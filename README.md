@@ -78,3 +78,7 @@ summary instead). The process exit code is the worst verdict across all evaluate
 OPA/Gatekeeper evaluates **structured API objects** against **hand-authored rules**. Aegis
 derives **unstructured human constraints** (from Slack, Jira, Git) and applies
 **authority-driven validation** to the agent's intent *before* it reaches the infrastructure.
+
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE).

@@ -4,6 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aegis-devops"
+license = "Apache-2.0"
 version = "0.1.0"
 description = "Provenance-backed, authority-aware policy verifier for agentic DevOps actions."
 requires-python = ">=3.11"
