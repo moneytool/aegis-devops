@@ -1,0 +1,15 @@
+{
+  "actions": [
+    "create"
+  ],
+  "constraint_class": "configuration",
+  "effect": "BLOCK",
+  "principal": "platform_admin",
+  "provider": "kubernetes",
+  "resource_pattern": "namespace/*",
+  "rule_text": "Block creating namespace/* missing required labels, per the gatekeeper-library `requiredlabels` template.",
+  "scope": {},
+  "source_ref": "src-0017",
+  "source_timestamp": "2026-01-03T03:00:00+00:00",
+  "time_window": null
+}

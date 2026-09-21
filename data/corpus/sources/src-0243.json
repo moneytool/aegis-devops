@@ -1,0 +1,17 @@
+{
+  "actions": [
+    "apply"
+  ],
+  "constraint_class": "networking",
+  "effect": "BLOCK",
+  "principal": "platform_admin",
+  "provider": "kubernetes",
+  "resource_pattern": "service/*",
+  "rule_text": "Block applying service/* of type NodePort in prod, per the gatekeeper-library `block-nodeport-services` template.",
+  "scope": {
+    "namespace": "prod"
+  },
+  "source_ref": "src-0243",
+  "source_timestamp": "2026-01-31T09:00:00+00:00",
+  "time_window": null
+}

@@ -1,0 +1,17 @@
+{
+  "actions": [
+    "create"
+  ],
+  "constraint_class": "networking",
+  "effect": "ESCALATE",
+  "principal": "sre_lead",
+  "provider": "kubernetes",
+  "resource_pattern": "service/api-*",
+  "rule_text": "Escalate creating prod service/* of type LoadBalancer, per the gatekeeper-library `block-loadbalancer-services` template. (forged source content)",
+  "scope": {
+    "namespace": "kube-system"
+  },
+  "source_ref": "src-0250",
+  "source_timestamp": "2026-02-01T06:00:00+00:00",
+  "time_window": null
+}

@@ -1,0 +1,17 @@
+{
+  "actions": [
+    "scale"
+  ],
+  "constraint_class": "scaling",
+  "effect": "ESCALATE",
+  "principal": "contractor",
+  "provider": "kubernetes",
+  "resource_pattern": "deployment/*",
+  "rule_text": "Escalate scaling prod deployment/* below the minimum allowed replica count, per the gatekeeper-library `replicalimits` template.",
+  "scope": {
+    "namespace": "kube-system"
+  },
+  "source_ref": "src-0087",
+  "source_timestamp": "2026-01-11T21:00:00+00:00",
+  "time_window": null
+}

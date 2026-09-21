@@ -1,0 +1,15 @@
+{
+  "actions": [
+    "set-image"
+  ],
+  "constraint_class": "configuration",
+  "effect": "ESCALATE",
+  "principal": "platform_admin",
+  "provider": "kubernetes",
+  "resource_pattern": "deployment/*",
+  "rule_text": "Escalate deployments that set an unpinned or `imagePullPolicy Always` image; Datadog's \"10 Ways to Shoot Yourself in the Foot\" talk lists this among repeated causes of pending pods and slow deployments.",
+  "scope": {},
+  "source_ref": "src-0020",
+  "source_timestamp": "2026-01-03T12:00:00+00:00",
+  "time_window": null
+}

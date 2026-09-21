@@ -1,0 +1,18 @@
+{
+  "actions": [
+    "apply",
+    "update"
+  ],
+  "constraint_class": "configuration",
+  "effect": "ESCALATE",
+  "principal": "sre_oncall",
+  "provider": "kubernetes",
+  "resource_pattern": "cronjob/*",
+  "rule_text": "Escalate changes to CronJobs in kube-system; Zalando's \"Kubernetes Failure Stories\" talk lists frozen/stuck CronJobs among repeated causes of production outages.",
+  "scope": {
+    "namespace": "dev"
+  },
+  "source_ref": "src-0261",
+  "source_timestamp": "2026-02-02T15:00:00+00:00",
+  "time_window": null
+}

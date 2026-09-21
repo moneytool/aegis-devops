@@ -1,0 +1,17 @@
+{
+  "actions": [
+    "delete"
+  ],
+  "constraint_class": "deletion",
+  "effect": "BLOCK",
+  "principal": "sre_oncall",
+  "provider": "kubernetes",
+  "resource_pattern": "namespace/*",
+  "rule_text": "Block deletion of namespaces in prod; Skyscanner's outage was caused by a GitOps templating bug that deleted a namespace it should not have touched.",
+  "scope": {
+    "namespace": "staging"
+  },
+  "source_ref": "src-0373",
+  "source_timestamp": "2026-02-16T15:00:00+00:00",
+  "time_window": null
+}

@@ -1,0 +1,17 @@
+{
+  "actions": [
+    "apply"
+  ],
+  "constraint_class": "configuration",
+  "effect": "BLOCK",
+  "principal": "security_lead",
+  "provider": "kubernetes",
+  "resource_pattern": "statefulset/*",
+  "rule_text": "Block applying prod statefulset/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template.",
+  "scope": {
+    "namespace": "kube-system"
+  },
+  "source_ref": "src-0147",
+  "source_timestamp": "2026-01-19T09:00:00+00:00",
+  "time_window": null
+}

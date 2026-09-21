@@ -1,0 +1,15 @@
+{
+  "actions": [
+    "delete"
+  ],
+  "constraint_class": "deletion",
+  "effect": "ESCALATE",
+  "principal": "platform_admin",
+  "provider": "kubernetes",
+  "resource_pattern": "node/*",
+  "rule_text": "Escalate node deletion or draining outside of a controlled runbook; loveholidays documented total ingress outages caused by mishandled load balancer behavior while draining nodes.",
+  "scope": {},
+  "source_ref": "src-0181",
+  "source_timestamp": "2026-01-23T15:00:00+00:00",
+  "time_window": null
+}

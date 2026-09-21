@@ -1,0 +1,505 @@
+#!/usr/bin/env python3
+"""Builds the Aegis evaluation corpus described in PLAN.md §4.
+
+Expands the hand-derived seeds in ``data/corpus/seeds.yaml`` (themselves
+drawn from the Kubernetes failure-stories index and the OPA Gatekeeper
+policy library) into exactly 500 labeled constraints, using
+``aegis_core.store`` and ``aegis_core.provenance`` directly so every hash
+is real, not simulated.
+
+Labels (operational definitions, PLAN.md §4):
+  * Trusted   (~50%) — valid provenance, principal IS authorized.
+  * Untrusted (~25%) — valid provenance, principal is NOT authorized.
+  * Malicious (~25%) — provenance fails, split evenly between:
+      - tampered: hash computed over the original fields, then one field
+        mutated afterward (so ``verify_integrity`` fails and
+        ``ConstraintStore.load`` quarantines it). The source file matches
+        the ORIGINAL (pre-mutation) fields.
+      - forged: the constraint's own fields and hash are self-consistent
+        (loads fine), but its source file is either absent or contains
+        different content, so only ``verify_source`` catches it.
+
+Everything is driven off a single ``random.Random(seed)`` instance in a
+fixed sequence of operations, so re-running with the same ``--seed``
+produces byte-identical ``constraints.yaml``, ``labels.jsonl`` and
+``split.json``.
+"""
+
+from __future__ import annotations
+
+import argparse
+import copy
+import json
+import random
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+import yaml
+
+from aegis_core.authority import load_authority_map
+from aegis_core.intent import InfrastructureIntent
+from aegis_core.interceptor import AegisInterceptor
+from aegis_core.store import Constraint, ConstraintStore
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+CORPUS_DIR = REPO_ROOT / "data" / "corpus"
+SEEDS_PATH = CORPUS_DIR / "seeds.yaml"
+SOURCES_DIR = CORPUS_DIR / "sources"
+
+TOTAL_CONSTRAINTS = 500
+TRUSTED_COUNT = 250
+UNTRUSTED_COUNT = 125
+MALICIOUS_COUNT = 125
+TAMPERED_COUNT = 62
+FORGED_COUNT = MALICIOUS_COUNT - TAMPERED_COUNT  # 63
+
+NUM_INTENTS = 200
+INTENTS_ON_TRUSTED = 100
+INTENTS_ON_NONTRUSTED = 50
+INTENTS_ON_NOTHING = 50
+
+AUTHORITY = {
+    "platform_admin": [
+        "scaling", "deletion", "configuration", "deployment", "networking", "access",
+    ],
+    "sre_lead": ["scaling", "deletion", "deployment", "networking"],
+    "sre_oncall": ["scaling", "deployment"],
+    "security_lead": ["access", "networking", "configuration"],
+    "developer": ["configuration"],
+    "contractor": [],
+    "ci_bot": ["deployment"],
+}
+
+NAMESPACES = ["prod", "staging", "dev", "kube-system"]
+REGIONS = ["us-east-1", "us-west-2", "eu-west-1"]
+CLUSTERS = ["prod-us-east-1", "prod-eu-west-1", "staging-us-west-2"]
+RESOURCE_NAMES = ["api", "web", "worker", "cache", "billing", "auth", "gateway", "ingest"]
+
+_WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri"]
+TIME_WINDOW_POOL = [
+    {"days": _WEEKDAYS, "start": "09:00", "end": "17:00", "tz": "America/New_York"},
+    {"days": ["Sat", "Sun"], "start": "00:00", "end": "23:59", "tz": "UTC"},
+    {"days": _WEEKDAYS, "start": "00:00", "end": "06:00", "tz": "UTC"},
+    {"days": _WEEKDAYS, "start": "08:00", "end": "20:00", "tz": "America/Los_Angeles"},
+]
+
+_WEEKDAY_ABBR = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+TAMPER_MUTATIONS = ["rule_text", "effect", "actions", "scope"]
+
+
+# ---------------------------------------------------------------------------
+# Seed loading & variation
+# ---------------------------------------------------------------------------
+
+def load_seeds() -> list[dict]:
+    with open(SEEDS_PATH) as f:
+        payload = yaml.safe_load(f)
+    return payload["seeds"]
+
+
+def narrow_pattern(pattern: str, rng: random.Random) -> str:
+    """Occasionally narrows a `kind/*` pattern to `kind/name-*`."""
+    if pattern.endswith("/*") and rng.random() < 0.3:
+        prefix = pattern[:-1]  # keep trailing "/"
+        name = rng.choice(RESOURCE_NAMES)
+        return f"{prefix}{name}-*"
+    return pattern
+
+
+def vary_scope(seed_scope: dict, rng: random.Random) -> dict:
+    scope = dict(seed_scope)
+    for key in list(scope.keys()):
+        if key == "namespace":
+            scope[key] = rng.choice(NAMESPACES)
+        elif key == "region":
+            scope[key] = rng.choice(REGIONS)
+        elif key == "cluster":
+            scope[key] = rng.choice(CLUSTERS)
+    return scope
+
+
+def vary_time_window(seed_tw: dict | None, rng: random.Random) -> dict | None:
+    if seed_tw is None:
+        return None
+    if rng.random() < 0.5:
+        return dict(seed_tw)
+    return copy.deepcopy(rng.choice(TIME_WINDOW_POOL))
+
+
+def deterministic_timestamp(n: int) -> str:
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    ts = base + timedelta(hours=3 * n)
+    return ts.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+
+
+# ---------------------------------------------------------------------------
+# Source file helpers
+# ---------------------------------------------------------------------------
+
+def constraint_source_payload(fields: dict) -> dict:
+    """Builds the JSON shape used under data/sources/*.json (and
+    data/corpus/sources/*.json), matching FileSourceFetcher's expectations."""
+    return {
+        "provider": fields["provider"],
+        "resource_pattern": fields["resource_pattern"],
+        "actions": sorted(fields["actions"]),
+        "scope": fields["scope"],
+        "time_window": fields["time_window"],
+        "effect": fields["effect"],
+        "constraint_class": fields["constraint_class"],
+        "principal": fields["principal"],
+        "source_ref": fields["source_ref"],
+        "source_timestamp": fields["source_timestamp"],
+        "rule_text": fields["rule_text"],
+    }
+
+
+def write_source_file(source_ref: str, payload: dict) -> None:
+    path = SOURCES_DIR / f"{source_ref}.json"
+    with open(path, "w") as f:
+        json.dump(payload, f, indent=2, sort_keys=True)
+        f.write("\n")
+
+
+def apply_tamper(constraint: Constraint, rng: random.Random) -> str:
+    """Mutates one field on ``constraint`` in place, *after* its
+    provenance_hash was already computed, so verify_integrity() will fail.
+    Returns which field was mutated."""
+    candidates = list(TAMPER_MUTATIONS)
+    if not constraint.scope:
+        candidates.remove("scope")
+    mutation = rng.choice(candidates)
+    if mutation == "rule_text":
+        constraint.rule_text = constraint.rule_text + " [unreviewed emergency override]"
+    elif mutation == "effect":
+        constraint.effect = "ESCALATE" if constraint.effect == "BLOCK" else "BLOCK"
+    elif mutation == "actions":
+        widened = set(constraint.actions)
+        widened.add("exec" if "exec" not in widened else "delete")
+        constraint.actions = widened
+    elif mutation == "scope":
+        scope = dict(constraint.scope)
+        for key in ("namespace", "region", "cluster"):
+            if key in scope:
+                del scope[key]
+                break
+        constraint.scope = scope
+    return mutation
+
+
+def forge_mutated_payload(payload: dict, rng: random.Random) -> dict:
+    """Returns a copy of ``payload`` with one field changed, so that
+    re-hashing it will NOT match the constraint's real provenance_hash."""
+    forged = copy.deepcopy(payload)
+    forged["rule_text"] = forged["rule_text"] + " (forged source content)"
+    return forged
+
+
+# ---------------------------------------------------------------------------
+# Constraint generation
+# ---------------------------------------------------------------------------
+
+def build_label_sequence(rng: random.Random) -> list[str]:
+    labels = (
+        ["Trusted"] * TRUSTED_COUNT
+        + ["Untrusted"] * UNTRUSTED_COUNT
+        + ["Malicious"] * MALICIOUS_COUNT
+    )
+    rng.shuffle(labels)
+    assert len(labels) == TOTAL_CONSTRAINTS
+    return labels
+
+
+def build_malicious_subtype_sequence(rng: random.Random) -> list[str]:
+    subtypes = ["tampered"] * TAMPERED_COUNT + ["forged"] * FORGED_COUNT
+    rng.shuffle(subtypes)
+    assert len(subtypes) == MALICIOUS_COUNT
+    return subtypes
+
+
+def class_to_authorized_map() -> dict[str, list[str]]:
+    mapping: dict[str, list[str]] = {}
+    for principal, classes in AUTHORITY.items():
+        for cls in classes:
+            mapping.setdefault(cls, []).append(principal)
+    return mapping
+
+
+def unauthorized_principal_for(cls: str, rng: random.Random) -> str:
+    candidates = [p for p in AUTHORITY if cls not in AUTHORITY[p]]
+    return rng.choice(candidates)
+
+
+def build_constraints(seeds: list[dict], rng: random.Random):
+    labels = build_label_sequence(rng)
+    malicious_subtypes = iter(build_malicious_subtype_sequence(rng))
+    class_authorized = class_to_authorized_map()
+
+    constraints: list[Constraint] = []
+    label_records: list[dict] = []
+
+    for i in range(TOTAL_CONSTRAINTS):
+        n = i + 1
+        cid = f"c-{n:04d}"
+        seed = rng.choice(seeds)
+        label = labels[i]
+
+        material = {
+            "provider": seed["provider"],
+            "resource_pattern": narrow_pattern(seed["resource_pattern"], rng),
+            "actions": set(seed["actions"]),
+            "scope": vary_scope(seed.get("scope") or {}, rng),
+            "time_window": vary_time_window(seed.get("time_window"), rng),
+            "effect": seed["effect"],
+            "constraint_class": seed["constraint_class"],
+            "rule_text": seed["rule_text"],
+            "source_ref": f"src-{n:04d}",
+            "source_timestamp": deterministic_timestamp(n),
+        }
+        constraint_class = material["constraint_class"]
+        authorized_for_class = class_authorized[constraint_class]
+
+        if label == "Trusted":
+            principal = rng.choice(authorized_for_class)
+            reason = "authorized"
+            constraint = Constraint.create(id=cid, principal=principal, **material)
+            payload = constraint_source_payload({**material, "principal": principal})
+            write_source_file(material["source_ref"], payload)
+
+        elif label == "Untrusted":
+            principal = unauthorized_principal_for(constraint_class, rng)
+            reason = "unauthorized"
+            constraint = Constraint.create(id=cid, principal=principal, **material)
+            payload = constraint_source_payload({**material, "principal": principal})
+            write_source_file(material["source_ref"], payload)
+
+        else:  # Malicious
+            principal = rng.choice(authorized_for_class)
+            subtype = next(malicious_subtypes)
+            constraint = Constraint.create(id=cid, principal=principal, **material)
+            original_payload = constraint_source_payload({**material, "principal": principal})
+
+            if subtype == "tampered":
+                apply_tamper(constraint, rng)
+                reason = "tampered"
+                # Source file matches the ORIGINAL, pre-mutation fields.
+                write_source_file(material["source_ref"], original_payload)
+            else:
+                reason = "forged"
+                if rng.random() < 0.5:
+                    # Source is absent entirely.
+                    pass
+                else:
+                    forged_payload = forge_mutated_payload(original_payload, rng)
+                    write_source_file(material["source_ref"], forged_payload)
+
+        constraints.append(constraint)
+        label_records.append({"id": cid, "label": label, "reason": reason})
+
+    return constraints, label_records
+
+
+# ---------------------------------------------------------------------------
+# Held-out split
+# ---------------------------------------------------------------------------
+
+def build_split(label_records: list[dict], rng: random.Random, seed: int) -> dict:
+    by_label: dict[str, list[str]] = {}
+    for rec in label_records:
+        by_label.setdefault(rec["label"], []).append(rec["id"])
+
+    holdout: list[str] = []
+    for label, ids in by_label.items():
+        k = round(len(ids) * 0.2)
+        holdout.extend(rng.sample(ids, k))
+
+    holdout_set = set(holdout)
+    dev = [rec["id"] for rec in label_records if rec["id"] not in holdout_set]
+    holdout_sorted = [rec["id"] for rec in label_records if rec["id"] in holdout_set]
+
+    return {"seed": seed, "holdout": holdout_sorted, "dev": dev}
+
+
+# ---------------------------------------------------------------------------
+# Intents
+# ---------------------------------------------------------------------------
+
+def concretize_resource(pattern: str, rng: random.Random) -> str:
+    if "*" in pattern:
+        name = rng.choice(RESOURCE_NAMES)
+        return pattern.replace("*", name)
+    return pattern
+
+
+def now_for_time_window(tw: dict | None) -> datetime:
+    if tw is None:
+        return datetime(2026, 6, 15, 12, 0, tzinfo=UTC)
+
+    days = tw.get("days") or ["Mon"]
+    target_idx = _WEEKDAY_ABBR.index(days[0])
+    day = datetime(2026, 1, 1)
+    while day.weekday() != target_idx:
+        day += timedelta(days=1)
+
+    start = tw.get("start") or "00:00"
+    hh, mm = (int(x) for x in start.split(":"))
+    naive = datetime(day.year, day.month, day.day, hh, mm) + timedelta(minutes=15)
+
+    tz_name = tw.get("tz")
+    tzinfo = ZoneInfo(tz_name) if tz_name else UTC
+    localized = naive.replace(tzinfo=tzinfo)
+    return localized.astimezone(UTC)
+
+
+def build_intent_record(idx: int, provider: str, resource: str, action: str,
+                         metadata: dict, now: datetime, interceptor: AegisInterceptor) -> dict:
+    intent = InfrastructureIntent(
+        resource=resource, action=action, provider=provider, params={}, metadata=metadata
+    )
+    decision = interceptor.intercept(intent, now=now)
+    return {
+        "id": f"i-{idx:04d}",
+        "provider": provider,
+        "resource": resource,
+        "action": action,
+        "params": {},
+        "metadata": metadata,
+        "now": now.isoformat(),
+        "expected_verdict": decision.verdict,
+        "expected_covered": decision.covered,
+    }
+
+
+def build_intents(constraints: list[Constraint], label_records: list[dict],
+                   interceptor: AegisInterceptor, rng: random.Random) -> list[dict]:
+    by_id = {c.id: c for c in constraints}
+    trusted_ids = [r["id"] for r in label_records if r["label"] == "Trusted"]
+    nontrusted_ids = [r["id"] for r in label_records if r["label"] in ("Untrusted", "Malicious")]
+
+    intents: list[dict] = []
+    idx = 0
+
+    for _ in range(INTENTS_ON_TRUSTED):
+        idx += 1
+        c = by_id[rng.choice(trusted_ids)]
+        resource = concretize_resource(c.resource_pattern, rng)
+        action = rng.choice(sorted(c.actions))
+        metadata = dict(c.scope)
+        now = now_for_time_window(c.time_window)
+        intents.append(
+            build_intent_record(idx, c.provider, resource, action, metadata, now, interceptor)
+        )
+
+    for _ in range(INTENTS_ON_NONTRUSTED):
+        idx += 1
+        c = by_id[rng.choice(nontrusted_ids)]
+        resource = concretize_resource(c.resource_pattern, rng)
+        action = rng.choice(sorted(c.actions))
+        metadata = dict(c.scope)
+        now = now_for_time_window(c.time_window)
+        intents.append(
+            build_intent_record(idx, c.provider, resource, action, metadata, now, interceptor)
+        )
+
+    for _ in range(INTENTS_ON_NOTHING):
+        idx += 1
+        provider = rng.choice(["kubernetes", "terraform"])
+        resource = f"unmatched-kind-{idx:04d}/{rng.choice(RESOURCE_NAMES)}"
+        action = "describe"  # never used by any generated constraint
+        now = datetime(2026, 6, 15, 12, 0, tzinfo=UTC)
+        intents.append(build_intent_record(idx, provider, resource, action, {}, now, interceptor))
+
+    return intents
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--seed", type=int, default=20260920)
+    parser.add_argument("--out-dir", type=Path, default=CORPUS_DIR)
+    args = parser.parse_args()
+
+    out_dir = args.out_dir
+    sources_dir = out_dir / "sources"
+    sources_dir.mkdir(parents=True, exist_ok=True)
+    global SOURCES_DIR
+    SOURCES_DIR = sources_dir
+
+    # Clean previously generated source files so stale files from a
+    # different run/seed don't linger and pollute forged/absent cases.
+    for f in sources_dir.glob("src-*.json"):
+        f.unlink()
+
+    rng = random.Random(args.seed)
+    seeds = load_seeds()
+
+    constraints, label_records = build_constraints(seeds, rng)
+
+    # constraints.yaml — written via ConstraintStore.save so the format is
+    # exactly what ConstraintStore.load expects.
+    store = ConstraintStore()
+    for c in constraints:
+        store.constraints[c.id] = c
+    store.save(out_dir / "constraints.yaml")
+
+    # labels.jsonl
+    with open(out_dir / "labels.jsonl", "w") as f:
+        for rec in label_records:
+            f.write(json.dumps(rec, sort_keys=True) + "\n")
+
+    # authority.yaml
+    with open(out_dir / "authority.yaml", "w") as f:
+        yaml.safe_dump({"principals": AUTHORITY}, f, sort_keys=False)
+
+    # split.json
+    split = build_split(label_records, rng, args.seed)
+    with open(out_dir / "split.json", "w") as f:
+        json.dump(split, f, indent=2, sort_keys=True)
+        f.write("\n")
+
+    # intents.jsonl — run the real interceptor against the just-written
+    # corpus for ground truth.
+    authority_map = load_authority_map(out_dir / "authority.yaml")
+    loaded_store = ConstraintStore.load(out_dir / "constraints.yaml", authority_map=authority_map)
+    interceptor = AegisInterceptor(loaded_store)
+    intents = build_intents(constraints, label_records, interceptor, rng)
+    with open(out_dir / "intents.jsonl", "w") as f:
+        for rec in intents:
+            f.write(json.dumps(rec, sort_keys=True) + "\n")
+
+    # Summary
+    from collections import Counter
+
+    label_counts = Counter(r["label"] for r in label_records)
+    reason_counts = Counter(r["reason"] for r in label_records)
+    verdict_counts = Counter(r["expected_verdict"] for r in intents)
+    covered_counts = Counter(r["expected_covered"] for r in intents)
+
+    print(f"seed = {args.seed}")
+    print(f"seeds used = {len(seeds)}")
+    print()
+    print("Label counts:")
+    for label in ("Trusted", "Untrusted", "Malicious"):
+        print(f"  {label:10s} {label_counts[label]:4d}")
+    print("Reason counts:")
+    for reason in ("authorized", "unauthorized", "tampered", "forged"):
+        print(f"  {reason:12s} {reason_counts[reason]:4d}")
+    print(f"Total constraints: {sum(label_counts.values())}")
+    print()
+    print(f"Holdout: {len(split['holdout'])}  Dev: {len(split['dev'])}")
+    print()
+    print("Intent counts:")
+    print(f"  total       {len(intents):4d}")
+    for verdict, count in sorted(verdict_counts.items()):
+        print(f"  verdict={verdict:10s} {count:4d}")
+    for covered, count in sorted(covered_counts.items()):
+        print(f"  covered={covered!s:10s} {count:4d}")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,16 @@
+{
+  "actions": [
+    "apply",
+    "create"
+  ],
+  "constraint_class": "configuration",
+  "effect": "ESCALATE",
+  "principal": "platform_admin",
+  "provider": "kubernetes",
+  "resource_pattern": "pod/auth-*",
+  "rule_text": "Escalate Pods scheduled without anti-affinity rules; Moonlight's postmortem describes all Pods landing on the same failing host and causing a 100% traffic-loss outage.",
+  "scope": {},
+  "source_ref": "src-0429",
+  "source_timestamp": "2026-02-23T15:00:00+00:00",
+  "time_window": null
+}

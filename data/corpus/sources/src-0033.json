@@ -1,0 +1,17 @@
+{
+  "actions": [
+    "apply"
+  ],
+  "constraint_class": "configuration",
+  "effect": "BLOCK",
+  "principal": "platform_admin",
+  "provider": "kubernetes",
+  "resource_pattern": "statefulset/*",
+  "rule_text": "Block applying prod statefulset/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template.",
+  "scope": {
+    "namespace": "prod"
+  },
+  "source_ref": "src-0033",
+  "source_timestamp": "2026-01-05T03:00:00+00:00",
+  "time_window": null
+}

@@ -1,0 +1,15 @@
+{
+  "actions": [
+    "create"
+  ],
+  "constraint_class": "networking",
+  "effect": "BLOCK",
+  "principal": "platform_admin",
+  "provider": "kubernetes",
+  "resource_pattern": "service/*",
+  "rule_text": "Block creating service/* of type NodePort, per the gatekeeper-library `block-nodeport-services` template (\"Disallows all Services with type NodePort\").",
+  "scope": {},
+  "source_ref": "src-0112",
+  "source_timestamp": "2026-01-15T00:00:00+00:00",
+  "time_window": null
+}

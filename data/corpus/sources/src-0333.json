@@ -1,0 +1,18 @@
+{
+  "actions": [
+    "delete",
+    "replace"
+  ],
+  "constraint_class": "deletion",
+  "effect": "ESCALATE",
+  "principal": "platform_admin",
+  "provider": "terraform",
+  "resource_pattern": "aws_instance.*",
+  "rule_text": "Escalate destructive terraform changes to EC2 instances in us-east-1; Veracode's \"Outages? Downtime?\" postmortem describes a QA/dev cluster outage during an AWS IAM/region migration done with Terraform.",
+  "scope": {
+    "region": "us-west-2"
+  },
+  "source_ref": "src-0333",
+  "source_timestamp": "2026-02-11T15:00:00+00:00",
+  "time_window": null
+}

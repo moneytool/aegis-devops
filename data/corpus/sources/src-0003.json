@@ -1,0 +1,17 @@
+{
+  "actions": [
+    "scale"
+  ],
+  "constraint_class": "scaling",
+  "effect": "BLOCK",
+  "principal": "sre_oncall",
+  "provider": "kubernetes",
+  "resource_pattern": "deployment/*",
+  "rule_text": "Block scaling changes to kube-system deployments outside a controlled change process; repeated CoreDNS-related outages in the failure-stories index trace back to uncontrolled control-plane-adjacent scaling.",
+  "scope": {
+    "namespace": "dev"
+  },
+  "source_ref": "src-0003",
+  "source_timestamp": "2026-01-01T09:00:00+00:00",
+  "time_window": null
+}

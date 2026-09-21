@@ -1,0 +1,16 @@
+{
+  "actions": [
+    "apply",
+    "create"
+  ],
+  "constraint_class": "configuration",
+  "effect": "ESCALATE",
+  "principal": "security_lead",
+  "provider": "kubernetes",
+  "resource_pattern": "deployment/web-*",
+  "rule_text": "Escalate applying deployment/* missing required labels, per the gatekeeper-library `requiredlabels` template (\"Requires resources to contain specified labels, with values matching provided regular expressions\").",
+  "scope": {},
+  "source_ref": "src-0403",
+  "source_timestamp": "2026-02-20T09:00:00+00:00",
+  "time_window": null
+}

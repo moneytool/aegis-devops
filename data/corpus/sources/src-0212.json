@@ -1,0 +1,17 @@
+{
+  "actions": [
+    "scale"
+  ],
+  "constraint_class": "scaling",
+  "effect": "ESCALATE",
+  "principal": "ci_bot",
+  "provider": "kubernetes",
+  "resource_pattern": "deployment/gateway-*",
+  "rule_text": "Escalate deployment scaling changes in prod; loveholidays' postmortem on GKE running out of IP addresses describes stuck deployments and blocked autoscaling of both pods and nodes.",
+  "scope": {
+    "namespace": "dev"
+  },
+  "source_ref": "src-0212",
+  "source_timestamp": "2026-01-27T12:00:00+00:00",
+  "time_window": null
+}

@@ -1,0 +1,15 @@
+{
+  "actions": [
+    "set-image"
+  ],
+  "constraint_class": "access",
+  "effect": "BLOCK",
+  "principal": "platform_admin",
+  "provider": "kubernetes",
+  "resource_pattern": "deployment/ingest-*",
+  "rule_text": "Block set-image on deployment/* to an image outside the allowed registry prefixes, per the gatekeeper-library `allowedrepos` template.",
+  "scope": {},
+  "source_ref": "src-0357",
+  "source_timestamp": "2026-02-14T15:00:00+00:00",
+  "time_window": null
+}

@@ -1,0 +1,16 @@
+{
+  "actions": [
+    "apply",
+    "create"
+  ],
+  "constraint_class": "deployment",
+  "effect": "BLOCK",
+  "principal": "sre_lead",
+  "provider": "kubernetes",
+  "resource_pattern": "poddisruptionbudget/*",
+  "rule_text": "Block applying poddisruptionbudget/* with maxUnavailable == 0, per the gatekeeper-library `poddisruptionbudget` template (this blocks voluntary disruptions such as node draining).",
+  "scope": {},
+  "source_ref": "src-0289",
+  "source_timestamp": "2026-02-06T03:00:00+00:00",
+  "time_window": null
+}

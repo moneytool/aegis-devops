@@ -1,0 +1,15 @@
+{
+  "actions": [
+    "set-image"
+  ],
+  "constraint_class": "configuration",
+  "effect": "BLOCK",
+  "principal": "security_lead",
+  "provider": "kubernetes",
+  "resource_pattern": "deployment/cache-*",
+  "rule_text": "Block set-image on deployment/* to a disallowed image tag (e.g. `:latest`), per the gatekeeper-library `disallowedtags` template (\"Requires container images to have an image tag different from the ones in the specified list\").",
+  "scope": {},
+  "source_ref": "src-0154",
+  "source_timestamp": "2026-01-20T06:00:00+00:00",
+  "time_window": null
+}

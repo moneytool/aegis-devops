@@ -1,0 +1,16 @@
+{
+  "actions": [
+    "apply",
+    "create"
+  ],
+  "constraint_class": "configuration",
+  "effect": "ESCALATE",
+  "principal": "contractor",
+  "provider": "kubernetes",
+  "resource_pattern": "service/worker-*",
+  "rule_text": "Escalate creating service/* missing required labels, per the gatekeeper-library `requiredlabels` template.",
+  "scope": {},
+  "source_ref": "src-0187",
+  "source_timestamp": "2026-01-24T09:00:00+00:00",
+  "time_window": null
+}

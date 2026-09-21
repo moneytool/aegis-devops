@@ -1,0 +1,15 @@
+{
+  "actions": [
+    "scale"
+  ],
+  "constraint_class": "scaling",
+  "effect": "BLOCK",
+  "principal": "platform_admin",
+  "provider": "kubernetes",
+  "resource_pattern": "deployment/*",
+  "rule_text": "Block scaling deployment/* outside the allowed replica range, per the gatekeeper-library `replicalimits` template (\"Requires that objects with the field spec.replicas specify a number of replicas within defined ranges\"). (forged source content)",
+  "scope": {},
+  "source_ref": "src-0119",
+  "source_timestamp": "2026-01-15T21:00:00+00:00",
+  "time_window": null
+}

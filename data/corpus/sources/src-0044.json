@@ -1,0 +1,16 @@
+{
+  "actions": [
+    "apply",
+    "update"
+  ],
+  "constraint_class": "networking",
+  "effect": "ESCALATE",
+  "principal": "sre_lead",
+  "provider": "kubernetes",
+  "resource_pattern": "service/*",
+  "rule_text": "Escalate Service changes that alter externalTrafficPolicy; the DevOps Hof postmortem on load-balancer configuration during node draining traces a total ingress outage to this setting.",
+  "scope": {},
+  "source_ref": "src-0044",
+  "source_timestamp": "2026-01-06T12:00:00+00:00",
+  "time_window": null
+}

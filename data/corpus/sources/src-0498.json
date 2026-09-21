@@ -1,0 +1,17 @@
+{
+  "actions": [
+    "apply"
+  ],
+  "constraint_class": "networking",
+  "effect": "BLOCK",
+  "principal": "ci_bot",
+  "provider": "kubernetes",
+  "resource_pattern": "service/api-*",
+  "rule_text": "Block applying service/* of type NodePort in prod, per the gatekeeper-library `block-nodeport-services` template.",
+  "scope": {
+    "namespace": "staging"
+  },
+  "source_ref": "src-0498",
+  "source_timestamp": "2026-03-04T06:00:00+00:00",
+  "time_window": null
+}

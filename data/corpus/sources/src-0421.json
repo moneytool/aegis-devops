@@ -1,0 +1,17 @@
+{
+  "actions": [
+    "scale"
+  ],
+  "constraint_class": "scaling",
+  "effect": "ESCALATE",
+  "principal": "sre_lead",
+  "provider": "kubernetes",
+  "resource_pattern": "deployment/cache-*",
+  "rule_text": "Escalate deployment scaling changes in prod; loveholidays' postmortem on GKE running out of IP addresses describes stuck deployments and blocked autoscaling of both pods and nodes.",
+  "scope": {
+    "namespace": "staging"
+  },
+  "source_ref": "src-0421",
+  "source_timestamp": "2026-02-22T15:00:00+00:00",
+  "time_window": null
+}

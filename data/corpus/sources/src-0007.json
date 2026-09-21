@@ -1,0 +1,16 @@
+{
+  "actions": [
+    "apply",
+    "create"
+  ],
+  "constraint_class": "configuration",
+  "effect": "ESCALATE",
+  "principal": "ci_bot",
+  "provider": "kubernetes",
+  "resource_pattern": "pod/*",
+  "rule_text": "Escalate creating pod/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template.",
+  "scope": {},
+  "source_ref": "src-0007",
+  "source_timestamp": "2026-01-01T21:00:00+00:00",
+  "time_window": null
+}

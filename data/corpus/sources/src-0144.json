@@ -1,0 +1,17 @@
+{
+  "actions": [
+    "apply"
+  ],
+  "constraint_class": "networking",
+  "effect": "BLOCK",
+  "principal": "sre_lead",
+  "provider": "kubernetes",
+  "resource_pattern": "service/*",
+  "rule_text": "Block applying service/* of type LoadBalancer in us-east-1, per the gatekeeper-library `block-loadbalancer-services` template.",
+  "scope": {
+    "region": "us-west-2"
+  },
+  "source_ref": "src-0144",
+  "source_timestamp": "2026-01-19T00:00:00+00:00",
+  "time_window": null
+}

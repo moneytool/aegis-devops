@@ -1,0 +1,15 @@
+{
+  "actions": [
+    "scale"
+  ],
+  "constraint_class": "scaling",
+  "effect": "BLOCK",
+  "principal": "sre_oncall",
+  "provider": "kubernetes",
+  "resource_pattern": "statefulset/*",
+  "rule_text": "Block scaling statefulset/* outside the allowed replica range, per the gatekeeper-library `replicalimits` template.",
+  "scope": {},
+  "source_ref": "src-0229",
+  "source_timestamp": "2026-01-29T15:00:00+00:00",
+  "time_window": null
+}

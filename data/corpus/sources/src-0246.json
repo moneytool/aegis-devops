@@ -1,0 +1,16 @@
+{
+  "actions": [
+    "delete",
+    "patch"
+  ],
+  "constraint_class": "deletion",
+  "effect": "ESCALATE",
+  "principal": "platform_admin",
+  "provider": "kubernetes",
+  "resource_pattern": "node/*",
+  "rule_text": "Escalate node-level changes during autoscaler activity; Nordstrom's \"101 Ways to Crash Your Cluster\" talk lists eviction thresholds and cluster-autoscaler interaction as a cause of full production cluster outages.",
+  "scope": {},
+  "source_ref": "src-0246",
+  "source_timestamp": "2026-01-31T18:00:00+00:00",
+  "time_window": null
+}

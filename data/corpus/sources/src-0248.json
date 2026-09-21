@@ -1,0 +1,18 @@
+{
+  "actions": [
+    "apply",
+    "update"
+  ],
+  "constraint_class": "deployment",
+  "effect": "BLOCK",
+  "principal": "sre_lead",
+  "provider": "kubernetes",
+  "resource_pattern": "poddisruptionbudget/*",
+  "rule_text": "Block applying prod poddisruptionbudget/* configurations that would block node draining, per the gatekeeper-library `poddisruptionbudget` template.",
+  "scope": {
+    "namespace": "prod"
+  },
+  "source_ref": "src-0248",
+  "source_timestamp": "2026-02-01T00:00:00+00:00",
+  "time_window": null
+}

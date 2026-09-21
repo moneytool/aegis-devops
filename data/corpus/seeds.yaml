@@ -1,0 +1,656 @@
+# Seed constraints for the Aegis evaluation corpus (PLAN.md §4).
+#
+# Each entry is a *seed* — not yet a full Constraint. It carries the
+# source-derivable fields only (no id/principal/provenance_hash, which
+# scripts/build_corpus.py assigns during expansion).
+#
+# Sources:
+#   - Kubernetes failure stories index (hjacobs/kubernetes-failure-stories,
+#     mirrored at https://codeberg.org/hjacobs/kubernetes-failure-stories,
+#     originally https://k8s.af). origin_kind: postmortem.
+#   - OPA Gatekeeper policy library, library/general/* templates
+#     (open-policy-agent/gatekeeper-library). origin_kind: policy-library.
+#
+# Fetch notes: the GitHub mirror's README.md for kubernetes-failure-stories
+# now just points at the Codeberg move; the actual list was fetched from
+# the Codeberg API (contents endpoint, base64-decoded). The gatekeeper
+# templates have no README.md per template — their `description:` field in
+# template.yaml was used instead (fetched via raw.githubusercontent.com).
+# All 8 requested gatekeeper templates and the full failure-stories index
+# were fetched successfully; no source substitutions were needed.
+
+seeds:
+
+# ---------------------------------------------------------------------------
+# From kubernetes-failure-stories (postmortems / public incident write-ups)
+# ---------------------------------------------------------------------------
+
+- provider: kubernetes
+  resource_pattern: namespace/kube-system
+  actions: [delete]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  rule_text: Never delete namespace/kube-system; multiple public incidents trace
+    outages back to accidental namespace deletion.
+  origin: https://www.youtube.com/watch?v=likHm-KHGWQ
+  origin_kind: postmortem
+
+- provider: kubernetes
+  resource_pattern: namespace/*
+  actions: [delete]
+  scope:
+    namespace: prod
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  rule_text: Block deletion of namespaces in prod; Skyscanner's outage was caused
+    by a GitOps templating bug that deleted a namespace it should not have touched.
+  origin: https://medium.com/@SkyscannerEng/how-a-couple-of-characters-brought-down-our-site-356ccaf1fbc3
+  origin_kind: postmortem
+
+- provider: kubernetes
+  resource_pattern: deployment/coredns
+  actions: [scale]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: scaling
+  rule_text: Escalate any scale-down of the CoreDNS deployment; Preply's DNS postmortem
+    traced a partial production outage to CoreDNS-autoscaler behavior under conntrack
+    pressure.
+  origin: https://medium.com/preply-engineering/dns-postmortem-e169efd45afd
+  origin_kind: postmortem
+
+- provider: kubernetes
+  resource_pattern: configmap/coredns
+  actions: [update, delete]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: configuration
+  rule_text: Escalate changes to the CoreDNS configmap; Zalando's "Total DNS outage"
+    postmortem identified CoreDNS/ndots:5 configuration as a production outage cause.
+  origin: https://github.com/zalando-incubator/kubernetes-on-aws/blob/dev/docs/postmortems/jan-2019-dns-outage.md
+  origin_kind: postmortem
+
+- provider: terraform
+  resource_pattern: google_container_cluster.*
+  actions: [delete, replace]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: deletion
+  rule_text: Escalate any terraform delete or replace of a GKE cluster; Spotify's
+    postmortem describes accidentally deleting all its Kube clusters via a stale
+    Terraform global state file.
+  origin: https://www.youtube.com/watch?v=ix0Tw8uinWs
+  origin_kind: postmortem
+
+- provider: kubernetes
+  resource_pattern: node/*
+  actions: [delete]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: deletion
+  rule_text: Escalate node deletion or draining outside of a controlled runbook;
+    loveholidays documented total ingress outages caused by mishandled load balancer
+    behavior while draining nodes.
+  origin: https://www.devops-hof.de/kubernetes-load-balancer-konfiguration-beware-when-draining-nodes/
+  origin_kind: postmortem
+
+- provider: kubernetes
+  resource_pattern: deployment/*
+  actions: [scale]
+  scope:
+    namespace: prod
+  time_window: null
+  effect: ESCALATE
+  constraint_class: scaling
+  rule_text: Escalate deployment scaling changes in prod; loveholidays' postmortem
+    on GKE running out of IP addresses describes stuck deployments and blocked
+    autoscaling of both pods and nodes.
+  origin: https://deploy.live/blog/when-gke-ran-out-of-ip-addresses/
+  origin_kind: postmortem
+
+- provider: kubernetes
+  resource_pattern: configmap/*
+  actions: [update, delete]
+  scope:
+    namespace: prod
+  time_window: null
+  effect: ESCALATE
+  constraint_class: configuration
+  rule_text: Escalate configmap changes in prod; Pusher's "Oh Sh*t! The Config
+    Changed!" talk describes a production outage triggered by an nginx ConfigMap
+    change.
+  origin: https://www.youtube.com/watch?v=8P7-C44Gjj8
+  origin_kind: postmortem
+
+- provider: kubernetes
+  resource_pattern: validatingwebhookconfiguration/*
+  actions: [apply, delete]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: configuration
+  rule_text: Block ad-hoc changes to ValidatingWebhookConfiguration objects; Jetstack's
+    postmortem shows a misconfigured admission webhook caused a GKE cluster outage
+    and lost nodes.
+  origin: https://blog.jetstack.io/blog/gke-webhook-outage
+  origin_kind: postmortem
+
+- provider: kubernetes
+  resource_pattern: cronjob/*
+  actions: [apply, update]
+  scope:
+    namespace: kube-system
+  time_window: null
+  effect: ESCALATE
+  constraint_class: configuration
+  rule_text: Escalate changes to CronJobs in kube-system; Zalando's "Kubernetes
+    Failure Stories" talk lists frozen/stuck CronJobs among repeated causes of
+    production outages.
+  origin: https://www.youtube.com/watch?v=LpFApeaGv7A
+  origin_kind: postmortem
+
+- provider: kubernetes
+  resource_pattern: deployment/*
+  actions: [rollout-restart, delete]
+  scope:
+    namespace: prod
+  time_window:
+    days: [Mon, Tue, Wed, Thu, Fri]
+    start: '09:00'
+    end: '17:00'
+    tz: America/New_York
+  effect: BLOCK
+  constraint_class: deployment
+  rule_text: Block deployment restarts and deletions in prod during business hours;
+    Monzo's KubeCon talk on the "Anatomy of a Production Kubernetes Outage" traces
+    a ledger/platform outage to a risky in-hours API change.
+  origin: https://www.youtube.com/watch?v=OUYTNywPk-s
+  origin_kind: postmortem
+
+- provider: kubernetes
+  resource_pattern: node/*
+  actions: [label, patch]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: configuration
+  rule_text: Escalate node label/taint changes; Grafana Labs' postmortem on Pod
+    Priorities describes a production outage caused by cascading Pod evictions
+    tied to scheduling metadata.
+  origin: https://grafana.com/blog/2019/07/24/how-a-production-outage-was-caused-using-kubernetes-pod-priorities/
+  origin_kind: postmortem
+
+- provider: terraform
+  resource_pattern: aws_instance.*
+  actions: [delete, replace]
+  scope:
+    region: us-east-1
+  time_window: null
+  effect: ESCALATE
+  constraint_class: deletion
+  rule_text: Escalate destructive terraform changes to EC2 instances in us-east-1;
+    Veracode's "Outages? Downtime?" postmortem describes a QA/dev cluster outage
+    during an AWS IAM/region migration done with Terraform.
+  origin: https://sethmccombs.github.io/work/2018/12/03/Outages.html
+  origin_kind: postmortem
+
+- provider: kubernetes
+  resource_pattern: deployment/*
+  actions: [apply, create]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: deployment
+  rule_text: Escalate deployments that pull public/unpinned images; Sr. SRE Medya
+    Ghazizadeh's "How NOT to do Kubernetes" talk lists a public container registry
+    and `latest`-style tags among practices that hurt cluster stability.
+  origin: https://www.youtube.com/watch?v=V0DVkrHf08k
+  origin_kind: postmortem
+
+- provider: kubernetes
+  resource_pattern: job/*
+  actions: [apply, create]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: deployment
+  rule_text: Escalate Jobs created without a bounded RestartPolicy; Universe's incident
+    report describes a production search/reporting outage caused by a Job that
+    kept consuming node resources on restart.
+  origin: http://status.universe.com/incidents/115n3vxqwzcf
+  origin_kind: postmortem
+
+- provider: kubernetes
+  resource_pattern: pod/*
+  actions: [apply, create]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: configuration
+  rule_text: Escalate Pods scheduled without anti-affinity rules; Moonlight's postmortem
+    describes all Pods landing on the same failing host and causing a 100% traffic-loss
+    outage.
+  origin: https://updates.moonlightwork.com/outage-post-mortem-87370
+  origin_kind: postmortem
+
+- provider: kubernetes
+  resource_pattern: deployment/*
+  actions: [set-image]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: configuration
+  rule_text: Escalate deployments that set an unpinned or `imagePullPolicy Always`
+    image; Datadog's "10 Ways to Shoot Yourself in the Foot" talk lists this among
+    repeated causes of pending pods and slow deployments.
+  origin: https://www.youtube.com/watch?v=QKI-JRs2RIE
+  origin_kind: postmortem
+
+- provider: kubernetes
+  resource_pattern: service/*
+  actions: [apply, update]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: networking
+  rule_text: Escalate Service changes that alter externalTrafficPolicy; the DevOps
+    Hof postmortem on load-balancer configuration during node draining traces a
+    total ingress outage to this setting.
+  origin: https://www.devops-hof.de/kubernetes-load-balancer-konfiguration-beware-when-draining-nodes/
+  origin_kind: postmortem
+
+- provider: kubernetes
+  resource_pattern: deployment/*
+  actions: [scale]
+  scope:
+    namespace: kube-system
+  time_window: null
+  effect: BLOCK
+  constraint_class: scaling
+  rule_text: Block scaling changes to kube-system deployments outside a controlled
+    change process; repeated CoreDNS-related outages in the failure-stories index
+    trace back to uncontrolled control-plane-adjacent scaling.
+  origin: https://medium.com/preply-engineering/dns-postmortem-e169efd45afd
+  origin_kind: postmortem
+
+- provider: kubernetes
+  resource_pattern: statefulset/*
+  actions: [delete]
+  scope:
+    namespace: prod
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  rule_text: Block deletion of prod StatefulSets; Gravitational's postmortem on
+    running PostgreSQL on Kubernetes describes data loss from mishandled streaming
+    replication during a disruptive operation.
+  origin: https://gravitational.com/blog/running-postgresql-on-kubernetes/
+  origin_kind: postmortem
+
+- provider: kubernetes
+  resource_pattern: node/*
+  actions: [patch, delete]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: deletion
+  rule_text: Escalate node-level changes during autoscaler activity; Nordstrom's
+    "101 Ways to Crash Your Cluster" talk lists eviction thresholds and cluster-autoscaler
+    interaction as a cause of full production cluster outages.
+  origin: https://www.youtube.com/watch?v=xZO9nx6GBu0
+  origin_kind: postmortem
+
+- provider: kubernetes
+  resource_pattern: ingress/*
+  actions: [apply, update]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: networking
+  rule_text: Escalate Ingress changes; Ravelin's postmortem on Kubernetes' endpoint
+    behavior describes occasional 502 errors traced to Ingress/replication-controller
+    interaction during shutdown.
+  origin: https://philpearl.github.io/post/k8s_ingress/
+  origin_kind: postmortem
+
+- provider: kubernetes
+  resource_pattern: deployment/*
+  actions: [apply]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: configuration
+  rule_text: Escalate deployments without resource requests/limits set; Blue Matador's
+    Kubernetes Node OOM postmortem traces Pod kills to containers with no resource
+    requests or limits.
+  origin: https://www.bluematador.com/blog/post-mortem-kubernetes-node-oom
+  origin_kind: postmortem
+
+- provider: terraform
+  resource_pattern: aws_autoscaling_group.*
+  actions: [update, replace]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: scaling
+  rule_text: Escalate terraform changes to AWS autoscaling groups; Toyota Connected's
+    "A Perfect DNS Storm" postmortem and related ASG-rebalance issues in the failure-stories
+    index show autoscaler churn causing outages.
+  origin: https://www.adammargherio.com/a-perfect-dns-storm/
+  origin_kind: postmortem
+
+# ---------------------------------------------------------------------------
+# From the OPA Gatekeeper policy library (library/general/*)
+# ---------------------------------------------------------------------------
+
+- provider: kubernetes
+  resource_pattern: deployment/*
+  actions: [apply, create]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: configuration
+  rule_text: Escalate applying deployment/* without CPU and memory limits set,
+    per the gatekeeper-library `containerlimits` template ("Requires containers
+    to have memory and CPU limits set and constrains limits to be within the
+    specified maximum values").
+  origin: https://github.com/open-policy-agent/gatekeeper-library/tree/master/library/general/containerlimits
+  origin_kind: policy-library
+
+- provider: kubernetes
+  resource_pattern: pod/*
+  actions: [apply, create]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: configuration
+  rule_text: Escalate creating pod/* without CPU and memory limits set, per the
+    gatekeeper-library `containerlimits` template.
+  origin: https://github.com/open-policy-agent/gatekeeper-library/tree/master/library/general/containerlimits
+  origin_kind: policy-library
+
+- provider: kubernetes
+  resource_pattern: statefulset/*
+  actions: [apply]
+  scope:
+    namespace: prod
+  time_window: null
+  effect: BLOCK
+  constraint_class: configuration
+  rule_text: Block applying prod statefulset/* without CPU and memory limits set,
+    per the gatekeeper-library `containerlimits` template.
+  origin: https://github.com/open-policy-agent/gatekeeper-library/tree/master/library/general/containerlimits
+  origin_kind: policy-library
+
+- provider: kubernetes
+  resource_pattern: deployment/*
+  actions: [apply, create]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: configuration
+  rule_text: Escalate applying deployment/* missing required labels, per the gatekeeper-library
+    `requiredlabels` template ("Requires resources to contain specified labels,
+    with values matching provided regular expressions").
+  origin: https://github.com/open-policy-agent/gatekeeper-library/tree/master/library/general/requiredlabels
+  origin_kind: policy-library
+
+- provider: kubernetes
+  resource_pattern: service/*
+  actions: [apply, create]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: configuration
+  rule_text: Escalate creating service/* missing required labels, per the gatekeeper-library
+    `requiredlabels` template.
+  origin: https://github.com/open-policy-agent/gatekeeper-library/tree/master/library/general/requiredlabels
+  origin_kind: policy-library
+
+- provider: kubernetes
+  resource_pattern: namespace/*
+  actions: [create]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: configuration
+  rule_text: Block creating namespace/* missing required labels, per the gatekeeper-library
+    `requiredlabels` template.
+  origin: https://github.com/open-policy-agent/gatekeeper-library/tree/master/library/general/requiredlabels
+  origin_kind: policy-library
+
+- provider: kubernetes
+  resource_pattern: service/*
+  actions: [create]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: networking
+  rule_text: Block creating service/* of type NodePort, per the gatekeeper-library
+    `block-nodeport-services` template ("Disallows all Services with type NodePort").
+  origin: https://github.com/open-policy-agent/gatekeeper-library/tree/master/library/general/block-nodeport-services
+  origin_kind: policy-library
+
+- provider: kubernetes
+  resource_pattern: service/*
+  actions: [apply]
+  scope:
+    namespace: prod
+  time_window: null
+  effect: BLOCK
+  constraint_class: networking
+  rule_text: Block applying service/* of type NodePort in prod, per the gatekeeper-library
+    `block-nodeport-services` template.
+  origin: https://github.com/open-policy-agent/gatekeeper-library/tree/master/library/general/block-nodeport-services
+  origin_kind: policy-library
+
+- provider: kubernetes
+  resource_pattern: deployment/*
+  actions: [set-image]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: configuration
+  rule_text: Block set-image on deployment/* to a disallowed image tag (e.g. `:latest`),
+    per the gatekeeper-library `disallowedtags` template ("Requires container images
+    to have an image tag different from the ones in the specified list").
+  origin: https://github.com/open-policy-agent/gatekeeper-library/tree/master/library/general/disallowedtags
+  origin_kind: policy-library
+
+- provider: kubernetes
+  resource_pattern: deployment/*
+  actions: [set-image]
+  scope:
+    namespace: prod
+  time_window: null
+  effect: ESCALATE
+  constraint_class: configuration
+  rule_text: Escalate set-image on prod deployment/* to a disallowed image tag,
+    per the gatekeeper-library `disallowedtags` template.
+  origin: https://github.com/open-policy-agent/gatekeeper-library/tree/master/library/general/disallowedtags
+  origin_kind: policy-library
+
+- provider: kubernetes
+  resource_pattern: deployment/*
+  actions: [scale]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: scaling
+  rule_text: Block scaling deployment/* outside the allowed replica range, per
+    the gatekeeper-library `replicalimits` template ("Requires that objects with
+    the field spec.replicas specify a number of replicas within defined ranges").
+  origin: https://github.com/open-policy-agent/gatekeeper-library/tree/master/library/general/replicalimits
+  origin_kind: policy-library
+
+- provider: kubernetes
+  resource_pattern: deployment/*
+  actions: [scale]
+  scope:
+    namespace: prod
+  time_window: null
+  effect: ESCALATE
+  constraint_class: scaling
+  rule_text: Escalate scaling prod deployment/* below the minimum allowed replica
+    count, per the gatekeeper-library `replicalimits` template.
+  origin: https://github.com/open-policy-agent/gatekeeper-library/tree/master/library/general/replicalimits
+  origin_kind: policy-library
+
+- provider: kubernetes
+  resource_pattern: statefulset/*
+  actions: [scale]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: scaling
+  rule_text: Block scaling statefulset/* outside the allowed replica range, per
+    the gatekeeper-library `replicalimits` template.
+  origin: https://github.com/open-policy-agent/gatekeeper-library/tree/master/library/general/replicalimits
+  origin_kind: policy-library
+
+- provider: kubernetes
+  resource_pattern: deployment/*
+  actions: [apply, create]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: access
+  rule_text: Block applying deployment/* whose image is outside the allowed registry
+    prefixes, per the gatekeeper-library `allowedrepos` template ("Requires container
+    images to begin with a string from the specified list").
+  origin: https://github.com/open-policy-agent/gatekeeper-library/tree/master/library/general/allowedrepos
+  origin_kind: policy-library
+
+- provider: kubernetes
+  resource_pattern: pod/*
+  actions: [create]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: access
+  rule_text: Escalate creating pod/* whose image is outside the allowed registry
+    prefixes, per the gatekeeper-library `allowedrepos` template.
+  origin: https://github.com/open-policy-agent/gatekeeper-library/tree/master/library/general/allowedrepos
+  origin_kind: policy-library
+
+- provider: kubernetes
+  resource_pattern: deployment/*
+  actions: [set-image]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: access
+  rule_text: Block set-image on deployment/* to an image outside the allowed registry
+    prefixes, per the gatekeeper-library `allowedrepos` template.
+  origin: https://github.com/open-policy-agent/gatekeeper-library/tree/master/library/general/allowedrepos
+  origin_kind: policy-library
+
+- provider: kubernetes
+  resource_pattern: poddisruptionbudget/*
+  actions: [apply, create]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: deployment
+  rule_text: Block applying poddisruptionbudget/* with maxUnavailable == 0, per
+    the gatekeeper-library `poddisruptionbudget` template (this blocks voluntary
+    disruptions such as node draining).
+  origin: https://github.com/open-policy-agent/gatekeeper-library/tree/master/library/general/poddisruptionbudget
+  origin_kind: policy-library
+
+- provider: kubernetes
+  resource_pattern: poddisruptionbudget/*
+  actions: [apply]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: deployment
+  rule_text: Escalate applying poddisruptionbudget/* with minAvailable equal to
+    the target resource's replica count, per the gatekeeper-library `poddisruptionbudget`
+    template.
+  origin: https://github.com/open-policy-agent/gatekeeper-library/tree/master/library/general/poddisruptionbudget
+  origin_kind: policy-library
+
+- provider: kubernetes
+  resource_pattern: poddisruptionbudget/*
+  actions: [apply, update]
+  scope:
+    namespace: prod
+  time_window: null
+  effect: BLOCK
+  constraint_class: deployment
+  rule_text: Block applying prod poddisruptionbudget/* configurations that would
+    block node draining, per the gatekeeper-library `poddisruptionbudget` template.
+  origin: https://github.com/open-policy-agent/gatekeeper-library/tree/master/library/general/poddisruptionbudget
+  origin_kind: policy-library
+
+- provider: kubernetes
+  resource_pattern: service/*
+  actions: [create]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: networking
+  rule_text: Block creating service/* of type LoadBalancer, per the gatekeeper-library
+    `block-loadbalancer-services` template ("Disallows all Services with type LoadBalancer").
+  origin: https://github.com/open-policy-agent/gatekeeper-library/tree/master/library/general/block-loadbalancer-services
+  origin_kind: policy-library
+
+- provider: kubernetes
+  resource_pattern: service/*
+  actions: [create]
+  scope:
+    namespace: prod
+  time_window: null
+  effect: ESCALATE
+  constraint_class: networking
+  rule_text: Escalate creating prod service/* of type LoadBalancer, per the gatekeeper-library
+    `block-loadbalancer-services` template.
+  origin: https://github.com/open-policy-agent/gatekeeper-library/tree/master/library/general/block-loadbalancer-services
+  origin_kind: policy-library
+
+- provider: kubernetes
+  resource_pattern: service/*
+  actions: [apply]
+  scope:
+    region: us-east-1
+  time_window: null
+  effect: BLOCK
+  constraint_class: networking
+  rule_text: Block applying service/* of type LoadBalancer in us-east-1, per the
+    gatekeeper-library `block-loadbalancer-services` template.
+  origin: https://github.com/open-policy-agent/gatekeeper-library/tree/master/library/general/block-loadbalancer-services
+  origin_kind: policy-library
+
+- provider: kubernetes
+  resource_pattern: deployment/*
+  actions: [apply, create]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: configuration
+  rule_text: Escalate applying deployment/* missing required annotations, extending
+    the gatekeeper-library `requiredlabels` pattern to annotations (see the sibling
+    `requiredannotations` template in the same library).
+  origin: https://github.com/open-policy-agent/gatekeeper-library/tree/master/library/general/requiredlabels
+  origin_kind: policy-library
+
+- provider: kubernetes
+  resource_pattern: deployment/*
+  actions: [scale]
+  scope:
+    cluster: prod-us-east-1
+  time_window: null
+  effect: ESCALATE
+  constraint_class: scaling
+  rule_text: Escalate scaling deployment/* outside the allowed replica range in
+    the prod-us-east-1 cluster, per the gatekeeper-library `replicalimits` template.
+  origin: https://github.com/open-policy-agent/gatekeeper-library/tree/master/library/general/replicalimits
+  origin_kind: policy-library

@@ -1,0 +1,16 @@
+{
+  "actions": [
+    "apply",
+    "create"
+  ],
+  "constraint_class": "access",
+  "effect": "BLOCK",
+  "principal": "sre_oncall",
+  "provider": "kubernetes",
+  "resource_pattern": "deployment/*",
+  "rule_text": "Block applying deployment/* whose image is outside the allowed registry prefixes, per the gatekeeper-library `allowedrepos` template (\"Requires container images to begin with a string from the specified list\").",
+  "scope": {},
+  "source_ref": "src-0328",
+  "source_timestamp": "2026-02-11T00:00:00+00:00",
+  "time_window": null
+}

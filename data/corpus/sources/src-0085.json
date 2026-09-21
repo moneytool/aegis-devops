@@ -1,0 +1,15 @@
+{
+  "actions": [
+    "apply"
+  ],
+  "constraint_class": "deployment",
+  "effect": "ESCALATE",
+  "principal": "ci_bot",
+  "provider": "kubernetes",
+  "resource_pattern": "poddisruptionbudget/*",
+  "rule_text": "Escalate applying poddisruptionbudget/* with minAvailable equal to the target resource's replica count, per the gatekeeper-library `poddisruptionbudget` template. (forged source content)",
+  "scope": {},
+  "source_ref": "src-0085",
+  "source_timestamp": "2026-01-11T15:00:00+00:00",
+  "time_window": null
+}

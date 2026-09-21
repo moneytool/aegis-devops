@@ -1,0 +1,17 @@
+{
+  "actions": [
+    "set-image"
+  ],
+  "constraint_class": "configuration",
+  "effect": "ESCALATE",
+  "principal": "sre_lead",
+  "provider": "kubernetes",
+  "resource_pattern": "deployment/*",
+  "rule_text": "Escalate set-image on prod deployment/* to a disallowed image tag, per the gatekeeper-library `disallowedtags` template.",
+  "scope": {
+    "namespace": "dev"
+  },
+  "source_ref": "src-0342",
+  "source_timestamp": "2026-02-12T18:00:00+00:00",
+  "time_window": null
+}

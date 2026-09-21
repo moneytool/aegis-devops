@@ -1,0 +1,16 @@
+{
+  "actions": [
+    "apply",
+    "create"
+  ],
+  "constraint_class": "deployment",
+  "effect": "ESCALATE",
+  "principal": "platform_admin",
+  "provider": "kubernetes",
+  "resource_pattern": "job/*",
+  "rule_text": "Escalate Jobs created without a bounded RestartPolicy; Universe's incident report describes a production search/reporting outage caused by a Job that kept consuming node resources on restart. (forged source content)",
+  "scope": {},
+  "source_ref": "src-0478",
+  "source_timestamp": "2026-03-01T18:00:00+00:00",
+  "time_window": null
+}

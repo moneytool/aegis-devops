@@ -1,0 +1,16 @@
+{
+  "actions": [
+    "delete",
+    "update"
+  ],
+  "constraint_class": "configuration",
+  "effect": "ESCALATE",
+  "principal": "security_lead",
+  "provider": "kubernetes",
+  "resource_pattern": "configmap/coredns",
+  "rule_text": "Escalate changes to the CoreDNS configmap; Zalando's \"Total DNS outage\" postmortem identified CoreDNS/ndots:5 configuration as a production outage cause. (forged source content)",
+  "scope": {},
+  "source_ref": "src-0163",
+  "source_timestamp": "2026-01-21T09:00:00+00:00",
+  "time_window": null
+}

@@ -1,0 +1,17 @@
+{
+  "actions": [
+    "scale"
+  ],
+  "constraint_class": "scaling",
+  "effect": "ESCALATE",
+  "principal": "security_lead",
+  "provider": "kubernetes",
+  "resource_pattern": "deployment/*",
+  "rule_text": "Escalate scaling deployment/* outside the allowed replica range in the prod-us-east-1 cluster, per the gatekeeper-library `replicalimits` template.",
+  "scope": {
+    "cluster": "prod-eu-west-1"
+  },
+  "source_ref": "src-0269",
+  "source_timestamp": "2026-02-03T15:00:00+00:00",
+  "time_window": null
+}

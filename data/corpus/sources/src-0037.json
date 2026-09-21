@@ -1,0 +1,17 @@
+{
+  "actions": [
+    "delete"
+  ],
+  "constraint_class": "deletion",
+  "effect": "BLOCK",
+  "principal": "sre_lead",
+  "provider": "kubernetes",
+  "resource_pattern": "statefulset/web-*",
+  "rule_text": "Block deletion of prod StatefulSets; Gravitational's postmortem on running PostgreSQL on Kubernetes describes data loss from mishandled streaming replication during a disruptive operation.",
+  "scope": {
+    "namespace": "kube-system"
+  },
+  "source_ref": "src-0037",
+  "source_timestamp": "2026-01-05T15:00:00+00:00",
+  "time_window": null
+}

@@ -1,0 +1,15 @@
+{
+  "actions": [
+    "create"
+  ],
+  "constraint_class": "access",
+  "effect": "ESCALATE",
+  "principal": "contractor",
+  "provider": "kubernetes",
+  "resource_pattern": "pod/gateway-*",
+  "rule_text": "Escalate creating pod/* whose image is outside the allowed registry prefixes, per the gatekeeper-library `allowedrepos` template.",
+  "scope": {},
+  "source_ref": "src-0313",
+  "source_timestamp": "2026-02-09T03:00:00+00:00",
+  "time_window": null
+}

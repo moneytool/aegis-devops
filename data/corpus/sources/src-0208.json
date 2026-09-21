@@ -1,0 +1,15 @@
+{
+  "actions": [
+    "delete"
+  ],
+  "constraint_class": "deletion",
+  "effect": "BLOCK",
+  "principal": "platform_admin",
+  "provider": "kubernetes",
+  "resource_pattern": "namespace/kube-system",
+  "rule_text": "Never delete namespace/kube-system; multiple public incidents trace outages back to accidental namespace deletion.",
+  "scope": {},
+  "source_ref": "src-0208",
+  "source_timestamp": "2026-01-27T00:00:00+00:00",
+  "time_window": null
+}

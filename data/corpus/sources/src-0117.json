@@ -1,0 +1,16 @@
+{
+  "actions": [
+    "label",
+    "patch"
+  ],
+  "constraint_class": "configuration",
+  "effect": "ESCALATE",
+  "principal": "platform_admin",
+  "provider": "kubernetes",
+  "resource_pattern": "node/billing-*",
+  "rule_text": "Escalate node label/taint changes; Grafana Labs' postmortem on Pod Priorities describes a production outage caused by cascading Pod evictions tied to scheduling metadata.",
+  "scope": {},
+  "source_ref": "src-0117",
+  "source_timestamp": "2026-01-15T15:00:00+00:00",
+  "time_window": null
+}

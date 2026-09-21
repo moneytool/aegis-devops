@@ -1,0 +1,16 @@
+{
+  "actions": [
+    "apply",
+    "update"
+  ],
+  "constraint_class": "networking",
+  "effect": "ESCALATE",
+  "principal": "platform_admin",
+  "provider": "kubernetes",
+  "resource_pattern": "ingress/*",
+  "rule_text": "Escalate Ingress changes; Ravelin's postmortem on Kubernetes' endpoint behavior describes occasional 502 errors traced to Ingress/replication-controller interaction during shutdown.",
+  "scope": {},
+  "source_ref": "src-0366",
+  "source_timestamp": "2026-02-15T18:00:00+00:00",
+  "time_window": null
+}

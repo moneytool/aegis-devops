@@ -1,0 +1,15 @@
+{
+  "actions": [
+    "apply"
+  ],
+  "constraint_class": "configuration",
+  "effect": "ESCALATE",
+  "principal": "security_lead",
+  "provider": "kubernetes",
+  "resource_pattern": "deployment/*",
+  "rule_text": "Escalate deployments without resource requests/limits set; Blue Matador's Kubernetes Node OOM postmortem traces Pod kills to containers with no resource requests or limits.",
+  "scope": {},
+  "source_ref": "src-0014",
+  "source_timestamp": "2026-01-02T18:00:00+00:00",
+  "time_window": null
+}

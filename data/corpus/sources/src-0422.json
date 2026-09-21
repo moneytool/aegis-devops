@@ -1,0 +1,16 @@
+{
+  "actions": [
+    "apply",
+    "delete"
+  ],
+  "constraint_class": "configuration",
+  "effect": "BLOCK",
+  "principal": "contractor",
+  "provider": "kubernetes",
+  "resource_pattern": "validatingwebhookconfiguration/*",
+  "rule_text": "Block ad-hoc changes to ValidatingWebhookConfiguration objects; Jetstack's postmortem shows a misconfigured admission webhook caused a GKE cluster outage and lost nodes.",
+  "scope": {},
+  "source_ref": "src-0422",
+  "source_timestamp": "2026-02-22T18:00:00+00:00",
+  "time_window": null
+}
