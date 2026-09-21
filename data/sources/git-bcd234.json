@@ -1,0 +1,15 @@
+{
+  "provider": "terraform",
+  "resource_pattern": "aws_autoscaling_group.*",
+  "actions": [
+    "update"
+  ],
+  "scope": {},
+  "time_window": null,
+  "effect": "BLOCK",
+  "constraint_class": "scaling",
+  "principal": "admin",
+  "source_ref": "git-bcd234",
+  "source_timestamp": "2026-03-05T14:00:00+00:00",
+  "rule_text": "Block direct terraform changes to autoscaling groups; use the scaling API instead."
+}

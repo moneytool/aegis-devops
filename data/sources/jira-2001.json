@@ -1,0 +1,17 @@
+{
+  "provider": "aws",
+  "resource_pattern": "ec2/instance/*",
+  "actions": [
+    "delete"
+  ],
+  "scope": {
+    "region": "us-east-1"
+  },
+  "time_window": null,
+  "effect": "BLOCK",
+  "constraint_class": "deletion",
+  "principal": "admin",
+  "source_ref": "jira-2001",
+  "source_timestamp": "2026-03-10T09:00:00+00:00",
+  "rule_text": "Block deleting EC2 instances in us-east-1; terminate through the runbook instead."
+}
