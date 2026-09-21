@@ -43,6 +43,29 @@ together against three intents — one allowed, one blocked, one escalated:
 venv/bin/python examples/demo.py
 ```
 
+## CLI
+
+The `aegis` console script wraps the interceptor so it can sit in front of an agent's
+shell and gate `kubectl`/`terraform` actions before they run. `--now` (ISO8601) makes
+time-windowed constraints evaluate deterministically; it goes *before* the `--` that
+separates Aegis's own flags from the wrapped `kubectl` argv.
+
+```bash
+aegis check kubectl --now 2026-03-16T10:00:00-05:00 -- \
+    kubectl scale deployment/api-server --replicas=5 -n prod
+
+aegis check terraform data/example-plan.json
+```
+
+Each matching intent prints one JSON `Decision` line (pass `--pretty` for a human-readable
+summary instead). The process exit code is the worst verdict across all evaluated intents:
+
+| exit code | verdict |
+| :--- | :--- |
+| `0` | ALLOW |
+| `2` | ESCALATE |
+| `3` | BLOCK |
+
 ## Why not OPA/Gatekeeper?
 
 OPA/Gatekeeper evaluates **structured API objects** against **hand-authored rules**. Aegis
