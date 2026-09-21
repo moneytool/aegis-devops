@@ -1,0 +1,17 @@
+{
+  "provider": "mongodb",
+  "resource_pattern": "collection/*",
+  "actions": [
+    "delete"
+  ],
+  "scope": {
+    "unbounded": true
+  },
+  "time_window": null,
+  "effect": "BLOCK",
+  "constraint_class": "deletion",
+  "principal": "admin",
+  "source_ref": "jira-5004",
+  "source_timestamp": "2026-04-01T09:15:00+00:00",
+  "rule_text": "Block unbounded deleteMany/remove calls against any Mongo collection (an empty filter matches everything)."
+}

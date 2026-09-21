@@ -1,0 +1,16 @@
+{
+  "provider": "pulumi",
+  "resource_pattern": "aws/rds/*",
+  "actions": [
+    "delete",
+    "replace"
+  ],
+  "scope": {},
+  "time_window": null,
+  "effect": "ESCALATE",
+  "constraint_class": "deletion",
+  "principal": "admin",
+  "source_ref": "plan-5005",
+  "source_timestamp": "2026-04-01T09:20:00+00:00",
+  "rule_text": "Escalate any Pulumi delete or replace of an RDS resource for human review before applying."
+}

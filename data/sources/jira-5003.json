@@ -1,0 +1,18 @@
+{
+  "provider": "sql",
+  "resource_pattern": "table/*",
+  "actions": [
+    "update"
+  ],
+  "scope": {
+    "ddl": true,
+    "drop_column": true
+  },
+  "time_window": null,
+  "effect": "ESCALATE",
+  "constraint_class": "configuration",
+  "principal": "sre_lead",
+  "source_ref": "jira-5003",
+  "source_timestamp": "2026-04-01T09:10:00+00:00",
+  "rule_text": "Escalate ALTER TABLE ... DROP COLUMN statements for human review before they run."
+}
