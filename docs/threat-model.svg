@@ -1,0 +1,108 @@
+<svg viewBox="0 0 960 640" xmlns="http://www.w3.org/2000/svg" font-family="Helvetica, Arial, sans-serif">
+  <rect width="960" height="640" fill="#ffffff"/>
+  <text x="480" y="28" text-anchor="middle" font-size="18" font-weight="700" fill="#1a202c">Threat Model — Adversarial Suite (18 attacks, 4 categories)</text>
+  <text x="480" y="48" text-anchor="middle" font-size="11.5" fill="#718096">src/aegis_core/adversarial.py — tests/test_adversarial.py</text>
+
+  <!-- Category 1: tampered -->
+  <rect x="30" y="70" width="215" height="250" rx="8" fill="#fff5f5" stroke="#e53e3e" stroke-width="1.5"/>
+  <text x="137" y="93" text-anchor="middle" font-size="13.5" font-weight="700" fill="#9b2c2c">tampered</text>
+  <text x="137" y="110" text-anchor="middle" font-size="10" fill="#9b2c2c">field mutated after ingest</text>
+
+  <rect x="45" y="122" width="185" height="42" rx="5" fill="#ffffff" stroke="#e53e3e"/>
+  <text x="137" y="139" text-anchor="middle" font-size="10.5" fill="#742a2a">tamper-effect-downgrade</text>
+  <text x="137" y="153" text-anchor="middle" font-size="9.5" fill="#742a2a">BLOCK → ESCALATE</text>
+
+  <rect x="45" y="170" width="185" height="42" rx="5" fill="#ffffff" stroke="#e53e3e"/>
+  <text x="137" y="187" text-anchor="middle" font-size="10.5" fill="#742a2a">tamper-widen-pattern</text>
+  <text x="137" y="201" text-anchor="middle" font-size="9.5" fill="#742a2a">"api-*" → "*"</text>
+
+  <rect x="45" y="218" width="185" height="42" rx="5" fill="#ffffff" stroke="#e53e3e"/>
+  <text x="137" y="235" text-anchor="middle" font-size="10.5" fill="#742a2a">tamper-principal-swap</text>
+  <text x="137" y="249" text-anchor="middle" font-size="9.5" fill="#742a2a">no rehash (authority laundering)</text>
+
+  <rect x="45" y="270" width="185" height="38" rx="5" fill="#f0fff4" stroke="#38a169"/>
+  <text x="137" y="285" text-anchor="middle" font-size="9.5" font-weight="700" fill="#276749">Stopped by:</text>
+  <text x="137" y="299" text-anchor="middle" font-size="9.5" fill="#276749">verify_integrity() — load + decision</text>
+
+  <!-- Category 2: unauthorized -->
+  <rect x="265" y="70" width="215" height="250" rx="8" fill="#fffaf0" stroke="#dd6b20" stroke-width="1.5"/>
+  <text x="372" y="93" text-anchor="middle" font-size="13.5" font-weight="700" fill="#9c4221">unauthorized</text>
+  <text x="372" y="110" text-anchor="middle" font-size="10" fill="#9c4221">self-consistent, wrong principal</text>
+
+  <rect x="280" y="122" width="185" height="42" rx="5" fill="#ffffff" stroke="#dd6b20"/>
+  <text x="372" y="139" text-anchor="middle" font-size="10.5" fill="#7b341e">unauth-principal-swap-rehash</text>
+  <text x="372" y="153" text-anchor="middle" font-size="9.5" fill="#7b341e">rewrite + recompute hash</text>
+
+  <rect x="280" y="170" width="185" height="42" rx="5" fill="#ffffff" stroke="#dd6b20"/>
+  <text x="372" y="187" text-anchor="middle" font-size="10.5" fill="#7b341e">unauth-class-escalation</text>
+  <text x="372" y="201" text-anchor="middle" font-size="9.5" fill="#7b341e">"configuration" → "deletion"</text>
+
+  <rect x="280" y="218" width="185" height="42" rx="5" fill="#ffffff" stroke="#dd6b20"/>
+  <text x="372" y="235" text-anchor="middle" font-size="10.5" fill="#7b341e">unauth-revoked</text>
+  <text x="372" y="249" text-anchor="middle" font-size="9.5" fill="#7b341e">authority pulled after ingest</text>
+
+  <rect x="280" y="270" width="185" height="38" rx="5" fill="#f0fff4" stroke="#38a169"/>
+  <text x="372" y="285" text-anchor="middle" font-size="9.5" font-weight="700" fill="#276749">Stopped by:</text>
+  <text x="372" y="299" text-anchor="middle" font-size="9.5" fill="#276749">is_authorized() at decision time</text>
+
+  <!-- Category 3: forged -->
+  <rect x="500" y="70" width="215" height="250" rx="8" fill="#faf5ff" stroke="#805ad5" stroke-width="1.5"/>
+  <text x="607" y="93" text-anchor="middle" font-size="13.5" font-weight="700" fill="#553c9a">forged</text>
+  <text x="607" y="110" text-anchor="middle" font-size="10" fill="#553c9a">hash valid, source doesn't back it</text>
+
+  <rect x="515" y="122" width="185" height="42" rx="5" fill="#ffffff" stroke="#805ad5"/>
+  <text x="607" y="139" text-anchor="middle" font-size="10.5" fill="#44337a">forge-fabricated-source</text>
+  <text x="607" y="153" text-anchor="middle" font-size="9.5" fill="#44337a">source file content differs</text>
+
+  <rect x="515" y="170" width="185" height="42" rx="5" fill="#ffffff" stroke="#805ad5"/>
+  <text x="607" y="187" text-anchor="middle" font-size="10.5" fill="#44337a">forge-missing-source</text>
+  <text x="607" y="201" text-anchor="middle" font-size="9.5" fill="#44337a">source_ref points nowhere</text>
+
+  <rect x="515" y="218" width="185" height="42" rx="5" fill="#ffffff" stroke="#805ad5"/>
+  <text x="607" y="235" text-anchor="middle" font-size="10.5" fill="#44337a">forge-replay</text>
+  <text x="607" y="249" text-anchor="middle" font-size="9.5" fill="#44337a">reuses someone else's citation</text>
+
+  <rect x="515" y="270" width="185" height="38" rx="5" fill="#fff5f5" stroke="#e53e3e"/>
+  <text x="607" y="285" text-anchor="middle" font-size="9.5" font-weight="700" fill="#9b2c2c">Stopped by:</text>
+  <text x="607" y="299" text-anchor="middle" font-size="9.5" fill="#9b2c2c">verify_source() — needs --sources</text>
+
+  <!-- Category 4: evasion -->
+  <rect x="735" y="70" width="200" height="250" rx="8" fill="#ebf4ff" stroke="#3182ce" stroke-width="1.5"/>
+  <text x="835" y="93" text-anchor="middle" font-size="13.5" font-weight="700" fill="#2c5282">evasion</text>
+  <text x="835" y="110" text-anchor="middle" font-size="10" fill="#2c5282">slip past the matcher itself</text>
+
+  <rect x="748" y="122" width="175" height="42" rx="5" fill="#ffffff" stroke="#3182ce"/>
+  <text x="835" y="139" text-anchor="middle" font-size="10.5" fill="#2a4365">evade-provider-mismatch</text>
+  <text x="835" y="153" text-anchor="middle" font-size="9.5" fill="#2a4365">terraform vs kubernetes rule</text>
+
+  <rect x="748" y="170" width="175" height="42" rx="5" fill="#ffffff" stroke="#3182ce"/>
+  <text x="835" y="187" text-anchor="middle" font-size="10.5" fill="#2a4365">evade-namespace-omitted</text>
+  <text x="835" y="201" text-anchor="middle" font-size="9.5" fill="#2a4365">no namespace vs scoped rule</text>
+
+  <rect x="748" y="218" width="175" height="42" rx="5" fill="#fffaf0" stroke="#dd6b20"/>
+  <text x="835" y="235" text-anchor="middle" font-size="10.5" fill="#7b341e">evade-case-variant</text>
+  <text x="835" y="249" text-anchor="middle" font-size="9.5" fill="#7b341e">"Deployment" vs "deployment"</text>
+
+  <rect x="748" y="270" width="175" height="38" rx="5" fill="#fffaf0" stroke="#dd6b20"/>
+  <text x="835" y="285" text-anchor="middle" font-size="9.5" font-weight="700" fill="#7b341e">Documented gap:</text>
+  <text x="835" y="299" text-anchor="middle" font-size="9.5" fill="#7b341e">fnmatch is case-sensitive (xfail)</text>
+
+  <!-- Bottom summary -->
+  <rect x="30" y="345" width="900" height="270" rx="8" fill="#f7fafc" stroke="#a0aec0" stroke-width="1"/>
+  <text x="50" y="370" font-size="13" font-weight="700" fill="#2d3748">Full registry (18 attacks) — tests/test_adversarial.py proves the interceptor rejects every one</text>
+
+  <text x="50" y="398" font-size="11.5" font-weight="700" fill="#9b2c2c">tampered (8):</text>
+  <text x="50" y="416" font-size="11" fill="#2d3748">tamper-rule-text · tamper-effect-downgrade · tamper-effect-upgrade · tamper-widen-actions</text>
+  <text x="50" y="434" font-size="11" fill="#2d3748">tamper-widen-pattern · tamper-drop-scope · tamper-drop-time-window · tamper-principal-swap</text>
+
+  <text x="50" y="462" font-size="11.5" font-weight="700" fill="#9c4221">unauthorized (4):</text>
+  <text x="50" y="480" font-size="11" fill="#2d3748">unauth-principal-swap-rehash · unauth-class-escalation · unauth-unknown-principal · unauth-revoked</text>
+
+  <text x="50" y="508" font-size="11.5" font-weight="700" fill="#553c9a">forged (3):</text>
+  <text x="50" y="526" font-size="11" fill="#2d3748">forge-fabricated-source · forge-missing-source · forge-replay</text>
+
+  <text x="50" y="554" font-size="11.5" font-weight="700" fill="#2c5282">evasion (3):</text>
+  <text x="50" y="572" font-size="11" fill="#2d3748">evade-case-variant (xfail, documented gap) · evade-provider-mismatch · evade-namespace-omitted</text>
+
+  <text x="50" y="600" font-size="10.5" fill="#718096">Forged detection needs --sources at load time; without it the interceptor still honours a forged constraint at decision time (see §8).</text>
+</svg>

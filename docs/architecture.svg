@@ -1,0 +1,88 @@
+<svg viewBox="0 0 960 620" xmlns="http://www.w3.org/2000/svg" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4a5568"/>
+    </marker>
+  </defs>
+  <rect width="960" height="620" fill="#ffffff"/>
+  <text x="480" y="30" text-anchor="middle" font-size="18" font-weight="700" fill="#1a202c">Aegis Architecture</text>
+
+  <!-- Sources -->
+  <rect x="30" y="70" width="150" height="90" rx="8" fill="#ebf4ff" stroke="#3182ce" stroke-width="1.5"/>
+  <text x="105" y="95" text-anchor="middle" font-size="13" font-weight="700" fill="#2c5282">Sources</text>
+  <text x="105" y="115" text-anchor="middle" font-size="12" fill="#2c5282">Git</text>
+  <text x="105" y="132" text-anchor="middle" font-size="12" fill="#2c5282">Jira</text>
+  <text x="105" y="149" text-anchor="middle" font-size="12" fill="#2c5282">Slack</text>
+
+  <!-- Constraint Store -->
+  <rect x="230" y="60" width="220" height="110" rx="8" fill="#ebf4ff" stroke="#3182ce" stroke-width="1.5"/>
+  <text x="340" y="82" text-anchor="middle" font-size="13" font-weight="700" fill="#2c5282">Constraint Store</text>
+  <text x="340" y="102" text-anchor="middle" font-size="11.5" fill="#2c5282">integrity hash</text>
+  <text x="340" y="120" text-anchor="middle" font-size="11.5" fill="#2c5282">authority policy</text>
+  <text x="340" y="138" text-anchor="middle" font-size="11.5" fill="#2c5282">quarantine</text>
+  <text x="340" y="156" text-anchor="middle" font-size="11.5" fill="#2c5282">plan constraints + ledger</text>
+
+  <line x1="180" y1="115" x2="228" y2="115" stroke="#4a5568" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Agent -->
+  <rect x="30" y="270" width="150" height="60" rx="8" fill="#fffaf0" stroke="#dd6b20" stroke-width="1.5"/>
+  <text x="105" y="305" text-anchor="middle" font-size="13" font-weight="700" fill="#9c4221">Agent</text>
+
+  <!-- Parsers -->
+  <rect x="230" y="220" width="220" height="160" rx="8" fill="#fffaf0" stroke="#dd6b20" stroke-width="1.5"/>
+  <text x="340" y="242" text-anchor="middle" font-size="13" font-weight="700" fill="#9c4221">Parsers</text>
+  <text x="340" y="262" text-anchor="middle" font-size="11.5" fill="#9c4221">kubectl · terraform/tofu</text>
+  <text x="340" y="280" text-anchor="middle" font-size="11.5" fill="#9c4221">aws · az · gcloud</text>
+  <text x="340" y="298" text-anchor="middle" font-size="11.5" fill="#9c4221">helm · argocd · flux</text>
+  <text x="340" y="316" text-anchor="middle" font-size="11.5" fill="#9c4221">git · gh</text>
+  <text x="340" y="334" text-anchor="middle" font-size="11.5" fill="#9c4221">sql · mongo · migrations</text>
+  <text x="340" y="352" text-anchor="middle" font-size="11.5" fill="#9c4221">pulumi</text>
+
+  <line x1="105" y1="270" x2="105" y2="180" stroke="#4a5568" stroke-width="1.5"/>
+  <line x1="105" y1="180" x2="105" y2="180" stroke="#4a5568" stroke-width="1.5"/>
+  <line x1="180" y1="300" x2="228" y2="300" stroke="#4a5568" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Intent -->
+  <rect x="500" y="270" width="120" height="60" rx="8" fill="#f0fff4" stroke="#38a169" stroke-width="1.5"/>
+  <text x="560" y="305" text-anchor="middle" font-size="13" font-weight="700" fill="#276749">Intent</text>
+  <line x1="450" y1="300" x2="498" y2="300" stroke="#4a5568" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Interceptor -->
+  <rect x="670" y="220" width="230" height="160" rx="8" fill="#f0fff4" stroke="#38a169" stroke-width="1.5"/>
+  <text x="785" y="242" text-anchor="middle" font-size="13" font-weight="700" fill="#276749">Interceptor</text>
+  <text x="785" y="264" text-anchor="middle" font-size="11.5" fill="#276749">env map</text>
+  <text x="785" y="282" text-anchor="middle" font-size="11.5" fill="#276749">ledger (rate limits)</text>
+  <text x="785" y="300" text-anchor="middle" font-size="11.5" fill="#276749">plan constraints</text>
+  <text x="785" y="318" text-anchor="middle" font-size="11.5" fill="#276749">integrity + authority</text>
+  <text x="785" y="336" text-anchor="middle" font-size="11.5" fill="#276749">check (per intent)</text>
+  <line x1="620" y1="300" x2="668" y2="300" stroke="#4a5568" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- connect store to interceptor -->
+  <line x1="785" y1="220" x2="785" y2="185" stroke="#4a5568" stroke-width="1.5"/>
+  <line x1="785" y1="185" x2="340" y2="185" stroke="#4a5568" stroke-width="1.5"/>
+  <line x1="340" y1="185" x2="340" y2="172" stroke="#4a5568" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Decision -->
+  <rect x="330" y="440" width="300" height="110" rx="8" fill="#faf5ff" stroke="#805ad5" stroke-width="1.5"/>
+  <text x="480" y="463" text-anchor="middle" font-size="13" font-weight="700" fill="#553c9a">Decision</text>
+  <text x="480" y="483" text-anchor="middle" font-size="11.5" fill="#553c9a">ALLOW / BLOCK / ESCALATE</text>
+  <text x="480" y="501" text-anchor="middle" font-size="11.5" fill="#553c9a">citations (which rules fired)</text>
+  <text x="480" y="519" text-anchor="middle" font-size="11.5" fill="#553c9a">discarded (tampered/unauthorized)</text>
+  <line x1="785" y1="380" x2="785" y2="495" stroke="#4a5568" stroke-width="1.5"/>
+  <line x1="785" y1="495" x2="632" y2="495" stroke="#4a5568" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Infrastructure / Human -->
+  <rect x="60" y="450" width="170" height="50" rx="8" fill="#fff5f5" stroke="#e53e3e" stroke-width="1.5"/>
+  <text x="145" y="480" text-anchor="middle" font-size="12.5" font-weight="700" fill="#9b2c2c">Infrastructure</text>
+
+  <rect x="60" y="520" width="170" height="50" rx="8" fill="#fff5f5" stroke="#e53e3e" stroke-width="1.5"/>
+  <text x="145" y="550" text-anchor="middle" font-size="12.5" font-weight="700" fill="#9b2c2c">Human</text>
+
+  <line x1="330" y1="475" x2="232" y2="475" stroke="#4a5568" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="280" y="468" text-anchor="middle" font-size="10.5" fill="#4a5568">ALLOW</text>
+
+  <line x1="330" y1="530" x2="232" y2="545" stroke="#4a5568" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="285" y="522" text-anchor="middle" font-size="10.5" fill="#4a5568">ESCALATE</text>
+
+  <text x="480" y="580" text-anchor="middle" font-size="11" fill="#718096">BLOCK stops here — nothing downstream is notified except the caller's exit code</text>
+</svg>

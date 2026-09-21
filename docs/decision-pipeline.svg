@@ -1,0 +1,87 @@
+<svg viewBox="0 0 960 700" xmlns="http://www.w3.org/2000/svg" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4a5568"/>
+    </marker>
+  </defs>
+  <rect width="960" height="700" fill="#ffffff"/>
+  <text x="480" y="28" text-anchor="middle" font-size="18" font-weight="700" fill="#1a202c">Two-Phase Decision Pipeline</text>
+
+  <!-- LOAD TIME -->
+  <text x="40" y="60" font-size="14" font-weight="700" fill="#2c5282">Load time — ConstraintStore.load()</text>
+  <rect x="40" y="72" width="880" height="110" rx="8" fill="#ebf4ff" stroke="#3182ce" stroke-width="1.5"/>
+
+  <rect x="60" y="95" width="150" height="60" rx="6" fill="#ffffff" stroke="#3182ce"/>
+  <text x="135" y="118" text-anchor="middle" font-size="11.5" fill="#2c5282">Parse YAML</text>
+  <text x="135" y="136" text-anchor="middle" font-size="11.5" fill="#2c5282">constraint file</text>
+
+  <rect x="240" y="95" width="180" height="60" rx="6" fill="#ffffff" stroke="#3182ce"/>
+  <text x="330" y="114" text-anchor="middle" font-size="11.5" fill="#2c5282">Integrity check</text>
+  <text x="330" y="132" text-anchor="middle" font-size="11.5" fill="#2c5282">verify_integrity()</text>
+  <text x="330" y="148" text-anchor="middle" font-size="10.5" fill="#c53030">mismatch → "tampered"</text>
+
+  <rect x="450" y="95" width="230" height="60" rx="6" fill="#ffffff" stroke="#3182ce"/>
+  <text x="565" y="114" text-anchor="middle" font-size="11.5" fill="#2c5282">Source verification</text>
+  <text x="565" y="132" text-anchor="middle" font-size="10.5" fill="#2c5282">verify_source() (--sources)</text>
+  <text x="565" y="148" text-anchor="middle" font-size="10.5" fill="#c53030">mismatch/missing → "forged"</text>
+
+  <rect x="700" y="95" width="200" height="60" rx="6" fill="#fff5f5" stroke="#e53e3e"/>
+  <text x="800" y="118" text-anchor="middle" font-size="11.5" font-weight="700" fill="#9b2c2c">Quarantine</text>
+  <text x="800" y="136" text-anchor="middle" font-size="11.5" fill="#9b2c2c">tampered / forged</text>
+
+  <line x1="210" y1="125" x2="238" y2="125" stroke="#4a5568" stroke-width="1.5" marker-end="url(#arrow2)"/>
+  <line x1="420" y1="125" x2="448" y2="125" stroke="#4a5568" stroke-width="1.5" marker-end="url(#arrow2)"/>
+  <line x1="680" y1="125" x2="698" y2="125" stroke="#4a5568" stroke-width="1.5" marker-end="url(#arrow2)"/>
+
+  <!-- DECISION TIME -->
+  <text x="40" y="215" font-size="14" font-weight="700" fill="#276749">Decision time — AegisInterceptor.intercept() (per intent)</text>
+  <rect x="40" y="227" width="880" height="270" rx="8" fill="#f0fff4" stroke="#38a169" stroke-width="1.5"/>
+
+  <rect x="60" y="250" width="170" height="55" rx="6" fill="#ffffff" stroke="#38a169"/>
+  <text x="145" y="271" text-anchor="middle" font-size="11.5" fill="#276749">Match</text>
+  <text x="145" y="288" text-anchor="middle" font-size="10.5" fill="#276749">provider/glob/action/</text>
+  <text x="145" y="300" text-anchor="middle" font-size="10.5" fill="#276749">scope/time window</text>
+
+  <rect x="245" y="250" width="170" height="55" rx="6" fill="#ffffff" stroke="#38a169"/>
+  <text x="330" y="271" text-anchor="middle" font-size="11.5" fill="#276749">Integrity re-check</text>
+  <text x="330" y="290" text-anchor="middle" font-size="10.5" fill="#c53030">fail → "tampered"</text>
+
+  <rect x="430" y="250" width="190" height="55" rx="6" fill="#ffffff" stroke="#38a169"/>
+  <text x="525" y="271" text-anchor="middle" font-size="11.5" fill="#276749">Authority re-check</text>
+  <text x="525" y="290" text-anchor="middle" font-size="10.5" fill="#c53030">fail → "unauthorized"</text>
+
+  <rect x="635" y="250" width="150" height="55" rx="6" fill="#ffffff" stroke="#38a169"/>
+  <text x="710" y="271" text-anchor="middle" font-size="11.5" fill="#276749">Rate-limit check</text>
+  <text x="710" y="290" text-anchor="middle" font-size="10" fill="#276749">ledger quota (--ledger)</text>
+
+  <rect x="800" y="250" width="100" height="55" rx="6" fill="#ffffff" stroke="#38a169"/>
+  <text x="850" y="267" text-anchor="middle" font-size="10.5" fill="#276749">Dry-run</text>
+  <text x="850" y="283" text-anchor="middle" font-size="9.5" fill="#276749">downgrade to</text>
+  <text x="850" y="296" text-anchor="middle" font-size="9.5" fill="#276749">ALLOW+would_be</text>
+
+  <line x1="230" y1="277" x2="243" y2="277" stroke="#4a5568" stroke-width="1.5" marker-end="url(#arrow2)"/>
+  <line x1="415" y1="277" x2="428" y2="277" stroke="#4a5568" stroke-width="1.5" marker-end="url(#arrow2)"/>
+  <line x1="620" y1="277" x2="633" y2="277" stroke="#4a5568" stroke-width="1.5" marker-end="url(#arrow2)"/>
+  <line x1="785" y1="277" x2="798" y2="277" stroke="#4a5568" stroke-width="1.5" marker-end="url(#arrow2)"/>
+
+  <rect x="240" y="340" width="420" height="55" rx="6" fill="#faf5ff" stroke="#805ad5"/>
+  <text x="450" y="360" text-anchor="middle" font-size="12" font-weight="700" fill="#553c9a">Effect precedence</text>
+  <text x="450" y="380" text-anchor="middle" font-size="10.5" fill="#553c9a">BLOCK &gt; ESCALATE &gt; ALLOW, among surviving constraints</text>
+
+  <line x1="850" y1="305" x2="850" y2="367" stroke="#4a5568" stroke-width="1.5"/>
+  <line x1="850" y1="367" x2="662" y2="367" stroke="#4a5568" stroke-width="1.5" marker-end="url(#arrow2)"/>
+
+  <rect x="180" y="430" width="540" height="55" rx="6" fill="#fffaf0" stroke="#dd6b20"/>
+  <text x="450" y="450" text-anchor="middle" font-size="12" font-weight="700" fill="#9c4221">Plan-level constraints (PlanConstraint)</text>
+  <text x="450" y="469" text-anchor="middle" font-size="10.5" fill="#9c4221">evaluated once over the whole intent batch, after per-intent decisions</text>
+
+  <line x1="450" y1="395" x2="450" y2="428" stroke="#4a5568" stroke-width="1.5" marker-end="url(#arrow2)"/>
+
+  <!-- Discard origins legend -->
+  <rect x="40" y="530" width="880" height="130" rx="8" fill="#fffff0" stroke="#a0aec0" stroke-width="1"/>
+  <text x="60" y="555" font-size="13" font-weight="700" fill="#2d3748">Where each discard reason originates</text>
+  <text x="60" y="578" font-size="10.5" fill="#2d3748">"tampered" — provenance hash mismatch — caught at load time AND re-checked at decision time</text>
+  <text x="60" y="598" font-size="10.5" fill="#2d3748">"forged" — source_ref doesn't back the constraint — caught at load time only, and only with --sources</text>
+  <text x="60" y="618" font-size="10.5" fill="#2d3748">"unauthorized" — principal not authorized for its class — checked at decision time (authority can be revoked later)</text>
+  <text x="60" y="638" font-size="10.5" fill="#2d3748">not-yet-quota — rate_limit constraint under its window's quota — doesn't match this decision (not a discard)</text>
+</svg>
