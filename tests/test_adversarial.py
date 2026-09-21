@@ -1,3 +1,4 @@
+import json
 import random
 from datetime import UTC, datetime
 
@@ -270,10 +271,14 @@ def test_forge_replay_fails_verify_source():
     assert _verify_source_safe(poisoned, fetcher) is False
 
 
-def test_forged_constraints_do_load_and_are_honoured_by_the_interceptor_today():
+def test_without_a_fetcher_forged_constraints_are_still_honoured():
     """Forged constraints are self-consistent (valid hash, authorized
-    principal), so they pass both of the interceptor's checks today. Only
-    verify_source() (not wired into intercept()) would catch them."""
+    principal), so they pass both of the interceptor's checks. Only
+    verify_source() -- run at load time when a source_fetcher is supplied,
+    see test_forged_constraint_is_quarantined_at_load_when_a_fetcher_is_given
+    -- can catch them. This documents that the fetcher is what makes forgery
+    detectable at all: add_constraint()/store.constraints assignment alone
+    (no fetcher involved) never catches a forged constraint."""
     store = ConstraintStore(authority_map=dict(AUTHORITY))
     base = make_constraint()
     poisoned = apply(by_name("forge-replay"), base, rng=random.Random(0))
@@ -289,21 +294,53 @@ def test_forged_constraints_do_load_and_are_honoured_by_the_interceptor_today():
     assert decision.discarded == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="verify_source is not wired into intercept(); tracked for Week 7",
-)
-def test_forged_constraints_are_not_caught_at_decision_time_yet():
+def _write_source_file(directory, constraint) -> None:
+    (directory / f"{constraint.source_ref}.json").write_text(
+        json.dumps(
+            {
+                "provider": constraint.provider,
+                "resource_pattern": constraint.resource_pattern,
+                "actions": sorted(constraint.actions),
+                "scope": constraint.scope,
+                "time_window": constraint.time_window,
+                "effect": constraint.effect,
+                "constraint_class": constraint.constraint_class,
+                "principal": constraint.principal,
+                "source_ref": constraint.source_ref,
+                "source_timestamp": constraint.source_timestamp,
+                "rule_text": constraint.rule_text,
+            }
+        )
+    )
+
+
+def test_forged_constraint_is_quarantined_at_load_when_a_fetcher_is_given(tmp_path):
+    """Forged constraints are self-consistent (valid hash, authorized
+    principal), so verify_integrity()/is_authorized() alone can't catch
+    them. But when ConstraintStore.load() is given a source_fetcher, it
+    re-derives each constraint's hash from its *original* source and
+    quarantines anything that doesn't match -- so a replayed citation like
+    this never reaches the interceptor at all; it's quarantined with
+    reason "forged" before the store is even built."""
     store = ConstraintStore(authority_map=dict(AUTHORITY))
     base = make_constraint()
     poisoned = apply(by_name("forge-replay"), base, rng=random.Random(0))
-    store.add_constraint(poisoned)
+    store.add_constraint(poisoned)  # loads fine: authorized + self-consistent hash
 
-    intent = _intent_from_constraint(poisoned)
-    interceptor = AegisInterceptor(store)
-    decision = interceptor.intercept(intent, now=NOW)
+    path = tmp_path / "constraints.yaml"
+    store.save(path)
 
-    assert {"id": poisoned.id, "reason": "forged"} in decision.discarded
+    sources_dir = tmp_path / "sources"
+    sources_dir.mkdir()
+    # The real source behind base.source_ref backs BASE's fields, not the
+    # replayed/poisoned constraint's -- exactly what forge-replay exploits.
+    _write_source_file(sources_dir, base)
+
+    fetcher = FileSourceFetcher(base_dir=sources_dir)
+    reloaded = ConstraintStore.load(path, authority_map=dict(AUTHORITY), source_fetcher=fetcher)
+
+    assert poisoned.id not in reloaded.constraints
+    assert {"id": poisoned.id, "reason": "forged"} in reloaded.quarantined
 
 
 # --------------------------------------------------------------------------

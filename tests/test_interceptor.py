@@ -1,7 +1,9 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from aegis_core.intent import InfrastructureIntent
 from aegis_core.interceptor import AegisInterceptor
+from aegis_core.ledger import DecisionLedger
+from aegis_core.provenance import compute_provenance_hash
 from aegis_core.store import Constraint, ConstraintStore
 
 NOW = datetime(2026, 1, 5, 12, 0, tzinfo=UTC)
@@ -106,6 +108,59 @@ def test_escalate_when_no_block_matches():
     assert decision.citations == ["escalate-rule"]
 
 
+def test_non_dry_run_intent_has_dry_run_false_and_would_be_none():
+    store = ConstraintStore(authority_map=AUTHORITY)
+    constraint = make_constraint()
+    store.constraints[constraint.id] = constraint
+
+    interceptor = AegisInterceptor(store)
+    decision = interceptor.intercept(SCALE_INTENT, now=NOW)
+
+    assert decision.verdict == "BLOCK"
+    assert decision.dry_run is False
+    assert decision.would_be is None
+
+
+def test_dry_run_intent_is_allowed_but_reports_would_be_block():
+    store = ConstraintStore(authority_map=AUTHORITY)
+    constraint = make_constraint()
+    store.constraints[constraint.id] = constraint
+
+    dry_run_intent = InfrastructureIntent(
+        resource="deployment/api-server",
+        action="scale",
+        provider="kubernetes",
+        params={"dry_run": True},
+    )
+
+    interceptor = AegisInterceptor(store)
+    decision = interceptor.intercept(dry_run_intent, now=NOW)
+
+    assert decision.verdict == "ALLOW"
+    assert decision.dry_run is True
+    assert decision.would_be == "BLOCK"
+    assert decision.citations == ["rule-1"]
+    assert decision.covered is True
+
+
+def test_dry_run_intent_with_no_matching_constraint_is_allowed_and_uncovered():
+    store = ConstraintStore(authority_map=AUTHORITY)
+    interceptor = AegisInterceptor(store)
+
+    dry_run_intent = InfrastructureIntent(
+        resource="deployment/api-server",
+        action="scale",
+        provider="kubernetes",
+        params={"dry_run": True},
+    )
+    decision = interceptor.intercept(dry_run_intent, now=NOW)
+
+    assert decision.verdict == "ALLOW"
+    assert decision.dry_run is True
+    assert decision.would_be is None
+    assert decision.covered is False
+
+
 def test_latency_ms_is_populated_and_fast_for_500_constraints():
     store = ConstraintStore(authority_map=AUTHORITY)
     for i in range(500):
@@ -121,3 +176,186 @@ def test_latency_ms_is_populated_and_fast_for_500_constraints():
 
     assert decision.latency_ms > 0
     assert decision.latency_ms < 5
+
+
+# --------------------------------------------------------------------------
+# A2: rate/budget constraints (PLAN §7.6).
+# --------------------------------------------------------------------------
+
+RATE_INTENT_PROD = InfrastructureIntent(
+    resource="deployment/api-server",
+    action="scale",
+    provider="kubernetes",
+    metadata={"namespace": "prod"},
+)
+
+RATE_INTENT_STAGING = InfrastructureIntent(
+    resource="deployment/api-server",
+    action="scale",
+    provider="kubernetes",
+    metadata={"namespace": "staging"},
+)
+
+
+def make_rate_limited_constraint(**overrides) -> Constraint:
+    return make_constraint(
+        id="no-mass-scale",
+        resource_pattern="deployment/*",
+        scope={},
+        rate_limit={"max": 3, "per": "1h", "key": ["namespace"]},
+        **overrides,
+    )
+
+
+def test_first_n_matching_actions_allow_then_nth_plus_one_blocks():
+    store = ConstraintStore(authority_map=AUTHORITY)
+    store.add_constraint(make_rate_limited_constraint())
+    ledger = DecisionLedger()
+    interceptor = AegisInterceptor(store, ledger=ledger)
+
+    times = [NOW + timedelta(minutes=i) for i in range(4)]
+    decisions = [interceptor.intercept(RATE_INTENT_PROD, now=t) for t in times]
+
+    assert [d.verdict for d in decisions] == ["ALLOW", "ALLOW", "ALLOW", "BLOCK"]
+    assert decisions[3].citations == ["no-mass-scale"]
+    assert decisions[3].notes == ["rate-limit: no-mass-scale 3/3 in 1h"]
+    assert decisions[0].notes == []
+
+
+def test_rate_limit_is_bucketed_by_key_so_other_bucket_is_unaffected():
+    store = ConstraintStore(authority_map=AUTHORITY)
+    store.add_constraint(make_rate_limited_constraint())
+    ledger = DecisionLedger()
+    interceptor = AegisInterceptor(store, ledger=ledger)
+
+    for i in range(3):
+        d = interceptor.intercept(RATE_INTENT_PROD, now=NOW + timedelta(minutes=i))
+        assert d.verdict == "ALLOW"
+
+    # 4th prod scale is blocked...
+    blocked = interceptor.intercept(RATE_INTENT_PROD, now=NOW + timedelta(minutes=3))
+    assert blocked.verdict == "BLOCK"
+
+    # ...but a staging scale is a different bucket and is unaffected.
+    allowed = interceptor.intercept(RATE_INTENT_STAGING, now=NOW + timedelta(minutes=4))
+    assert allowed.verdict == "ALLOW"
+
+
+def test_rate_limit_window_expires():
+    store = ConstraintStore(authority_map=AUTHORITY)
+    store.add_constraint(make_rate_limited_constraint())
+    ledger = DecisionLedger()
+    interceptor = AegisInterceptor(store, ledger=ledger)
+
+    base = NOW
+    for i in range(3):
+        d = interceptor.intercept(RATE_INTENT_PROD, now=base + timedelta(minutes=i))
+        assert d.verdict == "ALLOW"
+
+    # Well past the 1h window: the quota has reset.
+    later = base + timedelta(hours=2)
+    decision = interceptor.intercept(RATE_INTENT_PROD, now=later)
+    assert decision.verdict == "ALLOW"
+
+
+def test_rate_limit_without_ledger_never_fires():
+    store = ConstraintStore(authority_map=AUTHORITY)
+    store.add_constraint(make_rate_limited_constraint())
+    interceptor = AegisInterceptor(store)  # no ledger attached
+
+    for i in range(5):
+        decision = interceptor.intercept(RATE_INTENT_PROD, now=NOW + timedelta(minutes=i))
+        assert decision.verdict == "ALLOW"
+        assert decision.notes == []
+
+
+def test_dry_runs_are_not_recorded_into_the_ledger():
+    store = ConstraintStore(authority_map=AUTHORITY)
+    store.add_constraint(make_rate_limited_constraint())
+    ledger = DecisionLedger()
+    interceptor = AegisInterceptor(store, ledger=ledger)
+
+    dry_run_intent = InfrastructureIntent(
+        resource="deployment/api-server",
+        action="scale",
+        provider="kubernetes",
+        metadata={"namespace": "prod"},
+        params={"dry_run": True},
+    )
+    for i in range(5):
+        decision = interceptor.intercept(dry_run_intent, now=NOW + timedelta(minutes=i))
+        assert decision.verdict == "ALLOW"
+        assert decision.dry_run is True
+
+    assert ledger.count(since=NOW - timedelta(hours=1)) == 0
+
+
+def test_non_dry_run_allow_is_recorded_blocked_actions_are_not():
+    store = ConstraintStore(authority_map=AUTHORITY)
+    block_all = make_constraint(
+        id="block-all", resource_pattern="deployment/*", scope={}, effect="BLOCK"
+    )
+    store.add_constraint(block_all)
+    ledger = DecisionLedger()
+    interceptor = AegisInterceptor(store, ledger=ledger)
+
+    blocked_intent = InfrastructureIntent(
+        resource="deployment/api-server", action="scale", provider="kubernetes"
+    )
+    decision = interceptor.intercept(blocked_intent, now=NOW)
+    assert decision.verdict == "BLOCK"
+    assert ledger.count(since=NOW - timedelta(hours=1)) == 0
+
+    uncovered_intent = InfrastructureIntent(
+        resource="service/frontend", action="get", provider="kubernetes"
+    )
+    decision = interceptor.intercept(uncovered_intent, now=NOW)
+    assert decision.verdict == "ALLOW"
+    assert ledger.count(since=NOW - timedelta(hours=1)) == 1
+
+
+def test_rate_limited_constraint_round_trips_through_save_and_load(tmp_path):
+    constraint = make_rate_limited_constraint()
+    store = ConstraintStore(authority_map=AUTHORITY)
+    store.add_constraint(constraint)
+
+    path = tmp_path / "constraints.yaml"
+    store.save(path)
+
+    reloaded = ConstraintStore.load(path, authority_map=AUTHORITY)
+    reloaded_constraint = reloaded.constraints["no-mass-scale"]
+
+    assert reloaded_constraint.rate_limit == {"max": 3, "per": "1h", "key": ["namespace"]}
+    assert reloaded_constraint.provenance_hash == constraint.provenance_hash
+    assert reloaded_constraint.verify_integrity() is True
+
+
+def test_constraint_without_rate_limit_has_unchanged_hash():
+    # Precomputed literal from running compute_provenance_hash() BEFORE the
+    # rate_limit field/kwarg existed, for these exact source fields -- this
+    # pins that adding rate_limit=None never perturbs a pre-existing hash.
+    expected = (
+        "eda49ce26152165fb4e061dcc01ea0025f3718ef46740da6362dd0ef29957c6e"
+    )
+    computed = compute_provenance_hash(
+        provider="kubernetes",
+        resource_pattern="node/*",
+        actions={"scale"},
+        scope={},
+        time_window=None,
+        effect="BLOCK",
+        constraint_class="scaling",
+        principal="sre_lead",
+        source_ref="git-abc",
+        source_timestamp="2026-01-01T00:00:00+00:00",
+        rule_text="no-scaling",
+    )
+    assert computed == expected
+
+    constraint = make_constraint(
+        id="test-1",
+        provider="kubernetes",
+        resource_pattern="node/*",
+        rule_text="no-scaling",
+    )
+    assert constraint.provenance_hash == expected

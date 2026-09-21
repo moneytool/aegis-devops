@@ -11,6 +11,25 @@ Every constraint carries two independent guarantees:
 Neither guarantee implies the other: integrity only proves nothing was
 tampered with since ingestion, not that the source was ever allowed to set
 policy in the first place.
+
+**Load-time pipeline** (``ConstraintStore.load``): for each constraint on
+disk, in order —
+  1. Integrity  — ``verify_integrity()``; a mismatch quarantines the
+     constraint with reason ``"tampered"``.
+  2. Source     — only when a ``source_fetcher`` is supplied:
+     ``verify_source()`` is re-run against the original source; ``False``
+     or a missing/unreadable source (``FileNotFoundError``/``KeyError``)
+     quarantines the constraint with reason ``"forged"``. Without a
+     fetcher this step is skipped, so forged constraints load normally —
+     the fetcher is what makes forgery detectable at all.
+  3. Authority-at-decision — *not* checked at load time; a constraint may
+     be authorized when ingested and have that authority revoked later, so
+     authority is (re-)checked by the interceptor at decision time instead
+     (see ``interceptor.py``).
+
+``ConstraintStore.verify_sources`` runs step 2 as a standalone, post-hoc
+audit over an already-loaded store, moving any newly-forged constraints
+from ``constraints`` into ``quarantined``.
 """
 
 import fnmatch
@@ -23,7 +42,12 @@ from typing import Any
 import yaml
 
 from aegis_core.intent import InfrastructureIntent
-from aegis_core.provenance import compute_provenance_hash
+from aegis_core.provenance import (
+    CachingSourceFetcher,
+    SourceFetcher,
+    compute_provenance_hash,
+    verify_source,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +74,12 @@ class Constraint:
     source_timestamp: str
     rule_text: str
     provenance_hash: str
+    rate_limit: dict[str, Any] | None = None
+    """Optional rate/budget rule: ``{"max": N, "per": "1h"|"24h"|"15m",
+    "key": [<metadata keys to bucket by>]}`` (PLAN §7.6). ``None`` (the
+    default) means this constraint is absolute, not rate-limited — and is
+    also what keeps every pre-existing constraint's provenance hash
+    unchanged, since it's included in the hash only when set."""
 
     @classmethod
     def create(
@@ -67,6 +97,7 @@ class Constraint:
         rule_text: str,
         scope: dict[str, Any] | None = None,
         time_window: dict[str, Any] | None = None,
+        rate_limit: dict[str, Any] | None = None,
     ) -> "Constraint":
         """Builds a Constraint and computes its provenance hash from the
         source-side fields."""
@@ -84,6 +115,7 @@ class Constraint:
             source_ref=source_ref,
             source_timestamp=source_timestamp,
             rule_text=rule_text,
+            rate_limit=rate_limit,
         )
         return cls(
             id=id,
@@ -98,6 +130,7 @@ class Constraint:
             source_ref=source_ref,
             source_timestamp=source_timestamp,
             rule_text=rule_text,
+            rate_limit=rate_limit,
             provenance_hash=provenance_hash,
         )
 
@@ -116,12 +149,13 @@ class Constraint:
             source_ref=self.source_ref,
             source_timestamp=self.source_timestamp,
             rule_text=self.rule_text,
+            rate_limit=self.rate_limit,
         )
         return expected == self.provenance_hash
 
 
 def _constraint_to_dict(c: Constraint) -> dict[str, Any]:
-    return {
+    data = {
         "id": c.id,
         "provider": c.provider,
         "resource_pattern": c.resource_pattern,
@@ -136,6 +170,11 @@ def _constraint_to_dict(c: Constraint) -> dict[str, Any]:
         "rule_text": c.rule_text,
         "provenance_hash": c.provenance_hash,
     }
+    # Only written when set, so save()/load() round-trip existing (v1)
+    # constraint files byte-for-byte unchanged.
+    if c.rate_limit is not None:
+        data["rate_limit"] = c.rate_limit
+    return data
 
 
 def _constraint_from_dict(data: dict[str, Any]) -> Constraint:
@@ -153,6 +192,7 @@ def _constraint_from_dict(data: dict[str, Any]) -> Constraint:
         source_timestamp=data["source_timestamp"],
         rule_text=data["rule_text"],
         provenance_hash=data["provenance_hash"],
+        rate_limit=data.get("rate_limit"),
     )
 
 
@@ -188,6 +228,15 @@ def _time_window_matches(window: dict[str, Any], now: datetime) -> bool:
             return False
 
     return True
+
+
+def _verify_source_safe(constraint: Constraint, fetcher: SourceFetcher) -> bool:
+    """``verify_source`` with a missing/unreadable source normalised to
+    ``False`` instead of propagating ``FileNotFoundError``/``KeyError``."""
+    try:
+        return verify_source(constraint, fetcher)
+    except (FileNotFoundError, KeyError):
+        return False
 
 
 class ConstraintStore:
@@ -244,21 +293,66 @@ class ConstraintStore:
 
     @classmethod
     def load(
-        cls, path: str | Path, authority_map: dict[str, set[str]] | None = None
+        cls,
+        path: str | Path,
+        authority_map: dict[str, set[str]] | None = None,
+        *,
+        source_fetcher: SourceFetcher | None = None,
     ) -> "ConstraintStore":
         """Loads constraints from a YAML file, verifying each one's
         provenance hash. Constraints that fail verification are quarantined
-        rather than loaded."""
+        rather than loaded.
+
+        When ``source_fetcher`` is given, surviving constraints are also
+        re-checked against their original source (see module docstring);
+        constraints whose source doesn't back their claimed fields, or
+        whose source can't be fetched at all, are quarantined with reason
+        ``"forged"`` instead of being loaded. Fetches are cached per
+        ``source_ref`` for the duration of this load.
+        """
         store = cls(authority_map=authority_map)
         with open(path) as f:
             payload = yaml.safe_load(f) or {}
+        caching_fetcher = CachingSourceFetcher(source_fetcher) if source_fetcher else None
         for entry in payload.get("constraints", []):
             constraint = _constraint_from_dict(entry)
-            if constraint.verify_integrity():
-                store.constraints[constraint.id] = constraint
-            else:
+            if not constraint.verify_integrity():
                 store.quarantined.append({"id": constraint.id, "reason": "tampered"})
                 logger.warning(
                     "Quarantined constraint %s: provenance hash mismatch", constraint.id
                 )
+                continue
+            if caching_fetcher is not None and not _verify_source_safe(
+                constraint, caching_fetcher
+            ):
+                store.quarantined.append({"id": constraint.id, "reason": "forged"})
+                logger.warning(
+                    "Quarantined constraint %s: source does not back its claimed fields",
+                    constraint.id,
+                )
+                continue
+            store.constraints[constraint.id] = constraint
         return store
+
+    def verify_sources(self, fetcher: SourceFetcher) -> list[dict]:
+        """Post-hoc audit of an already-loaded store: re-checks every
+        currently-loaded constraint against its original source, moving any
+        that fail into ``quarantined`` (reason ``"forged"``) and removing
+        them from ``constraints``.
+
+        Returns the list of newly-quarantined ``{"id", "reason"}`` entries.
+        """
+        caching_fetcher = CachingSourceFetcher(fetcher)
+        newly_quarantined: list[dict[str, str]] = []
+        for constraint_id in list(self.constraints.keys()):
+            constraint = self.constraints[constraint_id]
+            if not _verify_source_safe(constraint, caching_fetcher):
+                entry = {"id": constraint_id, "reason": "forged"}
+                newly_quarantined.append(entry)
+                self.quarantined.append(entry)
+                del self.constraints[constraint_id]
+                logger.warning(
+                    "Quarantined constraint %s: source does not back its claimed fields",
+                    constraint_id,
+                )
+        return newly_quarantined

@@ -27,8 +27,16 @@ def compute_provenance_hash(
     source_ref: str,
     source_timestamp: str,
     rule_text: str,
+    rate_limit: dict[str, Any] | None = None,
 ) -> str:
-    """SHA-256 of the canonical JSON serialisation of the source fields."""
+    """SHA-256 of the canonical JSON serialisation of the source fields.
+
+    ``rate_limit`` is included in the hashed payload only when it is not
+    ``None``. This keeps the hash of every constraint that predates the
+    rate-limit field (PLAN §7.6) byte-for-byte identical to before —
+    omitting a key from the payload, rather than hashing it as
+    ``"rate_limit": null``, is what makes that guarantee hold.
+    """
     payload = {
         "provider": provider,
         "resource_pattern": resource_pattern,
@@ -42,6 +50,8 @@ def compute_provenance_hash(
         "source_timestamp": source_timestamp,
         "rule_text": rule_text,
     }
+    if rate_limit is not None:
+        payload["rate_limit"] = rate_limit
     blob = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
@@ -70,6 +80,35 @@ class FileSourceFetcher:
             return json.load(f)
 
 
+class CachingSourceFetcher:
+    """Wraps a :class:`SourceFetcher`, memoising both successful fetches and
+    the exceptions raised by missing/unreadable sources, keyed by
+    ``source_ref``.
+
+    Used by ``ConstraintStore.load``/``verify_sources`` so that many
+    constraints citing the same ``source_ref`` only hit the underlying
+    fetcher once per load or audit pass.
+    """
+
+    def __init__(self, fetcher: SourceFetcher):
+        self._fetcher = fetcher
+        self._cache: dict[str, Any] = {}
+
+    def fetch(self, source_ref: str) -> dict[str, Any]:
+        if source_ref in self._cache:
+            cached = self._cache[source_ref]
+            if isinstance(cached, Exception):
+                raise cached
+            return cached
+        try:
+            result = self._fetcher.fetch(source_ref)
+        except (FileNotFoundError, KeyError) as exc:
+            self._cache[source_ref] = exc
+            raise
+        self._cache[source_ref] = result
+        return result
+
+
 def verify_source(constraint, fetcher: SourceFetcher) -> bool:
     """Re-derives the provenance hash from the original source and compares it.
 
@@ -91,5 +130,6 @@ def verify_source(constraint, fetcher: SourceFetcher) -> bool:
         source_ref=source["source_ref"],
         source_timestamp=source["source_timestamp"],
         rule_text=source["rule_text"],
+        rate_limit=source.get("rate_limit"),
     )
     return recomputed == constraint.provenance_hash
