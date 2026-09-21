@@ -376,3 +376,8 @@ def test_from_terraform_plan_forget_action():
     }
     intent = from_terraform_plan(plan)[0]
     assert intent.action == "forget"
+
+
+def test_from_kubectl_normalises_kind_case():
+    intent = from_kubectl(["kubectl", "delete", "Deployment/API-Server"])
+    assert intent.resource == "deployment/API-Server"

@@ -89,6 +89,7 @@ def _split_resource_token(token: str) -> tuple[str, str | None]:
     else:
         kind, name = token, None
     kind = kind.split(".", 1)[0]  # strip an API group suffix, e.g. "deployment.apps"
+    kind = kind.lower()  # kinds are case-insensitive in kubectl; patterns are lower-case
     kind = _RESOURCE_ALIASES.get(kind, kind)
     return kind, name
 
