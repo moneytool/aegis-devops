@@ -1,4 +1,7 @@
-# Aegis-DevOps
+# Aegis-DevOps — Policy Verifier for AI DevOps Agents
+
+**Provenance-backed, authority-aware guardrails that stop context poisoning and agentic drift
+before an AI agent's `kubectl` or `terraform` action reaches your infrastructure.**
 
 A lightweight, high-performance middleware layer that intercepts proposed agent actions and
 validates them against an **Authority-Anchored Constraint Store**. Unlike existing tools
@@ -6,6 +9,10 @@ validates them against an **Authority-Anchored Constraint Store**. Unlike existi
 constraint in the store must pass an integrity check (has it been tampered with since
 ingestion?) and an authority check (was its source ever allowed to assert this kind of
 policy?) before it can drive a decision.
+
+**Keywords:** AI agent security · AgentOps · prompt injection · context poisoning · policy
+enforcement · policy-as-code · Kubernetes · Terraform · OPA · SRE · LLM guardrails ·
+provenance · infrastructure-as-code
 
 ## Install
 
