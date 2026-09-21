@@ -1,34 +1,79 @@
-import sys
-import os
+import pytest
 
-# Add src to PYTHONPATH so we can import aegis_core
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
+from aegis_core.store import Constraint, ConstraintStore
 
-from aegis_core.store import ConstraintStore
+AUTHORITY = {
+    "admin": {"scaling", "deletion", "configuration"},
+    "sre_lead": {"scaling", "configuration"},
+    "developer": {"configuration"},
+}
 
-def test_constraint_addition():
-    store = ConstraintStore()
-    h = store.add_constraint("test-1", "no-scaling", "sre_lead", "git-abc")
+
+def make_constraint(**overrides) -> Constraint:
+    defaults = dict(
+        id="test-1",
+        provider="kubernetes",
+        resource_pattern="node/*",
+        actions={"scale"},
+        effect="BLOCK",
+        constraint_class="scaling",
+        principal="sre_lead",
+        source_ref="git-abc",
+        source_timestamp="2026-01-01T00:00:00+00:00",
+        rule_text="no-scaling",
+    )
+    defaults.update(overrides)
+    return Constraint.create(**defaults)
+
+
+def test_add_constraint_stores_it():
+    store = ConstraintStore(authority_map=AUTHORITY)
+    constraint = make_constraint()
+    store.add_constraint(constraint)
     assert "test-1" in store.constraints
-    assert store.constraints["test-1"]["principal"] == "sre_lead"
-    print("test_constraint_addition: PASSED")
+    assert store.constraints["test-1"].principal == "sre_lead"
 
-def test_unauthorized_principal():
-    store = ConstraintStore()
-    try:
-        store.add_constraint("test-2", "bad-rule", "untrusted_user", "hack")
-        print("test_unauthorized_principal: FAILED (Should have raised error)")
-    except PermissionError:
-        print("test_unauthorized_principal: PASSED")
 
-def test_integrity_verification():
-    store = ConstraintStore()
-    h = store.add_constraint("test-3", "verify-me", "admin", "jira-999")
-    assert store.verify_integrity("test-3") is True
-    print("test_integrity_verification: PASSED")
+def test_add_constraint_by_unauthorized_principal_raises():
+    store = ConstraintStore(authority_map=AUTHORITY)
+    constraint = make_constraint(
+        id="test-2", principal="developer", constraint_class="scaling"
+    )
+    with pytest.raises(PermissionError):
+        store.add_constraint(constraint)
 
-if __name__ == "__main__":
-    test_constraint_addition()
-    test_unauthorized_principal()
-    test_integrity_verification()
-    print("All tests completed successfully.")
+
+def test_add_constraint_denies_by_default_with_no_authority_map():
+    store = ConstraintStore()  # default: empty authority map, deny all
+    constraint = make_constraint(id="test-3", principal="admin")
+    with pytest.raises(PermissionError):
+        store.add_constraint(constraint)
+
+
+def test_integrity_verification_passes_for_untouched_constraint():
+    constraint = make_constraint(id="test-4")
+    assert constraint.verify_integrity() is True
+
+
+def test_integrity_verification_fails_after_tamper():
+    constraint = make_constraint(id="test-5")
+    constraint.rule_text = "an attacker rewrote this rule"
+    assert constraint.verify_integrity() is False
+
+
+def test_is_authorized_reflects_authority_map():
+    store = ConstraintStore(authority_map=AUTHORITY)
+    assert store.is_authorized("sre_lead", "scaling") is True
+    assert store.is_authorized("developer", "scaling") is False
+    assert store.is_authorized("unknown_principal", "scaling") is False
+
+
+def test_unauthorized_principal_bypassing_add_constraint_is_still_in_store():
+    """A constraint inserted directly into the store's dict, bypassing
+    add_constraint, is accepted into storage -- authority is enforced again
+    at decision time by the interceptor (see test_interceptor.py)."""
+    store = ConstraintStore(authority_map=AUTHORITY)
+    constraint = make_constraint(id="test-6", principal="developer", constraint_class="scaling")
+    store.constraints[constraint.id] = constraint
+    assert "test-6" in store.constraints
+    assert store.is_authorized(constraint.principal, constraint.constraint_class) is False

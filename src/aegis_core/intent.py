@@ -1,11 +1,12 @@
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional
+from typing import Any
+
 
 @dataclass
 class InfrastructureIntent:
     """
-    Represents a structural DevOps action (e.g., K8s or Terraform).
-    Example: 
+    Represents a structured DevOps action (e.g., K8s or Terraform).
+    Example:
     {
         "resource": "deployment/api-server",
         "action": "scale",
@@ -16,14 +17,14 @@ class InfrastructureIntent:
     resource: str
     action: str
     provider: str
-    params: Dict[str, Any] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    params: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "resource": self.resource,
             "action": self.action,
             "provider": self.provider,
             "params": self.params,
-            "metadata": self.metadata
+            "metadata": self.metadata,
         }

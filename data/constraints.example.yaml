@@ -1,0 +1,88 @@
+constraints:
+- id: no-scale-prod-peak
+  provider: kubernetes
+  resource_pattern: deployment/*
+  actions:
+  - scale
+  scope:
+    namespace: prod
+  time_window:
+    days:
+    - Mon
+    - Tue
+    - Wed
+    - Thu
+    - Fri
+    start: 09:00
+    end: '17:00'
+    tz: America/New_York
+  effect: BLOCK
+  constraint_class: scaling
+  principal: sre_lead
+  source_ref: jira-1001
+  source_timestamp: '2026-01-15T09:00:00+00:00'
+  rule_text: Do not scale deployments in prod during business hours (09:00-17:00 ET,
+    weekdays).
+  provenance_hash: f3af697890dc757effcf13cdfcc9e4624e32aa65dd3114c348674ddcda0f2244
+- id: no-delete-nodes
+  provider: kubernetes
+  resource_pattern: node/*
+  actions:
+  - delete
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  principal: admin
+  source_ref: git-abc123
+  source_timestamp: '2026-02-01T12:00:00+00:00'
+  rule_text: Never delete cluster nodes directly; drain and cordon through the runbook
+    instead.
+  provenance_hash: fd5a01ddabc24b1203b65dd2503be114d88d5de909b2bb1ca41ecbd2e02d078a
+- id: escalate-terraform-prod-destroy
+  provider: terraform
+  resource_pattern: aws_instance.*
+  actions:
+  - delete
+  - replace
+  scope:
+    region: us-east-1
+  time_window: null
+  effect: ESCALATE
+  constraint_class: deletion
+  principal: admin
+  source_ref: slack-perma-1
+  source_timestamp: '2026-02-10T18:30:00+00:00'
+  rule_text: Escalate any destructive terraform change to prod EC2 instances in us-east-1
+    for human review.
+  provenance_hash: 6d366d7ed1a8abbcc4e2979cbfe54fc0d2414f75ca1728ddbe4e689d3e8e23c7
+- id: escalate-configmap-changes
+  provider: kubernetes
+  resource_pattern: configmap/*
+  actions:
+  - delete
+  - update
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: configuration
+  principal: developer
+  source_ref: jira-2002
+  source_timestamp: '2026-03-01T08:00:00+00:00'
+  rule_text: Escalate configmap changes for review before they are applied.
+  provenance_hash: 49c7f045c4722687fbe9fe1bbd295f73814e8a6f815d30915c8446fe04b1d17e
+- id: no-direct-asg-changes
+  provider: terraform
+  resource_pattern: aws_autoscaling_group.*
+  actions:
+  - update
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: scaling
+  principal: admin
+  source_ref: git-def456
+  source_timestamp: '2026-03-05T14:00:00+00:00'
+  rule_text: Block direct terraform changes to autoscaling groups; use the scaling
+    API instead.
+  provenance_hash: 9c7755d1203dcbb9ea3d780e0ce609980638cc0073b469ae432a39394464d690
