@@ -1,0 +1,17 @@
+{
+  "provider": "kubernetes",
+  "resource_pattern": "*",
+  "actions": [
+    "delete"
+  ],
+  "scope": {
+    "env": "prod"
+  },
+  "time_window": null,
+  "effect": "BLOCK",
+  "constraint_class": "deletion",
+  "principal": "admin",
+  "source_ref": "git-789abc",
+  "source_timestamp": "2026-03-18T10:00:00+00:00",
+  "rule_text": "Block deleting any resource in a production environment, regardless of kind; only the runbook may delete in prod."
+}

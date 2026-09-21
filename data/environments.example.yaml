@@ -1,0 +1,31 @@
+# Maps provider-specific identifiers (kube context/cluster, AWS account/
+# profile, GCP project, Azure subscription/resource group) to a normalised
+# env: prod | staging | dev. Loaded via aegis_core.environments.load_environment_map(path).
+#
+# Fail-safe: an identifier that isn't listed here resolves to no env at all
+# (never a default like "dev") -- see aegis_core/environments.py.
+environments:
+  kubernetes:
+    contexts:
+      prod-us-east: prod
+      staging: staging
+      kind-local: dev
+    clusters:
+      gke_acme_us-east1_prod: prod
+  aws:
+    accounts:
+      "123456789012": prod
+      "210987654321": staging
+    profiles:
+      prod-admin: prod
+      staging: staging
+  gcp:
+    projects:
+      acme-prod: prod
+      acme-staging: staging
+  azure:
+    subscriptions:
+      "11111111-1111-1111-1111-111111111111": prod
+    resource_groups:
+      rg-prod: prod
+      rg1: staging
