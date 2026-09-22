@@ -4,25 +4,26 @@
 #   {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
 #     {"type": "command", "command": "/path/to/aegis-devops/examples/claude-code-hook.sh"}]}]}}
 # Claude Code semantics: exit 0 = allow; exit 2 = block, stderr is shown to the model.
-# `aegis --exit-style claude-hook` returns 0 (ALLOW) or 2 (ESCALATE/BLOCK) and prints
-# {"decision": "block", "reason": ...}; those two codes propagate as-is. Any tool error
-# (64 usage / 65 data / 66 missing file / 70 internal) and any failure of this script's
-# own parsing are converted to 2, so the hook never fails open. Compound commands
-# (";", "&&", "||", "|", "$(...)") are rejected by aegis as a usage error (64) -- and hence
-# blocked here -- until REVIEW-4 T1.2 adds --split-compound.
+# `aegis check command --exit-style claude-hook` takes the raw command string: it splits
+# compound commands (";", "&&", "||", "|"), unwraps sudo/env/timeout/sh -c, and checks every
+# simple command whose binary Aegis knows; binaries it has no parser for are not gated
+# (add --fail-closed to escalate them instead). It returns 0 (ALLOW) or 2 (ESCALATE/BLOCK)
+# and prints {"decision": "block", "reason": ...}; those two codes propagate as-is. Any
+# tool error -- 64 usage (including a command Aegis refuses to evaluate statically:
+# $(...), backticks, eval, xargs ...), 65 data / signature, 66 missing file, 70 internal --
+# and any failure of this script's own parsing are converted to 2, so the hook never
+# fails open. Run it from the aegis-devops checkout (or set AEGIS_ARGS to point
+# --constraints/--key at your own policy files). The aegis binary is $AEGIS_BIN, else the
+# venv next to this script, else whatever "aegis" is on PATH.
 set -u
 fail() { echo "aegis: $1; blocking to fail closed" >&2; exit 2; }
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+aegis=${AEGIS_BIN:-}
+[ -z "$aegis" ] && [ -x "$here/../venv/bin/aegis" ] && aegis="$here/../venv/bin/aegis"
+[ -z "$aegis" ] && aegis=aegis
 cmd=$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("tool_input",{}).get("command",""))' 2>/dev/null) \
   || fail "could not read hook input"
 [ -z "$cmd" ] && exit 0
-# shell-split into one token per line; punctuation_chars makes ";" / "&&" / "|" their own tokens
-split=$(python3 -c 'import shlex,sys
-print("\n".join(shlex.shlex(sys.argv[1], posix=True, punctuation_chars=True)))' "$cmd" 2>/dev/null) \
-  || fail "could not split command: $cmd"
-argv=(); while IFS= read -r tok; do argv+=("$tok"); done <<< "$split"
-case "$(basename "${argv[0]}")" in  # binaries Aegis knows how to parse; anything else is not gated
-  kubectl|aws|az|gcloud|gsutil|helm|argocd|flux|git|gh|psql|mysql|sqlite3|mongosh|pulumi|alembic|flyway|rails|prisma) ;;
-  *) exit 0 ;;
-esac
-aegis check argv --exit-style claude-hook -- "${argv[@]}"; rc=$?
+# shellcheck disable=SC2086  # AEGIS_ARGS is intentionally word-split
+"$aegis" check command --exit-style claude-hook ${AEGIS_ARGS:-} -- "$cmd"; rc=$?
 case "$rc" in 0|2) exit "$rc" ;; *) fail "tool error (exit $rc)" ;; esac

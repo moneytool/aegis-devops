@@ -43,8 +43,16 @@ BLOCK: kubernetes scale deployment/api-server
   citations: no-scale-prod-peak
   covered: True  latency_ms: 0.14
 PLAN BLOCK: 1 intent(s)
-STORE: loaded=20 quarantined=0 principals=3
+WARNING: using example signing key
+STORE: loaded=21 quarantined=0 principals=3
 ```
+
+The `WARNING` line is real: the shipped policy files are signed with a public demo key that
+lives next to them, so the CLI can verify them out of the box but tells you it did so with a
+key everyone has. See "Signing" below for using your own. To check a whole shell command
+string rather than one argv (what an agent framework actually hands you), use
+`aegis check command -- "kubectl get pods; sudo kubectl delete node/w1"` — see "Compound
+commands".
 
 Global options in front of the verb (`kubectl -n prod delete …`, `git -C /repo push …`,
 `helm --kube-context prod uninstall …`), glued short flags (`-nprod`), label selectors
@@ -64,9 +72,9 @@ depend on `--exit-style`; tool errors are identical in every style and never pri
 | `1` | — | — | ESCALATE or BLOCK |
 | `2` | ESCALATE | ESCALATE or BLOCK, printing `{"decision": "block", "reason": "<verdict>: <citations>"}` | — |
 | `3` | BLOCK | — | — |
-| `64` | usage error (unknown flag, no argv after `--`, compound shell command) | same | same |
-| `65` | bad data: unparseable argv, `--now`, YAML or JSON; degraded store (see below) | same | same |
-| `66` | a constraints/authority/environments/plan file does not exist or is unreadable | same | same |
+| `64` | usage error (unknown flag, no argv after `--`, compound argv without `--split-compound`, a command string Aegis refuses to evaluate statically) | same | same |
+| `65` | bad data: unparseable argv, `--now`, YAML or JSON; degraded store (see below); no signing key, or a missing/bad signature | same | same |
+| `66` | a constraints/authority/environments/plan/key file does not exist or is unreadable | same | same |
 | `70` | internal error; the exception class name is on stderr | same | same |
 
 Every error is one `aegis: error: …` line on stderr, never a traceback. `claude-hook` exists
@@ -79,8 +87,10 @@ Every output carries the state of the constraint store, so a degraded store can 
 mistaken for a clean allow. Each per-intent JSON line and the plan summary include a
 `store_health` object — `loaded`, `quarantined: [{id, reason}]`, `principals`,
 `constraints_sha256` (of the raw file bytes), `warnings` — and `--pretty` ends with a
-`STORE: loaded=N quarantined=M principals=P` line plus one line per quarantined rule. Load-time
-warnings also go to stderr as `aegis: WARNING …` lines.
+`STORE: loaded=N quarantined=M principals=P` line plus one line per quarantined rule, preceded
+by one `WARNING: …` line per store warning (`using example signing key`, `insecure: signatures
+not verified`, `ledger: chain-broken`, rate-limit key typos). Quarantines also go to stderr as
+`aegis: WARNING …` lines.
 
 Integrity failures **fail closed**. A constraint that was quarantined at load (`tampered`,
 `forged`) or discarded at decision time (`tampered`, `unauthorized`) is still matched, and if it
@@ -108,14 +118,22 @@ zero constraints, the authority map grants nothing to anyone, or more than
 additionally turns an *uncovered* intent (no rule matched) into ESCALATE with the note
 `fail-closed: uncovered`.
 
+Two more fail-closed clauses live in the interceptor: a rule that scopes on `env` when the
+intent's environment could not be resolved contributes ESCALATE with the note
+`env-unresolved: <id>` (see "Environment mapping"), and an intent whose target the parser
+could not pin down (`git push -f` with no refspec) contributes ESCALATE with the note
+`unknown-target`, so it cannot slip past a `ref/main` rule as `ref/*`.
+
 ### Claude Code hook
 
-`examples/claude-code-hook.sh` is a `PreToolUse` hook: it reads the hook JSON from stdin, splits
-`tool_input.command` with `shlex`, and runs `aegis check argv --exit-style claude-hook`. ALLOW
-lets the tool call proceed; ESCALATE and BLOCK exit 2 with the reason on stderr (which Claude
-Code shows to the model). Binaries Aegis cannot parse are not gated; compound commands (`;`,
-`&&`, `|`, `$(…)`) are a usage error until `--split-compound` lands (REVIEW-4 T1.2), and the hook
-converts any tool error into a block so it never fails open.
+`examples/claude-code-hook.sh` is a `PreToolUse` hook: it reads the hook JSON from stdin and
+hands `tool_input.command` — the raw string — to `aegis check command --exit-style claude-hook`.
+ALLOW lets the tool call proceed; ESCALATE and BLOCK exit 2 with the reason on stderr (which
+Claude Code shows to the model). Compound commands are split and launchers unwrapped (see
+"Compound commands"); binaries Aegis has no parser for are not gated unless you add
+`--fail-closed` via `AEGIS_ARGS`; any tool error — including a command string Aegis refuses to
+evaluate statically, such as `kubectl delete $(cat x)` — is converted into a block, so the hook
+never fails open. It runs the `aegis` in the venv next to it (`AEGIS_BIN` overrides).
 
 ```json
 {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
@@ -164,6 +182,7 @@ Every target below is checked with `aegis check <target> [flags] -- <argv...>`, 
 | `migrate` | `aegis check migrate -- alembic downgrade base` |
 | `sql` | `aegis check sql -- "DROP TABLE users;"` |
 | `argv` | `aegis check argv -- gcloud sql instances delete prod-db` (dispatches by binary name) |
+| `command` | `aegis check command -- "kubectl get pods; sudo kubectl delete node/w1"` (a shell string; see "Compound commands") |
 
 ## Writing constraints
 
@@ -233,16 +252,60 @@ A constraint whose `principal` isn't authorized for its own `constraint_class` i
 decision time with reason `unauthorized` — even if it was authorized when it was first added
 (`ConstraintStore.add_constraint` checks this too, but authority can be revoked later).
 
+## Compound commands
+
+Agent frameworks hand over a shell *string*, not an argv. `aegis check command -- "<string>"`
+(and `aegis check argv --split-compound`) turns that string into the simple commands it would
+run — splitting on `;`, `&&`, `||`, `|`, `&` and newlines, unwrapping `sudo`, `env VAR=…`,
+`timeout`, `nice`, `nohup`, `command`, `time`, `sh -c "…"` and the `k`/`tf`/`g` aliases — and
+checks every one whose binary Aegis knows. The exit code is the worst verdict across them:
+
+```
+aegis check command -- "kubectl get pods; kubectl delete node/w1"   # BLOCK, exit 3
+aegis check command -- "sudo kubectl delete node/w1"                # BLOCK, exit 3
+aegis check command -- "kubectl get pods | grep x"                  # ALLOW, exit 0
+aegis check command -- 'kubectl delete $(cat x)'                    # exit 64: command rejected
+```
+
+Inside a pipeline an unknown binary (`| grep x`) produces nothing; on its own it produces a
+synthetic `shell` / `binary/<name>` / `exec` intent that `--fail-closed` escalates. `KUBECONFIG=…`
+and `env AWS_PROFILE=…` prefixes land in the intent's metadata (`kubeconfig`, `profile`, …) so
+the environment map sees them. **Fail closed:** anything whose argv cannot be known without
+running it is refused as a usage error (exit 64, `command rejected: <reason>`) — command
+substitution (`$(…)`, backticks), `$VAR` outside single quotes, process substitution,
+subshells, here-docs, `eval`/`exec`/`source`/`.`/`xargs`, and unbalanced quotes. Without the
+flag, `aegis check <target>` still treats any shell metacharacter in an argv as a usage error.
+
 ## Environment mapping
 
 Constraints can scope on `env: prod|staging|dev` instead of repeating every raw
 context/account/project/subscription. `data/environments.example.yaml` maps provider-specific
 identifiers to a normalised environment, and `EnvironmentMap.annotate` sets
 `intent.metadata["env"]` at parse time (the CLI does this automatically via `--environments`,
-defaulting to `data/environments.example.yaml` when present). An identifier that isn't in the
-map resolves to no environment at all — never a default like `dev` — and, deliberately,
-kubectl namespaces are never used to infer `env`, since a namespace is a string the agent (or
-an attacker poisoning its context) controls.
+defaulting to `data/environments.example.yaml` when present). Resolution is provider-agnostic:
+whatever tool produced the intent, every identifier its parser recorded is looked up —
+`kubernetes.contexts` / `clusters` / `kubeconfigs` (kubectl, helm `--kube-context`, flux,
+argocd, `KUBECONFIG=…`), `aws.accounts` / `profiles`, `gcp.projects`, `azure.subscriptions` /
+`resource_groups`, `github.repos` (`owner/repo` from `gh -R`), `argocd.apps` (globs on the app
+name) and `terraform.workspaces`. An identifier that isn't in the map resolves to no
+environment at all — never a default like `dev` — and, deliberately, kubectl namespaces are
+never used to infer `env`, since a namespace is a string the agent (or an attacker poisoning
+its context) controls.
+
+**Unknown is not "not prod".** When a rule scoped on `env` would otherwise match and the intent
+has no resolved `env`, the rule is neither honoured nor dropped: the decision is ESCALATE with
+the note `env-unresolved: <id>` (a BLOCK from another rule still outranks it). So
+`kubectl delete pod/x -n dev` with no `--context` escalates against `no-delete-in-prod-env`
+instead of sailing through. Plan-constraint selectors with `scope: {env: …}` behave the same.
+
+`--resolve-current-context` fills a *missing* identifier from the invoking environment: the
+kubeconfig's `current-context` (and its cluster) from `$KUBECONFIG` / `~/.kube/config` (parsed,
+never by running `kubectl`), `$AWS_PROFILE`, `$AWS_DEFAULT_REGION`/`$AWS_REGION`,
+`$CLOUDSDK_CORE_PROJECT`, `$AZURE_SUBSCRIPTION_ID`, `$HELM_NAMESPACE`, `$ARGOCD_SERVER`. An
+explicit `--context` on the argv always wins, and the keys that were filled are listed in
+`metadata.resolved_from_environment`. It is opt-in because it **trusts the invoking
+environment**: whoever controls the process environment controls what Aegis believes the
+target is.
 
 ## Dry runs
 
@@ -264,26 +327,60 @@ rehearsal of one.
 
 ## Source verification
 
-`--sources data/sources` points at a directory of `<source_ref>.json` files. When given, a
-constraint whose cited source doesn't actually back it (missing file, or different content) is
-quarantined as `forged` at load time:
+`--sources DIR` points at a directory of `<source_ref>.json` files plus a `PRINCIPALS.yaml`
+that says which principal the *transport* attributes each source to. It defaults to the
+`sources/` directory next to the constraints file when one exists (`--sources ''` opts out), so
+with the shipped layout forgery is detected without any flag. A constraint whose cited source
+doesn't back it (missing file, or different content) is quarantined as `forged` at load time; one
+whose transport principal differs from the principal it claims is quarantined as
+`principal-mismatch`. Both fail closed like any other quarantine.
+
+`FileSourceFetcher` is a v1 stand-in for real Git/Slack/Jira connectors — it re-reads a flat
+JSON file rather than calling out to a commit, a permalink, or a ticket API (see "Open gaps" in
+`PLAN.md`).
+
+## Signing
+
+Every policy file — constraints, plan constraints, authority map, environment map, source
+snapshots and `PRINCIPALS.yaml` — must verify under a keyed BLAKE2b MAC before the CLI will
+decide with it. Single files carry a detached `<file>.sig`; a directory of sources carries one
+`AEGIS-MANIFEST.sig` (a JSON manifest of `{relpath: sha256}` plus the MAC of that mapping), so
+hundreds of snapshots are one signature. A file with a detached `.sig` is checked against it;
+otherwise the nearest manifest above it must list it with a matching hash.
 
 ```bash
-aegis check kubectl --sources data/sources --pretty -- kubectl get service/frontend -n prod
+aegis sign   --key file:aegis-signing.key data/constraints.yaml data/sources   # .sig + manifest
+aegis verify --key env:AEGIS_SIGNING_KEY  data/constraints.yaml data/sources
 ```
 
-`FileSourceFetcher` (the default behind `--sources`) is a v1 stand-in for real Git/Slack/Jira
-connectors — it re-reads a flat JSON file rather than calling out to a commit, a permalink, or
-a ticket API. Without `--sources`, forgery goes undetected (see "Open gaps" in `PLAN.md`).
+The key is resolved from `--key SOURCE` (`env:VAR`, `file:PATH`, or raw hex), then
+`$AEGIS_SIGNING_KEY`, then `<dir of --constraints>/example-signing.key` if it exists — with the
+store warning `using example signing key`, because **`data/example-signing.key` is public and
+demo-only**: it is committed so the shipped examples and corpus verify out of the box, and
+anyone holding it can forge those files. Generate your own (`python -c 'import secrets;
+print(secrets.token_hex(32))'`), re-sign, and keep it out of the agent's reach. With no key at
+all the CLI exits 65 (`no signing key: pass --key, set AEGIS_SIGNING_KEY, or --insecure`);
+`--insecure` loads everything unverified and says so in every `store_health.warnings`. This is a
+MAC, not a public-key signature: whoever can sign can verify, which is the v1 boundary — Aegis
+defends against poisoned *content* from sources you chose to trust, not against an attacker
+who holds the signing key.
 
 ## Rate limits & ledger
 
-`--ledger path.jsonl` enables `rate_limit` constraints and appends one JSON line per executed
-(`ALLOW`, non-dry-run) decision, bucketed by the constraint's `key` metadata fields within its
-`per` window:
+`--ledger PATH` enables `rate_limit` constraints and records every executed (`ALLOW`,
+non-dry-run) decision, bucketed by the constraint's `key` metadata fields within its `per`
+window. A `.jsonl` path gives an append-only JSON-lines ledger; `.db`/`.sqlite`/`.sqlite3` gives
+a SQLite one. Both serialise load → count → record across processes (an `flock` on a sidecar
+`.lock` file, or `BEGIN IMMEDIATE`), so sixteen racing agents against `max: 3` get exactly three
+ALLOWs; both hash-chain their records, and a truncated or hand-edited ledger surfaces as the
+store warning `ledger: chain-broken` and makes every rate-limited rule ESCALATE rather than
+count from zero. Records older than the largest `per` window in the store (at least 24h) are
+pruned on load, so a ledger never grows without bound; malformed lines are skipped and counted.
+A `rate_limit.key` naming a field no parser emits is reported in `store_health.warnings` at load
+instead of silently bucketing nothing (`resource` is allowed, to bucket per concrete target).
 
 ```bash
-aegis check kubectl --ledger results/ledger.jsonl --pretty -- \
+aegis check kubectl --ledger results/ledger.db --pretty -- \
     kubectl get service/frontend -n prod
 ```
 
@@ -441,9 +538,9 @@ constraints by hand: `venv/bin/python scripts/reference_oracle.py --corpus data/
 
 The engine (constraint store, interceptor, environment mapping, dry-run handling, rate limits,
 plan-level constraints, and parsers for every tool in "Supported tools") is complete. See
-`PLAN.md` for the full roadmap, backlog, and `§8` for an honest list of open gaps (forged
-detection isn't wired into decision time by default, the OPA and real-LLM baselines haven't
-been run yet, principal is still a bare string, and a few others).
+`PLAN.md` for the full roadmap, backlog, and `§8` for an honest list of open gaps (the real-LLM
+baseline hasn't been run, there are no real Git/Slack/Jira connectors, the signing key is a
+shared secret rather than a public-key signature, and a few others).
 
 ## Why not OPA/Gatekeeper?
 
@@ -454,7 +551,7 @@ derives **unstructured human constraints** (from Slack, Jira, Git) and applies
 ## Development
 
 ```bash
-venv/bin/python -m pytest -q      # 613 passed, 1 xfailed
+venv/bin/python -m pytest -q      # 1140 passed, 1 xfailed
 venv/bin/python -m ruff check src tests scripts examples
 vhs docs/demo.tape                # regenerate docs/demo.gif
 ```

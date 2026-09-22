@@ -3,9 +3,27 @@ import json
 import pytest
 
 from aegis_core.cli import main
+from aegis_core.signing import load_key, sign_file
 
 CONSTRAINTS = "data/constraints.example.yaml"
 AUTHORITY = "data/authority.example.yaml"
+EXAMPLE_KEY_PATH = "data/example-signing.key"
+EXAMPLE_KEY = load_key(f"file:{EXAMPLE_KEY_PATH}")
+
+
+@pytest.fixture(autouse=True)
+def _signing_key_in_env(monkeypatch):
+    """Every policy file the CLI loads must verify (REVIEW-4 T1.1). Tests
+    that write their own temporary policy files sign them with the public
+    example key (``_signed``) and the CLI finds that key here; the tests
+    that exercise key discovery / ``--insecure`` delete it again."""
+    monkeypatch.setenv("AEGIS_SIGNING_KEY", EXAMPLE_KEY.hex())
+
+
+def _signed(path) -> str:
+    """Signs a temporary policy file with the example key; returns its path."""
+    sign_file(path, EXAMPLE_KEY)
+    return str(path)
 # 2026-03-16 is a Monday, inside the no-scale-prod-peak time window
 # (09:00-17:00 ET, weekdays).
 DURING_PEAK = "2026-03-16T10:00:00-05:00"
@@ -441,7 +459,7 @@ def test_example_constraints_load_with_zero_quarantined():
 
     store = ConstraintStore.load(CONSTRAINTS, authority_map=load_authority_map(AUTHORITY))
     assert store.quarantined == []
-    assert len(store.constraints) == 20
+    assert len(store.constraints) == 21
 
 
 def test_tofu_plan_is_gated_by_the_same_terraform_rule(capsys, tmp_path):
@@ -658,7 +676,7 @@ def test_sources_flag_quarantines_forged_constraints(capsys, tmp_path):
     assert "fail-closed: no-scale-prod-peak (forged)" in lines[0]["decision"]["notes"]
     assert {"id": "no-scale-prod-peak", "reason": "forged"} in plan["quarantined_at_load"]
     assert {"id": "no-scale-prod-peak", "reason": "forged"} in plan["store_health"]["quarantined"]
-    assert lines[0]["store_health"]["loaded"] == 19
+    assert lines[0]["store_health"]["loaded"] == 20
 
 
 def test_ledger_flag_records_allowed_actions(capsys, tmp_path):
@@ -734,7 +752,7 @@ def _bit_flip(tmp_path, constraint_id: str) -> str:
     h = m.group(1)
     path = tmp_path / "oneflip.yaml"
     path.write_text(text.replace(h, h[:-1] + ("0" if h[-1] != "0" else "1")))
-    return str(path)
+    return _signed(path)
 
 
 @pytest.mark.parametrize(
@@ -786,19 +804,32 @@ def test_namespace_delete_cascade_is_scoped_to_the_namespace(capsys):
     assert cascade["intent"]["metadata"]["namespace"] == "prod"
     assert cascade["intent"]["params"]["cascade_from"] == "namespace/prod"
     assert "no-delete-in-prod-namespace" in cascade["decision"]["citations"]
-    # a non-prod namespace has no namespace-scoped rule: cascade ALLOWed
+    # a non-prod namespace has no namespace-scoped rule, and with a context
+    # that maps to dev the env-scoped rule is out too: cascade ALLOWed
+    code, lines = _run(
+        ["check", "kubectl", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
+         "--plan-constraints", "", "--", "kubectl", "delete", "ns", "scratch",
+         "--context", "kind-local"],
+        capsys,
+    )
+    assert code == 0
+    # ... but with no context at all the env is unknown, and the env-scoped
+    # rule neither matches nor is dropped: ESCALATE env-unresolved (T1.3)
     code, lines = _run(
         ["check", "kubectl", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
          "--plan-constraints", "", "--", "kubectl", "delete", "ns", "scratch"],
         capsys,
     )
-    assert code == 0
+    assert code == 2
+    assert all(line["decision"]["verdict"] == "ESCALATE" for line in lines)
+    assert "env-unresolved: no-delete-in-prod-env" in lines[0]["decision"]["notes"]
 
 
 # --- REVIEW-4 T0.3: store health, fail-closed, hard fails ----------------------
 
 
-def test_store_health_is_on_every_per_intent_line_and_the_plan_summary(capsys):
+def test_store_health_is_on_every_per_intent_line_and_the_plan_summary(capsys, monkeypatch):
+    monkeypatch.delenv("AEGIS_SIGNING_KEY")  # discovered next to the constraints instead
     code, lines, plan = _run_with_plan(
         ["check", "kubectl", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
          "--", "kubectl", "get", "pods", "-n", "dev"],
@@ -806,11 +837,11 @@ def test_store_health_is_on_every_per_intent_line_and_the_plan_summary(capsys):
     )
     assert code == 0
     health = lines[0]["store_health"]
-    assert health["loaded"] == 20
+    assert health["loaded"] == 21
     assert health["quarantined"] == []
     assert health["principals"] == 3
     assert len(health["constraints_sha256"]) == 64
-    assert health["warnings"] == []
+    assert health["warnings"] == ["using example signing key"]
     assert plan["store_health"] == health
     assert plan["plan_store_health"]["loaded"] == 4
 
@@ -822,7 +853,7 @@ def test_pretty_output_ends_with_store_line(capsys):
     )
     out = capsys.readouterr().out
     assert code == 0
-    assert out.strip().splitlines()[-1] == "STORE: loaded=20 quarantined=0 principals=3"
+    assert out.strip().splitlines()[-1] == "STORE: loaded=21 quarantined=0 principals=3"
 
 
 def test_single_bit_flip_escalates_and_reports_quarantine(capsys, tmp_path):
@@ -840,7 +871,7 @@ def test_single_bit_flip_escalates_and_reports_quarantine(capsys, tmp_path):
     assert "fail-closed: no-delete-nodes (tampered)" in decision["notes"]
     health = lines[0]["store_health"]
     assert health["quarantined"] == [{"id": "no-delete-nodes", "reason": "tampered"}]
-    assert health["loaded"] == 19
+    assert health["loaded"] == 20
     assert "aegis: WARNING Quarantined constraint no-delete-nodes" in err
 
 
@@ -852,7 +883,7 @@ def test_single_bit_flip_pretty_lists_quarantined_ids(capsys, tmp_path):
     )
     out = capsys.readouterr().out
     assert code == 2
-    assert "STORE: loaded=19 quarantined=1 principals=3" in out
+    assert "STORE: loaded=20 quarantined=1 principals=3" in out
     assert "  quarantined: no-delete-nodes (tampered)" in out
     assert "note: fail-closed: no-delete-nodes (tampered)" in out
 
@@ -883,7 +914,7 @@ def _assert_hard_fail(capsys, code):
 def test_empty_authority_file_is_a_hard_fail(capsys, tmp_path):
     empty = tmp_path / "empty.yaml"
     empty.write_text("")
-    code = main(["check", "kubectl", "--constraints", CONSTRAINTS, "--authority", str(empty),
+    code = main(["check", "kubectl", "--constraints", CONSTRAINTS, "--authority", _signed(empty),
                  "--", "kubectl", "get", "pods"])
     _assert_hard_fail(capsys, code)
 
@@ -891,7 +922,7 @@ def test_empty_authority_file_is_a_hard_fail(capsys, tmp_path):
 def test_authority_typo_principal_key_is_a_hard_fail(capsys, tmp_path):
     typo = tmp_path / "authority.yaml"
     typo.write_text("principal:\n  admin: [deletion]\n")  # 'principal', not 'principals'
-    code = main(["check", "kubectl", "--constraints", CONSTRAINTS, "--authority", str(typo),
+    code = main(["check", "kubectl", "--constraints", CONSTRAINTS, "--authority", _signed(typo),
                  "--", "kubectl", "delete", "node/x"])
     _assert_hard_fail(capsys, code)
 
@@ -899,7 +930,7 @@ def test_authority_typo_principal_key_is_a_hard_fail(capsys, tmp_path):
 def test_empty_constraints_file_is_a_hard_fail(capsys, tmp_path):
     empty = tmp_path / "empty.yaml"
     empty.write_text("")
-    code = main(["check", "kubectl", "--constraints", str(empty), "--authority", AUTHORITY,
+    code = main(["check", "kubectl", "--constraints", _signed(empty), "--authority", AUTHORITY,
                  "--", "kubectl", "get", "pods"])
     _assert_hard_fail(capsys, code)
 
@@ -911,7 +942,7 @@ def test_all_hashes_flipped_exceeds_quarantine_ratio_and_hard_fails(capsys, tmp_
     flipped = re.sub(r"(provenance_hash: [0-9a-f]{63})[0-9a-f]", r"\1x", text)
     path = tmp_path / "allflip.yaml"
     path.write_text(flipped)
-    code = main(["check", "kubectl", "--constraints", str(path), "--authority", AUTHORITY,
+    code = main(["check", "kubectl", "--constraints", _signed(path), "--authority", AUTHORITY,
                  "--", "kubectl", "get", "pods"])
     _assert_hard_fail(capsys, code)
 
@@ -1017,9 +1048,15 @@ def test_bad_yaml_is_data_error_65(capsys, tmp_path):
 def test_malformed_constraint_entry_is_data_error_65(capsys, tmp_path):
     bad = tmp_path / "bad.yaml"
     bad.write_text("constraints:\n  - id: x\n")  # missing every other key
-    code = main(["check", "kubectl", "--constraints", str(bad), "--authority", AUTHORITY,
+    code = main(["check", "kubectl", "--constraints", _signed(bad), "--authority", AUTHORITY,
                  "--", "kubectl", "get", "pods"])
-    _assert_one_line_error(capsys, code, 65)
+    captured = capsys.readouterr()
+    assert code == 65
+    assert captured.out == ""
+    assert "Traceback" not in captured.err
+    last = captured.err.strip().splitlines()[-1]
+    assert last.startswith("aegis: error: ")
+    assert "0 loaded constraints" in last and "quarantined" in last
 
 
 def test_bad_plan_json_is_data_error_65(capsys, tmp_path):
@@ -1097,13 +1134,22 @@ def test_exit_style_claude_hook_fail_closed_reason_names_the_quarantined_rule(ca
     path = _bit_flip(tmp_path, "no-delete-nodes")
     code = main(["check", "kubectl", "--constraints", path, "--authority", AUTHORITY,
                  "--plan-constraints", "", "--exit-style", "claude-hook",
-                 "--", "kubectl", "delete", "node/x"])
+                 "--", "kubectl", "delete", "node/x", "--context", "kind-local"])
     out = capsys.readouterr().out
     assert code == 2
     assert json.loads(out) == {
         "decision": "block",
         "reason": "ESCALATE: fail-closed: no-delete-nodes (tampered)",
     }
+    # With no context the env-scoped rule is unresolved too, and the reason says so.
+    code = main(["check", "kubectl", "--constraints", path, "--authority", AUTHORITY,
+                 "--plan-constraints", "", "--exit-style", "claude-hook",
+                 "--", "kubectl", "delete", "node/x"])
+    out = capsys.readouterr().out
+    assert code == 2
+    assert json.loads(out)["reason"] == (
+        "ESCALATE: env-unresolved: no-delete-in-prod-env, fail-closed: no-delete-nodes (tampered)"
+    )
 
 
 def test_exit_style_ci_is_0_or_1(capsys):
@@ -1142,3 +1188,357 @@ def test_compound_check_is_skipped_for_script_argument_binaries(capsys):
     assert code == 3
     assert lines[0]["intent"]["provider"] == "sql"
     assert lines[0]["decision"]["verdict"] == "BLOCK"
+
+
+# --- Integration wave: signing, compound commands, env identity, aliases, ledger --------
+
+
+def _copy_example_tree(tmp_path):
+    """data/{constraints.example.yaml, sources/} copied to a temp dir (the
+    example key is deliberately NOT copied, so key discovery is the env var)."""
+    import shutil
+
+    shutil.copy(CONSTRAINTS, tmp_path / "constraints.yaml")
+    shutil.copy(f"{CONSTRAINTS}.sig", tmp_path / "constraints.yaml.sig")
+    shutil.copytree("data/sources", tmp_path / "sources")
+    return str(tmp_path / "constraints.yaml")
+
+
+@pytest.mark.parametrize(
+    "command, expected_code, expected_verdicts",
+    [
+        ("kubectl get pods; kubectl delete node/w1", 3, ["ALLOW", "BLOCK"]),
+        ("sudo kubectl delete node/w1", 3, ["BLOCK"]),
+        ("kubectl get pods | grep x", 0, ["ALLOW"]),
+        ("env KUBECONFIG=/etc/kubernetes/prod.kubeconfig kubectl delete pod/x", 3, ["BLOCK"]),
+        ("k delete node/w1 && echo done", 3, ["BLOCK", "ALLOW"]),
+    ],
+)
+def test_check_command_splits_compound_strings(capsys, command, expected_code, expected_verdicts):
+    code, lines = _run(
+        ["check", "command", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
+         "--plan-constraints", "", "--", command],
+        capsys,
+    )
+    assert code == expected_code
+    assert [line["decision"]["verdict"] for line in lines] == expected_verdicts
+
+
+def test_check_command_unwrapped_env_assignment_resolves_env_from_kubeconfig_path(capsys):
+    code, lines = _run(
+        ["check", "command", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
+         "--plan-constraints", "", "--",
+         "env KUBECONFIG=/etc/kubernetes/prod.kubeconfig kubectl delete pod/x"],
+        capsys,
+    )
+    assert code == 3
+    assert lines[0]["intent"]["metadata"]["env"] == "prod"
+    assert "no-delete-in-prod-env" in lines[0]["decision"]["citations"]
+
+
+@pytest.mark.parametrize(
+    "command, reason",
+    [
+        ("kubectl delete $(cat x)", "shell expansion"),
+        ("kubectl delete `cat x`", "command substitution"),
+        ("eval kubectl delete node/w1", "cannot be checked statically"),
+        ("kubectl delete 'node/w1", "unbalanced quotes"),
+    ],
+)
+def test_check_command_rejects_unevaluable_shell_as_usage_error_64(capsys, command, reason):
+    code = main(["check", "command", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
+                 "--", command])
+    captured = capsys.readouterr()
+    assert code == 64
+    assert captured.out == ""
+    assert captured.err.startswith("aegis: error: command rejected: ")
+    assert reason in captured.err
+
+
+def test_check_command_with_no_string_is_usage_error(capsys):
+    code = main(["check", "command", "--constraints", CONSTRAINTS, "--authority", AUTHORITY, "--"])
+    _assert_one_line_error(capsys, code, 64)
+
+
+def test_argv_split_compound_flag_matches_check_command(capsys):
+    argv = ["check", "argv", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
+            "--plan-constraints", ""]
+    code = main([*argv, "--", "kubectl", "get", "pods;", "kubectl", "delete", "node/w1"])
+    assert code == 64  # without the flag: a compound command is a usage error
+    capsys.readouterr()
+    code, lines = _run([*argv, "--split-compound", "--", "kubectl", "get", "pods;", "kubectl",
+                        "delete", "node/w1"], capsys)
+    assert code == 3
+    assert [line["decision"]["verdict"] for line in lines] == ["ALLOW", "BLOCK"]
+
+
+def test_helm_uninstall_with_kube_context_is_blocked_by_env_rule(capsys):
+    code, lines = _run(
+        ["check", "helm", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
+         "--", "helm", "uninstall", "web", "--kube-context", "prod-us-east"],
+        capsys,
+    )
+    assert code == 3
+    assert lines[0]["intent"]["metadata"]["env"] == "prod"
+    assert lines[0]["decision"]["citations"] == ["helm-block-release-delete-prod-env"]
+
+
+def test_kubectl_delete_with_no_context_escalates_env_unresolved(capsys):
+    code, lines = _run(
+        ["check", "kubectl", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
+         "--plan-constraints", "", "--", "kubectl", "delete", "pod/x", "-n", "dev"],
+        capsys,
+    )
+    assert code == 2
+    decision = lines[0]["decision"]
+    assert decision["verdict"] == "ESCALATE"
+    assert decision["citations"] == []
+    assert decision["notes"] == ["env-unresolved: no-delete-in-prod-env"]
+    # The namespace-scoped BLOCK rule still outranks it for -n prod.
+    code, lines = _run(
+        ["check", "kubectl", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
+         "--plan-constraints", "", "--", "kubectl", "delete", "pod/x", "-n", "prod"],
+        capsys,
+    )
+    assert code == 3
+    assert lines[0]["decision"]["citations"] == ["no-delete-in-prod-namespace"]
+    assert lines[0]["decision"]["notes"] == ["env-unresolved: no-delete-in-prod-env"]
+
+
+def test_resolve_current_context_reads_kubeconfig_and_blocks_prod(capsys, tmp_path, monkeypatch):
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text(
+        "current-context: prod-us-east\ncontexts:\n- name: prod-us-east\n"
+        "  context: {cluster: gke_acme_us-east1_prod}\n"
+    )
+    monkeypatch.setenv("KUBECONFIG", str(kubeconfig))
+    argv = ["check", "kubectl", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
+            "--plan-constraints", "", "--", "kubectl", "delete", "pod/x", "-n", "dev"]
+    code, lines = _run(argv, capsys)
+    assert code == 2  # not opted in: the environment is not trusted
+    code, lines = _run([*argv[:2], "--resolve-current-context", *argv[2:]], capsys)
+    assert code == 3
+    md = lines[0]["intent"]["metadata"]
+    assert md["context"] == "prod-us-east" and md["env"] == "prod"
+    assert md["resolved_from_environment"] == ["context", "cluster", "kubeconfig"]
+    assert lines[0]["decision"]["citations"] == ["no-delete-in-prod-env"]
+    main([*argv[:2], "--resolve-current-context", "--pretty", *argv[2:]])
+    assert "  resolved_from_environment: context, cluster, kubeconfig" in capsys.readouterr().out
+
+
+def test_gh_workflow_run_in_mapped_repo_carries_env_prod(capsys):
+    code, lines = _run(
+        ["check", "gh", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
+         "--", "gh", "workflow", "run", "deploy-prod.yml", "-R", "acme/shop"],
+        capsys,
+    )
+    assert code == 2
+    assert lines[0]["intent"]["metadata"]["repo"] == "acme/shop"
+    assert lines[0]["intent"]["metadata"]["env"] == "prod"
+
+
+def test_git_push_force_without_refspec_escalates_unknown_target(capsys):
+    code, lines = _run(
+        ["check", "git", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
+         "--plan-constraints", "", "--", "git", "push", "-f"],
+        capsys,
+    )
+    assert code == 2
+    assert lines[0]["intent"]["params"]["unknown_target"] is True
+    assert lines[0]["decision"]["notes"] == ["unknown-target"]
+    main(["check", "git", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
+          "--plan-constraints", "", "--exit-style", "claude-hook", "--", "git", "push", "-f"])
+    assert json.loads(capsys.readouterr().out)["reason"] == "ESCALATE: unknown-target"
+
+
+def test_terraform_module_db_delete_is_blocked_by_plan_rule_and_prints_plan_sha(capsys, tmp_path):
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps({
+        "format_version": "1.2",
+        "resource_changes": [{
+            "address": "module.app.aws_db_instance.main",
+            "module_address": "module.app",
+            "type": "aws_db_instance", "name": "main",
+            "provider_name": "registry.terraform.io/hashicorp/aws",
+            "change": {"actions": ["delete"], "before": {"region": "us-west-2"}, "after": None},
+        }],
+    }))
+    code, lines, plan_out = _run_with_plan(
+        ["check", "terraform", "--constraints", CONSTRAINTS, "--authority", AUTHORITY, str(plan)],
+        capsys,
+    )
+    assert code == 3
+    assert plan_out["verdict"] == "BLOCK"
+    assert "plan-no-db-deletes" in plan_out["plan_citations"]
+    sha = lines[0]["intent"]["metadata"]["plan_sha256"]
+    assert len(sha) == 64
+    main(["check", "terraform", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
+          "--pretty", str(plan)])
+    assert f"  plan_sha256: {sha[:12]}" in capsys.readouterr().out
+
+
+# signing --------------------------------------------------------------------------
+
+
+def test_no_signing_key_anywhere_is_a_one_line_65(capsys, tmp_path, monkeypatch):
+    monkeypatch.delenv("AEGIS_SIGNING_KEY")
+    unsigned = tmp_path / "unsigned.yaml"
+    unsigned.write_text(open(CONSTRAINTS).read())
+    code = main(["check", "kubectl", "--constraints", str(unsigned), "--authority", AUTHORITY,
+                 "--", "kubectl", "get", "pods"])
+    captured = capsys.readouterr()
+    assert code == 65 and captured.out == ""
+    assert captured.err.strip() == (
+        "aegis: error: no signing key: pass --key, set AEGIS_SIGNING_KEY, or --insecure"
+    )
+    # --insecure loads it, with the warning on every store_health.
+    code, lines = _run(["check", "kubectl", "--insecure", "--constraints", str(unsigned),
+                        "--authority", AUTHORITY, "--", "kubectl", "get", "pods"], capsys)
+    assert code == 0
+    assert lines[0]["store_health"]["warnings"] == ["insecure: signatures not verified"]
+
+
+def test_key_sources_env_file_hex_and_wrong_key(capsys, tmp_path, monkeypatch):
+    common = ["--authority", AUTHORITY, "--", "kubectl", "get", "pods"]
+    monkeypatch.delenv("AEGIS_SIGNING_KEY")
+    assert main(["check", "kubectl", "--key", f"file:{EXAMPLE_KEY_PATH}", "--constraints",
+                 CONSTRAINTS, *common]) == 0
+    assert main(["check", "kubectl", "--key", EXAMPLE_KEY.hex(), "--constraints", CONSTRAINTS,
+                 *common]) == 0
+    monkeypatch.setenv("OTHER_KEY_VAR", EXAMPLE_KEY.hex())
+    assert main(["check", "kubectl", "--key", "env:OTHER_KEY_VAR", "--constraints", CONSTRAINTS,
+                 *common]) == 0
+    capsys.readouterr()
+    wrong = "f" * 64
+    code = main(["check", "kubectl", "--key", wrong, "--constraints", CONSTRAINTS, *common])
+    captured = capsys.readouterr()
+    assert code == 65 and "bad signature" in captured.err and captured.out == ""
+    # A signed file that was edited after signing is refused, not quarantined.
+    edited = tmp_path / "edited.yaml"
+    edited.write_text(open(CONSTRAINTS).read().replace("effect: BLOCK", "effect: ESCALATE", 1))
+    (tmp_path / "edited.yaml.sig").write_text(open(f"{CONSTRAINTS}.sig").read())
+    code = main(["check", "kubectl", "--key", EXAMPLE_KEY.hex(), "--constraints", str(edited),
+                 *common])
+    assert code == 65 and "bad signature" in capsys.readouterr().err
+    # --key pointing at a missing key file is a missing input.
+    assert main(["check", "kubectl", "--key", "file:/no/such.key", "--constraints",
+                 CONSTRAINTS, *common]) == 66
+    capsys.readouterr()
+
+
+def test_example_key_is_discovered_next_to_the_constraints_with_a_warning(capsys, monkeypatch):
+    monkeypatch.delenv("AEGIS_SIGNING_KEY")
+    main(["check", "kubectl", "--constraints", CONSTRAINTS, "--authority", AUTHORITY, "--pretty",
+          "--", "kubectl", "get", "pods"])
+    out = capsys.readouterr().out.splitlines()
+    assert "WARNING: using example signing key" in out
+    assert out[-1].startswith("STORE: ")
+
+
+def test_sources_directory_next_to_constraints_is_used_by_default(capsys, tmp_path):
+    constraints = _copy_example_tree(tmp_path)
+    (tmp_path / "sources" / "jira-1001.json").unlink()
+    code, lines = _run(["check", "kubectl", "--constraints", constraints, "--authority",
+                        AUTHORITY, "--", "kubectl", "get", "pods"], capsys)
+    assert code == 0
+    assert lines[0]["store_health"]["quarantined"] == [
+        {"id": "no-scale-prod-peak", "reason": "forged"}
+    ]
+    # --sources '' opts out.
+    code, lines = _run(["check", "kubectl", "--constraints", constraints, "--authority",
+                        AUTHORITY, "--sources", "", "--", "kubectl", "get", "pods"], capsys)
+    assert lines[0]["store_health"]["quarantined"] == []
+
+
+def test_sources_manifest_rejects_an_edited_source_file(capsys, tmp_path):
+    constraints = _copy_example_tree(tmp_path)
+    source = tmp_path / "sources" / "git-abc123.json"
+    source.write_text(source.read_text().replace("Never delete", "Always delete"))
+    code = main(["check", "kubectl", "--constraints", constraints, "--authority", AUTHORITY,
+                 "--", "kubectl", "get", "pods"])
+    captured = capsys.readouterr()
+    assert code == 65 and captured.out == ""
+    assert "bad signature" in captured.err and "git-abc123.json" in captured.err
+
+
+def test_sign_and_verify_subcommands(capsys, tmp_path, monkeypatch):
+    policy = tmp_path / "policy.yaml"
+    policy.write_text("principals: {admin: [deletion]}\n")
+    sources = tmp_path / "sources"
+    sources.mkdir()
+    (sources / "a.json").write_text("{}")
+    key = ["--key", f"file:{EXAMPLE_KEY_PATH}"]
+    assert main(["sign", *key, str(policy), str(sources)]) == 0
+    out = capsys.readouterr().out
+    assert f"signed  {policy}.sig" in out and f"signed  {sources / 'AEGIS-MANIFEST.sig'}" in out
+    assert not (sources / "a.json.sig").exists()
+    assert main(["verify", *key, str(tmp_path)]) == 0
+    assert capsys.readouterr().out.count("ok      ") == 2
+    (sources / "a.json").write_text('{"edited": true}')
+    assert main(["verify", *key, str(tmp_path)]) == 1
+    assert f"FAILED  {sources / 'a.json'}" in capsys.readouterr().out
+    # The env var is the fallback key source; no key at all is a usage error.
+    assert main(["sign", str(policy)]) == 0
+    capsys.readouterr()
+    monkeypatch.delenv("AEGIS_SIGNING_KEY")
+    code = main(["sign", str(policy)])
+    _assert_one_line_error(capsys, code, 64)
+    assert main(["verify", *key, str(tmp_path / "nope.yaml")]) == 66
+    capsys.readouterr()
+
+
+# ledger ----------------------------------------------------------------------------
+
+
+def test_sqlite_ledger_is_picked_by_extension_and_records(capsys, tmp_path):
+    import sqlite3
+
+    ledger = tmp_path / "ledger.db"
+    argv = ["check", "kubectl", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
+            "--ledger", str(ledger), "--", "kubectl", "get", "pods", "-n", "dev"]
+    _run(argv, capsys)
+    _run(argv, capsys)
+    with sqlite3.connect(ledger) as conn:
+        tables = {row[0] for row in conn.execute("select name from sqlite_master")}
+        assert tables, "SqliteLedger created its schema"
+        (count,) = conn.execute(
+            f"select count(*) from {sorted(tables)[0]}"  # noqa: S608 - test-only
+        ).fetchone()
+    assert count == 2
+
+
+def test_truncated_jsonl_ledger_warns_chain_broken(capsys, tmp_path):
+    ledger = tmp_path / "ledger.jsonl"
+    argv = ["check", "kubectl", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
+            "--ledger", str(ledger), "--", "kubectl", "get", "pods", "-n", "dev"]
+    _run(argv, capsys)
+    _run(argv, capsys)
+    lines = ledger.read_text().splitlines()
+    ledger.write_text(lines[1] + "\n")  # drop the genesis record
+    code, out = _run(argv, capsys)
+    assert code == 0
+    assert "ledger: chain-broken" in out[0]["store_health"]["warnings"]
+
+
+def test_rate_limit_key_outside_vocabulary_is_a_store_warning(capsys, tmp_path, monkeypatch):
+    from aegis_core.store import Constraint, ConstraintStore
+
+    store = ConstraintStore()
+    store.constraints["budget"] = Constraint.create(
+        id="budget", provider="kubernetes", resource_pattern="deployment/*", actions={"scale"},
+        effect="ESCALATE", constraint_class="scaling", principal="sre_lead",
+        source_ref="git-x", source_timestamp="2026-01-01T00:00:00+00:00",
+        rule_text="At most 3 scales per hour per cluster.",
+        rate_limit={"max": 3, "per": "1h", "key": ["clusterr"]},
+    )
+    path = tmp_path / "rl.yaml"
+    store.save(path)
+    code, lines = _run(
+        ["check", "kubectl", "--constraints", _signed(path), "--authority", AUTHORITY,
+         "--plan-constraints", "", "--sources", "", "--ledger", str(tmp_path / "l.jsonl"),
+         "--", "kubectl", "scale", "deployment/x", "--replicas=2"],
+        capsys,
+    )
+    assert code == 0
+    warnings = lines[0]["store_health"]["warnings"]
+    assert any(w.startswith("budget: rate_limit.key 'clusterr'") for w in warnings)

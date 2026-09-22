@@ -21,15 +21,28 @@ Usage:
         [--json | --pretty] -- git <argv...>
     aegis check gh      [--constraints PATH] [--authority PATH] [--now ISO8601] \
         [--json | --pretty] -- gh <argv...>
-    aegis check argv    [--constraints PATH] [--authority PATH] [--now ISO8601] \
-        [--json | --pretty] -- <any supported CLI argv...>
+    aegis check argv    [--split-compound] [...] -- <any supported CLI argv...>
+    aegis check command [...] -- "<shell command string>"
     aegis check terraform [--constraints PATH] [--authority PATH] [--now ISO8601] \
         [--json | --pretty] <plan.json>
     aegis check tofu      (same as terraform; OpenTofu plans use the same schema)
+    aegis sign   [--key SOURCE] PATH...     (a directory gets one AEGIS-MANIFEST.sig)
+    aegis verify [--key SOURCE] PATH...
 
 Every subcommand also takes ``--environments PATH`` (default
 data/environments.example.yaml if present) to annotate each intent's
 ``metadata["env"]`` before evaluation -- see aegis_core.environments.
+
+**Signing.** Every policy file (constraints, authority, environments, plan
+constraints, sources and their PRINCIPALS.yaml) must verify under a keyed
+MAC (aegis_core.signing). The key comes from ``--key SOURCE``
+(``env:VAR`` | ``file:PATH`` | hex), then ``$AEGIS_SIGNING_KEY``, then
+``<dir of --constraints>/example-signing.key`` if it exists (with the
+warning ``using example signing key`` -- that key is public). With none
+of those, ``--insecure`` loads everything unverified (warning
+``insecure: signatures not verified``); otherwise the CLI refuses (exit
+65). ``--insecure`` always disables verification, even when a key could
+have been found.
 
 Every output carries a ``store_health`` object (``loaded``, ``quarantined``,
 ``principals``, ``constraints_sha256``, ``warnings``): a degraded store must
@@ -40,8 +53,9 @@ constraints were quarantined.
 
 Exit codes (``--exit-style aegis``, the default):
     0   ALLOW               2   ESCALATE            3   BLOCK
-    64  usage error         65  bad data (YAML/JSON/argv/--now, degraded store)
-    66  missing input file  70  internal error (exception class on stderr)
+    64  usage error         65  bad data (YAML/JSON/argv/--now, degraded store,
+    66  missing input file      missing or bad signature)
+    70  internal error (exception class on stderr)
 ``--exit-style claude-hook``: 0 for ALLOW (prints nothing); 2 for ESCALATE
 and BLOCK, printing one ``{"decision": "block", "reason": ...}`` object.
 ``--exit-style ci``: 0 for ALLOW, 1 otherwise. Tool errors (64/65/66/70) are
@@ -55,20 +69,25 @@ import logging
 import os
 import sys
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import yaml
 
+from aegis_core import signing
 from aegis_core.authority import load_authority_map
-from aegis_core.environments import EnvironmentMap, load_environment_map
+from aegis_core.environments import (
+    EnvironmentMap,
+    load_environment_map,
+    resolve_current_context,
+)
 from aegis_core.intent import InfrastructureIntent
 from aegis_core.interceptor import AegisInterceptor, Decision
-from aegis_core.ledger import JsonlLedger
+from aegis_core.ledger import DecisionLedger, JsonlLedger, SqliteLedger, parse_window
 from aegis_core.parser import (
     from_argocd_multi,
     from_argv,
     from_aws_multi,
-    from_az,
+    from_az_multi,
     from_flux,
     from_gcloud,
     from_gh,
@@ -88,6 +107,8 @@ from aegis_core.parsers.sql import (
 )
 from aegis_core.plan import PlanConstraintStore, evaluate_plan
 from aegis_core.provenance import FileSourceFetcher
+from aegis_core.shell import ShellRejected, intents_from_command
+from aegis_core.signing import SignatureError
 from aegis_core.store import ConstraintStore, StoreHealth
 
 DEFAULT_CONSTRAINTS = "data/constraints.example.yaml"
@@ -95,6 +116,12 @@ DEFAULT_AUTHORITY = "data/authority.example.yaml"
 DEFAULT_ENVIRONMENTS = "data/environments.example.yaml"
 DEFAULT_PLAN_CONSTRAINTS = "data/plan_constraints.example.yaml"
 DEFAULT_MAX_QUARANTINE_RATIO = 0.10
+EXAMPLE_KEY_NAME = "example-signing.key"
+SIGNING_KEY_ENV = "AEGIS_SIGNING_KEY"
+SOURCES_DIR_NAME = "sources"
+WARN_EXAMPLE_KEY = "using example signing key"
+WARN_INSECURE = "insecure: signatures not verified"
+NO_KEY_MESSAGE = f"no signing key: pass --key, set {SIGNING_KEY_ENV}, or --insecure"
 
 # sysexits.h
 EX_USAGE = 64
@@ -110,11 +137,11 @@ _EXIT_CODES = {
 }
 
 # Shell metacharacters that mean the argv is really a compound shell command,
-# which the argv parsers cannot evaluate safely (REVIEW-4 T1.2 will add
-# --split-compound); until then such input is a usage error. Checked as
-# substrings, because a plain shlex.split leaves "pods;" as one token, while
-# a punctuation-aware split turns "$(cat x)" into "$", "(", ... -- so the
-# parentheses and redirections are rejected on their own as well.
+# which the argv parsers cannot evaluate safely; without --split-compound
+# such input is a usage error (use ``aegis check command`` for strings).
+# Checked as substrings, because a plain shlex.split leaves "pods;" as one
+# token, while a punctuation-aware split turns "$(cat x)" into "$", "(", ...
+# -- so the parentheses and redirections are rejected on their own as well.
 _SHELL_CONTROL_TOKENS = {"&"}
 _SHELL_CONTROL_MARKERS = (";", "|", "&&", "$(", "`", "\n", "(", ")", "<", ">")
 
@@ -124,7 +151,7 @@ _SHELL_CONTROL_MARKERS = (";", "|", "&&", "$(", "`", "\n", "(", ")", "<", ">")
 _ARGV_TARGET_PARSERS = {
     "kubectl": from_kubectl_multi,
     "aws": from_aws_multi,
-    "az": lambda argv: [from_az(argv)],
+    "az": from_az_multi,
     "gcloud": lambda argv: [from_gcloud(argv)],
     "helm": lambda argv: [from_helm(argv)],
     "argocd": from_argocd_multi,
@@ -139,6 +166,8 @@ _ARGV_TARGET_PARSERS = {
     "pulumi": lambda argv: [from_pulumi_argv(argv)],
     "argv": from_argv,
 }
+
+_SQLITE_SUFFIXES = (".db", ".sqlite", ".sqlite3")
 
 
 class UsageError(Exception):
@@ -186,6 +215,16 @@ def _configure_logging() -> None:
     _LOGGING_CONFIGURED = True
 
 
+def _add_key_options(subparser: argparse.ArgumentParser) -> None:
+    subparser.add_argument(
+        "--key",
+        default=None,
+        metavar="SOURCE",
+        help="signing key: env:VAR | file:PATH | hex (default: $AEGIS_SIGNING_KEY, then "
+        "<dir of --constraints>/example-signing.key if present)",
+    )
+
+
 def _add_common_options(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument("--constraints", default=DEFAULT_CONSTRAINTS)
     subparser.add_argument("--authority", default=DEFAULT_AUTHORITY)
@@ -206,14 +245,22 @@ def _add_common_options(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument(
         "--sources",
         default=None,
-        help="directory of <source_ref>.json files; when given, constraints whose cited "
-        "source does not back them are quarantined as forged at load time",
+        help="directory of <source_ref>.json files (default: <dir of --constraints>/sources "
+        "when it exists; pass '' to disable); constraints whose cited source does not back "
+        "them are quarantined as forged at load time",
+    )
+    _add_key_options(subparser)
+    subparser.add_argument(
+        "--insecure",
+        action="store_true",
+        default=False,
+        help="load policy files without verifying signatures (never for real use)",
     )
     subparser.add_argument(
         "--ledger",
         default=None,
-        help="JSONL decision ledger path; enables rate-limited constraints and records "
-        "every executed (ALLOW, non-dry-run) action",
+        help="decision ledger path (.jsonl, or .db/.sqlite for SQLite); enables rate-limited "
+        "constraints and records every executed (ALLOW, non-dry-run) action",
     )
     subparser.add_argument("--now", default=None, help="ISO8601 evaluation timestamp")
     subparser.add_argument(
@@ -229,6 +276,14 @@ def _add_common_options(subparser: argparse.ArgumentParser) -> None:
         action="store_true",
         default=False,
         help="ESCALATE (instead of ALLOW) any intent that no constraint covers",
+    )
+    subparser.add_argument(
+        "--resolve-current-context",
+        action="store_true",
+        default=False,
+        help="fill a missing context/profile/project/... from the invoking environment "
+        "($KUBECONFIG current-context, $AWS_PROFILE, $CLOUDSDK_CORE_PROJECT, ...); "
+        "TRUSTS THE INVOKING ENVIRONMENT",
     )
     subparser.add_argument(
         "--max-quarantine-ratio",
@@ -247,6 +302,14 @@ def _add_argv_target(check_sub: argparse._SubParsersAction, name: str, help_text
     options and REMAINDER argv-capture pattern used by kubectl/aws/az/gcloud/argv."""
     subparser = check_sub.add_parser(name, help=help_text)
     _add_common_options(subparser)
+    if name == "argv":
+        subparser.add_argument(
+            "--split-compound",
+            action="store_true",
+            default=False,
+            help="treat the argv as a shell command line: split on ; && || | and unwrap "
+            "sudo/env/timeout (same as 'aegis check command')",
+        )
     subparser.add_argument("target_argv", nargs=argparse.REMAINDER)
 
 
@@ -269,6 +332,12 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_argv_target(
         check_sub, "argv", "Evaluate any supported CLI invocation, dispatched by binary name"
     )
+    command_parser = check_sub.add_parser(
+        "command",
+        help="Evaluate a shell command string: splits compound commands, unwraps launchers",
+    )
+    _add_common_options(command_parser)
+    command_parser.add_argument("command_string", nargs=argparse.REMAINDER)
 
     for tool, help_text in (
         ("terraform", "Evaluate a terraform plan JSON"),
@@ -294,6 +363,14 @@ def _build_parser() -> argparse.ArgumentParser:
     sql_parser.add_argument("--database", default=None)
     sql_parser.add_argument("--dialect", default="generic")
     sql_parser.add_argument("sql", help="SQL text, or '-' to read from stdin")
+
+    for name, help_text in (
+        ("sign", "Sign policy files (a directory gets one AEGIS-MANIFEST.sig)"),
+        ("verify", "Verify policy file signatures"),
+    ):
+        sign_parser = subparsers.add_parser(name, help=help_text)
+        _add_key_options(sign_parser)
+        sign_parser.add_argument("paths", nargs="+")
 
     return parser
 
@@ -323,8 +400,46 @@ def _reject_compound_argv(argv: list[str]) -> None:
         if tok in _SHELL_CONTROL_TOKENS or any(m in tok for m in _SHELL_CONTROL_MARKERS):
             raise UsageError(
                 f"compound shell command not supported (token {tok!r}); "
-                "check each simple command separately"
+                "use 'aegis check command' or --split-compound, or check each simple "
+                "command separately"
             )
+
+
+def _intents_from_shell_string(command: str) -> list[InfrastructureIntent]:
+    try:
+        return intents_from_command(command)
+    except ShellRejected as exc:
+        raise UsageError(f"command rejected: {exc.reason}") from None
+
+
+# --- signing key resolution ------------------------------------------------------
+
+
+def _resolve_key(args: argparse.Namespace, warnings: list[str]) -> tuple[bytes | None, bool]:
+    """``(key, insecure)`` per the module docstring's resolution order.
+    Records the ``using example signing key`` / ``insecure`` warnings;
+    raises :class:`DataError` when there is no key and no ``--insecure``."""
+    if args.insecure:
+        warnings.append(WARN_INSECURE)
+        return None, True
+    if args.key:
+        return signing.load_key(args.key), False
+    if os.environ.get(SIGNING_KEY_ENV):
+        return signing.load_key(f"env:{SIGNING_KEY_ENV}"), False
+    example = os.path.join(os.path.dirname(os.path.abspath(args.constraints)), EXAMPLE_KEY_NAME)
+    if os.path.exists(example):
+        warnings.append(WARN_EXAMPLE_KEY)
+        return signing.load_key(f"file:{example}"), False
+    raise DataError(NO_KEY_MESSAGE)
+
+
+def _default_sources(args: argparse.Namespace) -> str | None:
+    """``--sources`` as given; ``''`` disables; ``None`` means the
+    ``sources`` directory next to the constraints file, when it exists."""
+    if args.sources is not None:
+        return args.sources or None
+    candidate = os.path.join(os.path.dirname(os.path.abspath(args.constraints)), SOURCES_DIR_NAME)
+    return candidate if os.path.isdir(candidate) else None
 
 
 # --- output ----------------------------------------------------------------
@@ -356,6 +471,12 @@ class _Output:
                 print(f"  discarded: {decision.discarded}")
             for note in decision.notes:
                 print(f"  note: {note}")
+            plan_sha = intent.metadata.get("plan_sha256")
+            if plan_sha:
+                print(f"  plan_sha256: {str(plan_sha)[:12]}")
+            resolved = intent.metadata.get("resolved_from_environment")
+            if resolved:
+                print(f"  resolved_from_environment: {', '.join(resolved)}")
             print(f"  covered: {decision.covered}  latency_ms: {decision.latency_ms:.4f}")
         else:
             payload = {
@@ -410,6 +531,8 @@ class _Output:
             return
         if self.pretty:
             h = self.store_health
+            for warning in h.warnings:
+                print(f"WARNING: {warning}")
             print(
                 f"STORE: loaded={h.loaded} quarantined={len(h.quarantined)} "
                 f"principals={h.principals}"
@@ -455,36 +578,64 @@ def _check_store_health(
         )
 
 
+def _open_ledger(
+    path: str, store: ConstraintStore, now: datetime | None
+) -> DecisionLedger:
+    """Picks ``SqliteLedger`` for ``.db``/``.sqlite``/``.sqlite3``, else
+    ``JsonlLedger``; sizes its retention window to the largest
+    ``rate_limit.per`` in the store; validates every ``rate_limit.key``
+    and folds the resulting warnings (and a broken hash chain) into the
+    store's warnings so ``store_health`` shows them."""
+    rate_limited = [c for c in store.constraints.values() if c.rate_limit]
+    max_window = timedelta(hours=24)
+    for c in rate_limited:
+        max_window = max(max_window, parse_window(c.rate_limit["per"]))
+    cls = SqliteLedger if path.lower().endswith(_SQLITE_SUFFIXES) else JsonlLedger
+    ledger = cls(path, max_window=max_window)
+    for c in rate_limited:
+        for warning in ledger.validate_rate_key(c.rate_limit.get("key") or []):
+            store.warnings.append(f"{c.id}: {warning}")
+    ledger.load(now)
+    if not ledger.chain_ok:
+        store.warnings.append("ledger: chain-broken")
+    if ledger.skipped_lines:
+        store.warnings.append(f"ledger: {ledger.skipped_lines} malformed line(s) skipped")
+    return ledger
+
+
 def _evaluate(intents: list[InfrastructureIntent], args: argparse.Namespace) -> int:
     now = _parse_now(args.now)
     pretty = bool(args.pretty)
 
+    if not os.path.exists(args.constraints):
+        raise FileNotFoundError(2, "No such file or directory", args.constraints)
+    key_warnings: list[str] = []
+    key, insecure = _resolve_key(args, key_warnings)
+    load = {"key": key, "insecure": insecure}
+
     authority_map = _load_or_data_error(
-        lambda: load_authority_map(args.authority), args.authority, "authority"
+        lambda: load_authority_map(args.authority, **load), args.authority, "authority"
     )
-    fetcher = FileSourceFetcher(args.sources) if args.sources else None
+    sources = _default_sources(args)
+    fetcher = FileSourceFetcher(sources, **load) if sources else None
     store = _load_or_data_error(
         lambda: ConstraintStore.load(
-            args.constraints, authority_map=authority_map, source_fetcher=fetcher
+            args.constraints, authority_map=authority_map, source_fetcher=fetcher, **load
         ),
         args.constraints,
         "constraints",
     )
+    store.warnings[:0] = key_warnings
     plan_store = None
     if args.plan_constraints:
         plan_store = _load_or_data_error(
-            lambda: PlanConstraintStore.load(args.plan_constraints, authority_map=authority_map),
+            lambda: PlanConstraintStore.load(
+                args.plan_constraints, authority_map=authority_map, **load
+            ),
             args.plan_constraints,
             "plan constraints",
         )
 
-    health = store.health
-    _check_store_health(
-        health,
-        constraints_path=args.constraints,
-        authority_path=args.authority,
-        max_ratio=args.max_quarantine_ratio,
-    )
     if plan_store is not None and plan_store.health.quarantine_ratio > args.max_quarantine_ratio:
         ph = plan_store.health
         raise DataError(
@@ -493,20 +644,32 @@ def _evaluate(intents: list[InfrastructureIntent], args: argparse.Namespace) -> 
             f"--max-quarantine-ratio {args.max_quarantine_ratio}); refusing to decide"
         )
 
-    ledger = None
-    if args.ledger:
-        ledger = JsonlLedger(args.ledger)
-        ledger.load()
+    ledger = _open_ledger(args.ledger, store, now) if args.ledger else None
     interceptor = AegisInterceptor(store, ledger=ledger, fail_closed=args.fail_closed)
     env_map = (
         _load_or_data_error(
-            lambda: load_environment_map(args.environments), args.environments, "environments"
+            lambda: load_environment_map(args.environments, **load),
+            args.environments,
+            "environments",
         )
         if args.environments
         else EnvironmentMap()
     )
+    for w in env_map.warnings:
+        if w not in store.warnings:
+            store.warnings.append(w)
     for intent in intents:
+        if args.resolve_current_context:
+            resolve_current_context(intent)
         env_map.annotate(intent)
+
+    health = store.health
+    _check_store_health(
+        health,
+        constraints_path=args.constraints,
+        authority_path=args.authority,
+        max_ratio=args.max_quarantine_ratio,
+    )
 
     output = _Output(pretty=pretty, style=args.exit_style, store_health=health)
 
@@ -517,7 +680,7 @@ def _evaluate(intents: list[InfrastructureIntent], args: argparse.Namespace) -> 
         output.plan(plan_decision, plan_health=plan_store.health)
         reason_parts = list(plan_decision.citations)
         if not reason_parts:
-            reason_parts = [n for n in plan_decision.notes if n.startswith("fail-closed")]
+            reason_parts = [n for n in plan_decision.notes if _is_fail_closed_note(n)]
         output.finish(plan_decision.verdict, reason_parts)
         return _EXIT_CODES[args.exit_style][plan_decision.verdict]
 
@@ -530,9 +693,13 @@ def _evaluate(intents: list[InfrastructureIntent], args: argparse.Namespace) -> 
         if _VERDICT_RANK[decision.verdict] > _VERDICT_RANK[worst]:
             worst = decision.verdict
         citations.extend(c for c in decision.citations if c not in citations)
-        fail_closed_notes.extend(n for n in decision.notes if n.startswith("fail-closed"))
+        fail_closed_notes.extend(n for n in decision.notes if _is_fail_closed_note(n))
     output.finish(worst, citations or fail_closed_notes)
     return _EXIT_CODES[args.exit_style][worst]
+
+
+def _is_fail_closed_note(note: str) -> bool:
+    return note.startswith(("fail-closed", "env-unresolved", "unknown-target", "ledger:"))
 
 
 def _strip_leading_separator(argv: list[str]) -> list[str]:
@@ -552,17 +719,42 @@ def _read_plan_json(path: str) -> dict:
             raise DataError(f"{path}: invalid JSON: {exc}") from None
 
 
+def _run_signing(args: argparse.Namespace) -> int:
+    source = args.key or (f"env:{SIGNING_KEY_ENV}" if os.environ.get(SIGNING_KEY_ENV) else None)
+    if source is None:
+        raise UsageError(f"{args.command}: pass --key SOURCE or set {SIGNING_KEY_ENV}")
+    key = signing.load_key(source)
+    for raw in args.paths:
+        if not os.path.exists(raw):
+            raise FileNotFoundError(2, "No such file or directory", raw)
+    return signing.run(args.command, key, args.paths)
+
+
 def _run(argv: list[str]) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
+    if args.command in ("sign", "verify"):
+        return _run_signing(args)
     if args.command != "check":
         raise UsageError("unknown command")
+
+    if args.target == "command":
+        parts = _strip_leading_separator(args.command_string)
+        command = " ".join(parts).strip()
+        if not command:
+            raise UsageError("check command: no command string given after --")
+        return _evaluate(_intents_from_shell_string(command), args)
 
     if args.target in _ARGV_TARGET_PARSERS:
         target_argv = _strip_leading_separator(args.target_argv)
         if not target_argv:
             raise UsageError(f"check {args.target}: no {args.target} argv given after --")
+        if getattr(args, "split_compound", False):
+            # The argv *is* the shell text here ("kubectl get pods; kubectl
+            # delete node/w1" as one or several tokens), so it is re-joined
+            # verbatim, not re-quoted.
+            return _evaluate(_intents_from_shell_string(" ".join(target_argv)), args)
         _reject_compound_argv(target_argv)
         intents = _ARGV_TARGET_PARSERS[args.target](target_argv)
         return _evaluate(intents, args)
@@ -597,7 +789,7 @@ def main(argv: list[str] | None = None) -> int:
         target = exc.filename or exc
         print(f"aegis: error: cannot read {target}: {exc.strerror or exc}", file=sys.stderr)
         return EX_NOINPUT
-    except (DataError, ValueError, yaml.YAMLError) as exc:
+    except (DataError, ValueError, yaml.YAMLError, SignatureError) as exc:
         message = str(exc).replace("\n", " ")
         print(f"aegis: error: {message}", file=sys.stderr)
         return EX_DATAERR

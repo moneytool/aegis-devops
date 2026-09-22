@@ -75,29 +75,37 @@ To make this project publishable at **SREcon** or **KubeCon**, we will use a rig
 *   **Secondary:** **KubeCon + CloudNativeCon EU 2027** — **Skip** (CFP closes Oct 11, 2026 — before any benchmark results exist). Consider as a possible target only if a later CFP becomes available; otherwise target **KubeCon + CloudNativeCon NA 2027**.
 
 ### 7. Backlog (post-Week-4 hardening, ordered)
-Items surfaced by the Week 1–3 build. None block the SREcon submission; 1–2 are cheap and reduce over-block, so they go first.
+Items surfaced by the Week 1–3 build and the REVIEW-4 council. None block the SREcon submission.
 
-1.  **Dry-run awareness — done.** `--dry-run`, `terraform plan`, `helm --dry-run` are already captured in `params`; the interceptor should downgrade BLOCK → ALLOW (with `covered=True` and a `dry_run` flag in the decision) so read-only rehearsals are never over-blocked.
-2.  **Environment identity mapping — done.** `data/environments.example.yaml` mapping kube contexts, AWS account IDs, GCP projects, Azure subscriptions → `env: prod|staging|dev`, injected into `metadata.env` at parse time so rules say `scope: {env: prod}` instead of repeating raw IDs.
-3.  **Forged sources at decision time — done.** `--sources DIR` wires `verify_source` into `ConstraintStore.load` (`FileSourceFetcher`, with a per-`source_ref` cache); a constraint whose cited source doesn't back it is quarantined as `forged` at load, without touching decision latency. It is still not re-checked at decision time by default — see §8.
+1.  **Dry-run awareness — done.** `--dry-run`, `terraform plan`, `helm --dry-run` are already captured in `params`; the interceptor downgrades BLOCK → ALLOW (with `covered=True` and a `dry_run` flag in the decision) so read-only rehearsals are never over-blocked.
+2.  **Environment identity mapping — done (T1.3).** `data/environments.example.yaml` maps kube contexts/clusters/kubeconfig paths, AWS account IDs/profiles, GCP projects, Azure subscriptions/resource groups, GitHub repos, ArgoCD app globs and terraform workspaces → `env: prod|staging|dev`; resolution is provider-agnostic; an env-scoped rule against an intent with no resolved `env` ESCALATEs (`env-unresolved`); `--resolve-current-context` (opt-in, trusts the invoking environment) fills a missing context/profile/project from `$KUBECONFIG`/`$AWS_PROFILE`/`$CLOUDSDK_CORE_PROJECT`/….
+3.  **Forged sources at decision time — done.** `verify_source` runs inside `ConstraintStore.load` against `<dir of constraints>/sources` by default (`--sources` overrides, `''` disables); the transport's signed `PRINCIPALS.yaml` — not the payload — says who a source belongs to (`principal-mismatch`). Still not re-checked at decision time — see §8.
 4.  **Helm / ArgoCD / Flux / Git / CI parsers — done.** `from_helm`, `from_argocd`/`_multi`, `from_flux`, `from_git`, `from_gh` ship as both library functions and `aegis check` subcommands, exercised in `examples/demo.py` and `tests/test_cli.py`.
-5.  **Set-level constraints — done.** `src/aegis_core/plan.py`'s `PlanConstraint` evaluates `max_intents`, `max_matching`, `requires_all`, `forbid_together`, and `ratio` predicates over a whole intent batch via `--plan-constraints`; see `data/plan_constraints.example.yaml`.
-6.  **Rate / budget constraints — done.** `Constraint.rate_limit` (`max`/`per`/`key`) plus `DecisionLedger`/`JsonlLedger` (`--ledger`) enforce "≤ N ops per window per bucket" using the append-only decision log.
-7.  **Real source connectors + identity.** Git (file at SHA), Slack (permalink), Jira fetchers replacing `FileSourceFetcher`; `principal` bound to commit signature / Slack user ID / SSO group rather than a bare string. This is the line between "reference design" and "deployable". Not started — see §8.
-8.  **SQL statement-class gating, then Pulumi — done.** `src/aegis_core/parsers/sql.py` (`from_sql` + psql/mysql/sqlite3/mongosh/migration wrappers) and `src/aegis_core/parsers/pulumi.py` (`from_pulumi_preview`/`from_pulumi_argv`) ship with tests (`tests/test_parsers_sql.py`, `tests/test_parsers_pulumi.py`). CDK remains backlog (§3.1).
+5.  **Set-level constraints — done.** `src/aegis_core/plan.py`'s `PlanConstraint` evaluates `max_intents`, `max_matching`, `requires_all`, `forbid_together`, and `ratio` predicates over a whole intent batch via `--plan-constraints`; selectors match every resource alias (`aws_db_instance.*` catches `module.app.aws_db_instance.main`, T1.6/T1.7) and escalate on an unresolved `env`.
+6.  **Rate / budget constraints — done (T1.9).** `Constraint.rate_limit` (`max`/`per`/`key`) plus `DecisionLedger`/`JsonlLedger`/`SqliteLedger` (`--ledger`, picked by extension) enforce "≤ N ops per window per bucket"; cross-process locking, hash-chained records (`chain-broken` fails closed), rotation to the largest window, `key: [resource]` buckets per concrete target, and `rate_limit.key` vocabulary validation at load.
+7.  **Root of trust — done (T1.1).** Every policy file is MAC-signed (`aegis sign`/`verify`; detached `.sig` per file, one `AEGIS-MANIFEST.sig` per sources directory); the CLI refuses to decide without a key (`--key`, `$AEGIS_SIGNING_KEY`, or the public example key with a warning) unless `--insecure`. The key is a shared secret — see §8.
+8.  **Shell-string front end — done (T1.2).** `aegis check command -- "<string>"` / `--split-compound` split compound commands, unwrap `sudo`/`env`/`timeout`/`sh -c`/aliases, and refuse (exit 64) anything whose argv needs execution to know; `examples/claude-code-hook.sh` uses it.
+9.  **Real source connectors + identity.** Git (file at SHA), Slack (permalink), Jira fetchers replacing `FileSourceFetcher`; `principal` bound to commit signature / Slack user ID / SSO group rather than a bare string. This is the line between "reference design" and "deployable". Not started — see §8.
+10. **SQL statement-class gating, then Pulumi — done.** `src/aegis_core/parsers/sql.py` (`from_sql` + psql/mysql/sqlite3/mongosh/migration wrappers, hardened against the T1.4 evasions) and `src/aegis_core/parsers/pulumi.py` (`from_pulumi_preview`/`from_pulumi_argv`) ship with tests. CDK remains backlog (§3.1).
 
 ### 8. Open gaps (honest, as of 2026-09-21)
 None of these block the current feature set; they're the known distance between "reference
-design" and "deployable" (see item 7 above), plus a few sharp edges worth naming rather than
+design" and "deployable" (see item 9 above), plus a few sharp edges worth naming rather than
 discovering later.
 
 *   **`evade-case-variant` is `xfail`.** The constraint matcher is case-sensitive (`fnmatch` on
     POSIX); the parser normalises resource kinds to lower-case, which covers the common case,
     but a constraint author or an attacker who varies case elsewhere can still slip past a
     pattern. Documented in `tests/test_adversarial.py`, not fixed.
-*   **Forged-source detection needs `--sources`.** Without it, `ConstraintStore.load` never
-    calls `verify_source`, and a forged constraint (valid hash, fabricated citation) is honoured
-    like any other. It also isn't re-checked at decision time even when `--sources` is given.
+*   **Forged sources are checked at load, not at decision time.** With the default `sources/`
+    directory (or `--sources`) forgery is caught when the store loads; a source that changes
+    while a long-lived process keeps its store in memory isn't noticed until the next load.
+*   **The signing key is a shared secret.** Signatures are keyed BLAKE2b MACs: whoever can verify
+    can also sign, so the key must be kept away from the agent and from anyone who can write
+    policy files. Public-key signatures (and a key-rotation story) are not implemented. The
+    committed `data/example-signing.key` is public and demo-only.
+*   **`--resolve-current-context` trusts the process environment.** It is opt-in for exactly that
+    reason: an agent that can set `$KUBECONFIG` can steer what Aegis believes the target is.
 *   **OPA rows depend on a local binary.** `opa` and `opa-signed` are run and reported in
     `results/benchmark.md` (opa 1.20); on a machine without the `opa` binary the harness skips
     both rows with a note rather than failing.
@@ -107,15 +115,12 @@ discovering later.
 *   **No real Git/Slack/Jira connectors.** `FileSourceFetcher` (a flat JSON file per
     `source_ref`) is the only `SourceFetcher` implementation; there is no commit-SHA, Slack
     permalink, or Jira-ticket fetcher yet.
-*   **`principal` is still a bare string.** It isn't bound to a commit signature, a Slack user
-    ID, or an SSO group — anyone who can write a constraint's `principal` field can claim to be
-    anyone the authority map recognises.
-*   **Raw shell/`ssh`/Ansible is explicitly out of scope (v1)**, per §3.1 — no parser will ever
-    cover truly arbitrary shell.
-*   **WHERE-in-comment false negative in the SQL classifier.** `src/aegis_core/parsers/sql.py`
-    detects an unbounded `DELETE`/`UPDATE` by regex-searching the statement text for `WHERE`;
-    it doesn't strip comments first, so `DELETE FROM users; -- WHERE clause TBD` is
-    (incorrectly) classified as bounded because the word appears in a trailing comment.
+*   **`principal` is still a bare string.** The signed `PRINCIPALS.yaml` binds a source to a
+    principal name, but that name isn't bound to a commit signature, a Slack user ID, or an
+    SSO group — whoever holds the signing key can attribute a source to anyone.
+*   **Raw shell/`ssh`/Ansible is explicitly out of scope (v1)**, per §3.1 — `aegis check
+    command` splits and unwraps shell strings, but an unknown binary is only a synthetic
+    `shell`/`exec` intent (escalated under `--fail-closed`), never parsed.
 *   **Plan constraints are evaluated per invocation, not across invocations.** `evaluate_plan`
     sees one batch of intents from one `aegis check` call; there is no persistence of partial
     plan state across multiple separate invocations that together make up one logical change.
