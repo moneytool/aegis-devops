@@ -93,11 +93,26 @@ def test_split_skips_blank_statements():
     ],
 )
 def test_drop_statements_classify_as_delete(kind, sql, resource):
-    (intent,) = from_sql(sql)
+    intents = from_sql(sql)
+    intent = intents[0]
     assert intent.action == "delete"
     assert intent.resource == resource
     assert intent.params["statement_class"] == "ddl"
     assert intent.provider == "sql"
+    assert intent.params["unbounded"] is True
+    assert intent.params["ddl"] is True
+    if kind in ("schema", "database"):
+        # DROP SCHEMA/DROP DATABASE also emit a synthetic table/* unbounded
+        # delete so table-scoped rules fire against everything it cascades
+        # into (REVIEW-4 T1.4).
+        assert len(intents) == 2
+        synthetic = intents[1]
+        assert synthetic.resource == "table/*"
+        assert synthetic.action == "delete"
+        assert synthetic.params["unbounded"] is True
+        assert synthetic.metadata["schema"] == resource.split("/", 1)[1]
+    else:
+        assert len(intents) == 1
 
 
 def test_drop_table_if_exists():
@@ -306,6 +321,8 @@ def test_from_psql_missing_file_falls_back_to_script_resource():
     assert intent.resource == "script/definitely_missing_9182.sql"
     assert intent.action == "update"
     assert intent.params["unclassified"] is True
+    assert intent.params["unreadable"] is True
+    assert intent.params["opaque"] is True
 
 
 def test_from_psql_existing_file_is_parsed(tmp_path):
@@ -483,7 +500,7 @@ def _load_example_store():
 def test_example_store_loads_with_zero_quarantined():
     store = _load_example_store()
     assert store.quarantined == []
-    assert len(store.constraints) == 20
+    assert len(store.constraints) == 21
 
 
 def test_unbounded_delete_is_blocked_end_to_end():
@@ -507,10 +524,15 @@ def test_bounded_delete_is_allowed_end_to_end():
 def test_drop_database_is_blocked_end_to_end():
     store = _load_example_store()
     interceptor = AegisInterceptor(store)
-    (intent,) = from_sql("DROP DATABASE prod;")
+    (intent, synthetic) = from_sql("DROP DATABASE prod;")
     decision = interceptor.intercept(intent, now=NOW)
     assert decision.verdict == "BLOCK"
     assert "sql-block-database-delete" in decision.citations
+    # The synthetic table/* cascade intent also blocks, via the unbounded
+    # table-delete rule.
+    synthetic_decision = interceptor.intercept(synthetic, now=NOW)
+    assert synthetic_decision.verdict == "BLOCK"
+    assert "sql-block-unbounded-table-delete" in synthetic_decision.citations
 
 
 def test_alter_table_drop_column_is_escalated_end_to_end():
@@ -543,3 +565,380 @@ def test_flyway_clean_is_blocked_end_to_end():
 def test_example_yaml_exists_alongside_matching_sources():
     for ref in ("jira-5001", "jira-5002", "jira-5003", "jira-5004", "plan-5005", "jira-5006"):
         assert Path(f"data/sources/{ref}.json").exists()
+
+
+# =================================================================================
+# REVIEW-4 T1.4 -- SQL/Mongo classifier evasion shapes
+# =================================================================================
+
+from aegis_core.parsers.sql import evasion  # noqa: E402
+
+
+def test_evasion_catalogue_is_nonempty_and_importable():
+    assert isinstance(evasion, list)
+    assert len(evasion) >= 30
+    assert all(isinstance(s, str) for s in evasion)
+
+
+# --- 1. TRUNCATE/DROP/DELETE unbounded flags -------------------------------------
+
+
+def test_truncate_is_unbounded_and_ddl():
+    (intent,) = from_sql("TRUNCATE TABLE orders;")
+    assert intent.params["unbounded"] is True
+    assert intent.params["ddl"] is True
+    assert intent.params["truncate"] is True
+
+
+def test_drop_index_is_unbounded_and_ddl():
+    (intent,) = from_sql("DROP INDEX idx_users_email;")
+    assert intent.params["unbounded"] is True
+    assert intent.params["ddl"] is True
+
+
+def test_drop_view_is_unbounded_and_ddl():
+    (intent,) = from_sql("DROP VIEW active_users;")
+    assert intent.params["unbounded"] is True
+    assert intent.params["ddl"] is True
+
+
+def test_delete_from_without_where_unbounded_flag_still_set():
+    (intent,) = from_sql("DELETE FROM users;")
+    assert intent.params["unbounded"] is True
+
+
+# --- 2. Comment stripping before classification -----------------------------------
+
+
+def test_delete_with_block_comment_between_keywords_is_delete_unbounded():
+    (intent,) = from_sql("DELETE/**/FROM users;")
+    assert intent.action == "delete"
+    assert intent.resource == "table/users"
+    assert intent.params["unbounded"] is True
+
+
+def test_delete_with_line_comment_between_keywords_is_delete():
+    (intent,) = from_sql("DELETE --comment\nFROM users;")
+    assert intent.action == "delete"
+    assert intent.resource == "table/users"
+
+
+def test_truncate_with_block_comment_still_classifies():
+    (intent,) = from_sql("TRUNCATE/**/TABLE/**/orders;")
+    assert intent.action == "delete"
+    assert intent.resource == "table/orders"
+    assert intent.params["unbounded"] is True
+
+
+def test_drop_table_with_line_comment_still_classifies():
+    (intent,) = from_sql("DROP TABLE --danger\nusers;")
+    assert intent.action == "delete"
+    assert intent.resource == "table/users"
+
+
+def test_comment_does_not_leak_fake_semicolon_terminator_into_classification():
+    # A ';' inside a comment must not split the statement -- covered by the
+    # splitter already, but confirm classification survives the combination
+    # with comment stripping.
+    intents = from_sql("DELETE FROM users -- ; not a real terminator\n;")
+    assert len(intents) == 1
+    assert intents[0].params["unbounded"] is True
+
+
+# --- 3. CTEs: classify by strongest inner statement -------------------------------
+
+
+def test_cte_with_delete_classifies_as_delete_with_cte_flag():
+    (intent,) = from_sql("WITH d AS (DELETE FROM users RETURNING *) SELECT 1;")
+    assert intent.action == "delete"
+    assert intent.resource == "table/users"
+    assert intent.params["cte"] is True
+    assert intent.params["unbounded"] is True
+
+
+def test_cte_with_delete_and_where_is_not_unbounded():
+    (intent,) = from_sql(
+        "WITH d AS (DELETE FROM users WHERE id = 1 RETURNING *) SELECT 1;"
+    )
+    assert intent.action == "delete"
+    assert intent.params["unbounded"] is False
+
+
+def test_cte_with_update_classifies_as_update():
+    (intent,) = from_sql("WITH u AS (UPDATE users SET active = false) SELECT 1;")
+    assert intent.action == "update"
+    assert intent.resource == "table/users"
+    assert intent.params["cte"] is True
+
+
+def test_cte_with_insert_classifies_as_put():
+    (intent,) = from_sql("WITH i AS (INSERT INTO users (id) VALUES (1)) SELECT 1;")
+    assert intent.action == "put"
+    assert intent.resource == "table/users"
+    assert intent.params["cte"] is True
+
+
+def test_cte_prefers_delete_over_update_when_both_present():
+    (intent,) = from_sql(
+        "WITH u AS (UPDATE accounts SET x = 1), d AS (DELETE FROM users) SELECT 1;"
+    )
+    assert intent.action == "delete"
+    assert intent.resource == "table/users"
+
+
+def test_cte_plain_select_still_reads():
+    (intent,) = from_sql("WITH recent AS (SELECT * FROM users) SELECT * FROM recent;")
+    assert intent.action == "read"
+    assert "cte" not in intent.params
+
+
+# --- 4. EXPLAIN / EXPLAIN ANALYZE -------------------------------------------------
+
+
+def test_explain_without_analyze_is_read_with_flag():
+    (intent,) = from_sql("EXPLAIN DELETE FROM users;")
+    assert intent.action == "read"
+    assert intent.params["explain"] is True
+
+
+def test_explain_analyze_delete_classifies_as_delete_unbounded():
+    (intent,) = from_sql("EXPLAIN ANALYZE DELETE FROM users;")
+    assert intent.action == "delete"
+    assert intent.resource == "table/users"
+    assert intent.params["unbounded"] is True
+    assert intent.params["explain_analyze"] is True
+
+
+def test_explain_analyze_select_still_reads_with_flag():
+    (intent,) = from_sql("EXPLAIN ANALYZE SELECT * FROM users;")
+    assert intent.action == "read"
+    assert intent.params["explain_analyze"] is True
+
+
+def test_explain_select_is_read():
+    (intent,) = from_sql("EXPLAIN SELECT * FROM users;")
+    assert intent.action == "read"
+    assert intent.params["explain"] is True
+
+
+# --- 5. DO / CALL / EXECUTE / PERFORM ---------------------------------------------
+
+
+def test_do_block_is_opaque_update():
+    (intent,) = from_sql("DO $$ BEGIN DELETE FROM users; END $$;")
+    assert intent.action == "update"
+    assert intent.resource == "block/*"
+    assert intent.params["opaque"] is True
+
+
+def test_call_proc_is_opaque_update_with_procedure_resource():
+    (intent,) = from_sql("CALL cleanup_users();")
+    assert intent.action == "update"
+    assert intent.resource == "procedure/cleanup_users"
+    assert intent.params["opaque"] is True
+
+
+def test_execute_proc_is_opaque_update_with_procedure_resource():
+    (intent,) = from_sql("EXECUTE cleanup_users();")
+    assert intent.action == "update"
+    assert intent.resource == "procedure/cleanup_users"
+    assert intent.params["opaque"] is True
+
+
+def test_execute_dynamic_sql_string_falls_back_to_block_resource():
+    (intent,) = from_sql("EXECUTE 'DELETE FROM users';")
+    assert intent.action == "update"
+    assert intent.resource == "block/*"
+    assert intent.params["opaque"] is True
+
+
+def test_perform_proc_is_opaque_update():
+    (intent,) = from_sql("PERFORM cleanup_users();")
+    assert intent.action == "update"
+    assert intent.resource == "procedure/cleanup_users"
+    assert intent.params["opaque"] is True
+
+
+# --- 6. MySQL multi-table DELETE --------------------------------------------------
+
+
+def test_mysql_multi_table_delete_targets_first_table():
+    (intent,) = from_sql("DELETE users FROM users JOIN orders ON users.id = orders.uid;")
+    assert intent.action == "delete"
+    assert intent.resource == "table/users"
+
+
+def test_delete_from_using_targets_first_table():
+    (intent,) = from_sql("DELETE FROM t1 USING t2 WHERE t1.id = t2.id;")
+    assert intent.action == "delete"
+    assert intent.resource == "table/t1"
+    assert intent.params["unbounded"] is False
+
+
+def test_delete_from_using_without_where_is_unbounded():
+    (intent,) = from_sql("DELETE FROM t1 USING t2;")
+    assert intent.params["unbounded"] is True
+
+
+# --- 7. DROP SCHEMA/DATABASE cascade + synthetic table/* intent ------------------
+
+
+def test_drop_schema_cascade_sets_cascade_param():
+    (intent, synthetic) = from_sql("DROP SCHEMA public CASCADE;")
+    assert intent.resource == "schema/public"
+    assert intent.params["cascade"] is True
+    assert synthetic.resource == "table/*"
+    assert synthetic.action == "delete"
+    assert synthetic.params["unbounded"] is True
+    assert synthetic.metadata["schema"] == "public"
+
+
+def test_drop_schema_without_cascade_has_no_cascade_param():
+    (intent, _synthetic) = from_sql("DROP SCHEMA analytics;")
+    assert "cascade" not in intent.params
+
+
+def test_drop_database_emits_synthetic_table_wildcard_delete():
+    (intent, synthetic) = from_sql("DROP DATABASE prod;")
+    assert intent.resource == "database/prod"
+    assert synthetic.resource == "table/*"
+    assert synthetic.metadata["schema"] == "prod"
+
+
+# --- 8. psql/mysql: multiple -c/-e, unreadable -f --------------------------------
+
+
+def test_from_psql_collects_all_command_flags_in_order():
+    intents = from_psql(
+        ["psql", "-d", "proddb", "-c", "DELETE FROM users;", "-c", "SELECT 1;"]
+    )
+    assert len(intents) == 2
+    assert intents[0].action == "delete"
+    assert intents[0].resource == "table/users"
+    assert intents[1].action == "read"
+
+
+def test_from_mysql_collects_all_execute_flags_in_order():
+    intents = from_mysql(
+        ["mysql", "-D", "shop", "-e", "DROP TABLE t;", "-e", "SELECT 1;"]
+    )
+    assert len(intents) == 2
+    assert intents[0].action == "delete"
+    assert intents[0].resource == "table/t"
+    assert intents[1].action == "read"
+
+
+def test_from_mysql_missing_file_is_opaque_unreadable():
+    (intent,) = from_mysql(["mysql", "-D", "shop", "-f", "definitely_missing_7213.sql"])
+    assert intent.resource == "script/definitely_missing_7213.sql"
+    assert intent.action == "update"
+    assert intent.params["unreadable"] is True
+    assert intent.params["opaque"] is True
+
+
+# --- 9. mongosh: getCollection / bracket access / chained find().forEach() ------
+
+
+def test_mongosh_get_collection_delete_many_is_unbounded_delete():
+    (intent,) = from_mongosh(
+        ["mongosh", "--eval", 'db.getCollection("users").deleteMany({})']
+    )
+    assert intent.action == "delete"
+    assert intent.resource == "collection/users"
+    assert intent.params["unbounded"] is True
+
+
+def test_mongosh_bracket_access_drop_is_unbounded_delete():
+    (intent,) = from_mongosh(["mongosh", "--eval", 'db["users"].drop()'])
+    assert intent.action == "delete"
+    assert intent.resource == "collection/users"
+    assert intent.params["unbounded"] is True
+
+
+def test_mongosh_plain_drop_is_unbounded_delete():
+    (intent,) = from_mongosh(["mongosh", "--eval", "db.users.drop()"])
+    assert intent.params["unbounded"] is True
+
+
+def test_mongosh_drop_database_is_unbounded_delete():
+    (intent,) = from_mongosh(["mongosh", "--eval", "db.dropDatabase()"])
+    assert intent.resource == "database/*"
+    assert intent.params["unbounded"] is True
+
+
+def test_mongosh_chained_find_forEach_classifies_as_read():
+    (intent,) = from_mongosh(
+        ["mongosh", "--eval", "db.users.find({}).forEach(function(doc) { print(doc); })"]
+    )
+    assert intent.action == "read"
+    assert intent.resource == "collection/users"
+
+
+# --- 10. GRANT/REVOKE unparseable grantee -> privilege/* -------------------------
+
+
+def test_grant_with_no_to_clause_falls_back_to_privilege_wildcard():
+    (intent,) = from_sql("GRANT SELECT ON users;")
+    assert intent.resource == "privilege/*"
+    assert intent.params["privilege"] is True
+    assert intent.action == "update"
+
+
+def test_revoke_with_no_from_clause_falls_back_to_privilege_wildcard():
+    (intent,) = from_sql("REVOKE SELECT ON users;")
+    assert intent.resource == "privilege/*"
+    assert intent.params["privilege"] is True
+
+
+# --- 11. fail-safe: opaque ops are never read -------------------------------------
+
+
+def test_do_call_execute_perform_are_never_read():
+    for sql in (
+        "DO $$ BEGIN NULL; END $$;",
+        "CALL some_proc();",
+        "EXECUTE some_proc();",
+        "PERFORM some_proc();",
+    ):
+        (intent,) = from_sql(sql)
+        assert intent.action != "read"
+        assert intent.params["opaque"] is True
+
+
+# --- end-to-end: interceptor against the example store (T1.4 accept criteria) ---
+
+
+def test_truncate_users_is_blocked_end_to_end():
+    store = _load_example_store()
+    interceptor = AegisInterceptor(store)
+    (intent,) = from_sql("TRUNCATE users;")
+    decision = interceptor.intercept(intent, now=NOW)
+    assert decision.verdict == "BLOCK"
+    assert "sql-block-unbounded-table-delete" in decision.citations
+
+
+def test_cte_delete_is_blocked_end_to_end():
+    store = _load_example_store()
+    interceptor = AegisInterceptor(store)
+    (intent,) = from_sql("WITH d AS (DELETE FROM users RETURNING *) SELECT 1;")
+    decision = interceptor.intercept(intent, now=NOW)
+    assert decision.verdict == "BLOCK"
+    assert "sql-block-unbounded-table-delete" in decision.citations
+
+
+def test_explain_delete_is_allowed_as_read_end_to_end():
+    store = _load_example_store()
+    interceptor = AegisInterceptor(store)
+    (intent,) = from_sql("EXPLAIN DELETE FROM users;")
+    assert intent.action == "read"
+    decision = interceptor.intercept(intent, now=NOW)
+    assert decision.verdict == "ALLOW"
+
+
+def test_explain_analyze_delete_is_blocked_end_to_end():
+    store = _load_example_store()
+    interceptor = AegisInterceptor(store)
+    (intent,) = from_sql("EXPLAIN ANALYZE DELETE FROM users;")
+    decision = interceptor.intercept(intent, now=NOW)
+    assert decision.verdict == "BLOCK"
+    assert "sql-block-unbounded-table-delete" in decision.citations

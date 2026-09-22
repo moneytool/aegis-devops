@@ -7,6 +7,7 @@ from aegis_core.parser import (
     from_aws,
     from_aws_multi,
     from_az,
+    from_az_multi,
     from_flux,
     from_gcloud,
     from_gh,
@@ -15,6 +16,8 @@ from aegis_core.parser import (
     from_kubectl,
     from_kubectl_multi,
     from_terraform_plan,
+    plan_digest,
+    terraform_resource_aliases,
 )
 
 
@@ -310,6 +313,9 @@ def test_from_terraform_plan_populates_metadata():
         "mode": "managed",
         "provider_name": "aws",
         "module_address": "module.app",
+        "module_path": "module.app",
+        "type_name": "aws_instance.web",
+        "plan_sha256": plan_digest(plan),
     }
 
 
@@ -427,10 +433,14 @@ def test_from_aws_modify_db_instance_maps_to_update():
     assert intent.resource == "rds/db-instance/prod-db"
 
 
-def test_from_aws_put_bucket_policy_kind_not_singularised():
+def test_from_aws_s3api_put_bucket_policy_collapses_to_the_s3_bucket():
+    # REVIEW-4 T1.7: s3api is the low-level spelling of s3; the resource is
+    # the bucket itself, not "s3api/bucket-policy/...".
     intent = from_aws(["aws", "s3api", "put-bucket-policy", "--bucket", "my-logs"])
     assert intent.action == "put"
-    assert intent.resource == "s3api/bucket-policy/my-logs"
+    assert intent.resource == "s3/bucket/my-logs"
+    assert intent.params["raw_action"] == "put-bucket-policy"
+    assert intent.params["raw_service"] == "s3api"
 
 
 def test_from_aws_update_function_code_uses_function_name_flag():
@@ -1595,3 +1605,777 @@ def test_helm_debug_flag_does_not_swallow_the_release_name():
     intent = from_helm(["helm", "uninstall", "--debug", "web"])
     assert intent.resource == "release/web"
     assert "debug" not in intent.params
+
+
+# --- REVIEW-4 T1.5: boolean coercion; --dry-run=false is not a dry run ----------
+# (argv, params key): "<flag>=false" (or =no / =0) must never set the boolean.
+FALSE_FLAG_CASES = [
+    (["kubectl", "delete", "pod/x", "--force=false"], "force"),
+    (["kubectl", "delete", "pod/x", "--wait=no"], "wait"),
+    (["kubectl", "delete", "pod/x", "--dry-run=false"], "dry_run"),
+    (["kubectl", "delete", "pod/x", "--dry-run=none"], "dry_run"),
+    (["aws", "ec2", "terminate-instances", "--instance-ids", "i-1", "--force=false"], "force"),
+    (["aws", "ec2", "terminate-instances", "--instance-ids", "i-1", "--dry-run=false"], "dry_run"),
+    (["az", "vm", "delete", "-n", "x", "-g", "rg", "--yes=false"], "yes"),
+    (["az", "vm", "delete", "-n", "x", "-g", "rg", "--no-wait=0"], "no-wait"),
+    (["az", "vm", "delete", "-n", "x", "-g", "rg", "--what-if=false"], "dry_run"),
+    (["az", "vm", "delete", "-n", "x", "-g", "rg", "--dry-run=false"], "dry_run"),
+    (["gcloud", "compute", "instances", "delete", "x", "--quiet=false"], "quiet"),
+    (["gcloud", "compute", "instances", "delete", "x", "--async=false"], "async"),
+    (["gcloud", "compute", "instances", "delete", "x", "--dry-run=false"], "dry_run"),
+    (["gcloud", "compute", "instances", "delete", "x", "--dry-run=0"], "dry_run"),
+    (["helm", "upgrade", "x", "./c", "--atomic=false"], "atomic"),
+    (["helm", "upgrade", "x", "./c", "--install=false"], "install"),
+    (["helm", "upgrade", "x", "./c", "--dry-run=false"], "dry_run"),
+    (["helm", "upgrade", "x", "./c", "--dry-run=none"], "dry_run"),
+    (["argocd", "app", "sync", "x", "--prune=false"], "prune"),
+    (["argocd", "app", "sync", "x", "--force=no"], "force"),
+    (["argocd", "app", "sync", "x", "--dry-run=false"], "dry_run"),
+    (["flux", "reconcile", "kustomization", "x", "--dry-run=false"], "dry_run"),
+    (["flux", "get", "kustomization", "x", "--export=false"], "export"),
+    (["flux", "get", "kustomization", "x", "--export=false"], "dry_run"),
+    (["gh", "pr", "merge", "1", "--admin=false"], "admin"),
+    (["gh", "pr", "merge", "1", "--delete-branch=false"], "delete_branch"),
+    (["git", "push", "origin", "main", "--dry-run=false"], "dry_run"),
+]
+
+
+@pytest.mark.parametrize(
+    "argv, key", FALSE_FLAG_CASES, ids=[f"{a[0]}:{a[-1]}->{k}" for a, k in FALSE_FLAG_CASES]
+)
+def test_flag_equals_false_never_sets_the_boolean(argv, key):
+    for intent in from_argv(argv):
+        assert intent.params.get(key) is not True, intent.params
+        assert intent.params.get(key) != "false", intent.params
+        if key == "dry_run":
+            assert "dry_run" not in intent.params, intent.params
+
+
+TRUE_FLAG_CASES = [
+    (["kubectl", "delete", "pod/x", "--force=true"], "force"),
+    (["kubectl", "delete", "pod/x", "--force=1"], "force"),
+    (["aws", "ec2", "terminate-instances", "--instance-ids", "i-1", "--force=yes"], "force"),
+    (["az", "vm", "delete", "-n", "x", "-g", "rg", "--yes=true"], "yes"),
+    (["gcloud", "compute", "instances", "delete", "x", "--quiet=true"], "quiet"),
+    (["helm", "upgrade", "x", "./c", "--atomic=on"], "atomic"),
+    (["argocd", "app", "sync", "x", "--prune=true"], "prune"),
+    (["argocd", "app", "sync", "x", "--prune=TRUE"], "prune"),
+    (["argocd", "app", "sync", "x", "--prune"], "prune"),
+    (["flux", "get", "kustomization", "x", "--export=true"], "export"),
+    (["flux", "get", "kustomization", "x", "--export=true"], "dry_run"),
+    (["gh", "pr", "merge", "1", "--admin=true"], "admin"),
+]
+
+
+@pytest.mark.parametrize(
+    "argv, key", TRUE_FLAG_CASES, ids=[f"{a[0]}:{a[-1]}->{k}" for a, k in TRUE_FLAG_CASES]
+)
+def test_flag_equals_true_sets_the_boolean_to_real_true(argv, key):
+    for intent in from_argv(argv):
+        assert intent.params.get(key) is True, intent.params
+
+
+DRY_RUN_TRUTHY_CASES = [
+    ["kubectl", "delete", "pod/x", "--dry-run=true"],
+    ["kubectl", "delete", "pod/x", "--dry-run=client"],
+    ["kubectl", "delete", "pod/x", "--dry-run=server"],
+    ["kubectl", "delete", "pod/x", "--dry-run"],
+    ["aws", "ec2", "terminate-instances", "--instance-ids", "i-1", "--dry-run"],
+    ["aws", "ec2", "terminate-instances", "--instance-ids", "i-1", "--dry-run=true"],
+    ["az", "vm", "delete", "-n", "x", "-g", "rg", "--what-if=true"],
+    ["gcloud", "compute", "instances", "delete", "x", "--dry-run=yes"],
+    ["helm", "upgrade", "x", "./c", "--dry-run"],
+    ["helm", "upgrade", "x", "./c", "--dry-run=client"],
+    ["helm", "upgrade", "x", "./c", "--dry-run=server"],
+    ["helm", "upgrade", "x", "./c", "--dry-run=true"],
+    ["argocd", "app", "sync", "x", "--dry-run"],
+    ["argocd", "app", "sync", "x", "--dry-run=true"],
+    ["flux", "reconcile", "kustomization", "x", "--dry-run"],
+    ["flux", "reconcile", "kustomization", "x", "--dry-run=1"],
+    ["git", "push", "-n", "origin", "main"],
+]
+
+
+@pytest.mark.parametrize("argv", DRY_RUN_TRUTHY_CASES, ids=lambda a: " ".join(a))
+def test_dry_run_bare_or_truthy_sets_dry_run(argv):
+    for intent in from_argv(argv):
+        assert intent.params.get("dry_run") is True
+
+
+def test_argocd_prune_with_dry_run_false_is_a_real_pruning_sync():
+    # REVIEW-4 T1.5 acceptance: `argocd app sync x --prune --dry-run=false`
+    intent = from_argocd(["argocd", "app", "sync", "x", "--prune", "--dry-run=false"])
+    assert intent.params["prune"] is True
+    assert "dry_run" not in intent.params
+
+
+def test_argocd_prune_equals_true_is_boolean_true_not_the_string():
+    intent = from_argocd(["argocd", "app", "sync", "prod-web", "--prune=true"])
+    assert intent.params["prune"] is True
+    assert intent.params["prune"] != "true"
+
+
+def test_kubectl_non_boolean_spelling_of_a_boolean_flag_is_kept_verbatim():
+    intent = from_kubectl(["kubectl", "delete", "pod/x", "--cascade=orphan"])
+    assert intent.params["cascade"] == "orphan"
+
+
+def test_bool_flag_helper_semantics():
+    from aegis_core.parser import _bool_param, _coerce_bool, _is_dry_run
+
+    assert _coerce_bool(None) is True
+    assert (
+        _coerce_bool("True") is True and _coerce_bool("YES") is True and _coerce_bool("1") is True
+    )
+    assert (
+        _coerce_bool("false") is False
+        and _coerce_bool("no") is False
+        and _coerce_bool("0") is False
+    )
+    assert _coerce_bool("orphan") is None
+    assert _bool_param(None) is True and _bool_param("false") is False and _bool_param("7") == 7
+    assert (
+        _is_dry_run(None)
+        and _is_dry_run("true")
+        and _is_dry_run("client", truthy=frozenset({"client"}))
+    )
+    assert not _is_dry_run("false") and not _is_dry_run("none") and not _is_dry_run("client")
+
+
+# --- REVIEW-4 T1.7: provider-namespace aliases ----------------------------------
+
+
+def test_git_push_force_without_refspec_marks_unknown_target():
+    for argv in (
+        ["git", "push", "-f"],
+        ["git", "push", "--force", "origin"],
+        ["git", "push", "--mirror", "origin"],
+    ):
+        intent = from_git(argv)
+        assert intent.resource == "ref/*", argv
+        assert intent.action == "push"
+        assert intent.params["force"] is True
+        assert intent.params["unknown_target"] is True
+
+
+def test_git_push_without_refspec_or_force_still_marks_unknown_target():
+    intent = from_git(["git", "push", "origin"])
+    assert intent.resource == "ref/*"
+    assert intent.params["unknown_target"] is True
+    assert "force" not in intent.params
+    assert intent.metadata == {"remote": "origin"}
+
+
+def test_git_push_with_refspec_has_no_unknown_target():
+    for argv in (["git", "push", "origin", "main"], ["git", "push", "-f", "origin", "HEAD:main"]):
+        intent = from_git(argv)
+        assert intent.resource == "ref/main"
+        assert "unknown_target" not in intent.params
+
+
+def test_git_push_mirror_does_not_swallow_the_remote_and_implies_force():
+    intent = from_git(["git", "push", "--mirror", "origin"])
+    assert intent.metadata == {"remote": "origin"}
+    assert intent.params["mirror"] is True
+    assert intent.params["force"] is True
+
+
+def test_git_push_all_is_unknown_target():
+    intent = from_git(["git", "push", "--all", "origin"])
+    assert intent.params["all"] is True
+    assert intent.params["unknown_target"] is True
+
+
+@pytest.mark.parametrize(
+    "argv, action, resource",
+    [
+        (["aws", "s3api", "delete-bucket", "--bucket", "b"], "delete", "s3/bucket/b"),
+        (
+            ["aws", "s3api", "create-bucket", "--bucket", "b", "--region", "us-east-1"],
+            "create",
+            "s3/bucket/b",
+        ),
+        (
+            ["aws", "s3api", "put-bucket-policy", "--bucket", "b", "--policy", "file://p.json"],
+            "put",
+            "s3/bucket/b",
+        ),
+        (["aws", "s3api", "put-public-access-block", "--bucket", "b"], "put", "s3/bucket/b"),
+        (["aws", "s3api", "get-bucket-location", "--bucket", "b"], "read", "s3/bucket/b"),
+        (["aws", "s3api", "list-buckets"], "read", "s3/bucket/*"),
+        (
+            ["aws", "s3api", "delete-object", "--bucket", "b", "--key", "k/x"],
+            "delete",
+            "s3/object/b/k/x",
+        ),
+        (
+            ["aws", "s3api", "put-object", "--bucket", "b", "--key", "k", "--body", "f"],
+            "put",
+            "s3/object/b/k",
+        ),
+        (
+            ["aws", "s3api", "delete-objects", "--bucket", "b", "--delete", "file://d.json"],
+            "delete",
+            "s3/object/b/*",
+        ),
+        (
+            ["aws", "s3control", "delete-access-point", "--account-id", "1", "--name", "ap"],
+            "delete",
+            "s3/access-point/ap",
+        ),
+        (
+            ["aws", "s3control", "put-public-access-block", "--account-id", "1"],
+            "put",
+            "s3/public-access-block/*",
+        ),
+    ],
+    ids=lambda v: " ".join(v) if isinstance(v, list) else "",
+)
+def test_aws_s3api_and_s3control_collapse_to_service_s3(argv, action, resource):
+    intent = from_aws(argv)
+    assert intent.provider == "aws"
+    assert intent.action == action
+    assert intent.resource == resource
+    assert intent.params["raw_service"] == argv[1]
+    assert intent.params["raw_action"] == argv[2]
+
+
+def test_aws_s3api_object_key_recorded_in_params():
+    intent = from_aws(["aws", "s3api", "delete-object", "--bucket", "b", "--key", "k/x"])
+    assert intent.params["key"] == "k/x"
+
+
+@pytest.mark.parametrize(
+    "argv, resource",
+    [
+        (
+            ["aws", "iam", "attach-role-policy", "--role-name", "r", "--policy-arn", "arn:x"],
+            "iam/role-policy/r",
+        ),
+        (
+            ["aws", "iam", "attach-user-policy", "--user-name", "u", "--policy-arn", "arn:x"],
+            "iam/user-policy/u",
+        ),
+        (
+            ["aws", "iam", "attach-group-policy", "--group-name", "g", "--policy-arn", "arn:x"],
+            "iam/group-policy/g",
+        ),
+        (
+            [
+                "aws",
+                "iam",
+                "put-user-policy",
+                "--user-name",
+                "u",
+                "--policy-name",
+                "p",
+                "--policy-document",
+                "d",
+            ],
+            "iam/user-policy/u",
+        ),
+        (
+            [
+                "aws",
+                "iam",
+                "put-role-policy",
+                "--role-name",
+                "r",
+                "--policy-name",
+                "p",
+                "--policy-document",
+                "d",
+            ],
+            "iam/role-policy/r",
+        ),
+        (
+            ["aws", "iam", "add-user-to-group", "--user-name", "u", "--group-name", "g"],
+            "iam/user-to-group/g",
+        ),
+        (["aws", "iam", "create-access-key", "--user-name", "u"], "iam/access-key/u"),
+    ],
+    ids=lambda v: " ".join(v) if isinstance(v, list) else "",
+)
+def test_aws_iam_privilege_grants_normalise_to_update_with_privilege_flag(argv, resource):
+    intent = from_aws(argv)
+    assert intent.action == "update"
+    assert intent.params["privilege"] is True
+    assert intent.resource == resource
+    assert intent.params["raw_action"] == argv[2]
+
+
+def test_aws_iam_reads_and_plain_creates_are_not_privilege_grants():
+    assert from_aws(["aws", "iam", "list-users"]).action == "read"
+    assert "privilege" not in from_aws(["aws", "iam", "list-users"]).params
+    create = from_aws(["aws", "iam", "create-user", "--user-name", "u"])
+    assert create.action == "create"
+    assert "privilege" not in create.params
+
+
+ARM = "/subscriptions/sub-1/resourceGroups/rg-1/providers"
+
+
+@pytest.mark.parametrize(
+    "arm_type, expected",
+    [
+        ("Microsoft.ContainerService/managedClusters/c1", "aks/cluster/c1"),
+        ("Microsoft.Compute/virtualMachines/vm1", "compute/vm/vm1"),
+        ("Microsoft.Compute/virtualMachineScaleSets/ss1", "compute/vmss/ss1"),
+        ("Microsoft.Storage/storageAccounts/sa1", "storage/account/sa1"),
+        ("Microsoft.Sql/servers/srv1", "sql/server/srv1"),
+        ("Microsoft.Sql/servers/srv1/databases/db1", "sql/db/db1"),
+        ("Microsoft.KeyVault/vaults/kv1", "keyvault/vault/kv1"),
+        ("Microsoft.Network/virtualNetworks/vn1", "network/vnet/vn1"),
+        ("Microsoft.Network/networkSecurityGroups/nsg1", "network/nsg/nsg1"),
+        ("Microsoft.Web/sites/app1", "web/app/app1"),
+        ("Microsoft.ContainerRegistry/registries/acr1", "acr/registry/acr1"),
+        ("Microsoft.Foo/bars/baz", "microsoft.foo/bars/baz"),
+        (
+            "Microsoft.ContainerService/managedClusters/c1/agentPools/p1",
+            "aks/cluster/c1/agentpools/p1",
+        ),
+    ],
+)
+def test_az_ids_arm_path_maps_to_named_form_resource(arm_type, expected):
+    intent = from_az(["az", "resource", "delete", "--ids", f"{ARM}/{arm_type}"])
+    assert intent.provider == "azure"
+    assert intent.action == "delete"
+    assert intent.resource == expected
+    assert intent.metadata["subscription"] == "sub-1"
+    assert intent.metadata["resource_group"] == "rg-1"
+    assert intent.metadata["arm_id"] == f"{ARM}/{arm_type}"
+
+
+def test_az_ids_matches_the_named_flag_form():
+    by_ids = from_az(
+        [
+            "az",
+            "aks",
+            "delete",
+            "--ids",
+            f"{ARM}/Microsoft.ContainerService/managedClusters/c1",
+            "--yes",
+        ]
+    )
+    by_name = from_az(
+        ["az", "aks", "delete", "-n", "c1", "-g", "rg-1", "--subscription", "sub-1", "--yes"]
+    )
+    assert by_ids.resource == by_name.resource == "aks/cluster/c1"
+    assert by_ids.action == by_name.action == "delete"
+    assert by_ids.params == by_name.params
+    assert by_ids.metadata["resource_group"] == by_name.metadata["resource_group"]
+    assert by_ids.metadata["subscription"] == by_name.metadata["subscription"]
+
+
+def test_az_ids_case_insensitive_segments_and_resource_group_id():
+    intent = from_az(
+        [
+            "az",
+            "resource",
+            "delete",
+            "--ids",
+            "/SUBSCRIPTIONS/s/resourcegroups/rg/PROVIDERS/microsoft.compute/VIRTUALMACHINES/vm",
+        ]
+    )
+    assert intent.resource == "compute/vm/vm"
+    group = from_az(["az", "group", "delete", "--ids", "/subscriptions/s/resourceGroups/rg1"])
+    assert group.resource == "resource/group/rg1"
+    assert group.metadata["resource_group"] == "rg1"
+
+
+def test_az_multiple_ids_yield_one_intent_each_and_single_form_rejects():
+    argv = [
+        "az",
+        "vm",
+        "deallocate",
+        "--ids",
+        f"{ARM}/Microsoft.Compute/virtualMachines/a",
+        "/subscriptions/sub-1/resourceGroups/rg-2/providers/Microsoft.Compute/virtualMachines/b",
+        "--no-wait",
+    ]
+    intents = from_az_multi(argv)
+    assert [i.resource for i in intents] == ["compute/vm/a", "compute/vm/b"]
+    assert [i.metadata["resource_group"] for i in intents] == ["rg-1", "rg-2"]
+    assert all(i.action == "stop" and i.params["no-wait"] is True for i in intents)
+    with pytest.raises(ValueError):
+        from_az(argv)
+    assert [i.resource for i in from_argv(argv)] == ["compute/vm/a", "compute/vm/b"]
+
+
+def test_az_ids_equals_form_and_explicit_flags_win_over_arm_metadata():
+    intent = from_az(
+        [
+            "az",
+            "vm",
+            "start",
+            f"--ids={ARM}/Microsoft.Compute/virtualMachines/a",
+            "--subscription",
+            "other",
+        ]
+    )
+    assert intent.resource == "compute/vm/a"
+    assert intent.metadata["subscription"] == "other"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "not-an-arm-id",
+        "/subscriptions",
+        "/subscriptions/s/resourceGroups",
+        "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute",
+        "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/a/extensions",
+    ],
+)
+def test_az_ids_malformed_arm_path_raises(bad):
+    with pytest.raises(ValueError):
+        from_az(["az", "resource", "delete", "--ids", bad])
+
+
+@pytest.mark.parametrize(
+    "argv, resource, action",
+    [
+        (
+            [
+                "gh",
+                "api",
+                "-X",
+                "POST",
+                "repos/o/r/actions/workflows/deploy-prod.yml/dispatches",
+                "-f",
+                "ref=main",
+            ],
+            "workflow/deploy-prod.yml",
+            "run",
+        ),
+        (
+            [
+                "gh",
+                "api",
+                "--method",
+                "post",
+                "/repos/o/r/actions/workflows/deploy-prod.yml/dispatches",
+            ],
+            "workflow/deploy-prod.yml",
+            "run",
+        ),
+        (
+            ["gh", "api", "--method=POST", "repos/o/r/releases", "-F", "tag_name=v1"],
+            "release/*",
+            "create",
+        ),
+        (["gh", "api", "-X", "DELETE", "repos/o/r/releases/12345"], "release/12345", "delete"),
+        (["gh", "api", "-X", "DELETE", "repos/o/r"], "repo/o/r", "delete"),
+        (["gh", "api", "-X", "DELETE", "https://api.github.com/repos/o/r"], "repo/o/r", "delete"),
+        (["gh", "api", "-X", "PUT", "repos/o/r/actions/secrets/API_KEY"], "secret/API_KEY", "put"),
+        (
+            ["gh", "api", "-X", "DELETE", "repos/o/r/actions/secrets/API_KEY"],
+            "secret/API_KEY",
+            "delete",
+        ),
+        (
+            ["gh", "api", "-X", "DELETE", "repos/o/r/branches/main/protection"],
+            "branch-protection/main",
+            "delete",
+        ),
+        (
+            ["gh", "api", "-X", "PUT", "repos/o/r/branches/main/protection"],
+            "branch-protection/main",
+            "update",
+        ),
+    ],
+    ids=lambda v: " ".join(v) if isinstance(v, list) else "",
+)
+def test_gh_api_rest_paths_map_to_porcelain_resources(argv, resource, action):
+    intent = from_gh(argv)
+    assert intent.provider == "github"
+    assert intent.resource == resource
+    assert intent.action == action
+    assert intent.metadata["repo"] == "o/r"
+    assert intent.params["api_path"].startswith("repos/o/r")
+
+
+def test_gh_api_workflow_dispatch_matches_gh_workflow_run():
+    via_api = from_gh(
+        [
+            "gh",
+            "api",
+            "-X",
+            "POST",
+            "repos/o/r/actions/workflows/deploy-prod.yml/dispatches",
+            "-f",
+            "ref=main",
+            "-F",
+            "inputs[env]=prod",
+        ]
+    )
+    via_porcelain = from_gh(
+        ["gh", "workflow", "run", "deploy-prod.yml", "-R", "o/r", "-r", "main", "-f", "env=prod"]
+    )
+    assert (via_api.resource, via_api.action) == (via_porcelain.resource, via_porcelain.action)
+    assert via_api.metadata["repo"] == via_porcelain.metadata["repo"] == "o/r"
+    assert via_api.metadata["ref"] == via_porcelain.metadata["ref"] == "main"
+    assert via_api.params["inputs"] == {"ref": "main", "inputs[env]": "prod"}
+
+
+def test_gh_api_unrouted_paths_and_methods_keep_the_generic_api_resource():
+    read = from_gh(["gh", "api", "repos/o/r/actions/workflows/x.yml/dispatches?per_page=1"])
+    assert read.action == "read"
+    assert read.resource == "api/repos/o/r/actions/workflows/x.yml/dispatches"
+    assert read.metadata["repo"] == "o/r"
+    other = from_gh(["gh", "api", "-X", "PATCH", "repos/o/r/issues/1"])
+    assert other.resource == "api/repos/o/r/issues/1" and other.action == "update"
+    user = from_gh(["gh", "api", "user"])
+    assert user.resource == "api/user" and "repo" not in user.metadata
+
+
+def test_gh_api_explicit_repo_flag_wins_over_the_path():
+    intent = from_gh(["gh", "api", "-R", "a/b", "-X", "DELETE", "repos/o/r"])
+    assert intent.metadata["repo"] == "a/b"
+    assert intent.resource == "repo/o/r"
+
+
+# --- REVIEW-4 T1.6: terraform address aliases, region resolution, plan digest -----
+
+
+def _tf_change(address, actions, **extra):
+    change = {"address": address, "change": {"actions": actions, "before": {}, "after": {}}}
+    change.update(extra)
+    return change
+
+
+def test_module_address_yields_type_name_alias():
+    plan = {
+        "resource_changes": [
+            _tf_change(
+                "module.app.aws_db_instance.main",
+                ["delete"],
+                type="aws_db_instance",
+                name="main",
+                module_address="module.app",
+            )
+        ]
+    }
+    (intent,) = from_terraform_plan(plan)
+    assert intent.resource == "module.app.aws_db_instance.main"
+    assert intent.metadata["type_name"] == "aws_db_instance.main"
+    assert intent.metadata["module_path"] == "module.app"
+    assert terraform_resource_aliases(intent) == [
+        "module.app.aws_db_instance.main",
+        "aws_db_instance.main",
+    ]
+
+
+def test_nested_and_indexed_module_prefixes_are_stripped():
+    plan = {
+        "resource_changes": [
+            _tf_change('module.app.module.db["primary"].aws_db_instance.main[0]', ["update"]),
+            _tf_change("module.net[1].aws_vpc.this", ["create"]),
+        ]
+    }
+    a, b = from_terraform_plan(plan)
+    assert a.metadata["type_name"] == "aws_db_instance.main[0]"
+    assert a.metadata["module_path"] == 'module.app.module.db["primary"]'
+    assert b.metadata["type_name"] == "aws_vpc.this"
+    assert b.metadata["module_path"] == "module.net[1]"
+
+
+def test_root_module_resource_has_type_name_equal_to_address_and_single_alias():
+    plan = {"resource_changes": [_tf_change("aws_instance.web", ["create"])]}
+    (intent,) = from_terraform_plan(plan)
+    assert intent.metadata["type_name"] == "aws_instance.web"
+    assert "module_path" not in intent.metadata
+    assert terraform_resource_aliases(intent) == ["aws_instance.web"]
+
+
+def test_terraform_resource_aliases_is_safe_on_non_plan_intents():
+    intent = from_kubectl(["kubectl", "delete", "pod/x"])
+    assert terraform_resource_aliases(intent) == ["pod/x"]
+
+
+def test_region_resolved_from_variables_when_provider_config_references_var():
+    plan = {
+        "variables": {"region": {"value": "eu-west-1"}},
+        "configuration": {
+            "provider_config": {"aws": {"expressions": {"region": {"references": ["var.region"]}}}}
+        },
+        "resource_changes": [
+            _tf_change(
+                "aws_instance.web", ["delete"], provider_name="registry.terraform.io/hashicorp/aws"
+            )
+        ],
+    }
+    (intent,) = from_terraform_plan(plan)
+    assert intent.params["region"] == "eu-west-1"
+    assert intent.metadata["region"] == "eu-west-1"
+
+
+def test_region_resolved_from_planned_values_before_provider_config():
+    plan = {
+        "configuration": {
+            "provider_config": {"aws": {"expressions": {"region": {"constant_value": "us-east-1"}}}}
+        },
+        "planned_values": {
+            "root_module": {
+                "child_modules": [
+                    {
+                        "resources": [
+                            {
+                                "address": "module.m.aws_instance.x",
+                                "values": {"region": "ap-south-1"},
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+        "resource_changes": [
+            _tf_change(
+                "module.m.aws_instance.x",
+                ["create"],
+                provider_name="registry.terraform.io/hashicorp/aws",
+            )
+        ],
+    }
+    (intent,) = from_terraform_plan(plan)
+    assert intent.params["region"] == "ap-south-1"
+
+
+def test_region_resolved_from_prior_state_as_last_resort():
+    plan = {
+        "prior_state": {
+            "values": {
+                "root_module": {
+                    "resources": [{"address": "aws_instance.x", "values": {"region": "sa-east-1"}}]
+                }
+            }
+        },
+        "resource_changes": [_tf_change("aws_instance.x", ["update"])],
+    }
+    (intent,) = from_terraform_plan(plan)
+    assert intent.params["region"] == "sa-east-1"
+
+
+def test_region_uses_the_resources_provider_alias_from_configuration():
+    plan = {
+        "configuration": {
+            "provider_config": {
+                "aws": {"expressions": {"region": {"constant_value": "us-east-1"}}},
+                "aws.west": {"expressions": {"region": {"constant_value": "us-west-2"}}},
+            },
+            "root_module": {
+                "resources": [{"address": "aws_instance.west", "provider_config_key": "aws.west"}]
+            },
+        },
+        "resource_changes": [
+            _tf_change(
+                "aws_instance.west", ["create"], provider_name="registry.terraform.io/hashicorp/aws"
+            ),
+            _tf_change(
+                "aws_instance.east", ["create"], provider_name="registry.terraform.io/hashicorp/aws"
+            ),
+        ],
+    }
+    west, east = from_terraform_plan(plan)
+    assert west.params["region"] == "us-west-2"
+    assert east.params["region"] == "us-east-1"
+
+
+def test_region_from_module_scoped_provider_config():
+    plan = {
+        "configuration": {
+            "provider_config": {
+                "module.app:aws": {"expressions": {"region": {"references": ["var.r"]}}}
+            },
+            "root_module": {
+                "module_calls": {
+                    "app": {
+                        "module": {
+                            "resources": [
+                                {
+                                    "address": "aws_instance.x",
+                                    "provider_config_key": "module.app:aws",
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+        },
+        "variables": {"r": {"value": "ca-central-1"}},
+        "resource_changes": [
+            _tf_change(
+                "module.app.aws_instance.x",
+                ["delete"],
+                provider_name="registry.terraform.io/hashicorp/aws",
+            )
+        ],
+    }
+    (intent,) = from_terraform_plan(plan)
+    assert intent.params["region"] == "ca-central-1"
+
+
+def test_create_carries_region_and_change_values_win():
+    plan = {
+        "configuration": {
+            "provider_config": {"aws": {"expressions": {"region": {"constant_value": "eu-west-1"}}}}
+        },
+        "resource_changes": [
+            _tf_change(
+                "aws_instance.a", ["create"], provider_name="registry.terraform.io/hashicorp/aws"
+            ),
+            {
+                "address": "aws_instance.b",
+                "provider_name": "registry.terraform.io/hashicorp/aws",
+                "change": {"actions": ["create"], "before": None, "after": {"region": "us-east-2"}},
+            },
+        ],
+    }
+    a, b = from_terraform_plan(plan)
+    assert (
+        a.action == "create"
+        and a.params["region"] == "eu-west-1"
+        and a.metadata["region"] == "eu-west-1"
+    )
+    assert b.params["region"] == "us-east-2"
+
+
+def test_no_region_anywhere_leaves_both_keys_absent():
+    (intent,) = from_terraform_plan(
+        {"resource_changes": [_tf_change("aws_instance.a", ["create"])]}
+    )
+    assert "region" not in intent.params and "region" not in intent.metadata
+
+
+def test_plan_digest_is_stable_canonical_and_content_sensitive():
+    plan = {
+        "resource_changes": [_tf_change("aws_instance.a", ["create"])],
+        "terraform_version": "1.9.0",
+    }
+    reordered = {
+        "terraform_version": "1.9.0",
+        "resource_changes": [_tf_change("aws_instance.a", ["create"])],
+    }
+    assert plan_digest(plan) == plan_digest(plan) == plan_digest(reordered)
+    assert len(plan_digest(plan)) == 64
+    changed = {**plan, "terraform_version": "1.9.1"}
+    assert plan_digest(changed) != plan_digest(plan)
+    deleted = {
+        "resource_changes": [_tf_change("aws_instance.a", ["delete"])],
+        "terraform_version": "1.9.0",
+    }
+    assert plan_digest(deleted) != plan_digest(plan)
+
+
+def test_every_plan_intent_carries_the_plan_sha256():
+    plan = {
+        "resource_changes": [
+            _tf_change("aws_instance.a", ["create"]),
+            _tf_change("aws_instance.b", ["delete"]),
+        ]
+    }
+    intents = from_terraform_plan(plan)
+    assert {i.metadata["plan_sha256"] for i in intents} == {plan_digest(plan)}
+    tofu = {**plan, "opentofu": True}
+    assert {i.metadata["plan_sha256"] for i in from_terraform_plan(tofu)} == {plan_digest(tofu)}
+    assert plan_digest(tofu) != plan_digest(plan)

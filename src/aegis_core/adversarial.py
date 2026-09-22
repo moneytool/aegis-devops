@@ -2,7 +2,7 @@
 poisoned constraints and evasive command lines.
 
 Each :class:`Attack` documents one way a constraint can be poisoned — or a
-command line shaped to slip past the parser — in one of five categories:
+command line shaped to slip past the parser — in one of six categories:
 
   * ``tampered``     — the constraint's fields were mutated after ingest, so
     its stored ``provenance_hash`` no longer matches. Caught by
@@ -32,7 +32,17 @@ command line shaped to slip past the parser — in one of five categories:
     comma-separated kinds, namespace deletion (which cascades to every
     object in the namespace). Each carries the ``argv`` to parse, the
     ``now`` to evaluate at, and the ``expected_rule`` from the example
-    store that a constraint author would expect to fire.
+    store that a constraint author would expect to fire. REVIEW-4 T1.5/T1.7
+    added the flag spellings and provider-namespace aliases that used to
+    slip past a rule written for the normal form (``--prune=true`` as the
+    string ``"true"``, ``--dry-run=false`` as a dry run, ``az … --ids
+    <ARM path>``, ``gh api … /dispatches``).
+  * ``shell-evasion``  — the same idea one level up (REVIEW-4 T1.2): a
+    *shell string* whose shape hid the dangerous command from an argv-only
+    gate — compound commands (``a; b``, ``a && b``), launchers (``sudo``,
+    ``env``, ``timeout``, ``sh -c``), aliases (``k``), pipelines. Each
+    carries the ``command`` string for :func:`aegis_core.shell.intents_from_command`
+    and the ``expected_rule`` that must fire on one of the resulting intents.
 
 Attacks in the first two categories return a poisoned :class:`Constraint`
 that can be inserted directly into ``store.constraints`` (bypassing
@@ -43,7 +53,8 @@ exists — for these, :func:`apply` returns ``None`` and the caller is
 expected to construct the malicious constraint itself and call
 ``add_constraint``. ``argv-evasion`` attacks don't mutate a constraint at
 all; :func:`apply` returns the base unchanged and the test parses
-``attack.argv`` instead.
+``attack.argv`` instead; ``shell-evasion`` likewise, parsing
+``attack.command``.
 """
 
 import random
@@ -53,7 +64,7 @@ from dataclasses import dataclass
 from aegis_core.provenance import compute_provenance_hash
 from aegis_core.store import Constraint
 
-CATEGORIES = ("tampered", "unauthorized", "forged", "evasion", "argv-evasion")
+CATEGORIES = ("tampered", "unauthorized", "forged", "evasion", "argv-evasion", "shell-evasion")
 
 
 @dataclass(frozen=True)
@@ -67,6 +78,8 @@ class Attack:
     argv: tuple[str, ...] | None = None
     now: str | None = None
     expected_rule: str | None = None
+    # shell-evasion only: the raw shell string to check.
+    command: str | None = None
 
 
 def _rehash(c: Constraint) -> Constraint:
@@ -328,11 +341,183 @@ _ARGV_EVASION_ATTACKS: list[Attack] = [
         argv=("helm", "-n", "prod", "uninstall", "web"),
         expected_rule="helm-block-release-delete-prod",
     ),
+    # REVIEW-4 T1.5: boolean spellings.
+    Attack(
+        name="argv-argocd-prune-equals-true",
+        category="argv-evasion",
+        description='"--prune=true" used to be the string "true", never equal to '
+        "scope prune: true.",
+        expected_reason=None,
+        argv=("argocd", "app", "sync", "prod-web", "--prune=true"),
+        expected_rule="argocd-escalate-prod-sync-prune",
+    ),
+    Attack(
+        name="argv-argocd-dry-run-false",
+        category="argv-evasion",
+        description='"--prune --dry-run=false" used to be treated as a dry run and '
+        "downgraded to ALLOW.",
+        expected_reason=None,
+        argv=("argocd", "app", "sync", "prod-web", "--prune", "--dry-run=false"),
+        expected_rule="argocd-escalate-prod-sync-prune",
+    ),
+    # REVIEW-4 T1.7: provider-namespace aliases.
+    Attack(
+        name="argv-az-resource-delete-ids",
+        category="argv-evasion",
+        description='"az resource delete --ids .../managedClusters/c1" used to be "resource/*".',
+        expected_reason=None,
+        argv=(
+            "az", "resource", "delete", "--ids",
+            "/subscriptions/s1/resourceGroups/rg1/providers/Microsoft.ContainerService/managedClusters/c1",
+        ),
+        expected_rule="azure-escalate-aks-scale-delete",
+    ),
+    Attack(
+        name="argv-az-aks-delete-ids",
+        category="argv-evasion",
+        description='"az aks delete --ids ..." (the group form) is the same AKS cluster deletion.',
+        expected_reason=None,
+        argv=(
+            "az", "aks", "delete", "--yes", "--ids",
+            "/subscriptions/s1/resourceGroups/rg1/providers/Microsoft.ContainerService/managedClusters/c1",
+        ),
+        expected_rule="azure-escalate-aks-scale-delete",
+    ),
+    Attack(
+        name="argv-gh-api-workflow-dispatch",
+        category="argv-evasion",
+        description='"gh api -X POST .../workflows/deploy-prod.yml/dispatches" used to '
+        'be "api/...".',
+        expected_reason=None,
+        argv=(
+            "gh", "api", "-X", "POST",
+            "repos/acme/platform/actions/workflows/deploy-prod.yml/dispatches", "-f", "ref=main",
+        ),
+        expected_rule="github-escalate-deploy-prod-workflow",
+    ),
+    Attack(
+        name="argv-gh-api-workflow-dispatch-full-url",
+        category="argv-evasion",
+        description="Same dispatch through the absolute API URL with a query string.",
+        expected_reason=None,
+        argv=(
+            "gh", "api", "--method", "post",
+            "https://api.github.com/repos/acme/platform/actions/workflows/deploy-prod.yml/dispatches?x=1",
+        ),
+        expected_rule="github-escalate-deploy-prod-workflow",
+    ),
+]
+
+
+# REVIEW-4 T1.2: shell strings whose shape hid the command from an
+# argv-only gate. Each is fed to aegis_core.shell.intents_from_command.
+_SHELL_EVASION_ATTACKS: list[Attack] = [
+    Attack(
+        name="shell-compound-semicolon",
+        category="shell-evasion",
+        description='"kubectl get pods; kubectl delete node/w1": the delete hides behind a read.',
+        expected_reason=None,
+        command="kubectl get pods; kubectl delete node/w1",
+        expected_rule="no-delete-nodes",
+    ),
+    Attack(
+        name="shell-compound-and-or",
+        category="shell-evasion",
+        description='"kubectl get pods && kubectl delete node/w1 || true".',
+        expected_reason=None,
+        command="kubectl get pods && kubectl delete node/w1 || true",
+        expected_rule="no-delete-nodes",
+    ),
+    Attack(
+        name="shell-newline-separated",
+        category="shell-evasion",
+        description="A two-line script: the delete is on the second line.",
+        expected_reason=None,
+        command="kubectl get pods\nkubectl delete node/w1",
+        expected_rule="no-delete-nodes",
+    ),
+    Attack(
+        name="shell-sudo-wrapper",
+        category="shell-evasion",
+        description='"sudo kubectl delete node/w1": binary hidden behind sudo.',
+        expected_reason=None,
+        command="sudo kubectl delete node/w1",
+        expected_rule="no-delete-nodes",
+    ),
+    Attack(
+        name="shell-sudo-user-env-wrapper",
+        category="shell-evasion",
+        description='"sudo -u deploy -E env KUBECONFIG=/etc/prod.kubeconfig kubectl '
+        'delete node/w1".',
+        expected_reason=None,
+        command="sudo -u deploy -E env KUBECONFIG=/etc/prod.kubeconfig kubectl delete node/w1",
+        expected_rule="no-delete-nodes",
+    ),
+    Attack(
+        name="shell-timeout-nice-nohup-wrapper",
+        category="shell-evasion",
+        description='"timeout 30 nice -n 10 nohup kubectl delete node/w1".',
+        expected_reason=None,
+        command="timeout 30 nice -n 10 nohup kubectl delete node/w1",
+        expected_rule="no-delete-nodes",
+    ),
+    Attack(
+        name="shell-alias-k",
+        category="shell-evasion",
+        description='"k delete node/w1": the kubectl alias.',
+        expected_reason=None,
+        command="k delete node/w1",
+        expected_rule="no-delete-nodes",
+    ),
+    Attack(
+        name="shell-sh-c-string",
+        category="shell-evasion",
+        description="\"sh -c 'kubectl delete node/w1'\": the command is a string inside a shell.",
+        expected_reason=None,
+        command="sh -c 'kubectl delete node/w1'",
+        expected_rule="no-delete-nodes",
+    ),
+    Attack(
+        name="shell-bash-c-compound",
+        category="shell-evasion",
+        description="\"bash -ec 'kubectl get pods; sudo k delete node/w1'\": compound "
+        "inside a shell string.",
+        expected_reason=None,
+        command="bash -ec 'kubectl get pods; sudo k delete node/w1'",
+        expected_rule="no-delete-nodes",
+    ),
+    Attack(
+        name="shell-helm-glued-namespace-behind-sudo",
+        category="shell-evasion",
+        description='"sudo helm uninstall web -nprod 2>&1 | tee log": launcher, glued '
+        "flag, redirect, pipe.",
+        expected_reason=None,
+        command="sudo helm uninstall web -nprod 2>&1 | tee log",
+        expected_rule="helm-block-release-delete-prod",
+    ),
+    Attack(
+        name="shell-git-force-push-in-pipeline",
+        category="shell-evasion",
+        description='"git -C /repo push -f origin main | tee push.log": known binary on '
+        "the left of a pipe.",
+        expected_reason=None,
+        command="git -C /repo push -f origin main | tee push.log",
+        expected_rule="git-block-force-push-main",
+    ),
+    Attack(
+        name="shell-argocd-prune-in-compound",
+        category="shell-evasion",
+        description='"argocd app get prod-web && argocd app sync prod-web --prune=true".',
+        expected_reason=None,
+        command="argocd app get prod-web && argocd app sync prod-web --prune=true",
+        expected_rule="argocd-escalate-prod-sync-prune",
+    ),
 ]
 
 
 _APPLIERS: dict[str, Callable[[Constraint, random.Random], Constraint]] = {
     **{a.name: _argv_evasion for a in _ARGV_EVASION_ATTACKS},
+    **{a.name: _argv_evasion for a in _SHELL_EVASION_ATTACKS},
     "tamper-rule-text": _tamper_rule_text,
     "tamper-effect-downgrade": _tamper_effect_downgrade,
     "tamper-effect-upgrade": _tamper_effect_upgrade,
@@ -474,6 +659,7 @@ _REGISTRY: list[Attack] = [
         expected_reason=None,
     ),
     *_ARGV_EVASION_ATTACKS,
+    *_SHELL_EVASION_ATTACKS,
 ]
 
 

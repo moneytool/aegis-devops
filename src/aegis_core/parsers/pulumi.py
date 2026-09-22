@@ -10,7 +10,10 @@ single, stack-scoped intent that's enough to gate the invocation itself.
 from typing import Any
 
 from aegis_core.intent import InfrastructureIntent
-from aegis_core.parser import _basename  # noqa: F401  (re-exported convention)
+from aegis_core.parser import (
+    _basename,  # noqa: F401  (re-exported convention)
+    plan_digest,
+)
 
 _OP_ACTION = {
     "same": "no-op",
@@ -45,18 +48,24 @@ def _parse_urn(urn: str) -> tuple[str, str, str, str]:
     return stack, project, raw_type, name
 
 
-def _type_to_resource(raw_type: str, name: str) -> str:
-    """``aws:ec2/instance:Instance`` + ``web`` -> ``aws/ec2/instance/web``.
-
-    Pulumi types end with a CamelCase token that usually repeats the module's
-    last segment (``ec2/instance:Instance``); collapsing it keeps resource
-    globs short (``aws/ec2/instance/*``) and consistent with the terraform
-    and cloud-CLI parsers.
-    """
+def _type_name(raw_type: str) -> str:
+    """``aws:ec2/instance:Instance`` -> ``aws/ec2/instance``: the resource's
+    type in the same slash form as the resource id, minus the name. Pulumi
+    types end with a CamelCase token that usually repeats the module's last
+    segment (``ec2/instance:Instance``); collapsing it keeps resource globs
+    short (``aws/ec2/instance/*``) and consistent with the terraform and
+    cloud-CLI parsers. Exposed as ``metadata["type_name"]`` (REVIEW-4 T1.6)
+    so :func:`aegis_core.parser.terraform_resource_aliases` can offer it as
+    a second match candidate."""
     segments = [seg for seg in raw_type.lower().replace(":", "/").split("/") if seg]
     if len(segments) >= 2 and segments[-1] == segments[-2]:
         segments.pop()
-    return "/".join(segments) + f"/{name}"
+    return "/".join(segments)
+
+
+def _type_to_resource(raw_type: str, name: str) -> str:
+    """``aws:ec2/instance:Instance`` + ``web`` -> ``aws/ec2/instance/web``."""
+    return f"{_type_name(raw_type)}/{name}"
 
 
 def _state_field(state: dict[str, Any] | None, key: str) -> Any:
@@ -80,7 +89,13 @@ def from_pulumi_preview(
     aren't a proposed change). ``op: "read"``/``"refresh"`` steps are
     skipped unless ``include_reads=True`` for the same reason data-source
     reads are skipped in the terraform parser.
+
+    Every intent carries ``metadata["plan_sha256"]`` (the
+    :func:`aegis_core.parser.plan_digest` of ``preview_json``) and
+    ``metadata["type_name"]`` (``aws/rds/instance`` for
+    ``aws:rds/instance:Instance``).
     """
+    digest = plan_digest(preview_json)
     intents = []
     for step in preview_json.get("steps", []):
         op = step.get("op")
@@ -103,7 +118,9 @@ def from_pulumi_preview(
             "stack": stack,
             "project": project,
             "type": raw_type,
+            "type_name": _type_name(raw_type),
             "provider_name": raw_type.split(":", 1)[0],
+            "plan_sha256": digest,
         }
         region = _state_field(new_state, "region") or _state_field(old_state, "region")
         if region is not None:

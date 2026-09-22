@@ -311,3 +311,33 @@ def test_ec2_delete_is_not_covered_by_rds_rule():
     decision = interceptor.intercept(intent, now=NOW)
     assert decision.verdict == "ALLOW"
     assert decision.covered is False
+
+
+# --- REVIEW-4 T1.6: type_name alias and plan digest --------------------------------
+
+
+def test_preview_intents_carry_type_name_alias():
+    from aegis_core.parser import terraform_resource_aliases
+
+    preview = {"steps": [_step("delete", AWS_RDS_URN)]}
+    (intent,) = from_pulumi_preview(preview)
+    assert intent.resource == "aws/rds/instance/db1"
+    assert intent.metadata["type_name"] == "aws/rds/instance"
+    assert terraform_resource_aliases(intent) == ["aws/rds/instance/db1", "aws/rds/instance"]
+
+
+def test_parented_type_name_uses_leaf_type():
+    urn = "urn:pulumi:prod::myproj::aws:ec2/vpc:Vpc$aws:ec2/subnet:Subnet::subnet1"
+    (intent,) = from_pulumi_preview({"steps": [_step("create", urn)]})
+    assert intent.metadata["type_name"] == "aws/ec2/subnet"
+
+
+def test_preview_intents_carry_plan_sha256_of_the_preview_document():
+    from aegis_core.parser import plan_digest
+
+    preview = {"steps": [_step("create", AWS_EC2_URN), _step("delete", AWS_RDS_URN)]}
+    intents = from_pulumi_preview(preview)
+    assert {i.metadata["plan_sha256"] for i in intents} == {plan_digest(preview)}
+    assert len(plan_digest(preview)) == 64
+    other = {"steps": [_step("create", AWS_EC2_URN), _step("update", AWS_RDS_URN)]}
+    assert from_pulumi_preview(other)[0].metadata["plan_sha256"] != plan_digest(preview)

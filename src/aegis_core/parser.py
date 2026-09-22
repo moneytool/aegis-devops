@@ -31,8 +31,34 @@ parser also emits a synthetic intent ``resource="*/*"``,
 ``scope: {namespace: prod}`` deletion rule fire on the namespace deletion
 itself. Only named namespaces cascade; ``namespace/*`` (``--all``, a
 selector) does not, because there is no single namespace to scope on.
+
+**Boolean flags and dry runs (REVIEW-4 T1.5).** Every parser routes its
+known boolean flags through :func:`_coerce_bool`, so ``--prune=true`` is
+``True`` and ``--prune=false`` is ``False`` — never the strings ``"true"`` /
+``"false"``. ``params["dry_run"]`` is set *only* when the flag is bare or
+truthy (``--dry-run``, ``--dry-run=true``, kubectl/helm ``=client`` /
+``=server``); ``--dry-run=false`` / ``=none`` / ``=0`` leave the key
+absent, so a "real run" rule fires.
+
+**Provider-namespace aliases (REVIEW-4 T1.7).** ``aws s3api`` / ``s3control``
+collapse to service ``s3``; ``az ... --ids <ARM path>`` is parsed into the
+same ``<service>/<kind>/<name>`` form as the named-flag invocation; ``gh
+api`` REST paths for workflow dispatch, releases, repo deletion, secrets
+and branch protection map to the same resources as the porcelain
+commands; ``git push`` without a refspec is marked
+``params["unknown_target"]=True`` so the caller can escalate.
+
+**Terraform / Pulumi plans (REVIEW-4 T1.6).** Every plan intent carries
+``metadata["plan_sha256"]`` (:func:`plan_digest` of the JSON that was
+checked) and ``metadata["type_name"]`` — the module-stripped
+``<type>.<name>`` for terraform, ``<provider>/<module>/<type>`` for pulumi
+— so :func:`terraform_resource_aliases` gives a matcher both the full
+address and the short form to try against ``resource_pattern``.
 """
 
+import hashlib
+import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -224,6 +250,55 @@ def _coerce(value: str) -> Any:
         return value
 
 
+_TRUE_WORDS = frozenset({"true", "t", "yes", "y", "1", "on"})
+_FALSE_WORDS = frozenset({"false", "f", "no", "n", "0", "off"})
+
+
+def _coerce_bool(value: Any) -> bool | None:
+    """Boolean coercion shared by every parser: ``None`` (a bare flag) ->
+    True; ``"true"/"t"/"yes"/"y"/"1"/"on"`` -> True and
+    ``"false"/"f"/"no"/"n"/"0"/"off"`` -> False, case-insensitively; a
+    real bool/int passes through; any other spelling -> ``None`` (not a
+    boolean value)."""
+    if value is None:
+        return True
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int | float):
+        return bool(value)
+    word = str(value).strip().lower()
+    if word in _TRUE_WORDS:
+        return True
+    if word in _FALSE_WORDS:
+        return False
+    return None
+
+
+def _bool_param(value: str | None) -> Any:
+    """The value to record for a *known-boolean* flag: ``--flag`` -> True,
+    ``--flag=false`` -> False. A non-boolean spelling (kubectl's
+    ``--cascade=orphan``) is recorded as given, never mistaken for True."""
+    coerced = _coerce_bool(value)
+    return coerced if coerced is not None else _coerce(value)
+
+
+def _is_dry_run(value: str | None, *, truthy: frozenset[str] = frozenset()) -> bool:
+    """Whether a ``--dry-run[=value]`` spelling is a rehearsal. Bare and
+    boolean-true values are; so are the tool's own words in ``truthy``
+    (kubectl/helm ``client``/``server``). Anything else — ``false``,
+    ``none``, ``0``, an unrecognised word — is treated as a real run, so
+    the stricter rule applies (fail closed)."""
+    if value is None:
+        return True
+    word = value.strip().lower()
+    if word in truthy:
+        return True
+    return _coerce_bool(word) is True
+
+
+_KUBECTL_DRY_RUN_WORDS = frozenset({"client", "server"})
+
+
 def _value_at(tokens: list[str], i: int, flag: str) -> str:
     """``tokens[i]`` as the value of ``flag``, or a ValueError (not an
     IndexError) when the argv ends right after a flag that needs a value."""
@@ -380,9 +455,10 @@ def _parse_flags(
                     val = _value_at(tokens, i, tok)
                 metadata["cluster"] = val
             elif key == "dry-run":
-                # bare --dry-run, --dry-run=client, --dry-run=server are all
-                # rehearsals; --dry-run=none is a real run.
-                if val is None or val in ("client", "server"):
+                # bare --dry-run, --dry-run=client, --dry-run=server (and the
+                # deprecated --dry-run=true) are rehearsals; --dry-run=none /
+                # =false is a real run.
+                if _is_dry_run(val, truthy=_KUBECTL_DRY_RUN_WORDS):
                     params["dry_run"] = True
             elif key in _SELECTOR_FLAGS:
                 if val is None:
@@ -400,8 +476,8 @@ def _parse_flags(
                     val = _value_at(tokens, i, tok)
             elif key in _DISCARD_BOOL_FLAGS:
                 pass
-            elif val is None and key in _KNOWN_BOOL_FLAGS:
-                params[key] = True
+            elif key in _KNOWN_BOOL_FLAGS:
+                params[key] = _bool_param(val)
             elif val is not None:
                 params[key] = _coerce(val)
             elif is_long:
@@ -561,14 +637,154 @@ def _provider_short_name(provider_name: str) -> str:
     return provider_name.rsplit("/", 1)[-1]
 
 
-def _region_from_provider_config(plan_json: dict[str, Any], provider_short: str) -> Any:
-    provider_configs = plan_json.get("configuration", {}).get("provider_config", {})
-    for key, cfg in provider_configs.items():
-        if key == provider_short or key.startswith(f"{provider_short}."):
-            region = cfg.get("expressions", {}).get("region", {}).get("constant_value")
+_TF_MODULE_PREFIX_RE = re.compile(r"^(?:module\.[^.\[]+(?:\[[^\]]*\])?\.)+")
+
+
+def _split_terraform_address(address: str) -> tuple[str, str | None]:
+    """``module.app.module.db[0].aws_db_instance.main`` ->
+    ``("aws_db_instance.main", "module.app.module.db[0]")``; an address with
+    no module prefix keeps its ``module_path`` as ``None``."""
+    match = _TF_MODULE_PREFIX_RE.match(address)
+    if not match:
+        return address, None
+    return address[match.end():], match.group(0).rstrip(".")
+
+
+def _walk_state_modules(module: dict[str, Any] | None):
+    """Yields every resource dict in a ``planned_values`` /
+    ``prior_state.values`` module tree (root and nested child modules)."""
+    if not module:
+        return
+    yield from module.get("resources") or []
+    for child in module.get("child_modules") or []:
+        yield from _walk_state_modules(child)
+
+
+def _region_from_values(values: dict[str, Any] | None, address: str) -> Any:
+    for resource in _walk_state_modules((values or {}).get("root_module")):
+        if resource.get("address") == address:
+            region = (resource.get("values") or {}).get("region")
             if region is not None:
                 return region
     return None
+
+
+def _config_module_for(plan_json: dict[str, Any], module_path: str | None) -> dict[str, Any]:
+    """The ``configuration`` module dict that declares the resources at
+    ``module_path`` (``None`` -> root module)."""
+    module = plan_json.get("configuration", {}).get("root_module", {}) or {}
+    for name in re.findall(r"module\.([^.\[]+)", module_path or ""):
+        module = ((module.get("module_calls") or {}).get(name) or {}).get("module") or {}
+    return module
+
+
+def _provider_config_key(
+    plan_json: dict[str, Any], type_name: str, module_path: str | None
+) -> str | None:
+    """The resource's ``provider_config_key`` (``aws``, ``aws.west``,
+    ``module.app:aws``) from the configuration block, if declared."""
+    base = re.sub(r"\[[^\]]*\]$", "", type_name)
+    for resource in _config_module_for(plan_json, module_path).get("resources") or []:
+        if resource.get("address") in (type_name, base):
+            return resource.get("provider_config_key")
+    return None
+
+
+def _resolve_expression(plan_json: dict[str, Any], expression: dict[str, Any] | None) -> Any:
+    """A configuration expression's value: its ``constant_value``, or the
+    plan-time value of the ``var.<name>`` it references."""
+    if not expression:
+        return None
+    if expression.get("constant_value") is not None:
+        return expression["constant_value"]
+    for ref in expression.get("references") or []:
+        if ref.startswith("var."):
+            name = ref[len("var."):].split(".", 1)[0].split("[", 1)[0]
+            value = (plan_json.get("variables", {}).get(name) or {}).get("value")
+            if value is not None:
+                return value
+    return None
+
+
+def _region_from_provider_config(
+    plan_json: dict[str, Any], provider_short: str, provider_key: str | None = None
+) -> Any:
+    provider_configs = plan_json.get("configuration", {}).get("provider_config", {}) or {}
+    ordered = []
+    if provider_key and provider_key in provider_configs:
+        ordered.append(provider_key)
+    ordered.extend(
+        key
+        for key in provider_configs
+        if key not in ordered
+        and (
+            key == provider_short
+            or key.startswith(f"{provider_short}.")
+            or key.endswith(f":{provider_short}")
+        )
+    )
+    for key in ordered:
+        expressions = provider_configs[key].get("expressions", {}) or {}
+        region = _resolve_expression(plan_json, expressions.get("region"))
+        if region is not None:
+            return region
+    return None
+
+
+def _terraform_region(
+    plan_json: dict[str, Any],
+    change: dict[str, Any],
+    address: str,
+    type_name: str,
+    module_path: str | None,
+) -> Any:
+    """Region for one ``resource_changes[]`` entry, resolved in order from
+    the change's before/after values, ``planned_values``, the provider
+    configuration (a constant or the ``var.<name>`` it references, via
+    ``variables``), and finally ``prior_state``."""
+    before = change.get("change", {}).get("before") or {}
+    after = change.get("change", {}).get("after") or {}
+    region = before.get("region") or after.get("region")
+    if region is not None:
+        return region
+    region = _region_from_values(plan_json.get("planned_values"), address)
+    if region is not None:
+        return region
+    provider_name = change.get("provider_name")
+    if provider_name:
+        region = _region_from_provider_config(
+            plan_json,
+            _provider_short_name(provider_name),
+            _provider_config_key(plan_json, type_name, module_path),
+        )
+        if region is not None:
+            return region
+    return _region_from_values((plan_json.get("prior_state") or {}).get("values"), address)
+
+
+def plan_digest(plan_json: dict[str, Any]) -> str:
+    """sha256 of the canonical JSON form of a plan / preview document
+    (sorted keys, no whitespace) — the ``plan_sha256`` every intent from
+    that document carries, so a decision can be bound to the exact plan
+    that was checked and re-verified before ``apply``."""
+    canonical = json.dumps(
+        plan_json, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def terraform_resource_aliases(intent: InfrastructureIntent) -> list[str]:
+    """The resource identifiers a matcher should try, in order, against a
+    constraint's ``resource_pattern`` for a plan-derived intent: the full
+    address (``module.app.aws_db_instance.main``) and the module-stripped
+    ``metadata["type_name"]`` (``aws_db_instance.main``), so a rule written
+    as ``aws_db_instance.*`` catches the resource wherever it lives. Works
+    for pulumi intents too (``aws/rds/instance/db1`` and
+    ``aws/rds/instance``). Intents without ``type_name`` yield just their
+    resource, so the helper is safe to call on any intent. Same as
+    :meth:`InfrastructureIntent.resource_aliases` (which the store and the
+    plan evaluator use directly, so neither has to import this module)."""
+    return intent.resource_aliases()
 
 
 def _plan_tool(plan_json: dict[str, Any], default: str) -> str:
@@ -595,11 +811,20 @@ def from_terraform_plan(
     is recorded in ``metadata["tool"]`` (``terraform`` | ``opentofu``);
     ``tool`` is the fallback when the plan itself carries no marker.
 
+    ``resource`` is the full address. ``metadata["type_name"]`` is the
+    module-stripped ``<type>.<name>`` and ``metadata["module_path"]`` the
+    stripped prefix (see :func:`terraform_resource_aliases`);
+    ``metadata["plan_sha256"]`` is :func:`plan_digest` of ``plan_json``.
+    ``region`` (in ``params`` and ``metadata``) is resolved for every
+    action, creates included, from the change values, ``planned_values``,
+    the provider configuration / ``variables``, and ``prior_state``.
+
     Data-source entries whose action is "read" are skipped by default (they
     aren't a proposed change to infrastructure) unless ``include_data`` is
     True.
     """
     tool = _plan_tool(plan_json, tool)
+    digest = plan_digest(plan_json)
     intents = []
     for change in plan_json.get("resource_changes", []):
         actions = tuple(change.get("change", {}).get("actions", []))
@@ -611,6 +836,9 @@ def from_terraform_plan(
         if mode == "data" and action == "read" and not include_data:
             continue
 
+        address = change["address"]
+        type_name, module_path = _split_terraform_address(address)
+
         metadata: dict[str, Any] = {"tool": tool}
         if "type" in change:
             metadata["type"] = change["type"]
@@ -621,30 +849,29 @@ def from_terraform_plan(
         provider_name = change.get("provider_name")
         if provider_name:
             metadata["provider_name"] = _provider_short_name(provider_name)
-        module_address = change.get("module_address")
+        module_address = change.get("module_address") or module_path
         if module_address:
             metadata["module_address"] = module_address
+            metadata["module_path"] = module_address
+        metadata["type_name"] = type_name
+        metadata["plan_sha256"] = digest
 
         params: dict[str, Any] = {}
-        if action in ("delete", "replace", "update"):
-            before = change.get("change", {}).get("before") or {}
-            after = change.get("change", {}).get("after") or {}
-            region = before.get("region") or after.get("region")
-            if region is None and provider_name:
-                region = _region_from_provider_config(
-                    plan_json, _provider_short_name(provider_name)
-                )
-            if region is not None:
-                params["region"] = region
-            tags = before.get("tags") or after.get("tags")
-            if tags is not None:
-                params["tags"] = tags
-            if change.get("change", {}).get("replace_paths"):
-                params["forced_replacement"] = True
+        region = _terraform_region(plan_json, change, address, type_name, module_path)
+        if region is not None:
+            params["region"] = region
+            metadata["region"] = region
+        before = change.get("change", {}).get("before") or {}
+        after = change.get("change", {}).get("after") or {}
+        tags = before.get("tags") or after.get("tags")
+        if tags is not None:
+            params["tags"] = tags
+        if change.get("change", {}).get("replace_paths"):
+            params["forced_replacement"] = True
 
         intents.append(
             InfrastructureIntent(
-                resource=change["address"],
+                resource=address,
                 action=action,
                 provider="terraform",
                 params=params,
@@ -727,11 +954,12 @@ def _parse_aws_tokens(
                     val = _value_at(tokens, i, tok)
                 metadata["profile"] = val
             elif key == "dry-run":
-                params["dry_run"] = True
+                if _is_dry_run(val):
+                    params["dry_run"] = True
             elif key == "no-dry-run":
                 pass  # explicitly a real run; nothing to record
             elif key in _AWS_BOOL_FLAGS:
-                params[key] = True if val is None else _coerce(val)
+                params[key] = _bool_param(val)
             elif key in _AWS_DISCARD_VALUE_FLAGS:
                 if val is None:
                     i += 1
@@ -800,6 +1028,67 @@ def _from_aws_s3(
     ]
 
 
+_IAM_PRIVILEGE_OPERATIONS = {
+    "add-user-to-group",
+    "create-access-key",
+    "create-login-profile",
+    "add-role-to-instance-profile",
+    "update-assume-role-policy",
+}
+
+
+def _is_iam_privilege_grant(operation: str) -> bool:
+    return (
+        operation.startswith("attach-")
+        or (operation.startswith("put-") and operation.endswith("-policy"))
+        or operation in _IAM_PRIVILEGE_OPERATIONS
+    )
+
+
+def _from_aws_s3_alias(
+    service: str,
+    operation: str,
+    metadata: dict[str, Any],
+    params: dict[str, Any],
+    id_value: str | None,
+) -> list[InfrastructureIntent]:
+    """``aws s3api`` and ``aws s3control`` are the low-level spellings of
+    the S3 service: both collapse to service ``s3`` so a rule written for
+    ``s3/bucket/*`` covers ``s3api delete-bucket --bucket b`` too.
+
+    s3api: ``--bucket`` names the bucket (``s3/bucket/<b>``); an
+    ``*-object*`` operation, or any operation with ``--key``, targets
+    ``s3/object/<bucket>/<key>``. s3control: ``<kind>`` from the operation
+    noun, name from ``--name`` (``s3/access-point/<name>``)."""
+    if "-" in operation:
+        verb, noun = operation.split("-", 1)
+    else:
+        verb, noun = operation, None
+    action = _normalize_verb(verb)
+    params = dict(params)
+    params["raw_action"] = operation
+    params["raw_service"] = service
+    key = params.pop("key", None)
+    if service == "s3api":
+        bucket = id_value or "*"
+        if key is not None:
+            params["key"] = key
+            resource = f"s3/object/{bucket}/{key}"
+        elif noun and noun.startswith("object"):
+            resource = f"s3/object/{bucket}/*"
+        else:
+            resource = f"s3/bucket/{bucket}"
+    else:
+        kind = _singularize(noun) if noun else service
+        name = params.pop("name", None) or id_value
+        resource = _aws_resource("s3", kind, name)
+    return [
+        InfrastructureIntent(
+            resource=resource, action=action, provider="aws", params=params, metadata=metadata
+        )
+    ]
+
+
 def from_aws_multi(argv: list[str]) -> list[InfrastructureIntent]:
     """Parses an ``aws`` CLI invocation into one InfrastructureIntent per
     target resource (``--instance-ids`` may name more than one)."""
@@ -816,6 +1105,9 @@ def from_aws_multi(argv: list[str]) -> list[InfrastructureIntent]:
 
     if service == "s3":
         return _from_aws_s3(operation, rest, metadata, params, argv)
+
+    if service in ("s3api", "s3control"):
+        return _from_aws_s3_alias(service, operation, metadata, params, id_value)
 
     if service == "autoscaling" and operation == "set-desired-capacity":
         params = dict(params)
@@ -842,6 +1134,14 @@ def from_aws_multi(argv: list[str]) -> list[InfrastructureIntent]:
     params = dict(params)
     params["raw_action"] = operation
     kind = _singularize(noun) if noun else service
+
+    if service == "iam" and _is_iam_privilege_grant(operation):
+        # attach-role-policy, put-user-policy, add-user-to-group,
+        # create-access-key, ...: a "create"/"put"/"attach" by verb, but what
+        # they do is widen someone's privileges. Normalised to "update" with
+        # params["privilege"]=True so one rule catches every spelling.
+        action = "update"
+        params["privilege"] = True
 
     names = multi_ids if multi_ids else [id_value]
     resources = [_aws_resource(service, kind, n) for n in names]
@@ -914,11 +1214,12 @@ _AZ_GROUP_MAP = {
 
 def _parse_az_tokens(
     tokens: list[str],
-) -> tuple[dict[str, Any], dict[str, Any], list[str], str | None]:
+) -> tuple[dict[str, Any], dict[str, Any], list[str], str | None, list[str]]:
     metadata: dict[str, Any] = {}
     params: dict[str, Any] = {}
     positional: list[str] = []
     name_value: str | None = None
+    ids_values: list[str] = []
 
     i = 0
     n = len(tokens)
@@ -947,9 +1248,19 @@ def _parse_az_tokens(
                     val = _value_at(tokens, i, tok)
                 name_value = val
             elif key in ("what-if", "dry-run"):
-                params["dry_run"] = True
+                if _is_dry_run(val):
+                    params["dry_run"] = True
+            elif key == "ids":
+                # `az <group> <verb> --ids ID [ID ...]`: one or more ARM
+                # resource ids in place of -g/-n (REVIEW-4 T1.7).
+                if val is not None:
+                    ids_values.append(val)
+                else:
+                    while i + 1 < n and not tokens[i + 1].startswith("-"):
+                        i += 1
+                        ids_values.append(tokens[i])
             elif key in _AZ_BOOL_FLAGS:
-                params["yes" if key == "y" else key] = True if val is None else _coerce(val)
+                params["yes" if key == "y" else key] = _bool_param(val)
             elif val is not None:
                 params[key] = _coerce(val)
             elif i + 1 < n and not tokens[i + 1].startswith("-"):
@@ -961,20 +1272,82 @@ def _parse_az_tokens(
             positional.append(tok)
         i += 1
 
-    return metadata, params, positional, name_value
+    return metadata, params, positional, name_value, ids_values
 
 
-def from_az(argv: list[str]) -> InfrastructureIntent:
-    """Parses an ``az`` CLI invocation, e.g.:
+# ARM resource types (lower-cased ``<namespace>/<type>``) -> the same
+# ``<service>/<kind>`` prefix the named-flag form of the command produces, so
+# ``az resource delete --ids .../Microsoft.ContainerService/managedClusters/c``
+# and ``az aks delete -n c -g rg`` hit the same ``aks/cluster/*`` rule.
+_ARM_TYPE_MAP = {
+    "microsoft.containerservice/managedclusters": "aks/cluster",
+    "microsoft.compute/virtualmachines": "compute/vm",
+    "microsoft.compute/virtualmachinescalesets": "compute/vmss",
+    "microsoft.storage/storageaccounts": "storage/account",
+    "microsoft.sql/servers": "sql/server",
+    "microsoft.keyvault/vaults": "keyvault/vault",
+    "microsoft.network/virtualnetworks": "network/vnet",
+    "microsoft.network/networksecuritygroups": "network/nsg",
+    "microsoft.web/sites": "web/app",
+    "microsoft.containerregistry/registries": "acr/registry",
+}
 
-    ``az vm start --resource-group rg1 --name vm1``
-      -> resource "compute/vm/vm1", action "start"
-    """
+# Nested ARM types (``<namespace>/<type>/<subtype>``) with a short form.
+_ARM_SUBTYPE_MAP = {
+    "microsoft.sql/servers/databases": "sql/db",
+}
+
+
+def _parse_arm_id(arm_id: str) -> tuple[str, dict[str, Any]]:
+    """``/subscriptions/<sub>/resourceGroups/<rg>/providers/<ns>/<type>/<name>
+    [/<subtype>/<subname>...]`` -> ``(resource, metadata)`` where
+    ``resource`` is ``<mapped service>/<kind>/<name>`` (or
+    ``<ns lower>/<type lower>/<name>`` for an unmapped type) and
+    ``metadata`` carries ``subscription`` / ``resource_group`` /
+    ``arm_id``. Raises ``ValueError`` for anything that isn't an ARM id."""
+    parts = [p for p in arm_id.split("/") if p]
+    if len(parts) < 2 or parts[0].lower() != "subscriptions":
+        raise ValueError(f"not an ARM resource id: {arm_id!r}")
+    metadata: dict[str, Any] = {"subscription": parts[1], "arm_id": arm_id}
+    i = 2
+    if i < len(parts) and parts[i].lower() == "resourcegroups":
+        if i + 1 >= len(parts):
+            raise ValueError(f"ARM id has no resource group name: {arm_id!r}")
+        metadata["resource_group"] = parts[i + 1]
+        i += 2
+    if i >= len(parts):
+        if "resource_group" in metadata:
+            return f"resource/group/{metadata['resource_group']}", metadata
+        return f"subscription/{parts[1]}", metadata
+    if parts[i].lower() != "providers" or i + 3 >= len(parts):
+        raise ValueError(f"ARM id has no providers/<ns>/<type>/<name> segment: {arm_id!r}")
+    namespace, kind, name = parts[i + 1], parts[i + 2], parts[i + 3]
+    i += 4
+    type_key = f"{namespace.lower()}/{kind.lower()}"
+    prefix = _ARM_TYPE_MAP.get(type_key, type_key)
+    rest = parts[i:]
+    if not rest:
+        return f"{prefix}/{name}", metadata
+    if len(rest) % 2:
+        raise ValueError(f"ARM id has an unpaired sub-resource segment: {arm_id!r}")
+    subtypes = [rest[j].lower() for j in range(0, len(rest), 2)]
+    mapped = _ARM_SUBTYPE_MAP.get(type_key + "/" + "/".join(subtypes))
+    if mapped:
+        return f"{mapped}/{rest[-1]}", metadata
+    chain = "/".join(f"{rest[j].lower()}/{rest[j + 1]}" for j in range(0, len(rest), 2))
+    return f"{prefix}/{name}/{chain}", metadata
+
+
+def from_az_multi(argv: list[str]) -> list[InfrastructureIntent]:
+    """Parses an ``az`` CLI invocation into one InfrastructureIntent per
+    target: one for the ``-n/--name`` form, or one per ``--ids`` ARM path
+    (``az vm deallocate --ids /subscriptions/.../virtualMachines/a
+    /subscriptions/.../virtualMachines/b`` names two)."""
     if not argv or _basename(argv[0]) != "az":
         raise ValueError(f"not a recognizable az invocation: {argv!r}")
 
     tokens = argv[1:]
-    metadata, params, positional, name_value = _parse_az_tokens(tokens)
+    metadata, params, positional, name_value, ids_values = _parse_az_tokens(tokens)
 
     if not positional:
         raise ValueError(f"could not find an az verb in: {argv!r}")
@@ -987,14 +1360,49 @@ def from_az(argv: list[str]) -> InfrastructureIntent:
     if not group_words:
         raise ValueError(f"could not determine an az resource group path in: {argv!r}")
 
-    resource_prefix = _AZ_GROUP_MAP.get(tuple(group_words), "/".join(group_words))
     action = _normalize_verb(verb)
     params["raw_action"] = verb
+
+    if ids_values:
+        intents = []
+        for arm_id in ids_values:
+            resource, arm_metadata = _parse_arm_id(arm_id)
+            intents.append(
+                InfrastructureIntent(
+                    resource=resource,
+                    action=action,
+                    provider="azure",
+                    params=dict(params),
+                    metadata={**arm_metadata, **metadata},
+                )
+            )
+        return intents
+
+    resource_prefix = _AZ_GROUP_MAP.get(tuple(group_words), "/".join(group_words))
     resource = f"{resource_prefix}/{name_value}" if name_value else f"{resource_prefix}/*"
 
-    return InfrastructureIntent(
-        resource=resource, action=action, provider="azure", params=params, metadata=metadata
-    )
+    return [
+        InfrastructureIntent(
+            resource=resource, action=action, provider="azure", params=params, metadata=metadata
+        )
+    ]
+
+
+def from_az(argv: list[str]) -> InfrastructureIntent:
+    """Parses an ``az`` CLI invocation that targets exactly one resource, e.g.:
+
+    ``az vm start --resource-group rg1 --name vm1``
+      -> resource "compute/vm/vm1", action "start"
+
+    Raises ValueError if ``--ids`` names more than one resource; use
+    :func:`from_az_multi` for that case.
+    """
+    intents = from_az_multi(argv)
+    if len(intents) != 1:
+        raise ValueError(
+            f"expected exactly one target resource, found {len(intents)}: {argv!r}"
+        )
+    return intents[0]
 
 
 # --- gcloud / gsutil -----------------------------------------------------------
@@ -1077,14 +1485,14 @@ def _parse_gcloud_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, A
                     val = _value_at(tokens, i, tok)
                 metadata["project"] = val
             elif key in ("quiet", "q"):
-                params["quiet"] = True if val is None else _coerce(val)
+                params["quiet"] = _bool_param(val)
             elif key == "dry-run":
-                if val is None or _coerce(val) not in (False, "false"):
+                if _is_dry_run(val):
                     params["dry_run"] = True
             elif key == "async":
-                params["async"] = True if val is None else _coerce(val)
+                params["async"] = _bool_param(val)
             elif key in _GCLOUD_BOOL_FLAGS:
-                params[key.replace("-", "_")] = True if val is None else _coerce(val)
+                params[key.replace("-", "_")] = _bool_param(val)
             elif val is not None:
                 params[key] = _coerce(val)
             elif i + 1 < n and not tokens[i + 1].startswith("-"):
@@ -1250,7 +1658,9 @@ def _parse_helm_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, Any
             elif key in _HELM_GLOBAL_BOOL_FLAGS:
                 pass  # consumed, intentionally not recorded
             elif key == "dry-run":
-                if val is None or val != "false":
+                # helm: --dry-run, =client, =server, =true rehearse;
+                # =none / =false run for real.
+                if _is_dry_run(val, truthy=_KUBECTL_DRY_RUN_WORDS):
                     params["dry_run"] = True
             elif key == "version":
                 if val is None:
@@ -1269,7 +1679,7 @@ def _parse_helm_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, Any
                 k, _sep, v = val.partition("=")
                 params.setdefault("set", {})[k] = _coerce(v)
             elif key in _HELM_BOOL_FLAGS:
-                params[key.replace("-", "_")] = True if val is None else _coerce(val)
+                params[key.replace("-", "_")] = _bool_param(val)
             elif val is not None:
                 params[key.replace("-", "_")] = _coerce(val)
             elif i + 1 < n and not tokens[i + 1].startswith("-"):
@@ -1416,6 +1826,9 @@ _ARGOCD_GLOBAL_BOOL_FLAGS = {
     "port-forward",
     "skip-test-tls",
 }
+# Known boolean sync/delete options (``--prune=true`` must be True, not "true").
+_ARGOCD_BOOL_FLAGS = {"prune", "force", "cascade", "async", "apply-out-of-sync-only",
+                      "server-side", "replace", "yes", "y"}
 
 
 def _parse_argocd_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
@@ -1447,9 +1860,10 @@ def _parse_argocd_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, A
             elif key in _ARGOCD_GLOBAL_BOOL_FLAGS:
                 pass  # consumed, intentionally not recorded
             elif key == "dry-run":
-                params["dry_run"] = True
-            elif key in ("prune", "force"):
-                params[key] = True if val is None else _coerce(val)
+                if _is_dry_run(val):
+                    params["dry_run"] = True
+            elif key in _ARGOCD_BOOL_FLAGS:
+                params[key.replace("-", "_")] = _bool_param(val)
             elif val is not None:
                 params[key.replace("-", "_")] = _coerce(val)
             elif i + 1 < n and not tokens[i + 1].startswith("-"):
@@ -1633,10 +2047,13 @@ def _parse_flux_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, Any
             elif key in _FLUX_GLOBAL_BOOL_FLAGS:
                 pass  # consumed, intentionally not recorded
             elif key == "dry-run":
-                params["dry_run"] = True
+                if _is_dry_run(val):
+                    params["dry_run"] = True
             elif key == "export":
-                params["dry_run"] = True
-                params["export"] = True
+                export = _bool_param(val)
+                params["export"] = export
+                if export is True:
+                    params["dry_run"] = True
             elif val is not None:
                 params[key.replace("-", "_")] = _coerce(val)
             elif i + 1 < n and not tokens[i + 1].startswith("-"):
@@ -1761,6 +2178,15 @@ _GIT_GLOBAL_BOOL_FLAGS = {
 }
 
 
+# Bare boolean options of the git verbs we model; without this list the
+# generic walker would swallow the token after ``--mirror`` as its value.
+_GIT_BOOL_FLAGS = {
+    "mirror", "all", "prune", "atomic", "no-verify", "verbose", "v", "quiet", "q",
+    "u", "set-upstream", "follow-tags", "porcelain", "progress", "no-progress",
+    "soft", "mixed", "merge", "keep", "interactive", "i", "autosquash", "no-edit",
+}
+
+
 def _parse_git_tokens(tokens: list[str]) -> tuple[dict[str, Any], list[str]]:
     params: dict[str, Any] = {}
     positional: list[str] = []
@@ -1784,6 +2210,11 @@ def _parse_git_tokens(tokens: list[str]) -> tuple[dict[str, Any], list[str]]:
                 params["hard"] = True
             elif key == "amend":
                 params["amend"] = True
+            elif key in ("dry-run", "n"):
+                if _is_dry_run(val):
+                    params["dry_run"] = True
+            elif key in _GIT_BOOL_FLAGS:
+                params[key.replace("-", "_")] = _bool_param(val)
             elif val is not None:
                 params[key.replace("-", "_")] = _coerce(val)
             elif i + 1 < n and not tokens[i + 1].startswith("-"):
@@ -1807,7 +2238,9 @@ def _from_git_push(
         metadata = {**metadata, "remote": remote}
 
     delete = bool(params.get("delete"))
-    force = bool(params.get("force"))
+    # --mirror force-updates every ref on the remote (and deletes the ones
+    # that don't exist locally): a force push by any other name.
+    force = bool(params.get("force")) or params.get("mirror") is True
     ref = None
 
     if refspec:
@@ -1833,6 +2266,12 @@ def _from_git_push(
         params["force"] = True
     if delete:
         params["delete"] = True
+    if not ref:
+        # No refspec: the target is whatever the local branch / push.default
+        # / --all / --mirror resolve to — unknowable from the argv. Marked
+        # so the caller can escalate ("git push -f" must not sail past a
+        # "ref/main" rule as "ref/*").
+        params["unknown_target"] = True
 
     resource = f"ref/{ref}" if ref else "ref/*"
     action = "delete" if delete else "push"
@@ -1975,18 +2414,18 @@ def _parse_gh_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, Any],
                     i += 1
                     val = _value_at(tokens, i, tok)
                 metadata["ref"] = val
-            elif key in ("f", "field", "raw-field"):
+            elif key in ("f", "F", "field", "raw-field"):
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
                 k, _sep, v = val.partition("=")
                 params.setdefault("inputs", {})[k] = _coerce(v)
             elif key == "admin":
-                params["admin"] = True if val is None else _coerce(val)
+                params["admin"] = _bool_param(val)
             elif key in ("squash", "merge", "rebase") and val is None:
                 params["method"] = key
             elif key == "delete-branch":
-                params["delete_branch"] = True
+                params["delete_branch"] = _bool_param(val)
             elif key in ("X", "method"):
                 if val is None:
                     i += 1
@@ -2004,6 +2443,48 @@ def _parse_gh_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, Any],
         i += 1
 
     return metadata, params, positional
+
+
+# ``gh api`` REST paths that are the raw spelling of a porcelain command.
+# Each maps (path regex, method) -> (resource template over the regex
+# groups, action), so ``gh api -X POST
+# repos/o/r/actions/workflows/deploy-prod.yml/dispatches`` is
+# ``workflow/deploy-prod.yml`` / ``run`` exactly like ``gh workflow run``.
+_GH_API_REPO_RE = re.compile(r"^repos/([^/]+)/([^/]+)(?:/|$)")
+_GH_API_ROUTES: list[tuple[re.Pattern[str], dict[str, tuple[str, str]]]] = [
+    (
+        re.compile(r"^repos/([^/]+)/([^/]+)/actions/workflows/([^/]+)/dispatches$"),
+        {"POST": ("workflow/{2}", "run")},
+    ),
+    (
+        re.compile(r"^repos/([^/]+)/([^/]+)/releases$"),
+        {"POST": ("release/*", "create")},
+    ),
+    (
+        re.compile(r"^repos/([^/]+)/([^/]+)/releases/([^/]+)$"),
+        {"DELETE": ("release/{2}", "delete")},
+    ),
+    (
+        re.compile(r"^repos/([^/]+)/([^/]+)$"),
+        {"DELETE": ("repo/{0}/{1}", "delete")},
+    ),
+    (
+        re.compile(r"^repos/([^/]+)/([^/]+)/actions/secrets/([^/]+)$"),
+        {"PUT": ("secret/{2}", "put"), "DELETE": ("secret/{2}", "delete")},
+    ),
+    (
+        re.compile(r"^repos/([^/]+)/([^/]+)/branches/([^/]+)/protection$"),
+        {"DELETE": ("branch-protection/{2}", "delete"), "PUT": ("branch-protection/{2}", "update")},
+    ),
+]
+
+
+def _gh_api_normalise_path(path: str) -> str:
+    """``https://api.github.com/repos/o/r?x=1`` / ``/repos/o/r/`` -> ``repos/o/r``."""
+    if path.startswith(("http://", "https://")):
+        path = path.split("://", 1)[1].split("/", 1)[1] if "/" in path.split("://", 1)[1] else ""
+    path = path.split("?", 1)[0]
+    return path.strip("/")
 
 
 def from_gh(argv: list[str]) -> InfrastructureIntent:
@@ -2122,7 +2603,28 @@ def from_gh(argv: list[str]) -> InfrastructureIntent:
         method = params.pop("_method", "GET")
         action = _GH_METHOD_ACTION.get(method, "read")
         params["raw_action"] = f"api-{method.lower()}"
-        path = positional[0] if positional else "*"
+        path = _gh_api_normalise_path(positional[0]) if positional else "*"
+        params["api_path"] = path
+        repo_match = _GH_API_REPO_RE.match(path)
+        if repo_match and "repo" not in metadata:
+            metadata["repo"] = f"{repo_match.group(1)}/{repo_match.group(2)}"
+        for pattern, by_method in _GH_API_ROUTES:
+            match = pattern.match(path)
+            if not match:
+                continue
+            route = by_method.get(method)
+            if route is None:
+                break
+            resource_template, action = route
+            resource = resource_template.format(*match.groups())
+            if resource.startswith("workflow/"):
+                ref = (params.get("inputs") or {}).get("ref")
+                if ref is not None and "ref" not in metadata:
+                    metadata["ref"] = ref
+            return InfrastructureIntent(
+                resource=resource, action=action, provider="github",
+                params=params, metadata=metadata,
+            )
         return InfrastructureIntent(
             resource=f"api/{path}", action=action, provider="github",
             params=params, metadata=metadata,
@@ -2162,7 +2664,7 @@ def from_argv(argv: list[str]) -> list[InfrastructureIntent]:
     if name == "aws":
         return from_aws_multi(argv)
     if name == "az":
-        return [from_az(argv)]
+        return from_az_multi(argv)
     if name in ("gcloud", "gsutil"):
         return [from_gcloud(argv)]
     if name == "helm":

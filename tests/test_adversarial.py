@@ -48,6 +48,26 @@ EXPECTED_ATTACK_NAMES = {
     "argv-kubectl-delete-all-in-namespace",
     "argv-helm-glued-namespace",
     "argv-helm-namespace-before-verb",
+    # REVIEW-4 T1.5 / T1.7
+    "argv-argocd-prune-equals-true",
+    "argv-argocd-dry-run-false",
+    "argv-az-resource-delete-ids",
+    "argv-az-aks-delete-ids",
+    "argv-gh-api-workflow-dispatch",
+    "argv-gh-api-workflow-dispatch-full-url",
+    # REVIEW-4 T1.2
+    "shell-compound-semicolon",
+    "shell-compound-and-or",
+    "shell-newline-separated",
+    "shell-sudo-wrapper",
+    "shell-sudo-user-env-wrapper",
+    "shell-timeout-nice-nohup-wrapper",
+    "shell-alias-k",
+    "shell-sh-c-string",
+    "shell-bash-c-compound",
+    "shell-helm-glued-namespace-behind-sudo",
+    "shell-git-force-push-in-pipeline",
+    "shell-argocd-prune-in-compound",
 }
 
 
@@ -509,3 +529,132 @@ def test_argv_evasion_attacks_apply_returns_base_unchanged(example_store):
     base = next(iter(example_store.constraints.values()))
     for attack in ARGV_EVASION_ATTACKS:
         assert apply(attack, base, rng=random.Random(0)) == base
+
+
+# --------------------------------------------------------------------------
+# REVIEW-4 T1.1 (Security C2): a forged Trusted constraint plus a matching
+# source file needs *no secret* when nothing is signed -- with a key, the
+# same attack is refused at load.
+# --------------------------------------------------------------------------
+
+
+def _c2_attack(tmp_path):
+    """Attacker with write access to the policy dir: writes a self-consistent
+    constraint asserting `principal: admin` and a source file that backs it,
+    so integrity, authority and source verification all pass."""
+    forged = make_constraint(
+        id="forged-allow-nothing", principal="admin", constraint_class="deletion",
+        resource_pattern="node/*", actions={"delete"}, effect="ESCALATE",
+        source_ref="git-forged",
+    )
+    store = ConstraintStore(authority_map=dict(AUTHORITY))
+    store.add_constraint(forged)
+    path = tmp_path / "constraints.yaml"
+    store.save(path)
+    sources_dir = tmp_path / "sources"
+    sources_dir.mkdir()
+    _write_source_file(sources_dir, forged)  # payload self-asserts principal: admin
+    return forged, path, sources_dir
+
+
+def test_c2_forged_trusted_constraint_loads_when_nothing_is_signed(tmp_path):
+    forged, path, sources_dir = _c2_attack(tmp_path)
+    fetcher = FileSourceFetcher(base_dir=sources_dir, insecure=True)
+    reloaded = ConstraintStore.load(
+        path, authority_map=dict(AUTHORITY), source_fetcher=fetcher, insecure=True
+    )
+    # Without a root of trust the attack succeeds (documented boundary)...
+    assert forged.id in reloaded.constraints
+    assert reloaded.quarantined == []
+    # ... and the payload-supplied principal is at least flagged.
+    assert "principal-from-payload: git-forged" in reloaded.warnings
+
+
+def test_c2_forged_trusted_constraint_is_refused_when_a_key_is_supplied(tmp_path):
+    from aegis_core.signing import SignatureError, sign_file, sign_tree
+
+    forged, path, sources_dir = _c2_attack(tmp_path)
+    key = b"operator-secret-key-32-bytes-xx!"[:32]
+
+    # 1. Unsigned constraints file -> refused outright.
+    with pytest.raises(SignatureError, match="unsigned"):
+        ConstraintStore.load(path, authority_map=dict(AUTHORITY), key=key)
+
+    # 2. Attacker can't sign, but suppose the operator's *signed* file is
+    #    then edited in place: the stale signature no longer verifies.
+    sign_file(path, key)
+    path.write_text(path.read_text().replace("effect: ESCALATE", "effect: BLOCK"))
+    with pytest.raises(SignatureError, match="bad signature"):
+        ConstraintStore.load(path, authority_map=dict(AUTHORITY), key=key)
+
+    # 3. Even a signed constraints file can't launder a self-asserted
+    #    principal: the transport (signed PRINCIPALS.yaml) says the source
+    #    belongs to `developer`, so the constraint is quarantined.
+    path.write_text(path.read_text().replace("effect: BLOCK", "effect: ESCALATE"))
+    sign_file(path, key)
+    (sources_dir / "PRINCIPALS.yaml").write_text("principals:\n  git-forged: developer\n")
+    sign_tree(sources_dir, key)
+    fetcher = FileSourceFetcher(base_dir=sources_dir, key=key)
+    reloaded = ConstraintStore.load(
+        path, authority_map=dict(AUTHORITY), source_fetcher=fetcher, key=key
+    )
+    assert forged.id not in reloaded.constraints
+    assert reloaded.quarantined == [{"id": forged.id, "reason": "principal-mismatch"}]
+    assert reloaded.warnings and all("unsigned" not in w for w in reloaded.warnings)
+
+    # 4. The quarantined rule still fails closed for the action it covers.
+    interceptor = AegisInterceptor(reloaded)
+    decision = interceptor.intercept(_intent_from_constraint(forged), now=NOW)
+    assert decision.verdict == "ESCALATE"
+    assert {"id": forged.id, "reason": "principal-mismatch"} in decision.discarded
+
+
+# --------------------------------------------------------------------------
+# shell-evasion attacks (REVIEW-4 T1.2): shell *strings* whose shape hid the
+# dangerous command from an argv-only gate. Each must, once split and
+# unwrapped, hit the rule a constraint author would expect.
+# --------------------------------------------------------------------------
+
+SHELL_EVASION_ATTACKS = [a for a in attacks() if a.category == "shell-evasion"]
+
+
+def test_shell_evasion_attacks_are_registered():
+    assert len(SHELL_EVASION_ATTACKS) >= 10
+    assert all(a.command and a.expected_rule and a.argv is None for a in SHELL_EVASION_ATTACKS)
+
+
+@pytest.mark.parametrize("attack", SHELL_EVASION_ATTACKS, ids=lambda a: a.name)
+def test_shell_evasion_attacks_hit_the_expected_rule(attack, example_gate):
+    from aegis_core.shell import intents_from_command
+
+    interceptor, env_map = example_gate
+    now = datetime.fromisoformat(attack.now) if attack.now else NOW
+
+    intents = intents_from_command(attack.command)
+    assert intents, f"{attack.name}: no intents from {attack.command!r}"
+    for intent in intents:
+        env_map.annotate(intent)
+    decisions = [interceptor.intercept(intent, now=now) for intent in intents]
+
+    hits = [d for d in decisions if attack.expected_rule in d.citations]
+    assert hits, f"{attack.name}: {attack.expected_rule} never fired; got {decisions}"
+    assert all(d.verdict != "ALLOW" for d in hits)
+
+
+def test_shell_evasion_attacks_apply_returns_base_unchanged(example_store):
+    base = next(iter(example_store.constraints.values()))
+    for attack in SHELL_EVASION_ATTACKS:
+        assert apply(attack, base, rng=random.Random(0)) == base
+
+
+def test_argv_evasion_dry_run_false_is_not_downgraded(example_gate):
+    # REVIEW-4 T1.5 acceptance: `argocd app sync prod-web --prune --dry-run=false`
+    # -> ESCALATE with no dry-run downgrade.
+    from aegis_core.parser import from_argv
+
+    interceptor, _ = example_gate
+    (intent,) = from_argv(["argocd", "app", "sync", "prod-web", "--prune", "--dry-run=false"])
+    assert "dry_run" not in intent.params
+    decision = interceptor.intercept(intent, now=NOW)
+    assert decision.verdict == "ESCALATE"
+    assert "argocd-escalate-prod-sync-prune" in decision.citations
