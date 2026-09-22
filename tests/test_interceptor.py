@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 from aegis_core.intent import InfrastructureIntent
 from aegis_core.interceptor import AegisInterceptor
-from aegis_core.ledger import DecisionLedger
+from aegis_core.ledger import DecisionLedger, JsonlLedger
 from aegis_core.provenance import compute_provenance_hash
 from aegis_core.store import Constraint, ConstraintStore
 
@@ -440,3 +440,197 @@ def test_constraint_without_rate_limit_has_unchanged_hash():
         rule_text="no-scaling",
     )
     assert constraint.provenance_hash == expected
+
+
+# --------------------------------------------------------------------------
+# T1.9: ledger locking/rotation/resource-bucketing/chain-verification, as
+# seen from the interceptor.
+# --------------------------------------------------------------------------
+
+
+def test_rate_limit_buckets_by_resource_key(tmp_path):
+    """``key: [resource]`` must bucket on the concrete intent resource, not
+    the (often shared) constraint resource_pattern -- so two resources
+    matched by the same pattern get independent quotas."""
+    store = ConstraintStore(authority_map=AUTHORITY)
+    store.add_constraint(
+        make_constraint(
+            id="per-container-cap",
+            resource_pattern="container/cluster/*",
+            scope={},
+            rate_limit={"max": 1, "per": "1h", "key": ["resource"]},
+        )
+    )
+    ledger = JsonlLedger(tmp_path / "ledger.jsonl")
+    interceptor = AegisInterceptor(store, ledger=ledger)
+
+    intent_1 = InfrastructureIntent(
+        resource="container/cluster/prod-1", action="scale", provider="kubernetes"
+    )
+    intent_2 = InfrastructureIntent(
+        resource="container/cluster/prod-2", action="scale", provider="kubernetes"
+    )
+
+    first = interceptor.intercept(intent_1, now=NOW)
+    assert first.verdict == "ALLOW"
+
+    # Same resource again: quota (max 1) is used up.
+    second = interceptor.intercept(intent_1, now=NOW + timedelta(minutes=1))
+    assert second.verdict == "BLOCK"
+
+    # A different resource is a different bucket, unaffected.
+    third = interceptor.intercept(intent_2, now=NOW + timedelta(minutes=2))
+    assert third.verdict == "ALLOW"
+
+
+def test_broken_ledger_chain_escalates_rate_limited_constraints(tmp_path):
+    """T1.9 accept: a truncated ledger sets ``chain_ok = False``, and every
+    rate-limited constraint is then treated as exhausted -- ESCALATE, with
+    an explanatory note, never BLOCK even when the constraint's own effect
+    is BLOCK."""
+    store = ConstraintStore(authority_map=AUTHORITY)
+    store.add_constraint(make_rate_limited_constraint())  # effect="BLOCK" by default
+    path = tmp_path / "ledger.jsonl"
+    ledger = JsonlLedger(path)
+    interceptor = AegisInterceptor(store, ledger=ledger)
+
+    # Establish some history, then truncate the file so the chain breaks.
+    for i in range(2):
+        d = interceptor.intercept(RATE_INTENT_PROD, now=NOW + timedelta(minutes=i))
+        assert d.verdict == "ALLOW"
+
+    lines = path.read_text().splitlines()
+    path.write_text("\n".join(lines[1:]) + "\n")  # drop the first line
+
+    decision = interceptor.intercept(RATE_INTENT_PROD, now=NOW + timedelta(minutes=5))
+
+    assert decision.verdict == "ESCALATE"
+    assert decision.verdict != "BLOCK"
+    assert "ledger: chain-broken" in decision.notes
+
+
+def test_rate_limit_survives_reload_via_jsonl_ledger(tmp_path):
+    """A fresh interceptor/ledger pair backed by the same file continues
+    counting where a previous process left off (load -> count -> record)."""
+    store = ConstraintStore(authority_map=AUTHORITY)
+    store.add_constraint(make_rate_limited_constraint())
+    path = tmp_path / "ledger.jsonl"
+
+    ledger_a = JsonlLedger(path)
+    interceptor_a = AegisInterceptor(store, ledger=ledger_a)
+    for i in range(3):
+        d = interceptor_a.intercept(RATE_INTENT_PROD, now=NOW + timedelta(minutes=i))
+        assert d.verdict == "ALLOW"
+
+    # A brand new process/interceptor instance, same file.
+    ledger_b = JsonlLedger(path)
+    interceptor_b = AegisInterceptor(store, ledger=ledger_b)
+    decision = interceptor_b.intercept(RATE_INTENT_PROD, now=NOW + timedelta(minutes=3))
+    assert decision.verdict == "BLOCK"
+
+
+# --- REVIEW-4 T1.3 / T1.6 / T1.7: env-unresolved, resource aliases, unknown target -----
+
+
+def _store_with(*constraints) -> ConstraintStore:
+    store = ConstraintStore(authority_map=AUTHORITY)
+    for c in constraints:
+        store.constraints[c.id] = c
+    return store
+
+
+def test_env_scoped_rule_without_resolved_env_escalates_not_allows():
+    rule = make_constraint(id="prod-only", actions={"delete"}, resource_pattern="*",
+                           scope={"env": "prod"}, constraint_class="deletion",
+                           principal="admin")
+    interceptor = AegisInterceptor(_store_with(rule))
+    intent = InfrastructureIntent(resource="pod/x", action="delete", provider="kubernetes",
+                                  metadata={"namespace": "prod"})
+    decision = interceptor.intercept(intent, now=NOW)
+    assert decision.verdict == "ESCALATE"
+    assert decision.covered is True
+    assert decision.citations == []
+    assert decision.notes == ["env-unresolved: prod-only"]
+    # An agent-supplied --env=prod in params does not count as a resolved env.
+    intent.params["env"] = "dev"
+    assert interceptor.intercept(intent, now=NOW).notes == ["env-unresolved: prod-only"]
+    # With the env resolved (operator metadata) the rule matches normally ...
+    intent.metadata["env"] = "prod"
+    assert interceptor.intercept(intent, now=NOW).verdict == "BLOCK"
+    # ... or is simply out of scope, with no note.
+    intent.metadata["env"] = "dev"
+    decision = interceptor.intercept(intent, now=NOW)
+    assert (decision.verdict, decision.covered, decision.notes) == ("ALLOW", False, [])
+
+
+def test_env_unresolved_requires_the_other_scope_keys_to_match():
+    rule = make_constraint(id="prod-ns-only", actions={"delete"}, resource_pattern="*",
+                           scope={"env": "prod", "namespace": "payments"},
+                           constraint_class="deletion", principal="admin")
+    interceptor = AegisInterceptor(_store_with(rule))
+    other_ns = InfrastructureIntent(resource="pod/x", action="delete", provider="kubernetes",
+                                    metadata={"namespace": "scratch"})
+    assert interceptor.intercept(other_ns, now=NOW).notes == []
+    same_ns = InfrastructureIntent(resource="pod/x", action="delete", provider="kubernetes",
+                                   metadata={"namespace": "payments"})
+    assert interceptor.intercept(same_ns, now=NOW).notes == ["env-unresolved: prod-ns-only"]
+
+
+def test_env_unresolved_never_outranks_a_real_block_and_is_a_dry_run_would_be():
+    prod_only = make_constraint(id="prod-only", actions={"delete"}, resource_pattern="*",
+                                scope={"env": "prod"}, constraint_class="deletion",
+                                principal="admin")
+    no_nodes = make_constraint(id="no-nodes", actions={"delete"}, resource_pattern="node/*",
+                               constraint_class="deletion", principal="admin")
+    interceptor = AegisInterceptor(_store_with(prod_only, no_nodes))
+    intent = InfrastructureIntent(resource="node/w1", action="delete", provider="kubernetes")
+    decision = interceptor.intercept(intent, now=NOW)
+    assert decision.verdict == "BLOCK" and decision.citations == ["no-nodes"]
+    assert "env-unresolved: prod-only" in decision.notes
+    dry = InfrastructureIntent(resource="pod/x", action="delete", provider="kubernetes",
+                               params={"dry_run": True})
+    decision = interceptor.intercept(dry, now=NOW)
+    assert (decision.verdict, decision.would_be) == ("ALLOW", "ESCALATE")
+
+
+def test_unknown_target_escalates_even_when_nothing_matches():
+    main_only = make_constraint(id="no-force-main", provider="git", resource_pattern="ref/main",
+                                actions={"push"}, scope={"force": True},
+                                constraint_class="configuration")
+    interceptor = AegisInterceptor(_store_with(main_only))
+    intent = InfrastructureIntent(resource="ref/*", action="push", provider="git",
+                                  params={"force": True, "unknown_target": True})
+    decision = interceptor.intercept(intent, now=NOW)
+    assert decision.verdict == "ESCALATE"
+    assert decision.notes == ["unknown-target"]
+    assert decision.covered is False
+    known = InfrastructureIntent(resource="ref/main", action="push", provider="git",
+                                 params={"force": True})
+    assert interceptor.intercept(known, now=NOW).verdict == "BLOCK"
+
+
+def test_git_push_force_without_refspec_is_escalated_end_to_end():
+    from aegis_core.parser import from_git
+
+    main_only = make_constraint(id="no-force-main", provider="git", resource_pattern="ref/main",
+                                actions={"push"}, scope={"force": True},
+                                constraint_class="configuration")
+    interceptor = AegisInterceptor(_store_with(main_only))
+    decision = interceptor.intercept(from_git(["git", "push", "-f"]), now=NOW)
+    assert (decision.verdict, decision.notes) == ("ESCALATE", ["unknown-target"])
+
+
+def test_resource_pattern_matches_module_stripped_terraform_alias():
+    rule = make_constraint(id="no-db-deletes", provider="terraform",
+                           resource_pattern="aws_db_instance.*", actions={"delete"},
+                           constraint_class="deletion", principal="admin")
+    interceptor = AegisInterceptor(_store_with(rule))
+    nested = InfrastructureIntent(resource="module.app.aws_db_instance.main", action="delete",
+                                  provider="terraform",
+                                  metadata={"type_name": "aws_db_instance.main"})
+    assert interceptor.intercept(nested, now=NOW).verdict == "BLOCK"
+    assert nested.resource_aliases() == ["module.app.aws_db_instance.main",
+                                         "aws_db_instance.main"]
+    bare = InfrastructureIntent(resource="module.app.aws_db_instance.main", action="delete",
+                                provider="terraform")
+    assert interceptor.intercept(bare, now=NOW).verdict == "ALLOW"

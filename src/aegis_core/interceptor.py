@@ -31,10 +31,23 @@ With ``fail_closed=True`` an *uncovered* intent (no constraint matched
 at all) also becomes ESCALATE (note ``"fail-closed: uncovered"``) instead
 of the default ALLOW.
 
+Two more fail-closed clauses (REVIEW-4 T1.3 / T1.7):
+
+* **env-unresolved** -- a constraint that would match except that it
+  scopes on ``env`` and the intent has no resolved ``metadata["env"]``
+  (the environment map didn't recognise the context/account/project) is
+  neither honoured nor dropped: it contributes ESCALATE with the note
+  ``"env-unresolved: <id>"``. "Unknown environment" is never "not prod".
+* **unknown-target** -- an intent whose parser could not determine what
+  it targets (``params["unknown_target"]``, e.g. ``git push -f`` with no
+  refspec) contributes ESCALATE with the note ``"unknown-target"``, so it
+  can't sail past a rule written for the concrete target as ``ref/*``.
+
 A rate-limited constraint that hasn't hit its quota (step 3) is neither
 discarded nor honoured — it's simply not a match for this decision.
 """
 
+import contextlib
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -97,10 +110,15 @@ class AegisInterceptor:
 
         matches = self.store.get_matching_constraints(intent, now)
         quarantined_matches = self.store.get_matching_quarantined(intent, now)
-        if not matches and not quarantined_matches:
+        get_env_unresolved = getattr(self.store, "get_env_unresolved", None)
+        env_unresolved = get_env_unresolved(intent, now) if get_env_unresolved else []
+        unknown_target = intent.params.get("unknown_target") is True
+        if not matches and not quarantined_matches and not env_unresolved:
             verdict, notes = "ALLOW", []
             if self.fail_closed:
                 verdict, notes = "ESCALATE", ["fail-closed: uncovered"]
+            if unknown_target:
+                verdict, notes = "ESCALATE", [*notes, "unknown-target"]
             decision = Decision(
                 verdict="ALLOW" if is_dry_run else verdict,
                 covered=False,
@@ -116,6 +134,12 @@ class AegisInterceptor:
         notes: list[str] = []
         fail_closed = False
         verified = []
+        for c in env_unresolved:
+            fail_closed = True
+            notes.append(f"env-unresolved: {c.id}")
+        if unknown_target:
+            fail_closed = True
+            notes.append("unknown-target")
         for c, reason in quarantined_matches:
             discarded.append({"id": c.id, "reason": reason})
             if c.effect in _ENFORCING_EFFECTS:
@@ -135,77 +159,123 @@ class AegisInterceptor:
                 continue
             verified.append(c)
 
-        active: list[Constraint] = []
-        for c in verified:
-            if c.rate_limit is None:
-                active.append(c)
-                continue
-            count = self._rate_count(c, intent, now)
-            max_ = c.rate_limit["max"]
-            if count >= max_:
-                active.append(c)
-                notes.append(f"rate-limit: {c.id} {count}/{max_} in {c.rate_limit['per']}")
+        # Rate-limited constraints need a consistent load -> count -> record
+        # view of the ledger even when other processes are racing the same
+        # decision (T1.9): everything from here through the eventual
+        # ``self._record`` call below runs inside a single ledger
+        # transaction (a no-op context manager when the ledger doesn't
+        # support/require locking, e.g. the plain in-memory
+        # ``DecisionLedger`` or when there's nothing rate-limited to check).
+        has_rate_limited = any(c.rate_limit is not None for c in verified)
+        with self._ledger_txn() if has_rate_limited else contextlib.nullcontext():
+            if has_rate_limited and self.ledger is not None and hasattr(self.ledger, "load"):
+                self.ledger.load(now)
+            # A broken hash-chain means the ledger's history can't be
+            # trusted -- fail closed by treating every rate-limited
+            # constraint as exhausted (never as satisfied), same as a
+            # tampered/unauthorized constraint: ESCALATE, never BLOCK.
+            chain_ok = True
+            if has_rate_limited and self.ledger is not None:
+                chain_ok = getattr(self.ledger, "chain_ok", True)
 
-        blocking = [c for c in active if c.effect == "BLOCK"]
-        escalating = [c for c in active if c.effect == "ESCALATE"]
+            active: list[Constraint] = []
+            for c in verified:
+                if c.rate_limit is None:
+                    active.append(c)
+                    continue
+                if not chain_ok:
+                    fail_closed = True
+                    if "ledger: chain-broken" not in notes:
+                        notes.append("ledger: chain-broken")
+                    continue
+                exhausted, count, max_ = self._rate_limit_exhausted(c, intent, now)
+                if exhausted:
+                    active.append(c)
+                    notes.append(f"rate-limit: {c.id} {count}/{max_} in {c.rate_limit['per']}")
 
-        if blocking:
-            verdict, citations = "BLOCK", [c.id for c in blocking]
-        elif escalating or fail_closed:
-            verdict, citations = "ESCALATE", [c.id for c in escalating]
-        else:
-            verdict, citations = "ALLOW", [c.id for c in active]
+            blocking = [c for c in active if c.effect == "BLOCK"]
+            escalating = [c for c in active if c.effect == "ESCALATE"]
 
-        latency_ms = (time.perf_counter() - start) * 1000
-        if is_dry_run:
+            if blocking:
+                verdict, citations = "BLOCK", [c.id for c in blocking]
+            elif escalating or fail_closed:
+                verdict, citations = "ESCALATE", [c.id for c in escalating]
+            else:
+                verdict, citations = "ALLOW", [c.id for c in active]
+
+            latency_ms = (time.perf_counter() - start) * 1000
+            if is_dry_run:
+                decision = Decision(
+                    verdict="ALLOW",
+                    citations=citations,
+                    discarded=discarded,
+                    covered=True,
+                    latency_ms=latency_ms,
+                    dry_run=True,
+                    would_be=verdict,
+                    notes=notes,
+                )
+                self._record(intent, decision, now)
+                return decision
+
             decision = Decision(
-                verdict="ALLOW",
+                verdict=verdict,
                 citations=citations,
                 discarded=discarded,
                 covered=True,
                 latency_ms=latency_ms,
-                dry_run=True,
-                would_be=verdict,
                 notes=notes,
             )
             self._record(intent, decision, now)
             return decision
 
-        decision = Decision(
-            verdict=verdict,
-            citations=citations,
-            discarded=discarded,
-            covered=True,
-            latency_ms=latency_ms,
-            notes=notes,
-        )
-        self._record(intent, decision, now)
-        return decision
+    def _ledger_txn(self):
+        """Returns the ledger's ``transaction()`` context manager when it
+        has one (``JsonlLedger``/``SqliteLedger``), else a no-op. Duck-typed
+        rather than an isinstance check so any ledger implementation can
+        opt in just by providing a ``transaction()`` method."""
+        if self.ledger is not None and hasattr(self.ledger, "transaction"):
+            return self.ledger.transaction()
+        return contextlib.nullcontext()
 
-    def _rate_count(self, c: Constraint, intent: InfrastructureIntent, now: datetime) -> int:
-        """Counts prior executed (non-dry-run, ALLOW) actions matching
-        ``c``'s rate-limit scope within its window, ending at ``now``."""
+    def _rate_limit_exhausted(
+        self, c: Constraint, intent: InfrastructureIntent, now: datetime
+    ) -> tuple[bool, int, int]:
+        """Returns ``(exhausted, count, max)`` for ``c``'s rate-limit window,
+        counting prior executed (non-dry-run, ALLOW) actions matching its
+        scope. ``rate_limit.key`` may include ``"resource"`` to bucket on
+        the concrete intent resource (e.g. ``container/cluster/prod-1`` vs.
+        ``prod-2``) rather than only the constraint's (often shared)
+        ``resource_pattern``."""
+        max_ = c.rate_limit["max"]
+        if self.ledger is None:
+            return False, 0, max_
         window = parse_window(c.rate_limit["per"])
         since = now - window
-        combined = {**intent.metadata, **intent.params}
+        combined = {**intent.metadata, **intent.params, "resource": intent.resource}
         scope_filter = dict(c.scope)
         for key in c.rate_limit.get("key") or []:
             if key in combined:
                 scope_filter[key] = combined[key]
-        if self.ledger is None:
-            return 0
-        return self.ledger.count(
+        count = self.ledger.count(
             since=since,
             provider=c.provider,
             action=intent.action,
             resource_pattern=c.resource_pattern,
             scope=scope_filter or None,
         )
+        return count >= max_, count, max_
 
     def _record(self, intent: InfrastructureIntent, decision: Decision, now: datetime) -> None:
         """Records every non-dry-run ALLOW decision into the ledger (when
         one is attached). Blocked/escalated actions never executed, so they
-        don't count towards future rate-limit windows."""
+        don't count towards future rate-limit windows.
+
+        Wrapped in the ledger's transaction (when it supports one) so this
+        append can never race a concurrent load -> count -> record cycle in
+        another process; reentrant if the caller already holds it (see
+        ``intercept``'s rate-limit handling above)."""
         if self.ledger is None or decision.dry_run or decision.verdict != "ALLOW":
             return
-        self.ledger.record(intent, decision.verdict, now)
+        with self._ledger_txn():
+            self.ledger.record(intent, decision.verdict, now)
