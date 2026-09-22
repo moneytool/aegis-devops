@@ -483,7 +483,7 @@ def _load_example_store():
 def test_example_store_loads_with_zero_quarantined():
     store = _load_example_store()
     assert store.quarantined == []
-    assert len(store.constraints) == 19
+    assert len(store.constraints) == 20
 
 
 def test_unbounded_delete_is_blocked_end_to_end():

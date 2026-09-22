@@ -33,8 +33,11 @@ import yaml
 
 from aegis_core.intent import InfrastructureIntent
 from aegis_core.interceptor import AegisInterceptor, Decision
+from aegis_core.store import StoreHealth, _sha256_file
 
 logger = logging.getLogger(__name__)
+
+_ENFORCING_EFFECTS = frozenset({"BLOCK", "ESCALATE"})
 
 
 def compute_plan_provenance_hash(
@@ -227,6 +230,22 @@ class PlanConstraintStore:
         self.constraints: dict[str, PlanConstraint] = {}
         self.authority_map: dict[str, set[str]] = authority_map or {}
         self.quarantined: list[dict[str, str]] = []
+        # Quarantined PlanConstraint objects, still evaluated by
+        # evaluate_plan so a tampered rule fails closed (ESCALATE).
+        self.quarantined_constraints: list[PlanConstraint] = []
+        self.constraints_sha256: str = ""
+        self.warnings: list[str] = []
+
+    @property
+    def health(self) -> StoreHealth:
+        """A fresh :class:`aegis_core.store.StoreHealth` snapshot."""
+        return StoreHealth(
+            loaded=len(self.constraints),
+            quarantined=[dict(q) for q in self.quarantined],
+            principals=len(self.authority_map),
+            constraints_sha256=self.constraints_sha256,
+            warnings=list(self.warnings),
+        )
 
     def is_authorized(self, principal: str, constraint_class: str) -> bool:
         return constraint_class in self.authority_map.get(principal, set())
@@ -263,17 +282,23 @@ class PlanConstraintStore:
         provenance hash. Constraints that fail verification are quarantined
         rather than loaded."""
         store = cls(authority_map=authority_map)
+        store.constraints_sha256 = _sha256_file(path)
         with open(path) as f:
             payload = yaml.safe_load(f) or {}
-        for entry in payload.get("plan_constraints", []):
+        if not isinstance(payload, dict):
+            raise ValueError(
+                f"{path}: plan constraints file must be a mapping with a 'plan_constraints' key"
+            )
+        for entry in payload.get("plan_constraints") or []:
             pc = _plan_constraint_from_dict(entry)
             if pc.verify_integrity():
                 store.constraints[pc.id] = pc
             else:
                 store.quarantined.append({"id": pc.id, "reason": "tampered"})
-                logger.warning(
-                    "Quarantined plan constraint %s: provenance hash mismatch", pc.id
-                )
+                store.quarantined_constraints.append(pc)
+                warning = f"Quarantined plan constraint {pc.id}: provenance hash mismatch"
+                store.warnings.append(warning)
+                logger.warning(warning)
         return store
 
 
@@ -420,6 +445,11 @@ def evaluate_plan(
       * otherwise its predicate is evaluated against the full intent batch,
         and a fired predicate contributes its ``effect``.
 
+    Fail closed, exactly as ``AegisInterceptor.intercept`` does: a discarded
+    or load-time-quarantined plan constraint whose ``effect`` was BLOCK or
+    ESCALATE contributes ESCALATE (never BLOCK) *when its predicate fires*
+    on this batch, with a ``"fail-closed: <id> (<reason>)"`` note.
+
     The final verdict is the max over every per-intent verdict and every
     fired plan-level effect, using ``BLOCK > ESCALATE > ALLOW``. Citations
     are the union of every per-intent decision's citations and every fired
@@ -440,14 +470,26 @@ def evaluate_plan(
     fired: list[tuple[str, str]] = []  # (effect, plan_constraint_id)
     notes: list[str] = []
 
-    for pc in plan_store.constraints.values():
+    quarantine_reasons = {q["id"]: q["reason"] for q in plan_store.quarantined}
+    candidates = [(pc, quarantine_reasons.get(pc.id, "quarantined"), True)
+                  for pc in plan_store.quarantined_constraints]
+    candidates += [(pc, None, False) for pc in plan_store.constraints.values()]
+
+    for pc, reason, quarantined in candidates:
         if pc.provider != "*" and not any(i.provider == pc.provider for i in intents):
             continue
-        if not pc.verify_integrity():
-            discarded.append({"id": pc.id, "reason": "tampered"})
-            continue
-        if not plan_store.is_authorized(pc.principal, pc.constraint_class):
-            discarded.append({"id": pc.id, "reason": "unauthorized"})
+        if not quarantined:
+            if not pc.verify_integrity():
+                reason = "tampered"
+            elif not plan_store.is_authorized(pc.principal, pc.constraint_class):
+                reason = "unauthorized"
+        if reason is not None:
+            discarded.append({"id": pc.id, "reason": reason})
+            if pc.effect in _ENFORCING_EFFECTS:
+                pc_fired, _pc_notes = _evaluate_predicate(pc, intents)
+                if pc_fired:
+                    fired.append(("ESCALATE", pc.id))
+                    notes.append(f"fail-closed: {pc.id} ({reason})")
             continue
 
         pc_fired, pc_notes = _evaluate_predicate(pc, intents)
@@ -483,8 +525,10 @@ def evaluate_plan(
         for c in d.citations:
             if c not in citations:
                 citations.append(c)
+    discarded_ids = {d["id"] for d in discarded}
     for _effect, pid in fired:
-        if pid not in citations:
+        # fail-closed escalations are reported in notes/discarded, not cited
+        if pid not in citations and pid not in discarded_ids:
             citations.append(pid)
 
     latency_ms = (time.perf_counter() - start) * 1000

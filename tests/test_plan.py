@@ -302,7 +302,9 @@ def test_wildcard_provider_applies_to_any_provider():
 # ---------------------------------------------------------------------------
 
 
-def test_tampered_plan_constraint_is_discarded():
+def test_tampered_plan_constraint_is_discarded_and_fails_closed():
+    """REVIEW-4 T0.3: a discarded BLOCK/ESCALATE plan rule whose predicate
+    fires contributes ESCALATE (it used to fail open to ALLOW)."""
     pc = make_pc(max_intents=0)
     store = PlanConstraintStore(authority_map=AUTHORITY)
     store.constraints[pc.id] = pc
@@ -311,9 +313,10 @@ def test_tampered_plan_constraint_is_discarded():
     intents = [tf_intent("create", "aws_instance.web")]
     decision = evaluate_plan(empty_interceptor(), store, intents, now=NOW)
 
-    assert decision.verdict == "ALLOW"
+    assert decision.verdict == "ESCALATE"
     assert decision.discarded == [{"id": "pc-1", "reason": "tampered"}]
     assert decision.citations == []
+    assert decision.notes == ["fail-closed: pc-1 (tampered)"]
 
 
 def test_unauthorized_plan_constraint_is_discarded_when_revoked_after_load():
@@ -328,8 +331,46 @@ def test_unauthorized_plan_constraint_is_discarded_when_revoked_after_load():
     intents = [tf_intent("create", "aws_instance.web")]
     decision = evaluate_plan(empty_interceptor(), store, intents, now=NOW)
 
-    assert decision.verdict == "ALLOW"
+    assert decision.verdict == "ESCALATE"
     assert decision.discarded == [{"id": "pc-1", "reason": "unauthorized"}]
+    assert decision.notes == ["fail-closed: pc-1 (unauthorized)"]
+
+
+def test_discarded_plan_constraint_whose_predicate_does_not_fire_stays_allow():
+    pc = make_pc(max_intents=10)
+    store = PlanConstraintStore(authority_map=AUTHORITY)
+    store.constraints[pc.id] = pc
+    pc.rule_text = "edited"
+
+    intents = [tf_intent("create", "aws_instance.web")]
+    decision = evaluate_plan(empty_interceptor(), store, intents, now=NOW)
+
+    assert decision.verdict == "ALLOW"
+    assert decision.discarded == [{"id": "pc-1", "reason": "tampered"}]
+    assert decision.notes == []
+
+
+def test_quarantined_at_load_plan_constraint_is_evaluated_and_fails_closed(tmp_path):
+    pc = make_pc(max_intents=0)
+    store = PlanConstraintStore(authority_map=AUTHORITY)
+    store.constraints[pc.id] = pc
+    path = tmp_path / "plan_constraints.yaml"
+    store.save(path)
+    text = path.read_text()
+    path.write_text(text.replace(pc.provenance_hash, pc.provenance_hash[:-1] + "x"))
+
+    reloaded = PlanConstraintStore.load(path, authority_map=AUTHORITY)
+    assert reloaded.constraints == {}
+    assert reloaded.quarantined == [{"id": "pc-1", "reason": "tampered"}]
+    assert [q.id for q in reloaded.quarantined_constraints] == ["pc-1"]
+    assert reloaded.health.loaded == 0
+    assert reloaded.health.quarantined == [{"id": "pc-1", "reason": "tampered"}]
+    assert len(reloaded.health.constraints_sha256) == 64
+
+    intents = [tf_intent("create", "aws_instance.web")]
+    decision = evaluate_plan(empty_interceptor(), reloaded, intents, now=NOW)
+    assert decision.verdict == "ESCALATE"
+    assert decision.notes == ["fail-closed: pc-1 (tampered)"]
 
 
 def test_add_raises_permission_error_for_unauthorized_principal():

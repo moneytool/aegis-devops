@@ -16,8 +16,22 @@ Decision pipeline, per matching constraint, in order:
   4. Effect     — BLOCK outranks ESCALATE outranks ALLOW among whatever
      constraints survived steps 1-3.
 
-Constraints that fail step 1 or 2 are discarded, not honoured. A
-rate-limited constraint that hasn't hit its quota (step 3) is neither
+Constraints that fail step 1 or 2 are discarded, not honoured — but they
+are not silently dropped either. **Fail closed on integrity failure:** a
+matching constraint that was quarantined at load (``tampered`` /
+``forged``, kept in ``store.quarantined_constraints``) or discarded at
+decision time (``tampered`` / ``unauthorized``) whose ``effect`` was BLOCK
+or ESCALATE contributes ESCALATE to the verdict, with
+``discarded[].reason`` naming the failure and a note
+``"fail-closed: <id> (<reason>)"``. Such a constraint can never contribute
+BLOCK: a rule nobody can vouch for is grounds for a human look, not for
+an automatic denial — and never grounds for an automatic allow.
+
+With ``fail_closed=True`` an *uncovered* intent (no constraint matched
+at all) also becomes ESCALATE (note ``"fail-closed: uncovered"``) instead
+of the default ALLOW.
+
+A rate-limited constraint that hasn't hit its quota (step 3) is neither
 discarded nor honoured — it's simply not a match for this decision.
 """
 
@@ -28,6 +42,9 @@ from datetime import UTC, datetime
 from aegis_core.intent import InfrastructureIntent
 from aegis_core.ledger import DecisionLedger, parse_window
 from aegis_core.store import Constraint, ConstraintStore
+
+# Effects that make a quarantined/discarded constraint fail closed.
+_ENFORCING_EFFECTS = frozenset({"BLOCK", "ESCALATE"})
 
 
 @dataclass
@@ -56,9 +73,16 @@ class AegisInterceptor:
     human or downstream check can see what's actually at stake.
     """
 
-    def __init__(self, store: ConstraintStore, ledger: DecisionLedger | None = None):
+    def __init__(
+        self,
+        store: ConstraintStore,
+        ledger: DecisionLedger | None = None,
+        *,
+        fail_closed: bool = False,
+    ):
         self.store = store
         self.ledger = ledger
+        self.fail_closed = fail_closed
 
     def intercept(self, intent: InfrastructureIntent, now: datetime | None = None) -> Decision:
         """Evaluates an intent and returns a Decision.
@@ -72,28 +96,45 @@ class AegisInterceptor:
         is_dry_run = intent.params.get("dry_run") is True
 
         matches = self.store.get_matching_constraints(intent, now)
-        if not matches:
+        quarantined_matches = self.store.get_matching_quarantined(intent, now)
+        if not matches and not quarantined_matches:
+            verdict, notes = "ALLOW", []
+            if self.fail_closed:
+                verdict, notes = "ESCALATE", ["fail-closed: uncovered"]
             decision = Decision(
-                verdict="ALLOW",
+                verdict="ALLOW" if is_dry_run else verdict,
                 covered=False,
                 latency_ms=(time.perf_counter() - start) * 1000,
                 dry_run=is_dry_run,
+                would_be=verdict if is_dry_run and verdict != "ALLOW" else None,
+                notes=notes,
             )
             self._record(intent, decision, now)
             return decision
 
         discarded: list[dict[str, str]] = []
+        notes: list[str] = []
+        fail_closed = False
         verified = []
+        for c, reason in quarantined_matches:
+            discarded.append({"id": c.id, "reason": reason})
+            if c.effect in _ENFORCING_EFFECTS:
+                fail_closed = True
+                notes.append(f"fail-closed: {c.id} ({reason})")
         for c in matches:
+            reason = None
             if not c.verify_integrity():
-                discarded.append({"id": c.id, "reason": "tampered"})
-                continue
-            if not self.store.is_authorized(c.principal, c.constraint_class):
-                discarded.append({"id": c.id, "reason": "unauthorized"})
+                reason = "tampered"
+            elif not self.store.is_authorized(c.principal, c.constraint_class):
+                reason = "unauthorized"
+            if reason is not None:
+                discarded.append({"id": c.id, "reason": reason})
+                if c.effect in _ENFORCING_EFFECTS:
+                    fail_closed = True
+                    notes.append(f"fail-closed: {c.id} ({reason})")
                 continue
             verified.append(c)
 
-        notes: list[str] = []
         active: list[Constraint] = []
         for c in verified:
             if c.rate_limit is None:
@@ -110,7 +151,7 @@ class AegisInterceptor:
 
         if blocking:
             verdict, citations = "BLOCK", [c.id for c in blocking]
-        elif escalating:
+        elif escalating or fail_closed:
             verdict, citations = "ESCALATE", [c.id for c in escalating]
         else:
             verdict, citations = "ALLOW", [c.id for c in active]

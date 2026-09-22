@@ -1,5 +1,37 @@
 """Turns raw kubectl/aws/az/gcloud/helm/argocd/flux/git/gh argv and
-terraform plan JSON into structured InfrastructureIntents."""
+terraform plan JSON into structured InfrastructureIntents.
+
+**Global options before the verb.** Every argv parser first consumes the
+tool's *global* options (``kubectl -n prod delete ...``, ``git -C /repo
+push ...``, ``helm --kube-context prod uninstall ...``) before it selects
+the verb, so a flag placed in front of the verb yields exactly the same
+intent as the same flag placed after it. Flags that carry environment
+identity (namespace / context / cluster / repo) land in ``metadata`` in
+both positions. A leading option the parser does not recognise is a
+``ValueError`` (fail closed) rather than a guess at where the verb starts,
+and the token finally chosen as the verb must not start with ``-``.
+
+**Glued short flags.** kubectl's ``-nprod`` / ``-lapp=web`` / ``-fx.yaml``
+/ ``-ojson`` / ``-k./dir`` and helm/flux's ``-nprod`` are expanded to their
+two-token form before parsing; ``-n=prod`` keeps working too.
+
+**Selectors, comma-separated kinds.** ``-l/--selector`` and
+``--field-selector`` are value flags recorded in ``params["selector"]`` /
+``params["field_selector"]``; the resource is then ``kind/*`` (every
+object the selector may match). ``kubectl delete nodes,pods`` yields one
+intent per kind; naming objects alongside a multi-kind list is rejected
+(kubectl rejects it too).
+
+**Namespace deletion cascade.** ``kubectl delete namespace/<ns>`` (in any
+form: ``namespace <ns>``, ``ns/<ns>``, ``namespaces <ns>``) deletes every
+object inside the namespace, so besides the ``namespace/<ns>`` intent the
+parser also emits a synthetic intent ``resource="*/*"``,
+``action="delete"``, ``metadata["namespace"]=<ns>``,
+``params["cascade_from"]="namespace/<ns>"`` — this is what lets a
+``scope: {namespace: prod}`` deletion rule fire on the namespace deletion
+itself. Only named namespaces cascade; ``namespace/*`` (``--all``, a
+selector) does not, because there is no single namespace to scope on.
+"""
 
 from pathlib import Path
 from typing import Any
@@ -125,11 +157,55 @@ _RESOURCE_ALIASES = {
 # without "=value".
 _KNOWN_BOOL_FLAGS = {"force", "cascade", "all", "wait", "now", "ignore-not-found"}
 
+# Global boolean flags that are consumed but not recorded anywhere.
+_DISCARD_BOOL_FLAGS = {
+    "insecure-skip-tls-verify",
+    "warnings-as-errors",
+    "match-server-version",
+    "disable-compression",
+}
+
 # Global flags whose value is consumed but not recorded anywhere.
-_DISCARD_VALUE_FLAGS = {"kubeconfig", "o", "output", "server"}
+_DISCARD_VALUE_FLAGS = {
+    "kubeconfig",
+    "o",
+    "output",
+    "s",
+    "server",
+    "v",
+    "as",
+    "as-uid",
+    "as-group",
+    "request-timeout",
+    "token",
+    "user",
+    "username",
+    "password",
+    "cache-dir",
+    "certificate-authority",
+    "client-certificate",
+    "client-key",
+    "tls-server-name",
+    "profile",
+    "profile-output",
+    "log-flush-frequency",
+}
 
 # Flags that point at a manifest (file or kustomize directory).
 _MANIFEST_FLAGS = {"f", "filename", "k", "kustomize"}
+
+# Flags carrying environment identity, recorded in metadata.
+_KUBECTL_IDENTITY_FLAGS = {"n", "namespace", "context", "cluster"}
+
+# Selector flags: value flags recorded in params; the target becomes kind/*.
+_SELECTOR_FLAGS = {"l": "selector", "selector": "selector", "field-selector": "field_selector"}
+
+# Every global option kubectl accepts in front of the verb, split by arity.
+_KUBECTL_GLOBAL_VALUE_FLAGS = _KUBECTL_IDENTITY_FLAGS | _DISCARD_VALUE_FLAGS
+_KUBECTL_GLOBAL_BOOL_FLAGS = {"A", "all-namespaces"} | _DISCARD_BOOL_FLAGS
+
+# Short flags that may be glued to their value: -nprod, -lapp=web, -fx.yaml.
+_KUBECTL_GLUED_SHORT_FLAGS = {"n", "l", "f", "o", "k", "s", "v"}
 
 # Verbs whose "resource" is just the literal first positional token (a pod
 # name, a path, ...), not a kind/name pair to be normalised.
@@ -148,10 +224,81 @@ def _coerce(value: str) -> Any:
         return value
 
 
+def _value_at(tokens: list[str], i: int, flag: str) -> str:
+    """``tokens[i]`` as the value of ``flag``, or a ValueError (not an
+    IndexError) when the argv ends right after a flag that needs a value."""
+    if i >= len(tokens):
+        raise ValueError(f"flag {flag!r} is missing its value: {tokens!r}")
+    return tokens[i]
+
+
 def _split_flag(token: str) -> tuple[str, str | None]:
     body = token[2:] if token.startswith("--") else token[1:]
     key, sep, value = body.partition("=")
     return key, (value if sep else None)
+
+
+def _expand_glued_short_flags(tokens: list[str], short_value_flags: set[str]) -> list[str]:
+    """``-nprod`` -> ``-n prod`` for every single-letter value flag in
+    ``short_value_flags``. ``-n=prod`` and ``-n prod`` are left alone, as is
+    any token that isn't a short flag."""
+    expanded: list[str] = []
+    for idx, tok in enumerate(tokens):
+        if tok == "--":
+            # everything after "--" is a wrapped command (kubectl exec ... -- ls -la)
+            expanded.extend(tokens[idx:])
+            break
+        if (
+            len(tok) > 2
+            and tok[0] == "-"
+            and tok[1] != "-"
+            and tok[1] in short_value_flags
+            and tok[2] != "="
+        ):
+            expanded.append(tok[:2])
+            expanded.append(tok[2:])
+        else:
+            expanded.append(tok)
+    return expanded
+
+
+def _split_leading_globals(
+    tokens: list[str],
+    *,
+    value_flags: set[str],
+    bool_flags: set[str],
+    tool: str,
+) -> tuple[list[str], list[str]]:
+    """Splits ``tokens`` into ``(leading_global_option_tokens, rest)`` where
+    ``rest[0]`` is the tool's verb.
+
+    A leading option is consumed as ``--flag=value`` (one token), or as
+    ``--flag value`` when its key is in ``value_flags``, or as a bare
+    boolean when its key is in ``bool_flags``. Anything else that starts
+    with ``-`` before the verb is a ``ValueError``: guessing whether an
+    unknown option swallows the next token is exactly how a verb gets
+    misidentified. Raises ``ValueError`` when no verb follows the options,
+    or when the option's value is missing."""
+    i = 0
+    n = len(tokens)
+    while i < n and tokens[i].startswith("-") and tokens[i] != "-":
+        tok = tokens[i]
+        key, val = _split_flag(tok)
+        if val is not None and (key in value_flags or key in bool_flags):
+            i += 1
+        elif key in value_flags:
+            if i + 1 >= n:
+                raise ValueError(f"{tool}: global option {tok!r} is missing its value")
+            i += 2
+        elif key in bool_flags:
+            i += 1
+        else:
+            raise ValueError(f"{tool}: unrecognised global option {tok!r} before the verb")
+    if i >= n:
+        raise ValueError(f"{tool}: no verb found after global options: {tokens!r}")
+    if tokens[i].startswith("-"):
+        raise ValueError(f"{tool}: verb {tokens[i]!r} must not start with '-'")
+    return tokens[:i], tokens[i:]
 
 
 def _split_resource_token(token: str) -> tuple[str, str | None]:
@@ -169,7 +316,9 @@ def _parse_resources(positional: list[str]) -> list[str]:
     """Turns a list of positional kubectl tokens into one or more
     ``kind/name`` resource identifiers. A kind with no name (``kubectl get
     pods``) targets every object of that kind, so it becomes ``kind/*`` and
-    matches ``kind/*`` constraint patterns."""
+    matches ``kind/*`` constraint patterns. A comma-separated kind list
+    (``nodes,pods``) yields one ``kind/*`` per kind; combining it with
+    object names is rejected, as kubectl itself does."""
     if not positional:
         return []
     if any("/" in t for t in positional):
@@ -178,6 +327,13 @@ def _parse_resources(positional: list[str]) -> list[str]:
             kind, name = _split_resource_token(t)
             resources.append(f"{kind}/{name}" if name is not None else f"{kind}/*")
         return resources
+    if "," in positional[0]:
+        if len(positional) > 1:
+            raise ValueError(
+                f"a comma-separated kind list cannot be combined with names: {positional!r}"
+            )
+        kinds = [_split_resource_token(k)[0] for k in positional[0].split(",") if k]
+        return [f"{kind}/*" for kind in kinds]
     kind, _ = _split_resource_token(positional[0])
     if len(positional) == 1:
         return [f"{kind}/*"]
@@ -209,34 +365,41 @@ def _parse_flags(
             if key in ("n", "namespace"):
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 metadata["namespace"] = val
             elif key in ("A", "all-namespaces"):
                 metadata["all_namespaces"] = True
             elif key == "context":
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 metadata["context"] = val
             elif key == "cluster":
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 metadata["cluster"] = val
             elif key == "dry-run":
                 # bare --dry-run, --dry-run=client, --dry-run=server are all
                 # rehearsals; --dry-run=none is a real run.
                 if val is None or val in ("client", "server"):
                     params["dry_run"] = True
+            elif key in _SELECTOR_FLAGS:
+                if val is None:
+                    i += 1
+                    val = _value_at(tokens, i, tok)
+                params[_SELECTOR_FLAGS[key]] = val
             elif key in _MANIFEST_FLAGS:
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 manifest_value = val
             elif key in _DISCARD_VALUE_FLAGS:
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
+            elif key in _DISCARD_BOOL_FLAGS:
+                pass
             elif val is None and key in _KNOWN_BOOL_FLAGS:
                 params[key] = True
             elif val is not None:
@@ -245,7 +408,7 @@ def _parse_flags(
                 # Unknown long flag with no "=value": treat the next token
                 # as its value.
                 i += 1
-                params[key] = _coerce(tokens[i])
+                params[key] = _coerce(_value_at(tokens, i, tok))
             # else: unrecognised bare short flag -- ignored.
         else:
             positional.append(tok)
@@ -279,8 +442,17 @@ def from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
     if len(argv) < 2 or not (argv[0] == "kubectl" or argv[0].endswith("/kubectl")):
         raise ValueError(f"not a recognizable kubectl invocation: {argv!r}")
 
-    verb = argv[1]
-    tokens = argv[2:]
+    all_tokens = _expand_glued_short_flags(argv[1:], _KUBECTL_GLUED_SHORT_FLAGS)
+    leading, rest = _split_leading_globals(
+        all_tokens,
+        value_flags=_KUBECTL_GLOBAL_VALUE_FLAGS,
+        bool_flags=_KUBECTL_GLOBAL_BOOL_FLAGS,
+        tool="kubectl",
+    )
+    verb = rest[0]
+    # Global options are parsed by the same flag walker as post-verb flags,
+    # so "-n prod delete x" and "delete x -n prod" produce identical intents.
+    tokens = leading + rest[1:]
 
     subverb = None
     if verb == "rollout":
@@ -335,7 +507,32 @@ def from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
     resources = _parse_resources(positional)
     if not resources:
         raise ValueError(f"could not find a target resource in: {argv!r}")
-    return _make_intents(resources, verb, params, metadata)
+    intents = _make_intents(resources, verb, params, metadata)
+    if verb == "delete":
+        intents.extend(_namespace_cascade_intents(resources, params, metadata))
+    return intents
+
+
+def _namespace_cascade_intents(
+    resources: list[str], params: dict[str, Any], metadata: dict[str, Any]
+) -> list[InfrastructureIntent]:
+    """For every named ``namespace/<ns>`` being deleted, the synthetic
+    ``*/*`` delete intent scoped to that namespace (see module docstring)."""
+    cascades = []
+    for resource in resources:
+        kind, _, name = resource.partition("/")
+        if kind != "namespace" or name in ("", "*"):
+            continue
+        cascades.append(
+            InfrastructureIntent(
+                resource="*/*",
+                action="delete",
+                provider="kubernetes",
+                params={**params, "cascade_from": resource},
+                metadata={**metadata, "namespace": name},
+            )
+        )
+    return cascades
 
 
 def from_kubectl(argv: list[str]) -> InfrastructureIntent:
@@ -459,7 +656,17 @@ def from_terraform_plan(
 
 # --- AWS CLI -----------------------------------------------------------------
 
-_AWS_BOOL_FLAGS = {"force", "no-paginate", "no-cli-pager"}
+_AWS_BOOL_FLAGS = {
+    "force",
+    "no-paginate",
+    "no-cli-pager",
+    # global booleans: never swallow the service/operation token after them
+    "debug",
+    "no-verify-ssl",
+    "no-sign-request",
+    "no-cli-auto-prompt",
+    "cli-auto-prompt",
+}
 _AWS_DISCARD_VALUE_FLAGS = {"output", "query"}
 
 _AWS_SINGLE_ID_FLAGS = {
@@ -512,12 +719,12 @@ def _parse_aws_tokens(
             if key == "region":
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 metadata["region"] = val
             elif key == "profile":
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 metadata["profile"] = val
             elif key == "dry-run":
                 params["dry_run"] = True
@@ -528,12 +735,12 @@ def _parse_aws_tokens(
             elif key in _AWS_DISCARD_VALUE_FLAGS:
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 # consumed, intentionally not recorded
             elif key == "cli-input-json":
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 params["cli_input_json"] = val
             elif key == "instance-ids":
                 if val is not None:
@@ -547,7 +754,7 @@ def _parse_aws_tokens(
             elif key in _AWS_SINGLE_ID_FLAGS:
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 id_value = val
             elif val is not None:
                 params[key] = _coerce(val)
@@ -683,7 +890,7 @@ _AZ_VERBS = {
     "purge",
 }
 
-_AZ_BOOL_FLAGS = {"yes", "y", "no-wait"}
+_AZ_BOOL_FLAGS = {"yes", "y", "no-wait", "debug", "verbose", "only-show-errors"}
 
 _AZ_GROUP_MAP = {
     ("vm",): "compute/vm",
@@ -722,22 +929,22 @@ def _parse_az_tokens(
             if key in ("l", "location"):
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 metadata["region"] = val
             elif key == "subscription":
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 metadata["subscription"] = val
             elif key in ("g", "resource-group"):
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 metadata["resource_group"] = val
             elif key in ("n", "name"):
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 name_value = val
             elif key in ("what-if", "dry-run"):
                 params["dry_run"] = True
@@ -838,6 +1045,9 @@ _GCLOUD_GROUP_MAP = {
 
 _GCS_LEGACY_VERB_MAP = {"rm": "delete", "rb": "delete", "cp": "put"}
 
+# gcloud global booleans: never swallow the group/verb token after them.
+_GCLOUD_BOOL_FLAGS = {"log-http", "no-user-output-enabled", "user-output-enabled"}
+
 
 def _parse_gcloud_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     metadata: dict[str, Any] = {}
@@ -853,18 +1063,18 @@ def _parse_gcloud_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, A
             if key == "region":
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 metadata["region"] = val
             elif key == "zone":
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 metadata["zone"] = val
                 metadata["region"] = val
             elif key == "project":
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 metadata["project"] = val
             elif key in ("quiet", "q"):
                 params["quiet"] = True if val is None else _coerce(val)
@@ -873,6 +1083,8 @@ def _parse_gcloud_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, A
                     params["dry_run"] = True
             elif key == "async":
                 params["async"] = True if val is None else _coerce(val)
+            elif key in _GCLOUD_BOOL_FLAGS:
+                params[key.replace("-", "_")] = True if val is None else _coerce(val)
             elif val is not None:
                 params[key] = _coerce(val)
             elif i + 1 < n and not tokens[i + 1].startswith("-"):
@@ -986,6 +1198,28 @@ _HELM_BOOL_FLAGS = {
 
 _HELM_READ_VERBS = {"history", "status", "list", "get"}
 
+# Helm global options (accepted before or after the verb).
+_HELM_GLOBAL_VALUE_FLAGS = {
+    "n",
+    "namespace",
+    "kube-context",
+    "kubeconfig",
+    "kube-apiserver",
+    "kube-as-user",
+    "kube-as-group",
+    "kube-token",
+    "kube-ca-file",
+    "kube-tls-server-name",
+    "registry-config",
+    "repository-cache",
+    "repository-config",
+    "burst-limit",
+    "qps",
+}
+_HELM_GLOBAL_BOOL_FLAGS = {"debug", "kube-insecure-skip-tls-verify"}
+# Global value flags whose value is consumed but not recorded.
+_HELM_DISCARD_VALUE_FLAGS = _HELM_GLOBAL_VALUE_FLAGS - {"n", "namespace", "kube-context"}
+
 
 def _parse_helm_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     metadata: dict[str, Any] = {}
@@ -1001,30 +1235,37 @@ def _parse_helm_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, Any
             if key in ("n", "namespace"):
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 metadata["namespace"] = val
             elif key == "kube-context":
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 metadata["context"] = val
+            elif key in _HELM_DISCARD_VALUE_FLAGS:
+                if val is None:
+                    i += 1
+                    val = _value_at(tokens, i, tok)
+                # consumed, intentionally not recorded
+            elif key in _HELM_GLOBAL_BOOL_FLAGS:
+                pass  # consumed, intentionally not recorded
             elif key == "dry-run":
                 if val is None or val != "false":
                     params["dry_run"] = True
             elif key == "version":
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 params["version"] = _coerce(val)
             elif key in ("f", "values"):
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 params.setdefault("values_files", []).append(val)
             elif key == "set":
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 k, _sep, v = val.partition("=")
                 params.setdefault("set", {})[k] = _coerce(v)
             elif key in _HELM_BOOL_FLAGS:
@@ -1054,8 +1295,14 @@ def from_helm(argv: list[str]) -> InfrastructureIntent:
     if len(argv) < 2 or _basename(argv[0]) != "helm":
         raise ValueError(f"not a recognizable helm invocation: {argv!r}")
 
-    verb = argv[1]
-    tokens = argv[2:]
+    leading, rest = _split_leading_globals(
+        _expand_glued_short_flags(argv[1:], {"n"}),
+        value_flags=_HELM_GLOBAL_VALUE_FLAGS,
+        bool_flags=_HELM_GLOBAL_BOOL_FLAGS,
+        tool="helm",
+    )
+    verb = rest[0]
+    tokens = leading + rest[1:]
     metadata, params, positional = _parse_helm_tokens(tokens)
     params["raw_action"] = verb
 
@@ -1140,6 +1387,36 @@ _ARGOCD_ACTION_MAP = {
 
 _ARGOCD_MULTI_APP_VERBS = {"sync", "delete"}
 
+# ArgoCD global options (persistent flags, accepted anywhere on the line).
+_ARGOCD_GLOBAL_VALUE_FLAGS = {
+    "server",
+    "auth-token",
+    "config",
+    "header",
+    "client-crt",
+    "client-crt-key",
+    "server-crt",
+    "kube-context",
+    "port-forward-namespace",
+    "logformat",
+    "loglevel",
+    "http-retry-max",
+    "server-name",
+    "grpc-web-root-path",
+    "redis-haproxy-name",
+    "redis-name",
+    "repo-server-name",
+    "controller-name",
+}
+_ARGOCD_GLOBAL_BOOL_FLAGS = {
+    "grpc-web",
+    "insecure",
+    "plaintext",
+    "core",
+    "port-forward",
+    "skip-test-tls",
+}
+
 
 def _parse_argocd_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     metadata: dict[str, Any] = {}
@@ -1155,14 +1432,19 @@ def _parse_argocd_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, A
             if key == "project":
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 metadata["project"] = val
-            elif key in ("server", "auth-token"):
+            elif key == "kube-context":
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
+                metadata["context"] = val
+            elif key in _ARGOCD_GLOBAL_VALUE_FLAGS:
+                if val is None:
+                    i += 1
+                    val = _value_at(tokens, i, tok)
                 # consumed, intentionally not recorded
-            elif key == "grpc-web":
+            elif key in _ARGOCD_GLOBAL_BOOL_FLAGS:
                 pass  # consumed, intentionally not recorded
             elif key == "dry-run":
                 params["dry_run"] = True
@@ -1187,18 +1469,34 @@ def from_argocd_multi(argv: list[str]) -> list[InfrastructureIntent]:
     target app (``argocd app sync`` / ``delete`` may name more than one)."""
     if len(argv) < 2 or _basename(argv[0]) != "argocd":
         raise ValueError(f"not a recognizable argocd invocation: {argv!r}")
-    if argv[1] != "app":
-        raise ValueError(f"unsupported argocd invocation: {argv!r}")
-    if len(argv) < 3:
-        raise ValueError(f"argocd app requires a subcommand: {argv!r}")
 
-    subverb = argv[2]
-    tokens = argv[3:]
+    # Persistent flags may precede "app" and/or its subcommand; both runs
+    # of globals are handed to the same token parser as the trailing flags.
+    leading, rest = _split_leading_globals(
+        argv[1:],
+        value_flags=_ARGOCD_GLOBAL_VALUE_FLAGS,
+        bool_flags=_ARGOCD_GLOBAL_BOOL_FLAGS,
+        tool="argocd",
+    )
+    if rest[0] != "app":
+        raise ValueError(f"unsupported argocd invocation: {argv!r}")
+    if len(rest) < 2:
+        raise ValueError(f"argocd app requires a subcommand: {argv!r}")
+    leading_2, rest = _split_leading_globals(
+        rest[1:],
+        value_flags=_ARGOCD_GLOBAL_VALUE_FLAGS,
+        bool_flags=_ARGOCD_GLOBAL_BOOL_FLAGS,
+        tool="argocd",
+    )
+    leading = leading + leading_2
+
+    subverb = rest[0]
+    tokens = leading + rest[1:]
 
     if subverb == "actions":
-        if len(tokens) < 1 or tokens[0] != "run":
+        if len(rest) < 2 or rest[1] != "run":
             raise ValueError(f"unsupported 'argocd app actions' invocation: {argv!r}")
-        metadata, params, positional = _parse_argocd_tokens(tokens[1:])
+        metadata, params, positional = _parse_argocd_tokens(leading + rest[2:])
         if len(positional) < 2:
             raise ValueError(f"could not find an app and action name in: {argv!r}")
         app, action_name = positional[0], positional[1]
@@ -1270,6 +1568,32 @@ _FLUX_VERB_ACTION = {
 
 _FLUX_READ_VERBS = {"get", "logs", "export"}
 
+# Flux global options (accepted before or after the verb).
+_FLUX_GLOBAL_VALUE_FLAGS = {
+    "n",
+    "namespace",
+    "context",
+    "kubeconfig",
+    "timeout",
+    "as",
+    "as-group",
+    "as-uid",
+    "cache-dir",
+    "certificate-authority",
+    "client-certificate",
+    "client-key",
+    "server",
+    "token",
+    "tls-server-name",
+    "kube-api-burst",
+    "kube-api-qps",
+}
+_FLUX_GLOBAL_BOOL_FLAGS = {"verbose", "insecure-skip-tls-verify"}
+# Global value flags whose value is consumed but not recorded. --timeout is
+# kept in params: it's meaningful to a rule author ("reconcile with a long
+# timeout") and lands there whichever side of the verb it's on.
+_FLUX_DISCARD_VALUE_FLAGS = _FLUX_GLOBAL_VALUE_FLAGS - {"n", "namespace", "context", "timeout"}
+
 _FLUX_KIND_ALIASES = {
     "kustomization": "kustomization",
     "kustomizations": "kustomization",
@@ -1294,13 +1618,20 @@ def _parse_flux_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, Any
             if key in ("n", "namespace"):
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 metadata["namespace"] = val
             elif key == "context":
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 metadata["context"] = val
+            elif key in _FLUX_DISCARD_VALUE_FLAGS:
+                if val is None:
+                    i += 1
+                    val = _value_at(tokens, i, tok)
+                # consumed, intentionally not recorded
+            elif key in _FLUX_GLOBAL_BOOL_FLAGS:
+                pass  # consumed, intentionally not recorded
             elif key == "dry-run":
                 params["dry_run"] = True
             elif key == "export":
@@ -1349,8 +1680,14 @@ def from_flux(argv: list[str]) -> InfrastructureIntent:
     if len(argv) < 2 or _basename(argv[0]) != "flux":
         raise ValueError(f"not a recognizable flux invocation: {argv!r}")
 
-    verb = argv[1]
-    tokens = argv[2:]
+    leading, rest = _split_leading_globals(
+        _expand_glued_short_flags(argv[1:], {"n"}),
+        value_flags=_FLUX_GLOBAL_VALUE_FLAGS,
+        bool_flags=_FLUX_GLOBAL_BOOL_FLAGS,
+        tool="flux",
+    )
+    verb = rest[0]
+    tokens = leading + rest[1:]
     metadata, params, positional = _parse_flux_tokens(tokens)
     params["raw_action"] = verb
 
@@ -1391,6 +1728,37 @@ def from_flux(argv: list[str]) -> InfrastructureIntent:
 
 
 # --- Git -----------------------------------------------------------------
+
+# Git launcher options: only valid *before* the verb ("git -C /repo push"),
+# and never part of the intent — a force-push is a force-push whichever
+# working tree it's launched from — so they're consumed and dropped.
+_GIT_GLOBAL_VALUE_FLAGS = {
+    "C",
+    "c",
+    "git-dir",
+    "work-tree",
+    "namespace",
+    "super-prefix",
+    "config-env",
+    "list-cmds",
+    "attr-source",
+}
+_GIT_GLOBAL_BOOL_FLAGS = {
+    "no-pager",
+    "p",
+    "paginate",
+    "P",
+    "no-optional-locks",
+    "exec-path",
+    "bare",
+    "no-replace-objects",
+    "no-lazy-fetch",
+    "no-advice",
+    "literal-pathspecs",
+    "glob-pathspecs",
+    "noglob-pathspecs",
+    "icase-pathspecs",
+}
 
 
 def _parse_git_tokens(tokens: list[str]) -> tuple[dict[str, Any], list[str]]:
@@ -1485,8 +1853,14 @@ def from_git(argv: list[str]) -> InfrastructureIntent:
     if len(argv) < 2 or _basename(argv[0]) != "git":
         raise ValueError(f"not a recognizable git invocation: {argv!r}")
 
-    verb = argv[1]
-    tokens = argv[2:]
+    _leading, rest = _split_leading_globals(
+        argv[1:],
+        value_flags=_GIT_GLOBAL_VALUE_FLAGS,
+        bool_flags=_GIT_GLOBAL_BOOL_FLAGS,
+        tool="git",
+    )
+    verb = rest[0]
+    tokens = rest[1:]
     params, positional = _parse_git_tokens(tokens)
     metadata: dict[str, Any] = {}
     params["raw_action"] = verb
@@ -1564,6 +1938,21 @@ _GH_METHOD_ACTION = {
     "PATCH": "update",
 }
 
+_GH_GLOBAL_VALUE_FLAGS = {"R", "repo"}
+
+# Groups whose first token is a subcommand ("gh workflow run ..."); the
+# rest ("gh api ...", "gh issue ...") take their flags directly.
+_GH_SUBVERB_GROUPS = {"workflow", "release", "pr", "repo", "secret", "variable"}
+
+
+def _gh_fold_globals(group: str, tokens: list[str], leading: list[str]) -> list[str]:
+    """Re-inserts leading global option tokens after the group's subcommand
+    (or at the front, for groups without one) so they reach
+    ``_parse_gh_tokens`` alongside the trailing flags."""
+    if group in _GH_SUBVERB_GROUPS and tokens:
+        return [tokens[0], *leading, *tokens[1:]]
+    return [*leading, *tokens]
+
 
 def _parse_gh_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     metadata: dict[str, Any] = {}
@@ -1579,17 +1968,17 @@ def _parse_gh_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, Any],
             if key in ("R", "repo"):
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 metadata["repo"] = val
             elif key in ("r", "ref"):
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 metadata["ref"] = val
             elif key in ("f", "field", "raw-field"):
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 k, _sep, v = val.partition("=")
                 params.setdefault("inputs", {})[k] = _coerce(v)
             elif key == "admin":
@@ -1601,7 +1990,7 @@ def _parse_gh_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, Any],
             elif key in ("X", "method"):
                 if val is None:
                     i += 1
-                    val = tokens[i]
+                    val = _value_at(tokens, i, tok)
                 params["_method"] = val.upper()
             elif val is not None:
                 params[key.replace("-", "_")] = _coerce(val)
@@ -1626,8 +2015,22 @@ def from_gh(argv: list[str]) -> InfrastructureIntent:
     if len(argv) < 2 or _basename(argv[0]) != "gh":
         raise ValueError(f"not a recognizable gh invocation: {argv!r}")
 
-    group = argv[1]
-    tokens = argv[2:]
+    # -R/--repo is a persistent flag of each command group, so it may sit in
+    # front of the group ("gh -R o/r workflow run x") or between the group
+    # and its subcommand ("gh workflow -R o/r run x"); both are folded into
+    # the tokens handed to _parse_gh_tokens.
+    leading, rest = _split_leading_globals(
+        argv[1:], value_flags=_GH_GLOBAL_VALUE_FLAGS, bool_flags=set(), tool="gh"
+    )
+    group = rest[0]
+    tokens = rest[1:]
+    if group in _GH_SUBVERB_GROUPS and tokens:
+        leading_2, tokens = _split_leading_globals(
+            tokens, value_flags=_GH_GLOBAL_VALUE_FLAGS, bool_flags=set(), tool="gh"
+        )
+        leading = leading + leading_2
+    if leading:
+        tokens = _gh_fold_globals(group, tokens, leading)
 
     if group == "workflow":
         if not tokens:

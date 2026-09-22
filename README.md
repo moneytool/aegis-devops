@@ -30,8 +30,8 @@ venv/bin/python -m pip install -e ".[dev]"
 venv/bin/python examples/demo.py
 ```
 
-`examples/demo.py` runs 14 intents across every supported tool through the interceptor and
-prints each decision. To check one command yourself:
+`examples/demo.py` runs 15 intents across every supported tool through the interceptor and
+prints each decision, starting with the store's health. To check one command yourself:
 
 ```bash
 aegis check kubectl --now 2026-03-16T10:00:00-05:00 --pretty -- \
@@ -43,15 +43,84 @@ BLOCK: kubernetes scale deployment/api-server
   citations: no-scale-prod-peak
   covered: True  latency_ms: 0.14
 PLAN BLOCK: 1 intent(s)
+STORE: loaded=20 quarantined=0 principals=3
 ```
 
-The process exit code is the worst verdict across all evaluated intents:
+Global options in front of the verb (`kubectl -n prod delete …`, `git -C /repo push …`,
+`helm --kube-context prod uninstall …`), glued short flags (`-nprod`), label selectors
+(`-l role=worker`) and comma-separated kinds (`nodes,pods`) all parse to the same intents as
+their canonical forms; a leading option Aegis does not recognise is an error (exit 65), never a
+guess at where the verb starts. `kubectl delete namespace prod` additionally emits a synthetic
+`*/*` delete intent scoped to that namespace, so namespace-scoped deletion rules fire on it.
 
-| exit code | verdict |
-| :--- | :--- |
-| `0` | ALLOW |
-| `2` | ESCALATE |
-| `3` | BLOCK |
+### Exit codes
+
+The exit code is the worst verdict across all evaluated intents, or a tool error. Verdict codes
+depend on `--exit-style`; tool errors are identical in every style and never print a verdict.
+
+| exit code | `--exit-style aegis` (default) | `--exit-style claude-hook` | `--exit-style ci` |
+| :--- | :--- | :--- | :--- |
+| `0` | ALLOW | ALLOW (prints nothing) | ALLOW |
+| `1` | — | — | ESCALATE or BLOCK |
+| `2` | ESCALATE | ESCALATE or BLOCK, printing `{"decision": "block", "reason": "<verdict>: <citations>"}` | — |
+| `3` | BLOCK | — | — |
+| `64` | usage error (unknown flag, no argv after `--`, compound shell command) | same | same |
+| `65` | bad data: unparseable argv, `--now`, YAML or JSON; degraded store (see below) | same | same |
+| `66` | a constraints/authority/environments/plan file does not exist or is unreadable | same | same |
+| `70` | internal error; the exception class name is on stderr | same | same |
+
+Every error is one `aegis: error: …` line on stderr, never a traceback. `claude-hook` exists
+because Claude Code `PreToolUse` hooks treat exit 2 as *block* and any other non-zero code as a
+non-blocking error, which would invert the default `3 = BLOCK` contract.
+
+### Store health
+
+Every output carries the state of the constraint store, so a degraded store can never be
+mistaken for a clean allow. Each per-intent JSON line and the plan summary include a
+`store_health` object — `loaded`, `quarantined: [{id, reason}]`, `principals`,
+`constraints_sha256` (of the raw file bytes), `warnings` — and `--pretty` ends with a
+`STORE: loaded=N quarantined=M principals=P` line plus one line per quarantined rule. Load-time
+warnings also go to stderr as `aegis: WARNING …` lines.
+
+Integrity failures **fail closed**. A constraint that was quarantined at load (`tampered`,
+`forged`) or discarded at decision time (`tampered`, `unauthorized`) is still matched, and if it
+was a BLOCK or ESCALATE rule its match contributes **ESCALATE** — never BLOCK (nobody can vouch
+for the rule) and never ALLOW (the action it covers is contested). The decision reports it in
+`discarded` and with a `fail-closed: <id> (<reason>)` note:
+
+```bash
+aegis check kubectl --constraints /tmp/oneflip.yaml --pretty -- kubectl delete node/x
+```
+
+```
+aegis: WARNING Quarantined constraint no-delete-nodes: provenance hash mismatch
+ESCALATE: kubernetes delete node/x
+  discarded: [{'id': 'no-delete-nodes', 'reason': 'tampered'}]
+  note: fail-closed: no-delete-nodes (tampered)
+  covered: True  latency_ms: 0.10
+STORE: loaded=19 quarantined=1 principals=3
+  quarantined: no-delete-nodes (tampered)
+```
+
+Aegis refuses to decide at all (exit 65, one-line message, no verdict) when the store loaded
+zero constraints, the authority map grants nothing to anyone, or more than
+`--max-quarantine-ratio` (default `0.10`) of the constraints were quarantined. `--fail-closed`
+additionally turns an *uncovered* intent (no rule matched) into ESCALATE with the note
+`fail-closed: uncovered`.
+
+### Claude Code hook
+
+`examples/claude-code-hook.sh` is a `PreToolUse` hook: it reads the hook JSON from stdin, splits
+`tool_input.command` with `shlex`, and runs `aegis check argv --exit-style claude-hook`. ALLOW
+lets the tool call proceed; ESCALATE and BLOCK exit 2 with the reason on stderr (which Claude
+Code shows to the model). Binaries Aegis cannot parse are not gated; compound commands (`;`,
+`&&`, `|`, `$(…)`) are a usage error until `--split-compound` lands (REVIEW-4 T1.2), and the hook
+converts any tool error into a block so it never fails open.
+
+```json
+{"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+  {"type": "command", "command": "/path/to/aegis-devops/examples/claude-code-hook.sh"}]}]}}
+```
 
 ## How a decision is made
 
@@ -237,18 +306,24 @@ print(decision.verdict, decision.citations, decision.covered)
 ```
 
 `Decision` also carries `discarded` (constraints that matched but were thrown out, with why),
-`latency_ms`, `dry_run`, and `would_be`.
+`notes` (`fail-closed: …`, `rate-limit: …`), `latency_ms`, `dry_run`, and `would_be`.
+`store.health` is the `StoreHealth` the CLI prints; `AegisInterceptor(store, fail_closed=True)`
+is the library form of `--fail-closed`.
 
 ## Adversarial suite
 
 ![Threat model](docs/threat-model.svg)
 
-`src/aegis_core/adversarial.py` generates 18 attacks across four categories — **tampered**
+`src/aegis_core/adversarial.py` generates 28 attacks across five categories — **tampered**
 (field mutated post-ingest), **unauthorized** (self-consistent but the wrong principal),
-**forged** (hash valid, cited source doesn't back it), and **evasion** (attempts to slip past
-the matcher itself). `tests/test_adversarial.py` proves the interceptor rejects every tampered
-and unauthorized attack, and that the matcher behaves correctly under the evasion attempts,
-with one documented gap (`evade-case-variant`, `xfail`: `fnmatch` is case-sensitive on POSIX).
+**forged** (hash valid, cited source doesn't back it), **evasion** (attempts to slip past
+the matcher itself), and **argv-evasion** (command-line shapes that used to parse into an
+intent nothing matched: global flags before the verb, `-nprod`, label selectors, comma kinds,
+namespace deletion). `tests/test_adversarial.py` proves every tampered and unauthorized attack
+is discarded *and fails closed to ESCALATE* (never ALLOW, never BLOCK), that each argv-evasion
+shape now hits the rule its author would expect, and that the matcher behaves correctly under
+the evasion attempts, with one documented gap (`evade-case-variant`, `xfail`: `fnmatch` is
+case-sensitive on POSIX).
 
 ```bash
 venv/bin/python -m pytest tests/test_adversarial.py -v
@@ -261,34 +336,77 @@ at decision time — see `--sources` above and "Open gaps" in `PLAN.md`.
 
 ![Benchmark results](docs/benchmark.svg)
 
-`scripts/benchmark.py` runs Aegis and two baselines over the labeled 500-constraint corpus in
-`data/corpus/` (built by `scripts/build_corpus.py`) and reports a confusion matrix, over-block
-rate, coverage, poison-susceptibility, and latency for each:
+`scripts/benchmark.py` runs Aegis and three baselines over the labeled 500-constraint corpus in
+`data/corpus/` (built by `scripts/build_corpus.py`) and reports precision/recall/F1, over-block
+rate, coverage, per-kind poison-susceptibility, and latency for each:
 
 ```bash
 venv/bin/python scripts/benchmark.py \
-    --corpus data/corpus --split all \
-    --verifiers aegis,llm-heuristic,opa \
+    --corpus data/corpus --split holdout \
+    --verifiers aegis,llm-heuristic,opa,opa-signed \
     --out results/
 ```
 
-This is fully offline: `llm-heuristic` is a deterministic, no-network stand-in for a naive LLM
-self-check (it blocks/escalates as soon as any constraint matches by provider/resource/action,
-with no provenance or authority reasoning), and `opa` is skipped with a note when the `opa`
-binary isn't on `PATH`.
+**Ground truth is independent of Aegis.** Every intent's `expected_verdict` / `expected_covered`
+comes from `scripts/reference_oracle.py` — a deliberately naive matcher (`provider ==`,
+`fnmatch`, `action in`, scope equality, a minimal time window) that reads `constraints.yaml`,
+`labels.jsonl` and `authority.yaml` with plain loaders and never imports
+`aegis_core.interceptor`, `aegis_core.store` or `aegis_core.plan`. Only constraints labelled
+**Trusted** drive the verdict (BLOCK > ESCALATE > ALLOW); `covered` is "any constraint of any
+label matched" and is computed once by the harness for every verifier. The harness re-runs the
+oracle at benchmark time and refuses to score a stale `intents.jsonl`. The `aegis` row is
+therefore a measurement against that oracle, not a sanity check on itself.
 
-| verifier | n | precision | recall | F1 | over-block | poison-susceptibility | coverage |
-| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| aegis | 200 | 1.000 | 1.000 | 1.000 | 0.000 | 0.000 | 0.735 |
-| llm-heuristic | 200 | 0.973 | 1.000 | 0.986 | 0.074 | 1.000 | 0.750 |
+**The test set is a held-out intent split.** `split.json["intents"]["holdout"]` is 20% of the
+600 intents, stratified by `expected_verdict` × `poison_candidate`, frozen with the corpus seed.
+`--split holdout` is the default and the only split reported here; `--split dev` is the rest;
+`--split all` requires `--i-know-this-is-dev`. The constraint store is always the full corpus —
+the store is the deployed artefact, the intents are the test set.
 
-**Caveat:** `expected_verdict` in the corpus was produced by running the real
-`AegisInterceptor` itself (see `scripts/build_corpus.py`), so the `aegis` row's perfect F1 is a
-harness sanity check, not an independent measurement — the baselines' numbers, scored against
-that same ground truth, are the actual comparison. `poison-susceptibility` is the headline
-number: of the intents whose only matching constraints are Untrusted/Malicious (correct verdict
-`ALLOW`), the fraction a verifier blocks/escalates on anyway — it should be ~0 for Aegis, and is
-1.0 for `llm-heuristic` because it has no provenance/authority concept at all.
+**Verifiers.** `aegis` loads the store the way a deployment would, with the corpus's `sources/`
+(so forged constraints are quarantined at load); `aegis-nosources` (opt-in) is the same engine
+without source verification, kept so the cost of skipping it is measurable. `llm-heuristic` is a
+deterministic, no-network stand-in for a naive LLM self-check (it blocks/escalates as soon as any
+constraint matches by provider/resource/action, with no provenance or authority reasoning).
+`opa` feeds every constraint to a real `opa eval`; `opa-signed` models a signed-bundle deployment
+(cosign/in-toto): the bundle handed to OPA excludes `tampered` and `forged` constraints but still
+contains `unauthorized` ones, because bundle signing proves integrity in transit, not that the
+author was allowed to say it. Both OPA rows are skipped with a note when the `opa` binary isn't
+on `PATH`.
+
+**Columns.** `n` is the number of held-out intents; `n_distinct` is the number of distinct
+`(provider, resource_pattern, actions, scope)` structures among the 500 constraints (from
+`data/corpus/stats.json`) — the honest measure of how many *different* rules the corpus
+contains. `poison-susceptibility` is the headline number: of the intents whose only matching
+constraints are Untrusted/Malicious (oracle verdict `ALLOW`), the fraction a verifier
+blocks/escalates on anyway. It is split by the strongest poisoned rule that matched:
+`ps_unauth` / `ps_tampered` / `ps_forged` count **BLOCK** verdicts (the verifier *obeyed* the
+poison), `pe_*` count **ESCALATE** verdicts (it failed closed — wrong verdict, but a human sees
+it). `unauthorized` is the realistic pre-ingest attacker; `tampered`/`forged` are post-ingest
+attacks that bundle signing already covers, which is why the `opa-signed` → `aegis` delta on
+`ps_unauth`/`pe_unauth` is the number that matters. `strict precision` counts a positive only on
+an exact verdict match.
+
+| verifier | n | n_distinct | precision | recall | F1 | over-block | PS | ps_unauth | ps_tampered | ps_forged | pe_unauth | pe_tampered | pe_forged | coverage |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| aegis | 120 | 196 | 0.711 | 1.000 | 0.831 | 0.464 | 1.000 | 0.000 | 0.000 | 0.000 | 1.000 | 1.000 | 1.000 | 0.750 |
+| llm-heuristic | 120 | 196 | 0.711 | 1.000 | 0.831 | 0.464 | 1.000 | 0.500 | 0.846 | 0.857 | 0.500 | 0.154 | 0.143 | 0.750 |
+| opa | 120 | 196 | 0.711 | 1.000 | 0.831 | 0.464 | 1.000 | 0.500 | 0.846 | 0.857 | 0.500 | 0.154 | 0.143 | 0.750 |
+| opa-signed | 120 | 196 | 0.842 | 1.000 | 0.914 | 0.214 | 0.462 | 0.500 | 0.000 | 0.571 | 0.500 | 0.077 | 0.143 | 0.750 |
+
+(`split: holdout`, `oracle: reference`; full table with latency in `results/benchmark.md`.)
+Every row has recall 1.0 because the corpus's poisoned rules are *additional* rules — a verifier
+that honours everything never misses a Trusted one; the cost shows up as over-block and `ps_*`.
+Read the Aegis row carefully: its binary precision / over-block are the *same* as the naive
+LLM's, because the interceptor fails closed (REVIEW-4 T0.3) — a quarantined or discarded
+BLOCK/ESCALATE rule contributes **ESCALATE** rather than being dropped — so every poison
+candidate is escalated to a human. The oracle's label semantics say those intents are `ALLOW`,
+so against the oracle that is an over-block, and it is reported as one. What separates Aegis is
+`ps_*` = 0 across every attack kind (it never *obeys* a poisoned rule; `pe_*` = 1.0 says it flags
+all of them), versus `ps_unauth` = 0.5 for both `opa` and `opa-signed` — bundle signing removes
+`tampered` but leaves the unauthorized author's rule in force. Whether "escalate everything
+poisoned" is the right trade-off versus "drop it silently" is a product decision, and the two
+columns let a reader make it.
 
 To run the real LLM baseline instead of the heuristic stand-in:
 
@@ -300,7 +418,7 @@ venv/bin/python scripts/benchmark.py --verifiers llm --llm-cache results/llm-cac
 
 Every prompt/response pair is cached so a later run can replay it offline (`--verifiers
 llm-replay`); without an API key it falls back to always-`ESCALATE` and is marked `stub: true`.
-The `opa` row needs the `opa` binary installed separately — it isn't a Python dependency.
+The `opa` binary is installed separately — it isn't a Python dependency.
 
 ## Corpus
 
@@ -308,9 +426,16 @@ The `opa` row needs the `opa` binary installed separately — it isn't a Python 
 failure-stories index and the OPA Gatekeeper policy library, not invented from scratch) into
 500 labeled constraints with real, computed provenance hashes: **Trusted** (~50%, valid
 provenance and authorized principal), **Untrusted** (~25%, valid provenance but unauthorized
-principal), and **Malicious** (~25%, split between tampered and forged). A 20% holdout split is
-frozen and excluded from development. Re-running with the same `--seed` reproduces the corpus
-byte-for-byte.
+principal), and **Malicious** (~25%, split between tampered and forged). Re-running with the
+same `--seed` reproduces every file byte-for-byte.
+
+It also emits 600 intents (300 aimed at Trusted rules, 150 aimed at poisoned rules that no
+Trusted rule shadows, 150 that match nothing), labelled by `scripts/reference_oracle.py` — never
+by the interceptor — and `data/corpus/stats.json`, which records the diversity numbers the
+benchmark header reports alongside `n = 500`: `n_distinct_structural = 196`, `n_distinct_patterns = 71`, `n_distinct_rule_text = 66`. `split.json` carries two 20% holdouts: a constraint split (per label, for store-level
+experiments) and the intent split (stratified by expected verdict × poison candidate) that
+`scripts/benchmark.py` scores by default. To relabel intents after editing labels or
+constraints by hand: `venv/bin/python scripts/reference_oracle.py --corpus data/corpus`.
 
 ## Project status / roadmap
 
@@ -329,8 +454,8 @@ derives **unstructured human constraints** (from Slack, Jira, Git) and applies
 ## Development
 
 ```bash
-venv/bin/python -m pytest -q      # 470 passed, 1 skipped, 1 xfailed
-venv/bin/python -m ruff check src tests
+venv/bin/python -m pytest -q      # 613 passed, 1 xfailed
+venv/bin/python -m ruff check src tests scripts examples
 vhs docs/demo.tape                # regenerate docs/demo.gif
 ```
 

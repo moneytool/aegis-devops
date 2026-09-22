@@ -1,27 +1,38 @@
 """The Adversarial Test Suite: a library of attack generators that produce
-poisoned constraints.
+poisoned constraints and evasive command lines.
 
-Each :class:`Attack` documents one way a constraint can be poisoned, in one
-of four categories:
+Each :class:`Attack` documents one way a constraint can be poisoned — or a
+command line shaped to slip past the parser — in one of five categories:
 
   * ``tampered``     — the constraint's fields were mutated after ingest, so
     its stored ``provenance_hash`` no longer matches. Caught by
     ``Constraint.verify_integrity`` (used both at load time and at decision
-    time by :meth:`AegisInterceptor.intercept`).
+    time by :meth:`AegisInterceptor.intercept`). **Fails closed**: the
+    tampered rule is discarded and, because its effect was BLOCK/ESCALATE,
+    the intent is ESCALATED — never ALLOWed as if no rule existed.
   * ``unauthorized``  — the hash is internally consistent (it was
     recomputed after the mutation, or the mutation happened to the
     authority map instead of the constraint), but the asserting principal
     is not allowed to assert that constraint's class. Caught by
-    ``ConstraintStore.is_authorized`` at add-time and decision-time.
+    ``ConstraintStore.is_authorized`` at add-time and decision-time; also
+    fails closed to ESCALATE.
   * ``forged``        — the constraint is self-consistent (hash matches its
     own fields) but does not match what its cited source actually says.
     Only ``verify_source`` (cross-checking against the original source via a
-    ``SourceFetcher``) can catch these; the interceptor does not call
-    ``verify_source`` today (tracked as a gap for Week 7).
+    ``SourceFetcher``) can catch these, at load time when ``--sources`` is
+    given; a quarantined forged rule that matches an intent also fails
+    closed to ESCALATE.
   * ``evasion``       — attempts to slip a malicious constraint or intent
     past the matching logic itself (case, provider, missing scope). These
     are tests of *correct* behaviour or documented gaps, not bypasses of
     the integrity/authority checks.
+  * ``argv-evasion``  — command-line shapes that used to parse into a
+    garbage intent nothing matched (REVIEW-4 T0.1/T0.2): global options in
+    front of the verb, glued short flags (``-nprod``), label selectors,
+    comma-separated kinds, namespace deletion (which cascades to every
+    object in the namespace). Each carries the ``argv`` to parse, the
+    ``now`` to evaluate at, and the ``expected_rule`` from the example
+    store that a constraint author would expect to fire.
 
 Attacks in the first two categories return a poisoned :class:`Constraint`
 that can be inserted directly into ``store.constraints`` (bypassing
@@ -30,7 +41,9 @@ a request would). Some attacks are "ingest-time": the assertion under test
 is that ``store.add_constraint`` itself raises, not that a poisoned object
 exists — for these, :func:`apply` returns ``None`` and the caller is
 expected to construct the malicious constraint itself and call
-``add_constraint``.
+``add_constraint``. ``argv-evasion`` attacks don't mutate a constraint at
+all; :func:`apply` returns the base unchanged and the test parses
+``attack.argv`` instead.
 """
 
 import random
@@ -40,13 +53,20 @@ from dataclasses import dataclass
 from aegis_core.provenance import compute_provenance_hash
 from aegis_core.store import Constraint
 
+CATEGORIES = ("tampered", "unauthorized", "forged", "evasion", "argv-evasion")
+
 
 @dataclass(frozen=True)
 class Attack:
     name: str
-    category: str  # "tampered" | "unauthorized" | "forged" | "evasion"
+    category: str  # one of CATEGORIES
     description: str
     expected_reason: str | None
+    # argv-evasion only: the command line to parse, when to evaluate it, and
+    # the example-store rule it must hit (see data/constraints.example.yaml).
+    argv: tuple[str, ...] | None = None
+    now: str | None = None
+    expected_rule: str | None = None
 
 
 def _rehash(c: Constraint) -> Constraint:
@@ -216,7 +236,103 @@ def _evade_namespace_omitted(base: Constraint, rng: random.Random) -> Constraint
     return _replace(base)
 
 
+def _argv_evasion(base: Constraint, rng: random.Random) -> Constraint:
+    # The attack is the *command line*, not the constraint: returned
+    # unchanged; the test parses attack.argv and checks attack.expected_rule.
+    return _replace(base)
+
+
+# 2026-09-22 is a Tuesday; 14:00Z is 10:00 ET, inside no-scale-prod-peak's window.
+_PEAK = "2026-09-22T14:00:00+00:00"
+
+_ARGV_EVASION_ATTACKS: list[Attack] = [
+    Attack(
+        name="argv-kubectl-namespace-before-verb",
+        category="argv-evasion",
+        description='"kubectl -n prod delete deployment/x": the verb used to be read as "-n".',
+        expected_reason=None,
+        argv=("kubectl", "-n", "prod", "delete", "deployment/x"),
+        expected_rule="no-delete-in-prod-namespace",
+    ),
+    Attack(
+        name="argv-kubectl-context-before-verb",
+        category="argv-evasion",
+        description='"kubectl --context=prod-us-east delete node/w1": verb read as the flag.',
+        expected_reason=None,
+        argv=("kubectl", "--context=prod-us-east", "delete", "node/w1"),
+        expected_rule="no-delete-nodes",
+    ),
+    Attack(
+        name="argv-git-C-before-verb",
+        category="argv-evasion",
+        description='"git -C /repo push -f origin main": verb used to be read as "-C".',
+        expected_reason=None,
+        argv=("git", "-C", "/repo", "push", "-f", "origin", "main"),
+        expected_rule="git-block-force-push-main",
+    ),
+    Attack(
+        name="argv-kubectl-glued-namespace",
+        category="argv-evasion",
+        description='"-nprod" glued short flag used to be ignored, dropping the namespace.',
+        expected_reason=None,
+        argv=("kubectl", "scale", "deployment/api-server", "--replicas=5", "-nprod"),
+        now=_PEAK,
+        expected_rule="no-scale-prod-peak",
+    ),
+    Attack(
+        name="argv-kubectl-label-selector",
+        category="argv-evasion",
+        description='"kubectl delete -l role=worker node" used to target "role=worker/node".',
+        expected_reason=None,
+        argv=("kubectl", "delete", "-l", "role=worker", "node"),
+        expected_rule="no-delete-nodes",
+    ),
+    Attack(
+        name="argv-kubectl-comma-kinds",
+        category="argv-evasion",
+        description='"kubectl delete nodes,pods --all" used to target "nodes,pods/*".',
+        expected_reason=None,
+        argv=("kubectl", "delete", "nodes,pods", "--all", "--context", "prod-us-east"),
+        expected_rule="no-delete-nodes",
+    ),
+    Attack(
+        name="argv-kubectl-namespace-cascade",
+        category="argv-evasion",
+        description="Deleting the prod namespace deletes everything in it; a "
+        "namespace-scoped deletion rule must fire on the synthetic */* intent.",
+        expected_reason=None,
+        argv=("kubectl", "delete", "namespace", "prod"),
+        expected_rule="no-delete-in-prod-namespace",
+    ),
+    Attack(
+        name="argv-kubectl-delete-all-in-namespace",
+        category="argv-evasion",
+        description='"kubectl delete --all pods -n prod": --all is a bool, resource pod/*.',
+        expected_reason=None,
+        argv=("kubectl", "delete", "--all", "pods", "-n", "prod"),
+        expected_rule="no-delete-in-prod-namespace",
+    ),
+    Attack(
+        name="argv-helm-glued-namespace",
+        category="argv-evasion",
+        description='"helm uninstall web -nprod" used to drop the namespace.',
+        expected_reason=None,
+        argv=("helm", "uninstall", "web", "-nprod"),
+        expected_rule="helm-block-release-delete-prod",
+    ),
+    Attack(
+        name="argv-helm-namespace-before-verb",
+        category="argv-evasion",
+        description='"helm -n prod uninstall web": verb used to be read as "-n".',
+        expected_reason=None,
+        argv=("helm", "-n", "prod", "uninstall", "web"),
+        expected_rule="helm-block-release-delete-prod",
+    ),
+]
+
+
 _APPLIERS: dict[str, Callable[[Constraint, random.Random], Constraint]] = {
+    **{a.name: _argv_evasion for a in _ARGV_EVASION_ATTACKS},
     "tamper-rule-text": _tamper_rule_text,
     "tamper-effect-downgrade": _tamper_effect_downgrade,
     "tamper-effect-upgrade": _tamper_effect_upgrade,
@@ -357,6 +473,7 @@ _REGISTRY: list[Attack] = [
         "what _scope_matches does today.",
         expected_reason=None,
     ),
+    *_ARGV_EVASION_ATTACKS,
 ]
 
 

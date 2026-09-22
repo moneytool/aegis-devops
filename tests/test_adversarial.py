@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from aegis_core.adversarial import Attack, apply, attacks, poison_store
+from aegis_core.adversarial import CATEGORIES, Attack, apply, attacks, poison_store
 from aegis_core.authority import load_authority_map
 from aegis_core.intent import InfrastructureIntent
 from aegis_core.interceptor import AegisInterceptor
@@ -38,6 +38,16 @@ EXPECTED_ATTACK_NAMES = {
     "evade-case-variant",
     "evade-provider-mismatch",
     "evade-namespace-omitted",
+    "argv-kubectl-namespace-before-verb",
+    "argv-kubectl-context-before-verb",
+    "argv-git-C-before-verb",
+    "argv-kubectl-glued-namespace",
+    "argv-kubectl-label-selector",
+    "argv-kubectl-comma-kinds",
+    "argv-kubectl-namespace-cascade",
+    "argv-kubectl-delete-all-in-namespace",
+    "argv-helm-glued-namespace",
+    "argv-helm-namespace-before-verb",
 }
 
 
@@ -148,9 +158,10 @@ def test_registry_matches_documented_attack_list():
     assert {a.name for a in attacks()} == EXPECTED_ATTACK_NAMES
 
 
-def test_registry_categories_are_one_of_the_four_known_values():
+def test_registry_categories_are_one_of_the_five_known_values():
     for a in attacks():
-        assert a.category in {"tampered", "unauthorized", "forged", "evasion"}
+        assert a.category in CATEGORIES
+    assert {a.category for a in attacks()} == set(CATEGORIES)
 
 
 def test_every_attack_runs_against_the_example_store(example_store):
@@ -162,14 +173,16 @@ def test_every_attack_runs_against_the_example_store(example_store):
 
 
 # --------------------------------------------------------------------------
-# Tampered attacks: interceptor discards with reason "tampered".
+# Tampered attacks: interceptor discards with reason "tampered" and FAILS
+# CLOSED (REVIEW-4 T0.3): a tampered BLOCK/ESCALATE rule yields ESCALATE,
+# never ALLOW (the pre-REVIEW-4 behaviour) and never BLOCK.
 # --------------------------------------------------------------------------
 
 TAMPERED_ATTACKS = [a for a in attacks() if a.category == "tampered"]
 
 
 @pytest.mark.parametrize("attack", TAMPERED_ATTACKS, ids=lambda a: a.name)
-def test_tampered_attacks_are_discarded_and_intent_allowed(attack):
+def test_tampered_attacks_are_discarded_and_intent_escalated(attack):
     store = ConstraintStore(authority_map=dict(AUTHORITY))
     base = make_constraint()
     poisoned = apply(attack, base, rng=random.Random(0))
@@ -181,7 +194,8 @@ def test_tampered_attacks_are_discarded_and_intent_allowed(attack):
 
     assert poisoned.id not in decision.citations
     assert {"id": poisoned.id, "reason": "tampered"} in decision.discarded
-    assert decision.verdict != "BLOCK"
+    assert decision.verdict == "ESCALATE"
+    assert f"fail-closed: {poisoned.id} (tampered)" in decision.notes
 
 
 # --------------------------------------------------------------------------
@@ -192,7 +206,7 @@ UNAUTHORIZED_ATTACKS = [a for a in attacks() if a.category == "unauthorized"]
 
 
 @pytest.mark.parametrize("attack", UNAUTHORIZED_ATTACKS, ids=lambda a: a.name)
-def test_unauthorized_attacks_are_discarded_and_intent_allowed(attack):
+def test_unauthorized_attacks_are_discarded_and_intent_escalated(attack):
     store = ConstraintStore(authority_map=dict(AUTHORITY))
     base = make_constraint()
 
@@ -211,7 +225,8 @@ def test_unauthorized_attacks_are_discarded_and_intent_allowed(attack):
 
     assert poisoned.id not in decision.citations
     assert {"id": poisoned.id, "reason": "unauthorized"} in decision.discarded
-    assert decision.verdict != "BLOCK"
+    assert decision.verdict == "ESCALATE"
+    assert f"fail-closed: {poisoned.id} (unauthorized)" in decision.notes
 
 
 def test_unauth_class_escalation_also_rejected_at_ingest_time():
@@ -450,3 +465,47 @@ def test_poison_store_poisons_exact_fraction_and_all_are_discarded(big_store, at
         discarded_ids = [d["id"] for d in decision.discarded]
         assert pid in discarded_ids, f"{pid} not discarded for attack {attack.name}"
         assert pid not in decision.citations
+        assert decision.verdict != "BLOCK"
+
+
+# --------------------------------------------------------------------------
+# argv-evasion attacks (REVIEW-4 T0.1/T0.2): command-line shapes that used
+# to parse into an intent nothing matched. Each must now hit the rule a
+# constraint author would expect, against the stock example store.
+# --------------------------------------------------------------------------
+
+ARGV_EVASION_ATTACKS = [a for a in attacks() if a.category == "argv-evasion"]
+
+
+@pytest.fixture
+def example_gate():
+    from aegis_core.environments import load_environment_map
+
+    authority_map = load_authority_map("data/authority.example.yaml")
+    store = ConstraintStore.load("data/constraints.example.yaml", authority_map=authority_map)
+    return AegisInterceptor(store), load_environment_map("data/environments.example.yaml")
+
+
+@pytest.mark.parametrize("attack", ARGV_EVASION_ATTACKS, ids=lambda a: a.name)
+def test_argv_evasion_attacks_now_hit_the_expected_rule(attack, example_gate):
+    from aegis_core.parser import from_argv
+
+    interceptor, env_map = example_gate
+    assert attack.argv and attack.expected_rule
+    now = datetime.fromisoformat(attack.now) if attack.now else NOW
+
+    intents = from_argv(list(attack.argv))
+    for intent in intents:
+        env_map.annotate(intent)
+    decisions = [interceptor.intercept(intent, now=now) for intent in intents]
+
+    hits = [d for d in decisions if attack.expected_rule in d.citations]
+    assert hits, f"{attack.name}: {attack.expected_rule} never fired; got {decisions}"
+    assert all(d.verdict != "ALLOW" for d in hits)
+    assert all(not i.action.startswith("-") for i in intents)
+
+
+def test_argv_evasion_attacks_apply_returns_base_unchanged(example_store):
+    base = next(iter(example_store.constraints.values()))
+    for attack in ARGV_EVASION_ATTACKS:
+        assert apply(attack, base, rng=random.Random(0)) == base

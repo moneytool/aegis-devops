@@ -1287,3 +1287,311 @@ def test_from_argv_dispatches_gh():
     intents = from_argv(["gh", "pr", "merge", "1"])
     assert intents[0].provider == "github"
     assert intents[0].action == "merge"
+
+
+# --- REVIEW-4 T0.1: global options before the verb -----------------------------
+
+# (parser, argv with global flags BEFORE the verb, equivalent argv with the
+# flags AFTER the verb -- or, for launcher-only options like git -C, the
+# plain command). The two forms must yield identical intents.
+GLOBAL_FLAG_PLACEMENTS = [
+    (
+        "kubectl-namespace",
+        from_argv,
+        ["kubectl", "-n", "prod", "delete", "deployment/x"],
+        ["kubectl", "delete", "deployment/x", "-n", "prod"],
+    ),
+    (
+        "kubectl-context-cluster-kubeconfig",
+        from_argv,
+        ["kubectl", "--context=prod-us-east", "--cluster", "c1", "--kubeconfig", "/k",
+         "delete", "node/w1"],
+        ["kubectl", "delete", "node/w1", "--context=prod-us-east", "--cluster", "c1",
+         "--kubeconfig", "/k"],
+    ),
+    (
+        "kubectl-server-output-v-as-timeout-token-user",
+        from_argv,
+        ["kubectl", "-s", "https://x", "-o", "json", "-v", "6", "--as", "admin",
+         "--as-group", "ops", "--request-timeout", "5s", "--token", "t", "--user", "u",
+         "get", "pod/x"],
+        ["kubectl", "get", "pod/x", "-s", "https://x", "-o", "json", "-v", "6", "--as",
+         "admin", "--as-group", "ops", "--request-timeout", "5s", "--token", "t",
+         "--user", "u"],
+    ),
+    (
+        "git-C-c-git-dir-work-tree-no-pager",
+        from_argv,
+        ["git", "-C", "/repo", "-c", "core.pager=cat", "--git-dir=/repo/.git",
+         "--work-tree", "/repo", "--no-pager", "-p", "--no-optional-locks",
+         "--exec-path=/usr/lib/git", "push", "-f", "origin", "main"],
+        ["git", "push", "-f", "origin", "main"],
+    ),
+    (
+        "helm-namespace-kube-context-kubeconfig-debug",
+        from_argv,
+        ["helm", "-n", "prod", "--kube-context", "prod-us-east", "--kubeconfig", "/k",
+         "--debug", "uninstall", "web"],
+        ["helm", "uninstall", "web", "-n", "prod", "--kube-context", "prod-us-east",
+         "--kubeconfig", "/k", "--debug"],
+    ),
+    (
+        "argocd-server-grpc-web-auth-token-insecure-plaintext-config-core",
+        from_argv,
+        ["argocd", "--server", "argo.example", "--grpc-web", "--auth-token", "t",
+         "--insecure", "--plaintext", "--config", "/c", "--core", "app", "sync",
+         "prod-web", "--prune"],
+        ["argocd", "app", "sync", "prod-web", "--prune", "--server", "argo.example",
+         "--grpc-web", "--auth-token", "t", "--insecure", "--plaintext", "--config",
+         "/c", "--core"],
+    ),
+    (
+        "argocd-globals-between-app-and-subcommand",
+        from_argv,
+        ["argocd", "app", "--server", "argo.example", "sync", "prod-web", "--prune"],
+        ["argocd", "app", "sync", "prod-web", "--prune"],
+    ),
+    (
+        "flux-namespace-context-kubeconfig-timeout-verbose",
+        from_argv,
+        ["flux", "-n", "flux-system", "--context", "prod", "--kubeconfig", "/k",
+         "--timeout", "5m", "--verbose", "reconcile", "kustomization", "podinfo"],
+        ["flux", "reconcile", "kustomization", "podinfo", "-n", "flux-system",
+         "--context", "prod", "--kubeconfig", "/k", "--timeout", "5m", "--verbose"],
+    ),
+    (
+        "gh-repo-before-group",
+        from_argv,
+        ["gh", "-R", "org/repo", "workflow", "run", "deploy-prod.yml", "-r", "main"],
+        ["gh", "workflow", "run", "deploy-prod.yml", "-r", "main", "-R", "org/repo"],
+    ),
+    (
+        "gh-repo-between-group-and-subcommand",
+        from_argv,
+        ["gh", "workflow", "--repo", "org/repo", "run", "deploy-prod.yml"],
+        ["gh", "workflow", "run", "deploy-prod.yml", "--repo", "org/repo"],
+    ),
+    (
+        "aws-region-profile-output-debug-before-service",
+        from_argv,
+        ["aws", "--region", "us-east-1", "--profile", "prod-admin", "--output", "json",
+         "--debug", "ec2", "terminate-instances", "--instance-ids", "i-1"],
+        ["aws", "ec2", "terminate-instances", "--instance-ids", "i-1", "--region",
+         "us-east-1", "--profile", "prod-admin", "--output", "json", "--debug"],
+    ),
+    (
+        "az-subscription-verbose-before-group",
+        from_argv,
+        ["az", "--subscription", "sub-1", "--verbose", "aks", "scale", "-g", "rg1",
+         "-n", "aks1", "--node-count", "5"],
+        ["az", "aks", "scale", "-g", "rg1", "-n", "aks1", "--node-count", "5",
+         "--subscription", "sub-1", "--verbose"],
+    ),
+    (
+        "gcloud-project-log-http-before-group",
+        from_argv,
+        ["gcloud", "--project", "acme-prod", "--log-http", "sql", "instances", "delete",
+         "prod-db"],
+        ["gcloud", "sql", "instances", "delete", "prod-db", "--project", "acme-prod",
+         "--log-http"],
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "parser, before, after",
+    [(p, b, a) for _, p, b, a in GLOBAL_FLAG_PLACEMENTS],
+    ids=[name for name, *_ in GLOBAL_FLAG_PLACEMENTS],
+)
+def test_global_flags_before_the_verb_yield_the_same_intents_as_after(parser, before, after):
+    intents_before = parser(before)
+    intents_after = parser(after)
+    assert [i.to_dict() for i in intents_before] == [i.to_dict() for i in intents_after]
+    # and the verb was actually recognised: no intent has a flag for an action
+    assert all(not i.action.startswith("-") for i in intents_before)
+
+
+def test_kubectl_identity_flags_before_verb_land_in_metadata():
+    intent = from_kubectl(
+        ["kubectl", "-n", "prod", "--context=prod-us-east", "--cluster", "c1", "delete", "pod/x"]
+    )
+    assert intent.metadata == {"namespace": "prod", "context": "prod-us-east", "cluster": "c1"}
+    assert intent.action == "delete"
+    assert intent.resource == "pod/x"
+
+
+def test_git_launcher_options_are_not_recorded_in_params():
+    intent = from_git(["git", "-C", "/repo", "--no-pager", "push", "-f", "origin", "main"])
+    assert intent.resource == "ref/main"
+    assert intent.params == {"force": True, "raw_action": "push"}
+
+
+def test_helm_kube_context_before_verb_lands_in_metadata():
+    intent = from_helm(["helm", "--kube-context", "prod-us-east", "-n", "prod", "uninstall", "web"])
+    assert intent.metadata == {"context": "prod-us-east", "namespace": "prod"}
+    assert intent.action == "delete"
+
+
+def test_gh_repo_before_group_lands_in_metadata():
+    intent = from_gh(["gh", "-R", "org/repo", "pr", "merge", "42", "--admin"])
+    assert intent.metadata == {"repo": "org/repo"}
+    assert intent.resource == "pr/42"
+    assert intent.action == "merge"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["kubectl", "--typo", "delete", "node/x"],
+        ["kubectl", "-n"],  # value flag with no value
+        ["kubectl", "-n", "prod"],  # options but no verb
+        ["git", "--typo", "push", "-f", "origin", "main"],
+        ["helm", "--typo", "uninstall", "web"],
+        ["argocd", "--typo", "app", "sync", "x"],
+        ["flux", "--typo", "reconcile", "kustomization", "x"],
+        ["gh", "--typo", "workflow", "run", "x"],
+    ],
+    ids=lambda a: " ".join(a),
+)
+def test_unrecognised_leading_option_or_missing_verb_raises(argv):
+    with pytest.raises(ValueError):
+        from_argv(argv)
+
+
+# --- REVIEW-4 T0.2: glued short flags, selectors, comma kinds, cascade ---------
+
+
+@pytest.mark.parametrize(
+    "argv, expected_metadata, expected_params",
+    [
+        (["kubectl", "get", "pod/x", "-nprod"], {"namespace": "prod"}, {}),
+        (["kubectl", "get", "pod/x", "-n=prod"], {"namespace": "prod"}, {}),
+        (["kubectl", "get", "pod/x", "-ojson", "-nprod"], {"namespace": "prod"}, {}),
+        (["kubectl", "get", "pods", "-lapp=web"], {}, {"selector": "app=web"}),
+        (["kubectl", "-nprod", "get", "pod/x", "-v6"], {"namespace": "prod"}, {}),
+    ],
+    ids=lambda v: " ".join(v) if isinstance(v, list) else str(v),
+)
+def test_kubectl_glued_short_flags_are_expanded(argv, expected_metadata, expected_params):
+    intent = from_kubectl(argv)
+    assert intent.metadata == expected_metadata
+    assert intent.params == expected_params
+
+
+def test_kubectl_glued_manifest_and_kustomize_flags():
+    intent = from_kubectl(["kubectl", "apply", "-fdeploy.yaml"])
+    assert intent.resource == "manifest/deploy.yaml"
+    assert intent.params["file"] == "deploy.yaml"
+    intent = from_kubectl(["kubectl", "apply", "-k./overlays/prod"])
+    assert intent.resource == "manifest/prod"
+
+
+def test_kubectl_scale_with_glued_namespace_keeps_replicas():
+    intent = from_kubectl(["kubectl", "scale", "deployment/api-server", "--replicas=5", "-nprod"])
+    assert intent.params == {"replicas": 5}
+    assert intent.metadata == {"namespace": "prod"}
+
+
+def test_kubectl_exec_command_after_double_dash_is_not_expanded():
+    intent = from_kubectl(["kubectl", "exec", "mypod", "-nprod", "--", "ls", "-la"])
+    assert intent.params["command"] == ["ls", "-la"]
+    assert intent.metadata == {"namespace": "prod"}
+
+
+@pytest.mark.parametrize(
+    "argv, expected_params",
+    [
+        (["kubectl", "delete", "-l", "role=worker", "node"], {"selector": "role=worker"}),
+        (["kubectl", "delete", "node", "--selector=role=worker"], {"selector": "role=worker"}),
+        (["kubectl", "delete", "node", "--selector", "role=worker"], {"selector": "role=worker"}),
+        (
+            ["kubectl", "delete", "node", "--field-selector", "spec.unschedulable=true"],
+            {"field_selector": "spec.unschedulable=true"},
+        ),
+    ],
+    ids=lambda v: " ".join(v) if isinstance(v, list) else str(v),
+)
+def test_kubectl_selectors_are_value_flags_and_target_every_object_of_kind(argv, expected_params):
+    intent = from_kubectl(argv)
+    assert intent.resource == "node/*"
+    assert intent.action == "delete"
+    assert intent.params == expected_params
+
+
+def test_kubectl_comma_separated_kinds_yield_one_intent_per_kind():
+    intents = from_kubectl_multi(
+        ["kubectl", "delete", "nodes,pods", "--all", "--context", "prod-us-east"]
+    )
+    assert [i.resource for i in intents] == ["node/*", "pod/*"]
+    assert all(i.action == "delete" for i in intents)
+    assert all(i.params == {"all": True} for i in intents)
+    assert all(i.metadata == {"context": "prod-us-east"} for i in intents)
+
+
+def test_kubectl_comma_separated_kinds_with_names_is_rejected():
+    with pytest.raises(ValueError):
+        from_kubectl_multi(["kubectl", "delete", "nodes,pods", "a", "b"])
+
+
+def test_kubectl_delete_all_of_kind_in_namespace():
+    intent = from_kubectl(["kubectl", "delete", "--all", "pods", "-n", "prod"])
+    assert intent.resource == "pod/*"
+    assert intent.params == {"all": True}
+    assert intent.metadata == {"namespace": "prod"}
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["kubectl", "delete", "namespace", "prod"],
+        ["kubectl", "delete", "namespace/prod"],
+        ["kubectl", "delete", "ns", "prod"],
+        ["kubectl", "delete", "namespaces", "prod", "--context", "prod-us-east"],
+    ],
+    ids=lambda a: " ".join(a),
+)
+def test_kubectl_delete_namespace_also_emits_cascade_intent(argv):
+    intents = from_kubectl_multi(argv)
+    assert [i.resource for i in intents] == ["namespace/prod", "*/*"]
+    cascade = intents[1]
+    assert cascade.action == "delete"
+    assert cascade.provider == "kubernetes"
+    assert cascade.metadata["namespace"] == "prod"
+    assert cascade.params["cascade_from"] == "namespace/prod"
+    # metadata from the command line is inherited by the cascade intent
+    assert intents[0].metadata.get("context") == cascade.metadata.get("context")
+
+
+def test_kubectl_delete_namespace_cascade_one_per_named_namespace():
+    intents = from_kubectl_multi(["kubectl", "delete", "ns", "a", "b"])
+    assert [i.resource for i in intents] == ["namespace/a", "namespace/b", "*/*", "*/*"]
+    assert [i.metadata["namespace"] for i in intents[2:]] == ["a", "b"]
+
+
+def test_kubectl_delete_namespace_wildcard_or_selector_does_not_cascade():
+    assert [i.resource for i in from_kubectl_multi(["kubectl", "delete", "ns", "--all"])] == [
+        "namespace/*"
+    ]
+    assert [
+        i.resource for i in from_kubectl_multi(["kubectl", "delete", "ns", "-l", "team=x"])
+    ] == ["namespace/*"]
+
+
+def test_kubectl_get_namespace_does_not_cascade():
+    assert [i.resource for i in from_kubectl_multi(["kubectl", "get", "ns", "prod"])] == [
+        "namespace/prod"
+    ]
+
+
+def test_helm_and_flux_glued_namespace():
+    assert from_helm(["helm", "uninstall", "web", "-nprod"]).metadata == {"namespace": "prod"}
+    assert from_helm(["helm", "-nprod", "uninstall", "web"]).metadata == {"namespace": "prod"}
+    assert from_flux(["flux", "suspend", "kustomization", "x", "-nflux-system"]).metadata == {
+        "namespace": "flux-system"
+    }
+
+
+def test_helm_debug_flag_does_not_swallow_the_release_name():
+    intent = from_helm(["helm", "uninstall", "--debug", "web"])
+    assert intent.resource == "release/web"
+    assert "debug" not in intent.params

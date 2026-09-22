@@ -2,7 +2,9 @@
 authority map, then runs intents through the interceptor -- kubectl and
 terraform ones allowed/blocked/escalated, plus one gated action per
 additional supported cloud CLI (aws, az, gcloud) and GitOps tool
-(helm, argocd, flux, git, gh).
+(helm, argocd, flux, git, gh), a namespace-deletion cascade, and a
+tampered rule failing closed. Prints the store's health up front, exactly
+as the CLI's ``store_health`` output does.
 
 Run with:
     venv/bin/python examples/demo.py
@@ -24,6 +26,7 @@ from aegis_core.parser import (
     from_git,
     from_helm,
     from_kubectl,
+    from_kubectl_multi,
     from_terraform_plan,
 )
 from aegis_core.store import ConstraintStore
@@ -36,7 +39,21 @@ def print_decision(label: str, intent, decision) -> None:
     print(f"covered:  {decision.covered}")
     print(f"citations: {decision.citations}")
     print(f"discarded: {decision.discarded}")
+    if decision.notes:
+        print(f"notes:    {decision.notes}")
     print(f"latency_ms: {decision.latency_ms:.4f}")
+
+
+def print_store_health(store: ConstraintStore) -> None:
+    """The same summary the CLI prints as its final STORE line / emits as
+    ``store_health``: a degraded store must never look like a clean ALLOW."""
+    health = store.health
+    print(
+        f"STORE: loaded={health.loaded} quarantined={len(health.quarantined)} "
+        f"principals={health.principals} sha256={health.constraints_sha256[:12]}..."
+    )
+    for entry in health.quarantined:
+        print(f"  quarantined: {entry['id']} ({entry['reason']})")
 
 
 def main() -> None:
@@ -45,8 +62,7 @@ def main() -> None:
     interceptor = AegisInterceptor(store)
     env_map = load_environment_map("data/environments.example.yaml")
 
-    if store.quarantined:
-        print(f"Quarantined constraints (failed integrity check): {store.quarantined}")
+    print_store_health(store)
 
     # 1. ALLOW -- a read-only action nothing in the store has an opinion about.
     allow_intent = from_kubectl(["kubectl", "get", "service/frontend", "-n", "prod"])
@@ -169,6 +185,42 @@ def main() -> None:
     env_map.annotate(gh_intent)
     gh_decision = interceptor.intercept(gh_intent)
     print_decision("Manually run a production deploy workflow (gh)", gh_intent, gh_decision)
+
+    # 14. BLOCK -- deleting the prod namespace cascades to every object in
+    # it, so the parser emits a second, synthetic "*/*" delete intent scoped
+    # to that namespace; the namespace-scoped "no-delete-in-prod-namespace"
+    # constraint fires on it. Note the global flag in front of the verb.
+    ns_intents = from_kubectl_multi(["kubectl", "--context", "kind-local", "delete", "ns", "prod"])
+    for ns_intent in ns_intents:
+        env_map.annotate(ns_intent)
+    cascade_intent = ns_intents[1]
+    cascade_decision = interceptor.intercept(cascade_intent)
+    print_decision(
+        "Delete the prod namespace (cascade intent, global flag before the verb)",
+        cascade_intent,
+        cascade_decision,
+    )
+
+    # 15. ESCALATE -- a rule quarantined at load (its provenance hash no longer
+    # matches: someone edited it on disk) is not forgotten. It is still
+    # matched, and because it was a BLOCK rule the decision fails closed to
+    # ESCALATE instead of silently ALLOWing as if the rule never existed.
+    tampered_store = ConstraintStore.load(
+        "data/constraints.example.yaml", authority_map=authority_map
+    )
+    node_rule = tampered_store.constraints.pop("no-delete-nodes")
+    node_rule.rule_text = node_rule.rule_text + " [edited on disk]"  # breaks the hash
+    tampered_store.quarantined.append({"id": node_rule.id, "reason": "tampered"})
+    tampered_store.quarantined_constraints.append(node_rule)
+    print()
+    print_store_health(tampered_store)
+    node_intent = from_kubectl(["kubectl", "delete", "node/worker-1"])
+    node_decision = AegisInterceptor(tampered_store).intercept(node_intent)
+    print_decision(
+        "Delete a node when the no-delete-nodes rule was tampered with (fails closed)",
+        node_intent,
+        node_decision,
+    )
 
 
 if __name__ == "__main__":

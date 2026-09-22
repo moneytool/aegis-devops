@@ -30,11 +30,21 @@ disk, in order —
 ``ConstraintStore.verify_sources`` runs step 2 as a standalone, post-hoc
 audit over an already-loaded store, moving any newly-forged constraints
 from ``constraints`` into ``quarantined``.
+
+**Quarantine is not deletion.** A quarantined constraint's ``Constraint``
+object is kept in ``quarantined_constraints`` and is still *matched*
+against intents (``get_matching_quarantined``), because a rule someone
+tampered with or forged is evidence that the action it covers is
+contested. The interceptor turns such a match into ESCALATE — never
+BLOCK, never ALLOW — so a degraded store fails closed instead of looking
+like a clean allow. ``store.health`` (:class:`StoreHealth`) summarises the
+load for the CLI's ``store_health`` output.
 """
 
 import fnmatch
+import hashlib
 import logging
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -52,6 +62,33 @@ from aegis_core.provenance import (
 logger = logging.getLogger(__name__)
 
 _WEEKDAY_ABBR = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+@dataclass
+class StoreHealth:
+    """What the CLI reports as ``store_health`` on every output: how many
+    constraints actually loaded, which were quarantined and why, how many
+    principals the authority map grants anything to, and the SHA-256 of the
+    raw constraints file bytes that were loaded."""
+
+    loaded: int = 0
+    quarantined: list[dict[str, str]] = field(default_factory=list)
+    principals: int = 0
+    constraints_sha256: str = ""
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def quarantine_ratio(self) -> float:
+        total = self.loaded + len(self.quarantined)
+        return len(self.quarantined) / total if total else 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def _sha256_file(path: str | Path) -> str:
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
 
 
 @dataclass
@@ -230,6 +267,23 @@ def _time_window_matches(window: dict[str, Any], now: datetime) -> bool:
     return True
 
 
+def _constraint_matches(c: Constraint, intent: InfrastructureIntent, now: datetime) -> bool:
+    """Whether ``c``'s (provider, resource_pattern, actions, scope,
+    time_window) apply to ``intent`` at ``now``. Shared by the live and the
+    quarantined match so both use exactly the same semantics."""
+    if c.provider != intent.provider:
+        return False
+    if not fnmatch.fnmatch(intent.resource, c.resource_pattern):
+        return False
+    if intent.action not in c.actions:
+        return False
+    if not _scope_matches(c.scope, intent):
+        return False
+    if c.time_window and not _time_window_matches(c.time_window, now):
+        return False
+    return True
+
+
 def _verify_source_safe(constraint: Constraint, fetcher: SourceFetcher) -> bool:
     """``verify_source`` with a missing/unreadable source normalised to
     ``False`` instead of propagating ``FileNotFoundError``/``KeyError``."""
@@ -246,12 +300,36 @@ class ConstraintStore:
         self.constraints: dict[str, Constraint] = {}
         # Who may assert which constraint_class. Default: empty (deny all).
         self.authority_map: dict[str, set[str]] = authority_map or {}
-        # Constraints that failed integrity verification on load.
+        # Constraints that failed integrity/source verification on load, as
+        # {"id", "reason"} entries ...
         self.quarantined: list[dict[str, str]] = []
+        # ... and the Constraint objects themselves, kept so the interceptor
+        # can still match them (and fail closed) — see module docstring.
+        self.quarantined_constraints: list[Constraint] = []
+        self.constraints_sha256: str = ""
+        self.warnings: list[str] = []
+
+    @property
+    def health(self) -> StoreHealth:
+        """A fresh :class:`StoreHealth` snapshot of this store."""
+        return StoreHealth(
+            loaded=len(self.constraints),
+            quarantined=[dict(q) for q in self.quarantined],
+            principals=len(self.authority_map),
+            constraints_sha256=self.constraints_sha256,
+            warnings=list(self.warnings),
+        )
 
     def is_authorized(self, principal: str, constraint_class: str) -> bool:
         """Whether ``principal`` may assert constraints of ``constraint_class``."""
         return constraint_class in self.authority_map.get(principal, set())
+
+    def _quarantine(self, constraint: Constraint, reason: str, message: str) -> None:
+        self.quarantined.append({"id": constraint.id, "reason": reason})
+        self.quarantined_constraints.append(constraint)
+        warning = f"Quarantined constraint {constraint.id}: {message}"
+        self.warnings.append(warning)
+        logger.warning(warning)
 
     def add_constraint(self, constraint: Constraint) -> Constraint:
         """Adds a constraint, enforcing authority at ingest time.
@@ -271,20 +349,20 @@ class ConstraintStore:
         self, intent: InfrastructureIntent, now: datetime
     ) -> list[Constraint]:
         """Returns every constraint whose pattern applies to this intent."""
-        matches = []
-        for c in self.constraints.values():
-            if c.provider != intent.provider:
-                continue
-            if not fnmatch.fnmatch(intent.resource, c.resource_pattern):
-                continue
-            if intent.action not in c.actions:
-                continue
-            if not _scope_matches(c.scope, intent):
-                continue
-            if c.time_window and not _time_window_matches(c.time_window, now):
-                continue
-            matches.append(c)
-        return matches
+        return [c for c in self.constraints.values() if _constraint_matches(c, intent, now)]
+
+    def get_matching_quarantined(
+        self, intent: InfrastructureIntent, now: datetime
+    ) -> list[tuple[Constraint, str]]:
+        """Returns every *quarantined* constraint whose (current, possibly
+        tampered) fields apply to this intent, paired with its quarantine
+        reason. The interceptor escalates on these; see module docstring."""
+        reasons = {q["id"]: q["reason"] for q in self.quarantined}
+        return [
+            (c, reasons.get(c.id, "quarantined"))
+            for c in self.quarantined_constraints
+            if _constraint_matches(c, intent, now)
+        ]
 
     def save(self, path: str | Path) -> None:
         payload = {"constraints": [_constraint_to_dict(c) for c in self.constraints.values()]}
@@ -311,24 +389,22 @@ class ConstraintStore:
         ``source_ref`` for the duration of this load.
         """
         store = cls(authority_map=authority_map)
+        store.constraints_sha256 = _sha256_file(path)
         with open(path) as f:
             payload = yaml.safe_load(f) or {}
+        if not isinstance(payload, dict):
+            raise ValueError(f"{path}: constraints file must be a mapping with a 'constraints' key")
         caching_fetcher = CachingSourceFetcher(source_fetcher) if source_fetcher else None
-        for entry in payload.get("constraints", []):
+        for entry in payload.get("constraints") or []:
             constraint = _constraint_from_dict(entry)
             if not constraint.verify_integrity():
-                store.quarantined.append({"id": constraint.id, "reason": "tampered"})
-                logger.warning(
-                    "Quarantined constraint %s: provenance hash mismatch", constraint.id
-                )
+                store._quarantine(constraint, "tampered", "provenance hash mismatch")
                 continue
             if caching_fetcher is not None and not _verify_source_safe(
                 constraint, caching_fetcher
             ):
-                store.quarantined.append({"id": constraint.id, "reason": "forged"})
-                logger.warning(
-                    "Quarantined constraint %s: source does not back its claimed fields",
-                    constraint.id,
+                store._quarantine(
+                    constraint, "forged", "source does not back its claimed fields"
                 )
                 continue
             store.constraints[constraint.id] = constraint
@@ -347,12 +423,7 @@ class ConstraintStore:
         for constraint_id in list(self.constraints.keys()):
             constraint = self.constraints[constraint_id]
             if not _verify_source_safe(constraint, caching_fetcher):
-                entry = {"id": constraint_id, "reason": "forged"}
-                newly_quarantined.append(entry)
-                self.quarantined.append(entry)
+                newly_quarantined.append({"id": constraint_id, "reason": "forged"})
+                self._quarantine(constraint, "forged", "source does not back its claimed fields")
                 del self.constraints[constraint_id]
-                logger.warning(
-                    "Quarantined constraint %s: source does not back its claimed fields",
-                    constraint_id,
-                )
         return newly_quarantined

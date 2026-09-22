@@ -51,7 +51,9 @@ def test_no_match_allows_and_reports_uncovered():
     assert decision.citations == []
 
 
-def test_tampered_constraint_is_discarded_and_intent_allowed():
+def test_tampered_constraint_is_discarded_and_intent_escalated():
+    """REVIEW-4 T0.3: a discarded BLOCK rule fails closed to ESCALATE (it used
+    to fail open to ALLOW), is never cited, and is explained in a note."""
     store = ConstraintStore(authority_map=AUTHORITY)
     constraint = make_constraint()
     store.constraints[constraint.id] = constraint
@@ -60,13 +62,14 @@ def test_tampered_constraint_is_discarded_and_intent_allowed():
     interceptor = AegisInterceptor(store)
     decision = interceptor.intercept(SCALE_INTENT, now=NOW)
 
-    assert decision.verdict == "ALLOW"
+    assert decision.verdict == "ESCALATE"
     assert decision.covered is True
     assert decision.discarded == [{"id": "rule-1", "reason": "tampered"}]
     assert decision.citations == []
+    assert decision.notes == ["fail-closed: rule-1 (tampered)"]
 
 
-def test_revoked_principal_constraint_is_discarded():
+def test_revoked_principal_constraint_is_discarded_and_intent_escalated():
     store = ConstraintStore(authority_map=dict(AUTHORITY))
     constraint = make_constraint(principal="sre_lead")
     store.constraints[constraint.id] = constraint
@@ -78,8 +81,86 @@ def test_revoked_principal_constraint_is_discarded():
     interceptor = AegisInterceptor(store)
     decision = interceptor.intercept(SCALE_INTENT, now=NOW)
 
-    assert decision.verdict == "ALLOW"
+    assert decision.verdict == "ESCALATE"
     assert decision.discarded == [{"id": "rule-1", "reason": "unauthorized"}]
+    assert decision.notes == ["fail-closed: rule-1 (unauthorized)"]
+
+
+def test_discarded_rule_never_contributes_block_even_if_its_effect_was_block():
+    store = ConstraintStore(authority_map=AUTHORITY)
+    tampered = make_constraint(id="tampered-block", effect="BLOCK")
+    store.constraints[tampered.id] = tampered
+    tampered.rule_text = "edited"
+    decision = AegisInterceptor(store).intercept(SCALE_INTENT, now=NOW)
+    assert decision.verdict == "ESCALATE"
+
+
+def test_valid_block_rule_still_outranks_a_discarded_one():
+    store = ConstraintStore(authority_map=AUTHORITY)
+    valid = make_constraint(id="valid-block", effect="BLOCK")
+    tampered = make_constraint(id="tampered-escalate", effect="ESCALATE")
+    store.constraints[valid.id] = valid
+    store.constraints[tampered.id] = tampered
+    tampered.rule_text = "edited"
+    decision = AegisInterceptor(store).intercept(SCALE_INTENT, now=NOW)
+    assert decision.verdict == "BLOCK"
+    assert decision.citations == ["valid-block"]
+    assert decision.discarded == [{"id": "tampered-escalate", "reason": "tampered"}]
+
+
+def test_quarantined_at_load_constraint_still_matches_and_escalates(tmp_path):
+    """A rule quarantined by ConstraintStore.load (tampered on disk) is not
+    forgotten: it is matched via store.quarantined_constraints and turns
+    the decision into ESCALATE with the load-time reason."""
+    store = ConstraintStore(authority_map=AUTHORITY)
+    store.add_constraint(make_constraint(id="on-disk-block", effect="BLOCK"))
+    path = tmp_path / "constraints.yaml"
+    store.save(path)
+    text = path.read_text()
+    original = store.constraints["on-disk-block"].provenance_hash
+    path.write_text(text.replace(original, original[:-1] + ("0" if original[-1] != "0" else "1")))
+
+    reloaded = ConstraintStore.load(path, authority_map=AUTHORITY)
+    assert reloaded.constraints == {}
+    assert reloaded.quarantined == [{"id": "on-disk-block", "reason": "tampered"}]
+    assert [c.id for c in reloaded.quarantined_constraints] == ["on-disk-block"]
+
+    decision = AegisInterceptor(reloaded).intercept(SCALE_INTENT, now=NOW)
+    assert decision.verdict == "ESCALATE"
+    assert decision.covered is True
+    assert decision.discarded == [{"id": "on-disk-block", "reason": "tampered"}]
+    assert decision.notes == ["fail-closed: on-disk-block (tampered)"]
+
+    unrelated = InfrastructureIntent(resource="service/x", action="get", provider="kubernetes")
+    assert AegisInterceptor(reloaded).intercept(unrelated, now=NOW).verdict == "ALLOW"
+
+
+def test_fail_closed_escalates_uncovered_intents():
+    store = ConstraintStore(authority_map=AUTHORITY)
+    interceptor = AegisInterceptor(store, fail_closed=True)
+    decision = interceptor.intercept(SCALE_INTENT, now=NOW)
+    assert decision.verdict == "ESCALATE"
+    assert decision.covered is False
+    assert decision.notes == ["fail-closed: uncovered"]
+
+
+def test_fail_closed_uncovered_dry_run_is_allowed_but_would_be_escalate():
+    store = ConstraintStore(authority_map=AUTHORITY)
+    interceptor = AegisInterceptor(store, fail_closed=True)
+    dry = InfrastructureIntent(
+        resource="deployment/x", action="scale", provider="kubernetes", params={"dry_run": True}
+    )
+    decision = interceptor.intercept(dry, now=NOW)
+    assert decision.verdict == "ALLOW"
+    assert decision.dry_run is True
+    assert decision.would_be == "ESCALATE"
+
+
+def test_fail_closed_does_not_change_a_covered_allow():
+    store = ConstraintStore(authority_map=AUTHORITY)
+    store.add_constraint(make_constraint(id="other", resource_pattern="node/*"))
+    interceptor = AegisInterceptor(store, fail_closed=False)
+    assert interceptor.intercept(SCALE_INTENT, now=NOW).verdict == "ALLOW"
 
 
 def test_block_outranks_escalate_when_both_match():

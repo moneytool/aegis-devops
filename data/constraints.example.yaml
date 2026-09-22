@@ -148,6 +148,23 @@ constraints:
   rule_text: Block deleting any resource in a production environment, regardless of
     kind; only the runbook may delete in prod.
   provenance_hash: 4c9c7f43f3d7e404ce0f9d4fc50cae305473aae9ee176f99028096754e042c72
+- id: no-delete-in-prod-namespace
+  provider: kubernetes
+  resource_pattern: '*'
+  actions:
+  - delete
+  scope:
+    namespace: prod
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  principal: admin
+  source_ref: jira-3004
+  source_timestamp: '2026-03-21T09:00:00+00:00'
+  rule_text: Block deleting any resource in the prod namespace (including deleting
+    the namespace itself, which cascades to everything in it); only the runbook may
+    delete in prod.
+  provenance_hash: f113e23d4a503ef45fbab68655f41d8cf434f1dbcf16f0fb646e5636bedb30e0
 - id: helm-block-release-delete-prod
   provider: helm
   resource_pattern: release/*

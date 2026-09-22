@@ -6,6 +6,7 @@ from aegis_core.authority import load_authority_map
 from aegis_core.provenance import FileSourceFetcher
 from aegis_core.store import Constraint, ConstraintStore
 
+AUTHORITY_PATH = "data/authority.example.yaml"
 AUTHORITY = {
     "admin": {"scaling", "deletion", "configuration"},
     "sre_lead": {"scaling", "configuration"},
@@ -249,3 +250,104 @@ def test_verify_sources_moves_forged_constraints_to_quarantined(tmp_path):
     assert result == [{"id": "rule-1", "reason": "forged"}]
     assert "rule-1" not in store.constraints
     assert {"id": "rule-1", "reason": "forged"} in store.quarantined
+
+
+# --------------------------------------------------------------------------
+# REVIEW-4 T0.3: store health and quarantined-constraint matching.
+# --------------------------------------------------------------------------
+
+
+def _bit_flip_hash(path, constraint_id: str) -> None:
+    import re
+
+    text = path.read_text()
+    m = re.search(
+        rf"- id: {re.escape(constraint_id)}\n(?:.*\n)*?  provenance_hash: ([0-9a-f]{{64}})\n", text
+    )
+    h = m.group(1)
+    path.write_text(text.replace(h, h[:-1] + ("0" if h[-1] != "0" else "1")))
+
+
+def test_store_health_reports_loaded_quarantined_principals_and_sha256(tmp_path):
+    import hashlib
+
+    from aegis_core.store import StoreHealth
+
+    store = ConstraintStore(authority_map=AUTHORITY)
+    store.add_constraint(make_constraint(id="a", resource_pattern="node/*"))
+    store.add_constraint(make_constraint(id="b", resource_pattern="pod/*"))
+    path = tmp_path / "constraints.yaml"
+    store.save(path)
+    _bit_flip_hash(path, "b")
+
+    reloaded = ConstraintStore.load(path, authority_map=AUTHORITY)
+    health = reloaded.health
+    assert isinstance(health, StoreHealth)
+    assert health.loaded == 1
+    assert health.quarantined == [{"id": "b", "reason": "tampered"}]
+    assert health.principals == 3
+    assert health.constraints_sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
+    assert health.warnings == ["Quarantined constraint b: provenance hash mismatch"]
+    assert health.quarantine_ratio == 0.5
+    assert health.to_dict()["quarantined"] == [{"id": "b", "reason": "tampered"}]
+
+
+def test_store_health_of_example_store_is_clean():
+    store = ConstraintStore.load(
+        "data/constraints.example.yaml", authority_map=load_authority_map(AUTHORITY_PATH)
+    )
+    health = store.health
+    assert health.loaded == 20
+    assert health.quarantined == []
+    assert health.principals == 3
+    assert len(health.constraints_sha256) == 64
+    assert health.quarantine_ratio == 0.0
+
+
+def test_quarantined_constraints_are_kept_and_matched(tmp_path):
+    from datetime import UTC, datetime
+
+    from aegis_core.intent import InfrastructureIntent
+
+    store = ConstraintStore(authority_map=AUTHORITY)
+    store.add_constraint(make_constraint(id="nodes", resource_pattern="node/*"))
+    path = tmp_path / "constraints.yaml"
+    store.save(path)
+    _bit_flip_hash(path, "nodes")
+
+    reloaded = ConstraintStore.load(path, authority_map=AUTHORITY)
+    assert [c.id for c in reloaded.quarantined_constraints] == ["nodes"]
+    now = datetime(2026, 1, 5, 12, 0, tzinfo=UTC)
+    node_intent = InfrastructureIntent(resource="node/w1", action="scale", provider="kubernetes")
+    pod_intent = InfrastructureIntent(resource="pod/x", action="scale", provider="kubernetes")
+    assert [(c.id, r) for c, r in reloaded.get_matching_quarantined(node_intent, now)] == [
+        ("nodes", "tampered")
+    ]
+    assert reloaded.get_matching_quarantined(pod_intent, now) == []
+    assert reloaded.get_matching_constraints(node_intent, now) == []
+
+
+def test_verify_sources_keeps_the_forged_constraint_object(tmp_path):
+    base = make_constraint(id="rule-1", source_ref="jira-real")
+    store = ConstraintStore()
+    store.constraints[base.id] = base
+    store.verify_sources(FileSourceFetcher(base_dir=tmp_path))
+    assert [c.id for c in store.quarantined_constraints] == ["rule-1"]
+    assert store.health.loaded == 0
+    assert store.health.quarantined == [{"id": "rule-1", "reason": "forged"}]
+
+
+def test_load_rejects_a_top_level_list(tmp_path):
+    path = tmp_path / "constraints.yaml"
+    path.write_text("- id: x\n")
+    with pytest.raises(ValueError):
+        ConstraintStore.load(path)
+
+
+def test_load_of_empty_file_has_zero_loaded():
+    import tempfile
+
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml") as f:
+        store = ConstraintStore.load(f.name, authority_map=AUTHORITY)
+    assert store.health.loaded == 0
+    assert store.health.quarantined == []
