@@ -12,7 +12,7 @@ from aegis_core.baselines.llm import (
     ReplayClient,
     parse_llm_response,
 )
-from aegis_core.baselines.opa import OpaVerifier, render_rego
+from aegis_core.baselines.opa import OpaVerifier, render_rego, signed_bundle_constraints
 from aegis_core.intent import InfrastructureIntent
 from aegis_core.store import Constraint
 
@@ -56,12 +56,16 @@ def test_heuristic_llm_blocks_on_constraint_aegis_would_discard():
     untrusted = make_constraint()
 
     # Aegis: authority_map doesn't grant "contractor" anything, so this
-    # constraint is discarded at decision time and the intent is ALLOWed.
+    # constraint is discarded at decision time. Aegis never *obeys* it
+    # (no BLOCK): pre-fail-closed it ALLOWed; with REVIEW-4 T0.3 fail-closed
+    # a discarded BLOCK rule contributes ESCALATE instead. Either way the
+    # rule is reported as discarded, not cited as the reason for a BLOCK.
     store = ConstraintStore(authority_map={"admin": {"scaling"}})
     store.constraints[untrusted.id] = untrusted
     aegis_decision = AegisInterceptor(store).intercept(SCALE_INTENT, now=NOW)
-    assert aegis_decision.verdict == "ALLOW"
-    assert aegis_decision.discarded == [{"id": untrusted.id, "reason": "unauthorized"}]
+    assert aegis_decision.verdict in ("ALLOW", "ESCALATE")
+    assert aegis_decision.verdict != "BLOCK"
+    assert {"id": untrusted.id, "reason": "unauthorized"} in aegis_decision.discarded
 
     # The heuristic LLM baseline sees the same constraint with no authority
     # filter at all, and blocks.
@@ -186,6 +190,48 @@ def test_render_rego_handles_no_block_or_escalate_constraints():
 
 
 # ---------------------------------------------------------------------------
+# opa-signed: a signed-bundle deployment drops tampered/forged, keeps
+# unauthorized (bundle signing proves integrity, not authority).
+# ---------------------------------------------------------------------------
+
+
+_SIGNED_LABELS = {
+    "c-ok": {"label": "Trusted", "reason": "authorized"},
+    "c-unauth": {"label": "Untrusted", "reason": "unauthorized"},
+    "c-tampered": {"label": "Malicious", "reason": "tampered"},
+    "c-forged": {"label": "Malicious", "reason": "forged"},
+}
+
+
+def _signed_fixture_constraints():
+    return [
+        make_constraint(id="c-ok", principal="platform_admin"),
+        make_constraint(id="c-unauth", principal="contractor"),
+        make_constraint(id="c-tampered", resource_pattern="node/*"),
+        make_constraint(id="c-forged", resource_pattern="pod/*"),
+        make_constraint(id="c-unlabelled", resource_pattern="job/*"),
+    ]
+
+
+def test_signed_bundle_filters_exactly_tampered_and_forged():
+    kept = signed_bundle_constraints(_signed_fixture_constraints(), _SIGNED_LABELS)
+    assert [c.id for c in kept] == ["c-ok", "c-unauth", "c-unlabelled"]
+
+
+def test_opa_signed_rego_excludes_tampered_and_forged_ids():
+    kept = signed_bundle_constraints(_signed_fixture_constraints(), _SIGNED_LABELS)
+    rego = render_rego(kept)
+    assert '"c-ok"' in rego
+    assert '"c-unauth"' in rego  # the realistic pre-ingest attacker survives signing
+    assert '"c-tampered"' not in rego
+    assert '"c-forged"' not in rego
+
+    verifier = OpaVerifier(kept, opa_bin="definitely-not-a-real-binary-xyz", name="opa-signed")
+    assert verifier.name == "opa-signed"
+    assert [c.id for c in verifier.constraints] == ["c-ok", "c-unauth", "c-unlabelled"]
+
+
+# ---------------------------------------------------------------------------
 # OpaVerifier availability
 # ---------------------------------------------------------------------------
 
@@ -209,3 +255,9 @@ def test_opa_verifier_real_eval_if_available():
     decision = verifier.decide(SCALE_INTENT, now=NOW)
     assert decision.verdict == "BLOCK"
     assert "c-block" in decision.citations
+
+    # Non-matching intent must fall through to the default ALLOW.
+    unrelated = InfrastructureIntent(
+        resource="service/frontend", action="get", provider="kubernetes"
+    )
+    assert verifier.decide(unrelated, now=NOW).verdict == "ALLOW"

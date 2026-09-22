@@ -21,8 +21,13 @@ Labels (operational definitions, PLAN.md §4):
 
 Everything is driven off a single ``random.Random(seed)`` instance in a
 fixed sequence of operations, so re-running with the same ``--seed``
-produces byte-identical ``constraints.yaml``, ``labels.jsonl`` and
-``split.json``.
+produces byte-identical ``constraints.yaml``, ``labels.jsonl``,
+``split.json``, ``intents.jsonl`` and ``stats.json``.
+
+Ground truth for the intents (``expected_verdict`` etc.) comes from
+``scripts/reference_oracle.py`` — an independent, label-driven matcher that
+never imports the interceptor — so the benchmark's ground truth is not the
+system under test (REVIEW-4 T0.5).
 """
 
 from __future__ import annotations
@@ -31,16 +36,18 @@ import argparse
 import copy
 import json
 import random
+import sys
+from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import yaml
 
-from aegis_core.authority import load_authority_map
-from aegis_core.intent import InfrastructureIntent
-from aegis_core.interceptor import AegisInterceptor
 from aegis_core.store import Constraint, ConstraintStore
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import reference_oracle  # noqa: E402  (scripts/reference_oracle.py)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CORPUS_DIR = REPO_ROOT / "data" / "corpus"
@@ -54,10 +61,15 @@ MALICIOUS_COUNT = 125
 TAMPERED_COUNT = 62
 FORGED_COUNT = MALICIOUS_COUNT - TAMPERED_COUNT  # 63
 
-NUM_INTENTS = 200
-INTENTS_ON_TRUSTED = 100
-INTENTS_ON_NONTRUSTED = 50
-INTENTS_ON_NOTHING = 50
+NUM_INTENTS = 600
+INTENTS_ON_TRUSTED = 300
+INTENTS_ON_NONTRUSTED = 150
+INTENTS_ON_NOTHING = 150
+# When drawing an intent aimed at a non-Trusted constraint, retry this many
+# times looking for one that no Trusted rule also covers (a real poison
+# candidate); the corpus shares structure across labels, so a blind draw
+# is usually shadowed by a Trusted rule with the same shape.
+POISON_SEEK_ATTEMPTS = 25
 
 AUTHORITY = {
     "platform_admin": [
@@ -354,11 +366,7 @@ def now_for_time_window(tw: dict | None) -> datetime:
 
 
 def build_intent_record(idx: int, provider: str, resource: str, action: str,
-                         metadata: dict, now: datetime, interceptor: AegisInterceptor) -> dict:
-    intent = InfrastructureIntent(
-        resource=resource, action=action, provider=provider, params={}, metadata=metadata
-    )
-    decision = interceptor.intercept(intent, now=now)
+                         metadata: dict, now: datetime) -> dict:
     return {
         "id": f"i-{idx:04d}",
         "provider": provider,
@@ -367,13 +375,22 @@ def build_intent_record(idx: int, provider: str, resource: str, action: str,
         "params": {},
         "metadata": metadata,
         "now": now.isoformat(),
-        "expected_verdict": decision.verdict,
-        "expected_covered": decision.covered,
     }
 
 
+def intent_from_constraint(idx: int, c: Constraint, rng: random.Random) -> dict:
+    resource = concretize_resource(c.resource_pattern, rng)
+    action = rng.choice(sorted(c.actions))
+    metadata = dict(c.scope)
+    now = now_for_time_window(c.time_window)
+    return build_intent_record(idx, c.provider, resource, action, metadata, now)
+
+
 def build_intents(constraints: list[Constraint], label_records: list[dict],
-                   interceptor: AegisInterceptor, rng: random.Random) -> list[dict]:
+                   constraint_dicts: list[dict], labels: dict[str, dict],
+                   rng: random.Random) -> list[dict]:
+    """Builds the intent set and annotates it with the reference oracle's
+    ``expected_*`` fields. The interceptor is never consulted."""
     by_id = {c.id: c for c in constraints}
     trusted_ids = [r["id"] for r in label_records if r["label"] == "Trusted"]
     nontrusted_ids = [r["id"] for r in label_records if r["label"] in ("Untrusted", "Malicious")]
@@ -383,25 +400,20 @@ def build_intents(constraints: list[Constraint], label_records: list[dict],
 
     for _ in range(INTENTS_ON_TRUSTED):
         idx += 1
-        c = by_id[rng.choice(trusted_ids)]
-        resource = concretize_resource(c.resource_pattern, rng)
-        action = rng.choice(sorted(c.actions))
-        metadata = dict(c.scope)
-        now = now_for_time_window(c.time_window)
-        intents.append(
-            build_intent_record(idx, c.provider, resource, action, metadata, now, interceptor)
-        )
+        intents.append(intent_from_constraint(idx, by_id[rng.choice(trusted_ids)], rng))
 
     for _ in range(INTENTS_ON_NONTRUSTED):
         idx += 1
-        c = by_id[rng.choice(nontrusted_ids)]
-        resource = concretize_resource(c.resource_pattern, rng)
-        action = rng.choice(sorted(c.actions))
-        metadata = dict(c.scope)
-        now = now_for_time_window(c.time_window)
-        intents.append(
-            build_intent_record(idx, c.provider, resource, action, metadata, now, interceptor)
-        )
+        chosen = None
+        for _attempt in range(POISON_SEEK_ATTEMPTS):
+            candidate = intent_from_constraint(idx, by_id[rng.choice(nontrusted_ids)], rng)
+            verdict = reference_oracle.oracle_for_intent(candidate, constraint_dicts, labels)
+            if chosen is None:
+                chosen = candidate
+            if verdict["poison_candidate"]:
+                chosen = candidate
+                break
+        intents.append(chosen)
 
     for _ in range(INTENTS_ON_NOTHING):
         idx += 1
@@ -409,9 +421,79 @@ def build_intents(constraints: list[Constraint], label_records: list[dict],
         resource = f"unmatched-kind-{idx:04d}/{rng.choice(RESOURCE_NAMES)}"
         action = "describe"  # never used by any generated constraint
         now = datetime(2026, 6, 15, 12, 0, tzinfo=UTC)
-        intents.append(build_intent_record(idx, provider, resource, action, {}, now, interceptor))
+        intents.append(build_intent_record(idx, provider, resource, action, {}, now))
 
-    return intents
+    return reference_oracle.annotate_intents(intents, constraint_dicts, labels)
+
+
+def build_intent_split(intents: list[dict], rng: random.Random) -> dict:
+    """20% holdout, stratified by (expected_verdict, poison_candidate)."""
+    strata: dict[tuple[str, bool], list[str]] = {}
+    for rec in intents:
+        key = (rec["expected_verdict"], rec["poison_candidate"])
+        strata.setdefault(key, []).append(rec["id"])
+
+    holdout: list[str] = []
+    for key in sorted(strata):
+        ids = strata[key]
+        holdout.extend(rng.sample(ids, round(len(ids) * 0.2)))
+
+    holdout_set = set(holdout)
+    return {
+        "holdout": [r["id"] for r in intents if r["id"] in holdout_set],
+        "dev": [r["id"] for r in intents if r["id"] not in holdout_set],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Stats
+# ---------------------------------------------------------------------------
+
+def structural_key(c: dict) -> tuple:
+    return (
+        c["provider"],
+        c["resource_pattern"],
+        tuple(sorted(c["actions"])),
+        json.dumps(c.get("scope") or {}, sort_keys=True),
+    )
+
+
+def build_stats(constraint_dicts: list[dict], label_records: list[dict],
+                intents: list[dict], split: dict) -> dict:
+    label_counts = Counter(r["label"] for r in label_records)
+    reason_counts = Counter(r["reason"] for r in label_records)
+    holdout = set(split["intents"]["holdout"])
+
+    def verdict_counts(records):
+        return dict(sorted(Counter(r["expected_verdict"] for r in records).items()))
+
+    def poison_counts(records):
+        kinds = Counter(r["poison_kind"] for r in records if r["poison_candidate"])
+        return dict(sorted(kinds.items()))
+
+    per_split = {}
+    for name, members in (
+        ("all", intents),
+        ("holdout", [r for r in intents if r["id"] in holdout]),
+        ("dev", [r for r in intents if r["id"] not in holdout]),
+    ):
+        per_split[name] = {
+            "n": len(members),
+            "by_expected_verdict": verdict_counts(members),
+            "poison_candidates_by_kind": poison_counts(members),
+            "poison_candidates": sum(1 for r in members if r["poison_candidate"]),
+        }
+
+    return {
+        "n_constraints": len(constraint_dicts),
+        "n_distinct_structural": len({structural_key(c) for c in constraint_dicts}),
+        "n_distinct_patterns": len({c["resource_pattern"] for c in constraint_dicts}),
+        "n_distinct_rule_text": len({c["rule_text"] for c in constraint_dicts}),
+        "labels": dict(sorted(label_counts.items())),
+        "reasons": dict(sorted(reason_counts.items())),
+        "constraint_split": {"holdout": len(split["holdout"]), "dev": len(split["dev"])},
+        "intents": per_split,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -456,49 +538,51 @@ def main() -> None:
     with open(out_dir / "authority.yaml", "w") as f:
         yaml.safe_dump({"principals": AUTHORITY}, f, sort_keys=False)
 
-    # split.json
+    # split.json — constraint split (kept for store-level experiments) plus
+    # the intent split the benchmark reports on.
     split = build_split(label_records, rng, args.seed)
+
+    # intents.jsonl — ground truth from the reference oracle, reading the
+    # just-written constraints.yaml and labels.jsonl with plain readers.
+    constraint_dicts = reference_oracle.read_constraints(out_dir / "constraints.yaml")
+    labels = reference_oracle.read_labels(out_dir / "labels.jsonl")
+    intents = build_intents(constraints, label_records, constraint_dicts, labels, rng)
+    split["intents"] = build_intent_split(intents, rng)
+
     with open(out_dir / "split.json", "w") as f:
         json.dump(split, f, indent=2, sort_keys=True)
         f.write("\n")
+    reference_oracle.write_jsonl(out_dir / "intents.jsonl", intents)
 
-    # intents.jsonl — run the real interceptor against the just-written
-    # corpus for ground truth.
-    authority_map = load_authority_map(out_dir / "authority.yaml")
-    loaded_store = ConstraintStore.load(out_dir / "constraints.yaml", authority_map=authority_map)
-    interceptor = AegisInterceptor(loaded_store)
-    intents = build_intents(constraints, label_records, interceptor, rng)
-    with open(out_dir / "intents.jsonl", "w") as f:
-        for rec in intents:
-            f.write(json.dumps(rec, sort_keys=True) + "\n")
+    # stats.json
+    stats = build_stats(constraint_dicts, label_records, intents, split)
+    with open(out_dir / "stats.json", "w") as f:
+        json.dump(stats, f, indent=2, sort_keys=True)
+        f.write("\n")
 
     # Summary
-    from collections import Counter
-
-    label_counts = Counter(r["label"] for r in label_records)
-    reason_counts = Counter(r["reason"] for r in label_records)
-    verdict_counts = Counter(r["expected_verdict"] for r in intents)
-    covered_counts = Counter(r["expected_covered"] for r in intents)
-
     print(f"seed = {args.seed}")
     print(f"seeds used = {len(seeds)}")
     print()
     print("Label counts:")
     for label in ("Trusted", "Untrusted", "Malicious"):
-        print(f"  {label:10s} {label_counts[label]:4d}")
+        print(f"  {label:10s} {stats['labels'][label]:4d}")
     print("Reason counts:")
     for reason in ("authorized", "unauthorized", "tampered", "forged"):
-        print(f"  {reason:12s} {reason_counts[reason]:4d}")
-    print(f"Total constraints: {sum(label_counts.values())}")
+        print(f"  {reason:12s} {stats['reasons'][reason]:4d}")
+    print(f"Total constraints: {stats['n_constraints']}  "
+          f"distinct structural: {stats['n_distinct_structural']}  "
+          f"patterns: {stats['n_distinct_patterns']}  "
+          f"rule_text: {stats['n_distinct_rule_text']}")
     print()
-    print(f"Holdout: {len(split['holdout'])}  Dev: {len(split['dev'])}")
+    print(f"Constraint split — holdout: {len(split['holdout'])}  dev: {len(split['dev'])}")
+    print(f"Intent split     — holdout: {len(split['intents']['holdout'])}  "
+          f"dev: {len(split['intents']['dev'])}")
     print()
-    print("Intent counts:")
-    print(f"  total       {len(intents):4d}")
-    for verdict, count in sorted(verdict_counts.items()):
-        print(f"  verdict={verdict:10s} {count:4d}")
-    for covered, count in sorted(covered_counts.items()):
-        print(f"  covered={covered!s:10s} {count:4d}")
+    for name in ("all", "holdout", "dev"):
+        s_ = stats["intents"][name]
+        print(f"Intents[{name}]: n={s_['n']} verdicts={s_['by_expected_verdict']} "
+              f"poison={s_['poison_candidates_by_kind']}")
 
 
 if __name__ == "__main__":

@@ -51,9 +51,12 @@ To make this project publishable at **SREcon** or **KubeCon**, we will use a rig
     *   At least part of the adversarial set is authored by a second person to mitigate circularity bias.
     *   The corpus is released as a standalone artifact for independent reuse and citation.
     *   Labels are defined operationally: **Trusted** = valid provenance AND authorized principal; **Untrusted** = valid provenance but unauthorized principal (the REVIEW-2 §1 attack case); **Malicious** = provenance fails (tampered or forged source). These map 1:1 to the interceptor's discard reasons (`unauthorized`, `tampered`), which is what makes the confusion matrix computable.
+    *   **Diversity, honestly:** the 500 constraints contain `n_distinct_structural = 196` distinct `(provider, resource_pattern, actions, scope)` tuples (71 distinct patterns, 66 distinct rule texts) — `data/corpus/stats.json`; every place a result reports `n` it reports `n_distinct` beside it.
+    *   **Attack model.** `tampered` (field mutated after hashing) and `forged` (self-consistent hash, fabricated or missing source) are *post-ingest* attacks on the store — the class that signed bundles (cosign / in-toto) already defend against. `unauthorized` (valid provenance, principal not allowed to assert that class) is the *pre-ingest* attacker — a real person or bot with a real citation who simply isn't entitled to set that policy — and is the realistic one. Poison-susceptibility is reported per kind (`ps_unauthorized`, `ps_tampered`, `ps_forged`, plus `pe_*` for fail-closed ESCALATEs); the `unauthorized` column is where Aegis's authority model separates from a signed-bundle OPA (`opa-signed`).
+*   **Ground truth:** `expected_verdict` for every intent comes from `scripts/reference_oracle.py`, an independent, deliberately naive matcher driven off `labels.jsonl` (only Trusted rules drive the verdict; BLOCK > ESCALATE > ALLOW) that never imports `aegis_core.interceptor`, `aegis_core.store` or `aegis_core.plan`. Aegis is scored against it like any other verifier; disagreement is a finding, not a harness bug. The reported test set is the **intent holdout** — 20% of the 600 intents, stratified by expected verdict × poison candidate and frozen with the corpus seed — with the full constraint store loaded (the store is the deployed artefact; the intents are the test set). `covered` is defined once, by the harness, as "any constraint of any label structurally matched".
 *   **The Baselines:** 
     *   **Baseline B (LLM-Self-Check):** Model = Claude Sonnet 5 (`claude-sonnet-5`) called via a provider-agnostic interface so it can be re-run on a local model (e.g., via Ollama). Prompt format: system prompt containing the full constraint list as YAML; user turn containing the structured intent as JSON. Model must answer with one of `ALLOW`, `BLOCK`, or `ESCALATE`. The *same* 500 constraints are stuffed into the prompt that Aegis loads into the store (constraint parity ensures apples-to-apples comparison).
-    *   **Baseline C (Deterministic):** Standard OPA/Rego-based policy enforcement.
+    *   **Baseline C (Deterministic):** Standard OPA/Rego-based policy enforcement (`opa`), plus `opa-signed`: the same Rego fed a signed bundle that excludes `tampered`/`forged` constraints but keeps `unauthorized` ones — the honest competitor.
 *   **The Metrics (The Confusion Matrix):**
     *   **True Positive (TP):** Correctly blocking malicious actions.
     *   **Over-block Rate (False Positive):** Percentage of legitimate actions incorrectly blocked.
@@ -95,9 +98,9 @@ discovering later.
 *   **Forged-source detection needs `--sources`.** Without it, `ConstraintStore.load` never
     calls `verify_source`, and a forged constraint (valid hash, fabricated citation) is honoured
     like any other. It also isn't re-checked at decision time even when `--sources` is given.
-*   **OPA baseline not yet run.** `src/aegis_core/baselines/opa.py` is implemented and tested,
-    but `results/benchmark.md` shows no `opa` row — the `opa` binary isn't installed in this
-    environment.
+*   **OPA rows depend on a local binary.** `opa` and `opa-signed` are run and reported in
+    `results/benchmark.md` (opa 1.20); on a machine without the `opa` binary the harness skips
+    both rows with a note rather than failing.
 *   **Real LLM baseline not yet run.** `src/aegis_core/baselines/llm.py`'s `AnthropicClient`
     path is implemented, but no run has been recorded — no `ANTHROPIC_API_KEY` in this
     environment. `results/benchmark.md` only has the offline `llm-heuristic` stand-in.

@@ -13,6 +13,15 @@ time-windowed constraint is emitted as an always-active rule with a
 comment noting the window it's ignoring. This means the OPA baseline will
 over-match relative to Aegis on time-windowed constraints; that's a
 documented baseline limitation, not a bug in the comparison.
+
+``opa-signed`` (``signed_bundle_constraints`` + ``OpaVerifier(name="opa-signed")``)
+models a signed-bundle deployment (Sigstore/cosign, in-toto): the bundle
+handed to OPA excludes every constraint whose *content* was altered after
+signing (``tampered``) or whose citation is fabricated (``forged``) — but it
+still contains the ``unauthorized`` ones, because bundle signing proves
+integrity in transit, not that the author was allowed to say it. The delta
+between ``opa-signed`` and Aegis on the ``unauthorized`` class is the
+authority model's contribution.
 """
 
 import json
@@ -89,6 +98,22 @@ def _emit_matches(rule_name: str, entries: list[Constraint]) -> str:
     return "\n\n".join(clauses)
 
 
+SIGNED_BUNDLE_EXCLUDED_REASONS = ("tampered", "forged")
+
+
+def signed_bundle_constraints(
+    constraints: list[Constraint], labels: dict[str, dict]
+) -> list[Constraint]:
+    """The constraint list a signed-bundle OPA deployment would load: every
+    constraint whose label reason is ``tampered`` or ``forged`` is dropped,
+    everything else (``authorized`` *and* ``unauthorized``) stays."""
+    return [
+        c
+        for c in constraints
+        if labels.get(c.id, {}).get("reason") not in SIGNED_BUNDLE_EXCLUDED_REASONS
+    ]
+
+
 def render_rego(constraints: list[Constraint]) -> str:
     """Generates a Rego v1 policy: one BLOCK/ESCALATE rule per constraint,
     folded into ``block_ids`` / ``escalate_ids`` sets. BLOCK beats
@@ -137,9 +162,10 @@ class OpaVerifier:
     rather than failing the whole run.
     """
 
-    name = "opa"
-
-    def __init__(self, constraints: list[Constraint], opa_bin: str = "opa"):
+    def __init__(
+        self, constraints: list[Constraint], opa_bin: str = "opa", name: str = "opa"
+    ):
+        self.name = name
         self.constraints = constraints
         self.opa_bin = opa_bin
         self.available = shutil.which(opa_bin) is not None
@@ -156,7 +182,10 @@ class OpaVerifier:
             )
 
         start = time.perf_counter()
-        input_payload = {"input": intent.to_dict()}
+        # ``opa eval -I`` reads the *input document itself* from stdin; an
+        # ``{"input": ...}`` wrapper would land at ``input.input`` and every
+        # rule would silently fall through to the default ALLOW.
+        input_payload = intent.to_dict()
         result = subprocess.run(
             [
                 self.opa_bin,
