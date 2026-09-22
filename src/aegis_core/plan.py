@@ -19,7 +19,6 @@ Instead it carries exactly one *batch predicate* — ``max_intents``,
 is evaluated against the full list of intents in the plan.
 """
 
-import fnmatch
 import hashlib
 import json
 import logging
@@ -33,11 +32,24 @@ import yaml
 
 from aegis_core.intent import InfrastructureIntent
 from aegis_core.interceptor import AegisInterceptor, Decision
-from aegis_core.store import StoreHealth, _sha256_file
+from aegis_core.signing import check_signature
+from aegis_core.store import (
+    VALID_EFFECTS,
+    StoreHealth,
+    _sha256_file,
+    env_unresolved,
+    resource_matches,
+    scope_matches,
+)
 
 logger = logging.getLogger(__name__)
 
 _ENFORCING_EFFECTS = frozenset({"BLOCK", "ESCALATE"})
+_PREDICATE_KEYS = ("max_intents", "max_matching", "requires_all", "forbid_together", "ratio")
+_REQUIRED_KEYS = (
+    "id", "provider", "effect", "constraint_class", "principal", "source_ref",
+    "source_timestamp", "rule_text", "provenance_hash",
+)
 
 
 def compute_plan_provenance_hash(
@@ -105,6 +117,13 @@ class PlanConstraint:
     requires_all: list[dict[str, Any]] | None = None
     forbid_together: list[dict[str, Any]] | None = None
     ratio: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if self.effect not in VALID_EFFECTS:
+            raise ValueError(
+                f"plan constraint {self.id!r}: effect must be BLOCK or ESCALATE, "
+                f"got {self.effect!r}"
+            )
 
     @classmethod
     def create(
@@ -196,7 +215,78 @@ def _plan_constraint_to_dict(pc: PlanConstraint) -> dict[str, Any]:
     }
 
 
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _validate_selector(selector: Any, label: str) -> str | None:
+    if not isinstance(selector, dict):
+        return f"{label} must be a mapping"
+    actions = selector.get("actions")
+    if actions is not None and (
+        not isinstance(actions, list) or not all(isinstance(a, str) for a in actions)
+    ):
+        return f"{label}.actions must be a list of strings"
+    pattern = selector.get("resource_pattern")
+    if pattern is not None and not isinstance(pattern, str):
+        return f"{label}.resource_pattern must be a string"
+    scope = selector.get("scope")
+    if scope is not None and not isinstance(scope, dict):
+        return f"{label}.scope must be a mapping"
+    return None
+
+
+def validate_plan_constraint_dict(data: Any) -> str | None:
+    """Shape-checks one raw plan-constraint entry. Returns ``None`` when it
+    is well-formed, else a short reason (without the ``"invalid: "`` prefix)."""
+    if not isinstance(data, dict):
+        return "entry must be a mapping"
+    for key in _REQUIRED_KEYS:
+        if key not in data or data[key] is None:
+            return f"missing {key}"
+        if not isinstance(data[key], str) or not data[key].strip():
+            return f"{key} must be a non-empty string"
+    if data["effect"] not in VALID_EFFECTS:
+        return f"effect must be BLOCK or ESCALATE, got {data['effect']!r}"
+    mi = data.get("max_intents")
+    if mi is not None and (not _is_int(mi) or mi < 0):
+        return "max_intents must be a non-negative integer"
+    mm = data.get("max_matching")
+    if mm is not None:
+        reason = _validate_selector(mm, "max_matching")
+        if reason:
+            return reason
+        if not _is_int(mm.get("max")) or mm["max"] < 0:
+            return "max_matching.max must be a non-negative integer"
+    for key in ("requires_all", "forbid_together"):
+        selectors = data.get(key)
+        if selectors is None:
+            continue
+        if not isinstance(selectors, list) or not selectors:
+            return f"{key} must be a non-empty list of selectors"
+        for i, sel in enumerate(selectors):
+            reason = _validate_selector(sel, f"{key}[{i}]")
+            if reason:
+                return reason
+    ratio = data.get("ratio")
+    if ratio is not None:
+        if not isinstance(ratio, dict):
+            return "ratio must be a mapping"
+        for part in ("numerator", "denominator"):
+            reason = _validate_selector(ratio.get(part, {}), f"ratio.{part}")
+            if reason:
+                return reason
+        max_ratio = ratio.get("max", 1.0)
+        if isinstance(max_ratio, bool) or not isinstance(max_ratio, (int, float)):
+            return "ratio.max must be a number"
+    if not any(data.get(key) is not None for key in _PREDICATE_KEYS):
+        return "one predicate is required (" + ", ".join(_PREDICATE_KEYS) + ")"
+    return None
+
+
 def _plan_constraint_from_dict(data: dict[str, Any]) -> PlanConstraint:
+    """Builds a :class:`PlanConstraint` from an already-validated entry (see
+    :func:`validate_plan_constraint_dict`)."""
     return PlanConstraint(
         id=data["id"],
         provider=data["provider"],
@@ -276,12 +366,27 @@ class PlanConstraintStore:
 
     @classmethod
     def load(
-        cls, path: str | Path, authority_map: dict[str, set[str]] | None = None
+        cls,
+        path: str | Path,
+        authority_map: dict[str, set[str]] | None = None,
+        *,
+        key: bytes | None = None,
+        insecure: bool = False,
     ) -> "PlanConstraintStore":
-        """Loads plan constraints from a YAML file, verifying each one's
-        provenance hash. Constraints that fail verification are quarantined
-        rather than loaded."""
+        """Loads plan constraints from a YAML file, validating each entry's
+        shape (quarantine reason ``"invalid: ..."``, never a traceback) and
+        verifying each one's provenance hash (``"tampered"``). Invalid
+        entries have no object and are not evaluated; tampered ones are
+        kept for fail-closed evaluation.
+
+        ``key`` enforces the file's ``.sig`` (``SignatureError`` when
+        missing or wrong); with no key, ``"unsigned: <path>"`` is recorded
+        in ``warnings`` unless ``insecure=True``."""
         store = cls(authority_map=authority_map)
+        check_signature(path, key, insecure, store.warnings)
+        for w in getattr(authority_map, "warnings", None) or []:
+            if w not in store.warnings:
+                store.warnings.append(w)
         store.constraints_sha256 = _sha256_file(path)
         with open(path) as f:
             payload = yaml.safe_load(f) or {}
@@ -289,7 +394,23 @@ class PlanConstraintStore:
             raise ValueError(
                 f"{path}: plan constraints file must be a mapping with a 'plan_constraints' key"
             )
-        for entry in payload.get("plan_constraints") or []:
+        entries = payload.get("plan_constraints") or []
+        if not isinstance(entries, list):
+            raise ValueError(f"{path}: 'plan_constraints' must be a list")
+        seen: set[str] = set()
+        for entry in entries:
+            reason = validate_plan_constraint_dict(entry)
+            if reason is None and entry["id"] in seen:
+                reason = "duplicate id"
+            if reason is not None:
+                cid = entry.get("id") if isinstance(entry, dict) else None
+                cid = cid if isinstance(cid, str) and cid else "<no id>"
+                store.quarantined.append({"id": cid, "reason": f"invalid: {reason}"})
+                warning = f"Quarantined plan constraint {cid}: invalid: {reason}"
+                store.warnings.append(warning)
+                logger.warning(warning)
+                continue
+            seen.add(entry["id"])
             pc = _plan_constraint_from_dict(entry)
             if pc.verify_integrity():
                 store.constraints[pc.id] = pc
@@ -311,14 +432,38 @@ def _selects(selector: dict[str, Any], intent: InfrastructureIntent) -> bool:
     if actions and intent.action not in actions:
         return False
     resource_pattern = selector.get("resource_pattern")
-    if resource_pattern and not fnmatch.fnmatch(intent.resource, resource_pattern):
+    if resource_pattern and not resource_matches(resource_pattern, intent):
         return False
     scope = selector.get("scope")
-    if scope:
-        combined = {**intent.metadata, **intent.params}
-        if not all(combined.get(key) == value for key, value in scope.items()):
-            return False
+    if scope and not scope_matches(scope, intent.metadata, intent.params):
+        return False
     return True
+
+
+def _selectors_of(pc: PlanConstraint) -> list[dict[str, Any]]:
+    selectors: list[dict[str, Any]] = []
+    if pc.max_matching:
+        selectors.append(pc.max_matching)
+    for group in (pc.requires_all, pc.forbid_together):
+        selectors.extend(group or [])
+    if pc.ratio:
+        selectors.extend(s for s in (pc.ratio.get("numerator"), pc.ratio.get("denominator")) if s)
+    return selectors
+
+
+def _env_unresolved_for(pc: PlanConstraint, intents: list[InfrastructureIntent]) -> bool:
+    """Whether any selector of ``pc`` scopes on ``env`` and would select an
+    intent that has no resolved ``env`` (REVIEW-4 T1.3): the predicate can
+    neither be evaluated nor ignored, so the plan escalates."""
+    for selector in _selectors_of(pc):
+        scope = selector.get("scope") or {}
+        if "env" not in scope:
+            continue
+        rest = {k: v for k, v in selector.items() if k != "scope"}
+        for intent in intents:
+            if _selects(rest, intent) and env_unresolved(scope, intent):
+                return True
+    return False
 
 
 def _eval_max_intents(
@@ -492,6 +637,10 @@ def evaluate_plan(
                     notes.append(f"fail-closed: {pc.id} ({reason})")
             continue
 
+        if _env_unresolved_for(pc, intents):
+            fired.append(("ESCALATE", pc.id))
+            notes.append(f"env-unresolved: {pc.id}")
+            continue
         pc_fired, pc_notes = _evaluate_predicate(pc, intents)
         if pc_fired:
             fired.append((pc.effect, pc.id))

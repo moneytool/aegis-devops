@@ -320,3 +320,19 @@ constraints:
   rule_text: Block database-wiping migration commands (flyway clean, rails db:drop/db:reset,
     prisma migrate reset) outright.
   provenance_hash: ebddf9666f7df5ce6ccd0a4cd9b1de5ae67cbbe12477b2559701aa0bf83cda2e
+- id: helm-block-release-delete-prod-env
+  provider: helm
+  resource_pattern: release/*
+  actions:
+  - delete
+  scope:
+    env: prod
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  principal: admin
+  source_ref: jira-3005
+  source_timestamp: '2026-03-20T09:15:00+00:00'
+  rule_text: Block deleting Helm releases in any production environment (resolved
+    from the kube context), whatever the namespace; use the decommission runbook instead.
+  provenance_hash: 747653b3b34300a18e4773a0784706fcb0147fb10507e88ce93f2fb5cdcd4df8

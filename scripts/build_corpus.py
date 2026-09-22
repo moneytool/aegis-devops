@@ -44,6 +44,7 @@ from zoneinfo import ZoneInfo
 
 import yaml
 
+from aegis_core.signing import load_key, sign_file, sign_tree
 from aegis_core.store import Constraint, ConstraintStore
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -53,6 +54,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 CORPUS_DIR = REPO_ROOT / "data" / "corpus"
 SEEDS_PATH = CORPUS_DIR / "seeds.yaml"
 SOURCES_DIR = CORPUS_DIR / "sources"
+EXAMPLE_KEY_PATH = REPO_ROOT / "data" / "example-signing.key"
+PRINCIPALS_HEADER = """\
+# Transport-level attribution for the source snapshots in this directory
+# (REVIEW-4 T1.1): which principal each source_ref is attributed to by the
+# transport (repo owner, ticket author, Slack user), independently of the
+# self-asserted `principal` inside the payload. Signed like every other
+# policy file; loaded by aegis_core.provenance.FileSourceFetcher.
+"""
 
 TOTAL_CONSTRAINTS = 500
 TRUSTED_COUNT = 250
@@ -168,11 +177,39 @@ def constraint_source_payload(fields: dict) -> dict:
     }
 
 
+SOURCE_PRINCIPALS: dict[str, str] = {}
+"""``source_ref -> principal`` for every source file written this run --
+the transport attribution ``PRINCIPALS.yaml`` is generated from."""
+
+
 def write_source_file(source_ref: str, payload: dict) -> None:
     path = SOURCES_DIR / f"{source_ref}.json"
     with open(path, "w") as f:
         json.dump(payload, f, indent=2, sort_keys=True)
         f.write("\n")
+    SOURCE_PRINCIPALS[source_ref] = payload["principal"]
+
+
+def write_principals_file() -> Path:
+    """``sources/PRINCIPALS.yaml``: the transport's attribution of every
+    written source, sorted so the output is byte-stable."""
+    path = SOURCES_DIR / "PRINCIPALS.yaml"
+    with open(path, "w") as f:
+        f.write(PRINCIPALS_HEADER)
+        yaml.safe_dump(
+            {"principals": dict(sorted(SOURCE_PRINCIPALS.items()))}, f, sort_keys=False
+        )
+    return path
+
+
+def sign_outputs(out_dir: Path) -> None:
+    """Signs ``constraints.yaml``/``authority.yaml`` (detached ``.sig``) and
+    the sources directory (one ``AEGIS-MANIFEST.sig``) with the public
+    example key, so the shipped corpus verifies out of the box."""
+    key = load_key(f"file:{EXAMPLE_KEY_PATH}")
+    sign_file(out_dir / "constraints.yaml", key)
+    sign_file(out_dir / "authority.yaml", key)
+    sign_tree(out_dir / "sources", key)
 
 
 def apply_tamper(constraint: Constraint, rng: random.Random) -> str:
@@ -516,6 +553,9 @@ def main() -> None:
     # different run/seed don't linger and pollute forged/absent cases.
     for f in sources_dir.glob("src-*.json"):
         f.unlink()
+    for f in sources_dir.glob("*.sig"):
+        f.unlink()
+    SOURCE_PRINCIPALS.clear()
 
     rng = random.Random(args.seed)
     seeds = load_seeds()
@@ -559,6 +599,10 @@ def main() -> None:
     with open(out_dir / "stats.json", "w") as f:
         json.dump(stats, f, indent=2, sort_keys=True)
         f.write("\n")
+
+    # sources/PRINCIPALS.yaml + signatures (REVIEW-4 T1.1)
+    write_principals_file()
+    sign_outputs(out_dir)
 
     # Summary
     print(f"seed = {args.seed}")

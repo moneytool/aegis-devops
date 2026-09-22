@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
 
+import pytest
+
 from aegis_core.intent import InfrastructureIntent
 from aegis_core.interceptor import AegisInterceptor
 from aegis_core.plan import (
@@ -530,3 +532,185 @@ def test_end_to_end_30_resource_plan_with_db_deletes_blocks_and_cites_both_rules
     assert "plan-no-db-deletes" in decision.citations
     assert "plan-max-25-resources" in decision.citations
     assert decision.n_intents == 30
+
+
+# ---------------------------------------------------------------------------
+# REVIEW-4 T1.1 / T1.8 / T1.5: signed load, validation, scope matching
+# ---------------------------------------------------------------------------
+
+
+def _pc_entry(**overrides):
+    pc = make_pc(max_intents=25)
+    entry = {
+        "id": pc.id, "provider": pc.provider, "effect": pc.effect,
+        "constraint_class": pc.constraint_class, "principal": pc.principal,
+        "source_ref": pc.source_ref, "source_timestamp": pc.source_timestamp,
+        "rule_text": pc.rule_text, "provenance_hash": pc.provenance_hash,
+        "max_intents": pc.max_intents,
+    }
+    entry.update(overrides)
+    return entry
+
+
+def _load_entries(tmp_path, *entries):
+    import yaml
+
+    path = tmp_path / "plan_constraints.yaml"
+    path.write_text(yaml.safe_dump({"plan_constraints": list(entries)}, sort_keys=False))
+    return PlanConstraintStore.load(path, authority_map=AUTHORITY, insecure=True)
+
+
+def test_plan_store_signed_load_and_signature_errors(tmp_path):
+    from aegis_core.signing import SignatureError, sign_file
+
+    key = b"k" * 32
+    store = PlanConstraintStore(authority_map=AUTHORITY)
+    store.add(make_pc(max_intents=25))
+    path = tmp_path / "plan_constraints.yaml"
+    store.save(path)
+    with pytest.raises(SignatureError, match="unsigned"):
+        PlanConstraintStore.load(path, authority_map=AUTHORITY, key=key)
+    assert PlanConstraintStore.load(path, authority_map=AUTHORITY).health.warnings == [
+        f"unsigned: {path}"
+    ]
+    sign_file(path, key)
+    reloaded = PlanConstraintStore.load(path, authority_map=AUTHORITY, key=key)
+    assert reloaded.health.loaded == 1 and reloaded.health.warnings == []
+    path.write_text(path.read_text().replace("max_intents: 25", "max_intents: 250"))
+    with pytest.raises(SignatureError, match="bad signature"):
+        PlanConstraintStore.load(path, authority_map=AUTHORITY, key=key)
+
+
+def test_example_plan_file_verifies_under_example_key():
+    from aegis_core.signing import load_key
+
+    key = load_key("file:data/example-signing.key")
+    store = PlanConstraintStore.load(
+        "data/plan_constraints.example.yaml", authority_map=AUTHORITY, key=key
+    )
+    assert store.health.loaded == 4 and store.health.warnings == []
+
+
+def test_plan_constraint_post_init_rejects_invalid_effect():
+    with pytest.raises(ValueError, match="effect must be BLOCK or ESCALATE"):
+        make_pc(effect="Block")
+
+
+@pytest.mark.parametrize(
+    "overrides, reason",
+    [
+        ({"effect": "Block"}, "invalid: effect must be BLOCK or ESCALATE, got 'Block'"),
+        ({"provider": ""}, "invalid: provider must be a non-empty string"),
+        ({"provider": None}, "invalid: missing provider"),
+        ({"max_intents": "25"}, "invalid: max_intents must be a non-negative integer"),
+        ({"max_intents": -1}, "invalid: max_intents must be a non-negative integer"),
+        ({"max_intents": None}, "invalid: one predicate is required (max_intents, "
+                                "max_matching, requires_all, forbid_together, ratio)"),
+        ({"max_matching": {"actions": "delete", "max": 0}},
+         "invalid: max_matching.actions must be a list of strings"),
+        ({"max_matching": {"actions": ["delete"]}},
+         "invalid: max_matching.max must be a non-negative integer"),
+        ({"max_matching": ["delete"]}, "invalid: max_matching must be a mapping"),
+        ({"requires_all": []}, "invalid: requires_all must be a non-empty list of selectors"),
+        ({"forbid_together": [{"scope": "prod"}]},
+         "invalid: forbid_together[0].scope must be a mapping"),
+        ({"ratio": {"numerator": [], "denominator": {}}},
+         "invalid: ratio.numerator must be a mapping"),
+        ({"ratio": {"numerator": {}, "denominator": {}, "max": "half"}},
+         "invalid: ratio.max must be a number"),
+    ],
+)
+def test_each_invalid_plan_shape_is_quarantined(tmp_path, overrides, reason):
+    store = _load_entries(tmp_path, _pc_entry(**overrides))
+    assert store.constraints == {}
+    assert store.quarantined_constraints == []
+    assert store.quarantined == [{"id": "pc-1", "reason": reason}]
+
+
+def test_plan_missing_key_and_duplicate_id_and_non_mapping(tmp_path):
+    entry = _pc_entry()
+    del entry["principal"]
+    store = _load_entries(tmp_path, entry, "nope", _pc_entry(), _pc_entry())
+    assert store.quarantined == [
+        {"id": "pc-1", "reason": "invalid: missing principal"},
+        {"id": "<no id>", "reason": "invalid: entry must be a mapping"},
+        {"id": "pc-1", "reason": "invalid: duplicate id"},
+    ]
+    assert list(store.constraints) == ["pc-1"]
+
+
+def test_plan_selector_scope_uses_metadata_first_and_coercion():
+    """Same T1.5 semantics as the per-intent store: metadata.env beats
+    params.env, ints match strings, lists are ORs, globs and dotted paths."""
+    pc = make_pc(
+        provider="kubernetes",
+        max_matching={"actions": ["delete"], "scope": {"env": "prod"}, "max": 0},
+    )
+    store = PlanConstraintStore(authority_map=AUTHORITY)
+    store.add(pc)
+    shadowed = k8s_intent("delete", "pod/x", env="dev", metadata={"env": "prod"})
+    decision = evaluate_plan(empty_interceptor(), store, [shadowed], now=NOW)
+    assert decision.verdict == "BLOCK"
+
+    pc2 = make_pc(
+        id="pc-2",
+        provider="kubernetes",
+        max_matching={"scope": {"account": 123456789012, "set.replicaCount": ["0", 1],
+                                "namespace": "prod-*"}, "max": 0},
+    )
+    store2 = PlanConstraintStore(authority_map=AUTHORITY)
+    store2.add(pc2)
+    hit = k8s_intent("scale", "deployment/x", set={"replicaCount": 0},
+                     metadata={"account": "123456789012", "namespace": "prod-eu"})
+    miss = k8s_intent("scale", "deployment/x", set={"replicaCount": 3},
+                      metadata={"account": "123456789012", "namespace": "prod-eu"})
+    assert evaluate_plan(empty_interceptor(), store2, [hit], now=NOW).verdict == "BLOCK"
+    assert evaluate_plan(empty_interceptor(), store2, [miss], now=NOW).verdict == "ALLOW"
+
+
+# --- REVIEW-4 T1.3 / T1.6: selector aliases and env-unresolved selectors ------------
+
+
+def test_max_matching_selector_matches_module_stripped_alias():
+    from aegis_core.parser import from_terraform_plan
+
+    plan = {
+        "format_version": "1.2",
+        "resource_changes": [
+            {
+                "address": "module.app.aws_db_instance.main",
+                "module_address": "module.app",
+                "type": "aws_db_instance",
+                "name": "main",
+                "provider_name": "registry.terraform.io/hashicorp/aws",
+                "change": {"actions": ["delete"], "before": {"region": "us-east-1"},
+                           "after": None},
+            }
+        ],
+    }
+    pc = make_pc(max_matching={"actions": ["delete"], "resource_pattern": "aws_db_instance.*",
+                               "max": 0})
+    plan_store = PlanConstraintStore(authority_map=AUTHORITY)
+    plan_store.constraints[pc.id] = pc
+    intents = from_terraform_plan(plan)
+    assert intents[0].metadata["plan_sha256"] and len(intents[0].metadata["plan_sha256"]) == 64
+    decision = evaluate_plan(empty_interceptor(), plan_store, intents, now=NOW)
+    assert decision.verdict == "BLOCK"
+    assert decision.citations == [pc.id]
+
+
+def test_env_scoped_selector_with_unresolved_env_escalates():
+    pc = make_pc(provider="kubernetes",
+                 max_matching={"actions": ["delete"], "scope": {"env": "prod"}, "max": 0})
+    plan_store = PlanConstraintStore(authority_map=AUTHORITY)
+    plan_store.constraints[pc.id] = pc
+    unresolved = [k8s_intent("delete", "pod/x", metadata={"namespace": "prod"})]
+    decision = evaluate_plan(empty_interceptor(), plan_store, unresolved, now=NOW)
+    assert decision.verdict == "ESCALATE"
+    assert decision.notes == [f"env-unresolved: {pc.id}"]
+    assert decision.citations == [pc.id]
+    resolved = [k8s_intent("delete", "pod/x", metadata={"env": "dev"})]
+    decision = evaluate_plan(empty_interceptor(), plan_store, resolved, now=NOW)
+    assert decision.verdict == "ALLOW" and decision.notes == []
+    prod = [k8s_intent("delete", "pod/x", metadata={"env": "prod"})]
+    assert evaluate_plan(empty_interceptor(), plan_store, prod, now=NOW).verdict == "BLOCK"

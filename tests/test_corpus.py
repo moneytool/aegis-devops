@@ -29,7 +29,8 @@ ORACLE_SCRIPT = REPO_ROOT / "scripts" / "reference_oracle.py"
 SEED = 20260920
 GENERATED_FILES = (
     "constraints.yaml", "labels.jsonl", "split.json", "intents.jsonl", "authority.yaml",
-    "stats.json",
+    "stats.json", "constraints.yaml.sig", "authority.yaml.sig", "sources/PRINCIPALS.yaml",
+    "sources/AEGIS-MANIFEST.sig",
 )
 
 

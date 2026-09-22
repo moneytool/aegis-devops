@@ -31,6 +31,20 @@ disk, in order —
 audit over an already-loaded store, moving any newly-forged constraints
 from ``constraints`` into ``quarantined``.
 
+**Validation (REVIEW-4 T1.8).** Before any of the above, each entry is
+shape-checked (:func:`validate_constraint_dict`); a malformed entry --
+missing key, ``effect: Block``, ``days: [Friday]``, ``start: 10:00``
+unquoted (YAML reads it as the integer 600), unknown ``tz``, duplicate
+``id`` -- is quarantined with reason ``"invalid: <why>"`` and never
+constructed, so a typo can neither traceback nor be cited as a reason to
+ALLOW. Invalid entries have no ``Constraint`` object and so are not
+matched, but they do count towards ``StoreHealth.quarantine_ratio``.
+
+**Signatures (REVIEW-4 T1.1).** ``load(..., key=K)`` refuses a constraints
+file without a valid ``<path>.sig`` (:class:`aegis_core.signing.SignatureError`);
+``load()`` without a key records ``"unsigned: <path>"`` in ``warnings``
+unless ``insecure=True``.
+
 **Quarantine is not deletion.** A quarantined constraint's ``Constraint``
 object is kept in ``quarantined_constraints`` and is still *matched*
 against intents (``get_matching_quarantined``), because a rule someone
@@ -44,10 +58,12 @@ load for the CLI's ``store_health`` output.
 import fnmatch
 import hashlib
 import logging
+import re
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
@@ -57,11 +73,20 @@ from aegis_core.provenance import (
     SourceFetcher,
     compute_provenance_hash,
     verify_source,
+    verify_source_reason,
 )
+from aegis_core.signing import check_signature
 
 logger = logging.getLogger(__name__)
 
 _WEEKDAY_ABBR = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+VALID_EFFECTS = frozenset({"BLOCK", "ESCALATE"})
+_HHMM = re.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+_RATE_PER = re.compile(r"^[1-9][0-9]*[mhd]$")
+_REQUIRED_KEYS = (
+    "id", "provider", "resource_pattern", "actions", "effect", "constraint_class",
+    "principal", "source_ref", "source_timestamp", "rule_text", "provenance_hash",
+)
 
 
 @dataclass
@@ -117,6 +142,12 @@ class Constraint:
     default) means this constraint is absolute, not rate-limited — and is
     also what keeps every pre-existing constraint's provenance hash
     unchanged, since it's included in the hash only when set."""
+
+    def __post_init__(self) -> None:
+        if self.effect not in VALID_EFFECTS:
+            raise ValueError(
+                f"constraint {self.id!r}: effect must be BLOCK or ESCALATE, got {self.effect!r}"
+            )
 
     @classmethod
     def create(
@@ -214,7 +245,83 @@ def _constraint_to_dict(c: Constraint) -> dict[str, Any]:
     return data
 
 
+def _validate_time_window(window: Any) -> str | None:
+    if window is None:
+        return None
+    if not isinstance(window, dict):
+        return "time_window must be a mapping"
+    days = window.get("days")
+    if days is not None:
+        if not isinstance(days, list) or not all(d in _WEEKDAY_ABBR for d in days):
+            return "days must be Mon..Sun"
+    for edge in ("start", "end"):
+        value = window.get(edge)
+        if value is not None and not (isinstance(value, str) and _HHMM.match(value)):
+            return f"{edge} must be HH:MM (quote it in YAML)"
+    if (window.get("start") is None) != (window.get("end") is None):
+        return "start and end must be given together"
+    tz = window.get("tz")
+    if tz is not None:
+        if not isinstance(tz, str):
+            return "tz must be a string"
+        try:
+            ZoneInfo(tz)
+        except (ZoneInfoNotFoundError, ValueError, OSError):
+            return f"unknown tz {tz!r}"
+    return None
+
+
+def _validate_rate_limit(rate_limit: Any) -> str | None:
+    if rate_limit is None:
+        return None
+    if not isinstance(rate_limit, dict):
+        return "rate_limit must be a mapping"
+    max_ = rate_limit.get("max")
+    if isinstance(max_, bool) or not isinstance(max_, int) or max_ < 0:
+        return "rate_limit.max must be a non-negative integer"
+    per = rate_limit.get("per")
+    if not isinstance(per, str) or not _RATE_PER.match(per):
+        return "rate_limit.per must look like 15m, 1h or 24h"
+    key = rate_limit.get("key")
+    if key is not None and (
+        not isinstance(key, list) or not all(isinstance(k, str) and k for k in key)
+    ):
+        return "rate_limit.key must be a list of field names"
+    return None
+
+
+def validate_constraint_dict(data: Any) -> str | None:
+    """Shape-checks one raw constraint entry. Returns ``None`` when it is
+    well-formed, else a short reason (without the ``"invalid: "`` prefix)."""
+    if not isinstance(data, dict):
+        return "entry must be a mapping"
+    for key in _REQUIRED_KEYS:
+        if key not in data or data[key] is None:
+            return f"missing {key}"
+    for key in ("id", "provider", "resource_pattern", "constraint_class", "principal",
+                "source_ref", "source_timestamp", "rule_text", "provenance_hash"):
+        if not isinstance(data[key], str) or not data[key].strip():
+            return f"{key} must be a non-empty string"
+    if data["effect"] not in VALID_EFFECTS:
+        return f"effect must be BLOCK or ESCALATE, got {data['effect']!r}"
+    actions = data["actions"]
+    if (
+        not isinstance(actions, list)
+        or not actions
+        or not all(isinstance(a, str) and a for a in actions)
+    ):
+        return "actions must be a non-empty list of strings"
+    if data.get("scope") is not None and not isinstance(data["scope"], dict):
+        return "scope must be a mapping"
+    reason = _validate_time_window(data.get("time_window"))
+    if reason:
+        return reason
+    return _validate_rate_limit(data.get("rate_limit"))
+
+
 def _constraint_from_dict(data: dict[str, Any]) -> Constraint:
+    """Builds a :class:`Constraint` from an already-validated entry (see
+    :func:`validate_constraint_dict`)."""
     return Constraint(
         id=data["id"],
         provider=data["provider"],
@@ -233,11 +340,87 @@ def _constraint_from_dict(data: dict[str, Any]) -> Constraint:
     )
 
 
+# ---------------------------------------------------------------------------
+# Scope matching (REVIEW-4 T1.5 / T2.5)
+# ---------------------------------------------------------------------------
+
+_GLOB_CHARS = frozenset("*?[")
+
+
+def _dig(mapping: dict[str, Any], key: str) -> tuple[bool, Any]:
+    """``(found, value)`` for ``key`` in ``mapping`` -- a literal key first,
+    then a dotted path (``set.replicaCount`` -> ``mapping["set"]["replicaCount"]``)."""
+    if key in mapping:
+        return True, mapping[key]
+    if "." in key:
+        current: Any = mapping
+        for part in key.split("."):
+            if not isinstance(current, dict) or part not in current:
+                return False, None
+            current = current[part]
+        return True, current
+    return False, None
+
+
+def _as_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered == "true":
+            return True
+        if lowered == "false":
+            return False
+    return None
+
+
+def scope_value_matches(expected: Any, actual: Any) -> bool:
+    """One scope value against one intent value:
+
+    * a list of expected values is an OR;
+    * if either side is a bool, both are read as booleans (``"true"``/
+      ``"false"`` strings, any case, count);
+    * if either side is a string, both are compared as strings, with
+      ``*``/``?``/``[...]`` in the expected side as an fnmatch glob (so YAML
+      ``account: 123456789012`` matches ``"123456789012"``).
+    """
+    if isinstance(expected, list):
+        return any(scope_value_matches(e, actual) for e in expected)
+    if isinstance(expected, bool) or isinstance(actual, bool):
+        e, a = _as_bool(expected), _as_bool(actual)
+        return e is not None and e == a
+    if isinstance(expected, str) or isinstance(actual, str):
+        if actual is None or isinstance(actual, (dict, list)):
+            return False
+        e, a = str(expected), str(actual)
+        if _GLOB_CHARS & set(e):
+            return fnmatch.fnmatchcase(a, e)
+        return a == e
+    return expected == actual
+
+
+def scope_matches(
+    scope: dict[str, Any], metadata: dict[str, Any], params: dict[str, Any]
+) -> bool:
+    """Whether every ``scope`` key is satisfied by the intent. Each key is
+    looked up in ``metadata`` first -- operator-derived context (resolved
+    ``env``, ``context``, ``account`` ...) that an agent-supplied ``--env``
+    flag in ``params`` must never shadow (REVIEW-4 H4) -- and only in
+    ``params`` when ``metadata`` lacks it entirely. A key absent from both
+    never matches."""
+    for key, expected in scope.items():
+        found, actual = _dig(metadata, key)
+        if not found:
+            found, actual = _dig(params, key)
+        if not found or not scope_value_matches(expected, actual):
+            return False
+    return True
+
+
 def _scope_matches(scope: dict[str, Any], intent: InfrastructureIntent) -> bool:
     if not scope:
         return True
-    combined = {**intent.metadata, **intent.params}
-    return all(combined.get(key) == value for key, value in scope.items())
+    return scope_matches(scope, intent.metadata, intent.params)
 
 
 def _time_window_matches(window: dict[str, Any], now: datetime) -> bool:
@@ -246,8 +429,6 @@ def _time_window_matches(window: dict[str, Any], now: datetime) -> bool:
 
     tz_name = window.get("tz")
     if tz_name:
-        from zoneinfo import ZoneInfo
-
         local = now.astimezone(ZoneInfo(tz_name))
     else:
         local = now
@@ -267,21 +448,55 @@ def _time_window_matches(window: dict[str, Any], now: datetime) -> bool:
     return True
 
 
-def _constraint_matches(c: Constraint, intent: InfrastructureIntent, now: datetime) -> bool:
-    """Whether ``c``'s (provider, resource_pattern, actions, scope,
-    time_window) apply to ``intent`` at ``now``. Shared by the live and the
-    quarantined match so both use exactly the same semantics."""
+def resource_matches(pattern: str, intent: InfrastructureIntent) -> bool:
+    """``fnmatch`` of ``pattern`` against every alias of the intent's
+    resource (:meth:`InfrastructureIntent.resource_aliases`), so
+    ``aws_db_instance.*`` matches ``module.app.aws_db_instance.main``."""
+    return any(fnmatch.fnmatch(alias, pattern) for alias in intent.resource_aliases())
+
+
+def _matches_except_scope(c: Constraint, intent: InfrastructureIntent, now: datetime) -> bool:
     if c.provider != intent.provider:
         return False
-    if not fnmatch.fnmatch(intent.resource, c.resource_pattern):
+    if not resource_matches(c.resource_pattern, intent):
         return False
     if intent.action not in c.actions:
-        return False
-    if not _scope_matches(c.scope, intent):
         return False
     if c.time_window and not _time_window_matches(c.time_window, now):
         return False
     return True
+
+
+def _constraint_matches(c: Constraint, intent: InfrastructureIntent, now: datetime) -> bool:
+    """Whether ``c``'s (provider, resource_pattern, actions, scope,
+    time_window) apply to ``intent`` at ``now``. Shared by the live and the
+    quarantined match so both use exactly the same semantics."""
+    return _matches_except_scope(c, intent, now) and _scope_matches(c.scope, intent)
+
+
+def env_unresolved(scope: dict[str, Any], intent: InfrastructureIntent) -> bool:
+    """Whether ``scope`` names ``env`` while the intent carries no resolved
+    ``metadata["env"]`` -- and every *other* scope key does match. Such a
+    rule can neither be honoured nor dismissed: the environment map didn't
+    recognise the target, so the interceptor escalates (REVIEW-4 T1.3)
+    instead of treating "unknown env" as "not prod"."""
+    if "env" not in scope or "env" in intent.metadata:
+        return False
+    rest = {k: v for k, v in scope.items() if k != "env"}
+    return scope_matches(rest, intent.metadata, {k: v for k, v in intent.params.items()
+                                                  if k != "env"})
+
+
+def _source_failure_reason(
+    constraint: Constraint, fetcher: SourceFetcher, warnings: list[str] | None = None
+) -> str | None:
+    """``verify_source_reason`` with a missing/unreadable/malformed source
+    normalised to ``"forged"`` instead of propagating
+    ``FileNotFoundError``/``KeyError``/``ValueError``."""
+    try:
+        return verify_source_reason(constraint, fetcher, warnings)
+    except (FileNotFoundError, KeyError, ValueError, TypeError):
+        return "forged"
 
 
 def _verify_source_safe(constraint: Constraint, fetcher: SourceFetcher) -> bool:
@@ -289,8 +504,14 @@ def _verify_source_safe(constraint: Constraint, fetcher: SourceFetcher) -> bool:
     ``False`` instead of propagating ``FileNotFoundError``/``KeyError``."""
     try:
         return verify_source(constraint, fetcher)
-    except (FileNotFoundError, KeyError):
+    except (FileNotFoundError, KeyError, ValueError, TypeError):
         return False
+
+
+_SOURCE_FAILURE_MESSAGES = {
+    "forged": "source does not back its claimed fields",
+    "principal-mismatch": "source transport attributes it to a different principal",
+}
 
 
 class ConstraintStore:
@@ -351,6 +572,17 @@ class ConstraintStore:
         """Returns every constraint whose pattern applies to this intent."""
         return [c for c in self.constraints.values() if _constraint_matches(c, intent, now)]
 
+    def get_env_unresolved(self, intent: InfrastructureIntent, now: datetime) -> list[Constraint]:
+        """Every loaded constraint that would apply to this intent except
+        that it scopes on ``env`` and the intent has no resolved ``env``
+        (see :func:`env_unresolved`). The interceptor turns each into an
+        ESCALATE with an ``env-unresolved: <id>`` note."""
+        return [
+            c
+            for c in self.constraints.values()
+            if _matches_except_scope(c, intent, now) and env_unresolved(c.scope, intent)
+        ]
+
     def get_matching_quarantined(
         self, intent: InfrastructureIntent, now: datetime
     ) -> list[tuple[Constraint, str]]:
@@ -369,6 +601,19 @@ class ConstraintStore:
         with open(path, "w") as f:
             yaml.safe_dump(payload, f, sort_keys=False)
 
+    def _quarantine_invalid(self, entry: Any, reason: str) -> None:
+        cid = entry.get("id") if isinstance(entry, dict) else None
+        cid = cid if isinstance(cid, str) and cid else "<no id>"
+        self.quarantined.append({"id": cid, "reason": f"invalid: {reason}"})
+        warning = f"Quarantined constraint {cid}: invalid: {reason}"
+        self.warnings.append(warning)
+        logger.warning(warning)
+
+    def _absorb_warnings(self, source: Any) -> None:
+        for w in getattr(source, "warnings", None) or []:
+            if w not in self.warnings:
+                self.warnings.append(w)
+
     @classmethod
     def load(
         cls,
@@ -376,45 +621,65 @@ class ConstraintStore:
         authority_map: dict[str, set[str]] | None = None,
         *,
         source_fetcher: SourceFetcher | None = None,
+        key: bytes | None = None,
+        insecure: bool = False,
     ) -> "ConstraintStore":
-        """Loads constraints from a YAML file, verifying each one's
-        provenance hash. Constraints that fail verification are quarantined
-        rather than loaded.
+        """Loads constraints from a YAML file, validating each entry's
+        shape and verifying each one's provenance hash. Entries that fail
+        are quarantined (``invalid: ...`` / ``tampered``) rather than loaded.
 
         When ``source_fetcher`` is given, surviving constraints are also
-        re-checked against their original source (see module docstring);
-        constraints whose source doesn't back their claimed fields, or
-        whose source can't be fetched at all, are quarantined with reason
-        ``"forged"`` instead of being loaded. Fetches are cached per
-        ``source_ref`` for the duration of this load.
+        re-checked against their original source (see module docstring):
+        a source whose transport principal differs from the constraint's
+        quarantines it as ``"principal-mismatch"``; a source that doesn't
+        back the claimed fields, or can't be fetched at all, as
+        ``"forged"``. Fetches are cached per ``source_ref`` for the
+        duration of this load.
+
+        ``key`` enforces the file's ``.sig`` (``SignatureError`` when
+        missing or wrong); with no key, ``"unsigned: <path>"`` is recorded
+        in ``warnings`` unless ``insecure=True``. The authority map's and
+        fetcher's own load warnings are folded in too.
         """
         store = cls(authority_map=authority_map)
+        check_signature(path, key, insecure, store.warnings)
+        store._absorb_warnings(authority_map)
         store.constraints_sha256 = _sha256_file(path)
         with open(path) as f:
             payload = yaml.safe_load(f) or {}
         if not isinstance(payload, dict):
             raise ValueError(f"{path}: constraints file must be a mapping with a 'constraints' key")
+        entries = payload.get("constraints") or []
+        if not isinstance(entries, list):
+            raise ValueError(f"{path}: 'constraints' must be a list")
         caching_fetcher = CachingSourceFetcher(source_fetcher) if source_fetcher else None
-        for entry in payload.get("constraints") or []:
+        seen: set[str] = set()
+        for entry in entries:
+            reason = validate_constraint_dict(entry)
+            if reason is None and entry["id"] in seen:
+                reason = "duplicate id"
+            if reason is not None:
+                store._quarantine_invalid(entry, reason)
+                continue
+            seen.add(entry["id"])
             constraint = _constraint_from_dict(entry)
             if not constraint.verify_integrity():
                 store._quarantine(constraint, "tampered", "provenance hash mismatch")
                 continue
-            if caching_fetcher is not None and not _verify_source_safe(
-                constraint, caching_fetcher
-            ):
-                store._quarantine(
-                    constraint, "forged", "source does not back its claimed fields"
-                )
-                continue
+            if caching_fetcher is not None:
+                failure = _source_failure_reason(constraint, caching_fetcher, store.warnings)
+                if failure is not None:
+                    store._quarantine(constraint, failure, _SOURCE_FAILURE_MESSAGES[failure])
+                    continue
             store.constraints[constraint.id] = constraint
+        store._absorb_warnings(source_fetcher)
         return store
 
     def verify_sources(self, fetcher: SourceFetcher) -> list[dict]:
         """Post-hoc audit of an already-loaded store: re-checks every
         currently-loaded constraint against its original source, moving any
-        that fail into ``quarantined`` (reason ``"forged"``) and removing
-        them from ``constraints``.
+        that fail into ``quarantined`` (reason ``"forged"`` or
+        ``"principal-mismatch"``) and removing them from ``constraints``.
 
         Returns the list of newly-quarantined ``{"id", "reason"}`` entries.
         """
@@ -422,8 +687,10 @@ class ConstraintStore:
         newly_quarantined: list[dict[str, str]] = []
         for constraint_id in list(self.constraints.keys()):
             constraint = self.constraints[constraint_id]
-            if not _verify_source_safe(constraint, caching_fetcher):
-                newly_quarantined.append({"id": constraint_id, "reason": "forged"})
-                self._quarantine(constraint, "forged", "source does not back its claimed fields")
+            failure = _source_failure_reason(constraint, caching_fetcher, self.warnings)
+            if failure is not None:
+                newly_quarantined.append({"id": constraint_id, "reason": failure})
+                self._quarantine(constraint, failure, _SOURCE_FAILURE_MESSAGES[failure])
                 del self.constraints[constraint_id]
+        self._absorb_warnings(fetcher)
         return newly_quarantined

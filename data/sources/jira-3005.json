@@ -1,0 +1,17 @@
+{
+  "provider": "helm",
+  "resource_pattern": "release/*",
+  "actions": [
+    "delete"
+  ],
+  "scope": {
+    "env": "prod"
+  },
+  "time_window": null,
+  "effect": "BLOCK",
+  "constraint_class": "deletion",
+  "principal": "admin",
+  "source_ref": "jira-3005",
+  "source_timestamp": "2026-03-20T09:15:00+00:00",
+  "rule_text": "Block deleting Helm releases in any production environment (resolved from the kube context), whatever the namespace; use the decommission runbook instead."
+}

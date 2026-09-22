@@ -13,6 +13,12 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Protocol
 
+import yaml
+
+from aegis_core.signing import check_signature
+
+PRINCIPALS_FILE = "PRINCIPALS.yaml"
+
 
 def compute_provenance_hash(
     *,
@@ -69,15 +75,86 @@ class FileSourceFetcher:
     Stands in for a real Git/Slack connector in v1. The adversarial test
     suite forges files under this directory to simulate a poisoned or
     edited source.
+
+    **Transport principal (REVIEW-4 T1.1).** A source payload's own
+    ``principal`` field is self-asserted and therefore untrusted. The
+    principal a source is attributed to comes from the *transport* -- for
+    the file transport, a signed ``<base_dir>/PRINCIPALS.yaml`` mapping
+    ``source_ref -> principal`` (``principal_map``). :meth:`principal_for`
+    returns ``None`` when the fetcher has no map at all, in which case
+    :func:`verify_source` falls back to the payload (and says so).
+
+    **Signatures.** With ``key`` set, every fetched ``.json`` and the
+    principals file must carry a valid ``.sig`` (:class:`SignatureError`
+    otherwise). Without a key and without ``insecure``, each unsigned load
+    is recorded in ``warnings`` for the store to surface.
     """
 
-    def __init__(self, base_dir: str | Path = "data/sources"):
+    def __init__(
+        self,
+        base_dir: str | Path = "data/sources",
+        *,
+        key: bytes | None = None,
+        insecure: bool = False,
+        principal_map: dict[str, str] | None = None,
+    ):
         self.base_dir = Path(base_dir)
+        self.key = key
+        self.insecure = insecure
+        self.warnings: list[str] = []
+        self.principal_map: dict[str, str] | None = principal_map
+        if principal_map is None:
+            principals_path = self.base_dir / PRINCIPALS_FILE
+            if principals_path.exists():
+                self.principal_map = load_principal_map(
+                    principals_path, key=key, insecure=insecure, warnings=self.warnings
+                )
 
-    def fetch(self, source_ref: str) -> dict[str, Any]:
+    def principal_for(self, source_ref: str) -> str | None:
+        """The transport's principal for ``source_ref``: ``None`` if this
+        fetcher has no principal map; ``""`` if it has one that doesn't
+        list ``source_ref`` (an unattributed source never verifies)."""
+        if self.principal_map is None:
+            return None
+        return self.principal_map.get(source_ref, "")
+
+    def fetch(
+        self, source_ref: str, *, key: bytes | None = None, insecure: bool | None = None
+    ) -> dict[str, Any]:
+        """``key``/``insecure`` override the fetcher-wide settings for one
+        fetch. A ``source_ref`` containing a path separator is rejected
+        (``KeyError``) so a constraint can't cite ``../../x``."""
+        if "/" in source_ref or "\\" in source_ref or source_ref in ("", ".", ".."):
+            raise KeyError(f"invalid source_ref {source_ref!r}")
         path = self.base_dir / f"{source_ref}.json"
+        if not path.exists():
+            raise FileNotFoundError(path)
+        check_signature(
+            path,
+            self.key if key is None else key,
+            self.insecure if insecure is None else insecure,
+            self.warnings,
+        )
         with open(path) as f:
             return json.load(f)
+
+
+def load_principal_map(
+    path: str | Path,
+    *,
+    key: bytes | None = None,
+    insecure: bool = False,
+    warnings: list[str] | None = None,
+) -> dict[str, str]:
+    """Reads ``PRINCIPALS.yaml`` (``principals: {source_ref: principal}``),
+    enforcing/recording its signature like every other loader."""
+    warnings = warnings if warnings is not None else []
+    check_signature(path, key, insecure, warnings)
+    with open(path) as f:
+        raw = yaml.safe_load(f) or {}
+    if not isinstance(raw, dict) or not isinstance(raw.get("principals", {}), dict):
+        raise ValueError(f"{path}: must be a mapping with a 'principals' mapping")
+    return {str(ref): str(principal) for ref, principal in (raw.get("principals") or {}).items()}
 
 
 class CachingSourceFetcher:
@@ -94,6 +171,14 @@ class CachingSourceFetcher:
         self._fetcher = fetcher
         self._cache: dict[str, Any] = {}
 
+    @property
+    def warnings(self) -> list[str]:
+        return getattr(self._fetcher, "warnings", [])
+
+    def principal_for(self, source_ref: str) -> str | None:
+        inner = getattr(self._fetcher, "principal_for", None)
+        return inner(source_ref) if inner is not None else None
+
     def fetch(self, source_ref: str) -> dict[str, Any]:
         if source_ref in self._cache:
             cached = self._cache[source_ref]
@@ -109,15 +194,35 @@ class CachingSourceFetcher:
         return result
 
 
-def verify_source(constraint, fetcher: SourceFetcher) -> bool:
-    """Re-derives the provenance hash from the original source and compares it.
+def verify_source_reason(
+    constraint, fetcher: SourceFetcher, warnings: list[str] | None = None
+) -> str | None:
+    """Re-derives the provenance hash from the original source and compares
+    it. Returns ``None`` when the source backs the constraint, else the
+    quarantine reason:
 
-    Returns False if the source's current content would hash to something
-    other than what the constraint claims — whether because the source
-    changed after ingest or because the constraint's own fields were
-    tampered with.
+    * ``"principal-mismatch"`` -- the transport attributes the source to a
+      different principal than the constraint claims (or to nobody);
+    * ``"forged"`` -- the source's content hashes to something else, so
+      either the source changed after ingest or the constraint's fields
+      were rewritten.
+
+    When the fetcher has no transport principal (no ``PRINCIPALS.yaml``,
+    or a fetcher that doesn't implement ``principal_for``) the payload's
+    own ``principal`` is used and ``"principal-from-payload: <ref>"`` is
+    appended to ``warnings`` (if given).
     """
     source = fetcher.fetch(constraint.source_ref)
+    principal_for = getattr(fetcher, "principal_for", None)
+    transport_principal = principal_for(constraint.source_ref) if principal_for else None
+    if transport_principal is None:
+        principal = source["principal"]
+        if warnings is not None:
+            warnings.append(f"principal-from-payload: {constraint.source_ref}")
+    else:
+        principal = transport_principal
+        if principal != constraint.principal:
+            return "principal-mismatch"
     recomputed = compute_provenance_hash(
         provider=source["provider"],
         resource_pattern=source["resource_pattern"],
@@ -126,10 +231,15 @@ def verify_source(constraint, fetcher: SourceFetcher) -> bool:
         time_window=source.get("time_window"),
         effect=source["effect"],
         constraint_class=source["constraint_class"],
-        principal=source["principal"],
+        principal=principal,
         source_ref=source["source_ref"],
         source_timestamp=source["source_timestamp"],
         rule_text=source["rule_text"],
         rate_limit=source.get("rate_limit"),
     )
-    return recomputed == constraint.provenance_hash
+    return None if recomputed == constraint.provenance_hash else "forged"
+
+
+def verify_source(constraint, fetcher: SourceFetcher) -> bool:
+    """``True`` iff :func:`verify_source_reason` finds nothing wrong."""
+    return verify_source_reason(constraint, fetcher) is None

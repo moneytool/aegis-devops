@@ -12,6 +12,11 @@ environments:
       kind-local: dev
     clusters:
       gke_acme_us-east1_prod: prod
+    # KUBECONFIG=/path kubectl ... / helm --kubeconfig: the file path itself
+    # names the cluster when no --context is given.
+    kubeconfigs:
+      /etc/kubernetes/prod.kubeconfig: prod
+      ~/.kube/staging.config: staging
   aws:
     accounts:
       "123456789012": prod
@@ -29,3 +34,18 @@ environments:
     resource_groups:
       rg-prod: prod
       rg1: staging
+  github:
+    # gh -R/--repo owner/repo (or a repo URL in the argv).
+    repos:
+      acme/shop: prod
+      acme/shop-staging: staging
+  argocd:
+    # Globs on the ArgoCD application name; first match wins.
+    apps:
+      "prod-*": prod
+      "staging-*": staging
+  terraform:
+    # terraform/tofu workspace (metadata.workspace) when a plan carries one.
+    workspaces:
+      prod: prod
+      staging: staging
