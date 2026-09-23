@@ -389,21 +389,31 @@ def test_forged_constraint_is_quarantined_at_load_when_a_fetcher_is_given(tmp_pa
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="resource kinds should be normalised in the parser, not the matcher",
-)
-def test_evade_case_variant_slips_past_case_sensitive_fnmatch():
-    """fnmatch (and therefore get_matching_constraints) is case-sensitive on
-    POSIX. A rule written for 'deployment/*' does not match a resource
-    string of 'Deployment/API-Server', even though they name the same
-    Kubernetes object. This is a real gap: case normalisation belongs in
-    intent/constraint parsing, not in store.py's matcher (which we were
-    told not to touch)."""
+def test_evade_case_variant_is_not_an_attacker_controlled_gap_any_more():
+    """REVIEW-4 extras: this used to be xfail, documenting that
+    fnmatch-based matching is case-sensitive so 'deployment/*' doesn't
+    match 'Deployment/API-Server'. Re-checked: the parser now lower-cases
+    every kubectl resource *kind* it parses (parser.py
+    `_split_resource_token`, "kinds are case-insensitive in kubectl;
+    patterns are lower-case"), so an intent built from real argv via the
+    CLI is always lower-case -- there is no argv shape an agent or
+    attacker can type that produces an upper-case kind any more. The
+    matcher itself is still case-sensitive (documented below), but hitting
+    it now requires either (a) a library caller building an
+    InfrastructureIntent directly, bypassing the parser entirely, as this
+    test does, or (b) a constraint author writing an upper-case
+    resource_pattern, which is a self-inflicted authoring mistake now
+    caught by a load-time warning (see the second test below) -- not an
+    attacker-controlled evasion of a rule the author actually wrote
+    correctly. So this stays documented, not fixed: fixing the matcher
+    itself is still out of scope (store.py's matching semantics), and
+    fixing it wouldn't change what a real CLI-driven attacker can do."""
     store = ConstraintStore(authority_map=dict(AUTHORITY))
     base = make_constraint(resource_pattern="deployment/*")
     store.add_constraint(base)
 
+    # Only reachable by constructing the intent directly -- the CLI/parser
+    # path can never produce an upper-case kind (see above).
     evasive_intent = InfrastructureIntent(
         resource="Deployment/API-Server",
         action="scale",
@@ -413,9 +423,31 @@ def test_evade_case_variant_slips_past_case_sensitive_fnmatch():
     interceptor = AegisInterceptor(store)
     decision = interceptor.intercept(evasive_intent, now=NOW)
 
-    # This is what SHOULD happen if case were normalised: the rule still
-    # applies and the scale is blocked.
-    assert decision.verdict == "BLOCK"
+    # Documents current (still case-sensitive) matcher behaviour: the rule
+    # does not fire, and the intent is reported uncovered rather than
+    # silently misjudged -- there's no BLOCK/ALLOW confusion, just a miss.
+    assert decision.verdict == "ALLOW"
+    assert decision.covered is False
+
+
+def test_upper_case_resource_pattern_gets_a_load_time_warning(tmp_path):
+    """The authoring mistake side of the case-sensitivity gap above: a
+    constraint whose resource_pattern isn't already lower-case will never
+    match a parser-derived intent, so load-time now warns about it instead
+    of leaving the author to discover a silently-dead rule."""
+    from aegis_core.store import ConstraintStore as CS
+
+    store = CS(authority_map=dict(AUTHORITY))
+    store.add_constraint(make_constraint(id="c1", resource_pattern="Deployment/*"))
+    path = tmp_path / "constraints.yaml"
+    store.save(path)
+
+    reloaded = CS.load(path, authority_map=dict(AUTHORITY), insecure=True)
+    assert reloaded.quarantined == []
+    assert any(
+        "resource_pattern is matched case-sensitively" in w and "Deployment/*" in w
+        for w in reloaded.warnings
+    )
 
 
 def test_evade_provider_mismatch_correctly_does_not_match():

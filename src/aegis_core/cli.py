@@ -650,14 +650,18 @@ class _Output:
             return
         if self.pretty:
             h = self.store_health
-            for warning in h.warnings:
-                print(f"WARNING: {warning}")
+            # REVIEW-4 L3: every store_health.warnings entry prints one
+            # line under the STORE: summary, alongside the quarantined
+            # entries, instead of scattered above it -- everything the
+            # store has to say about its own health lives in one place.
             print(
                 f"STORE: loaded={h.loaded} quarantined={len(h.quarantined)} "
                 f"principals={h.principals}"
             )
             for entry in h.quarantined:
                 print(f"  quarantined: {entry['id']} ({entry['reason']})")
+            for warning in h.warnings:
+                print(f"  warning: {warning}")
 
 
 class _StructuredLog:
@@ -891,7 +895,9 @@ def _evaluate(intents: list[InfrastructureIntent], args: argparse.Namespace) -> 
 
 
 def _is_fail_closed_note(note: str) -> bool:
-    return note.startswith(("fail-closed", "env-unresolved", "unknown-target", "ledger:"))
+    return note.startswith(
+        ("fail-closed", "env-unresolved", "unknown-target", "ledger:", "time-window-unresolved")
+    )
 
 
 def _strip_leading_separator(argv: list[str]) -> list[str]:
@@ -909,6 +915,27 @@ def _read_plan_json(path: str) -> dict:
             return json.load(f)
         except json.JSONDecodeError as exc:
             raise DataError(f"{path}: invalid JSON: {exc}") from None
+
+
+_PLAN_SHAPE_KEY = {
+    "terraform": "resource_changes",
+    "tofu": "resource_changes",
+    "pulumi-preview": "steps",
+}
+
+
+def _require_plan_shape(plan_json: object, target: str, path: str) -> None:
+    """Raises ``DataError`` (exit 65) when ``plan_json`` is valid JSON but
+    not the plan document ``target`` expects -- e.g. the wrong file, or
+    ``{}`` -- instead of letting the parser silently see zero entries and
+    the run decide an empty ALLOW (REVIEW-4 L1)."""
+    key = _PLAN_SHAPE_KEY[target]
+    if not isinstance(plan_json, dict):
+        raise DataError(f"{path}: not a {target} plan (expected a JSON object)")
+    if key not in plan_json:
+        raise DataError(f"{path}: not a {target} plan (missing top-level {key!r})")
+    if not isinstance(plan_json[key], list):
+        raise DataError(f"{path}: not a {target} plan ({key!r} must be a list)")
 
 
 def _run_signing(args: argparse.Namespace) -> int:
@@ -987,6 +1014,10 @@ def _run(argv: list[str]) -> int:
 
     if args.target in ("terraform", "tofu", "pulumi-preview"):
         plan_json = _read_plan_json(args.plan_path)
+        # REVIEW-4 L1: valid JSON that isn't a plan (e.g. the wrong file, or
+        # an empty `{}`) must not silently parse to zero intents and decide
+        # an empty ALLOW -- it's a usage/data mistake, not "nothing to check".
+        _require_plan_shape(plan_json, args.target, args.plan_path)
         if args.target == "pulumi-preview":
             intents = from_pulumi_preview(plan_json)
         else:

@@ -69,6 +69,37 @@ def test_tampered_constraint_is_discarded_and_intent_escalated():
     assert decision.notes == ["fail-closed: rule-1 (tampered)"]
 
 
+def test_decision_time_integrity_check_catches_a_post_load_in_memory_mutation(tmp_path):
+    """REVIEW-4 L4: interceptor.py re-verifies each matched constraint's
+    integrity at decision time even though ConstraintStore.load already did
+    so for every constraint that survived loading. That is not redundant:
+    a library caller holding a reference to a live Constraint object can
+    mutate one of its fields *after* a successful load, and only the
+    decision-time check -- which runs on every intercept() call, not just
+    once at load -- can catch it. Prove it by loading a perfectly valid
+    on-disk constraint (load-time verify_integrity necessarily passes,
+    since nothing is wrong yet), then mutating the in-memory object
+    in place before deciding."""
+    store = ConstraintStore(authority_map=AUTHORITY)
+    store.add_constraint(make_constraint(id="on-disk-block", effect="BLOCK"))
+    path = tmp_path / "constraints.yaml"
+    store.save(path)
+
+    reloaded = ConstraintStore.load(path, authority_map=AUTHORITY)
+    # Load-time verification passed: the constraint is live, not quarantined.
+    assert reloaded.quarantined == []
+    assert "on-disk-block" in reloaded.constraints
+
+    # A library caller mutates the in-memory object after load -- e.g.
+    # widening what it blocks -- with no further disk or load involved.
+    reloaded.constraints["on-disk-block"].actions = {"scale", "delete"}
+
+    decision = AegisInterceptor(reloaded).intercept(SCALE_INTENT, now=NOW)
+    assert decision.verdict == "ESCALATE"
+    assert decision.discarded == [{"id": "on-disk-block", "reason": "tampered"}]
+    assert decision.notes == ["fail-closed: on-disk-block (tampered)"]
+
+
 def test_revoked_principal_constraint_is_discarded_and_intent_escalated():
     store = ConstraintStore(authority_map=dict(AUTHORITY))
     constraint = make_constraint(principal="sre_lead")
@@ -537,6 +568,27 @@ def _store_with(*constraints) -> ConstraintStore:
     for c in constraints:
         store.constraints[c.id] = c
     return store
+
+
+def test_missing_tzdata_escalates_a_time_windowed_rule_end_to_end():
+    """REVIEW-4 L1: with tzdata unavailable, a time-windowed BLOCK rule
+    that would otherwise match must not fail open to ALLOW -- the
+    interceptor escalates via get_time_window_unresolved."""
+    rule = make_constraint(
+        id="peak-hours",
+        actions={"scale"},
+        time_window={"days": ["Mon"], "start": "09:00", "end": "17:00", "tz": "America/New_York"},
+    )
+    store = _store_with(rule)
+    store.tzdata_available = False
+    interceptor = AegisInterceptor(store)
+
+    decision = interceptor.intercept(SCALE_INTENT, now=NOW)  # NOW is a Monday
+
+    assert decision.verdict == "ESCALATE"
+    assert decision.covered is True
+    assert decision.citations == []
+    assert decision.notes == ["time-window-unresolved: peak-hours"]
 
 
 def test_env_scoped_rule_without_resolved_env_escalates_not_allows():

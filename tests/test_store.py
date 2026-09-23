@@ -1,8 +1,10 @@
 import json
+from datetime import UTC, datetime
 
 import pytest
 
 from aegis_core.authority import load_authority_map
+from aegis_core.intent import InfrastructureIntent
 from aegis_core.provenance import FileSourceFetcher
 from aegis_core.store import Constraint, ConstraintStore
 
@@ -335,6 +337,55 @@ def test_verify_sources_keeps_the_forged_constraint_object(tmp_path):
     assert [c.id for c in store.quarantined_constraints] == ["rule-1"]
     assert store.health.loaded == 0
     assert store.health.quarantined == [{"id": "rule-1", "reason": "forged"}]
+
+
+def test_missing_tzdata_warns_once_and_fails_closed_instead_of_silently_never_matching(
+    tmp_path, monkeypatch
+):
+    """REVIEW-4 L1: on a slim container with no tzdata database, every
+    ZoneInfo(...) call raises ZoneInfoNotFoundError -- including for "UTC".
+    That must not (a) quarantine every time-windowed constraint as
+    individually 'invalid', (b) traceback, or (c) silently make a
+    time-windowed BLOCK rule never match (fail *open*). Instead: one clear
+    store warning, and the constraint fails closed to ESCALATE."""
+    import zoneinfo
+
+    from aegis_core.store import ZoneInfoNotFoundError
+
+    def _always_raises(_name):
+        raise ZoneInfoNotFoundError("no tzdata available")
+
+    monkeypatch.setattr(zoneinfo, "ZoneInfo", _always_raises)
+    monkeypatch.setattr("aegis_core.store.ZoneInfo", _always_raises)
+
+    store = ConstraintStore(authority_map=AUTHORITY)
+    constraint = make_constraint(
+        id="prod-peak",
+        effect="BLOCK",
+        time_window={"days": ["Mon"], "start": "09:00", "end": "17:00", "tz": "America/New_York"},
+    )
+    store.constraints[constraint.id] = constraint
+    path = tmp_path / "constraints.yaml"
+    store.save(path)
+
+    reloaded = ConstraintStore.load(path, authority_map=AUTHORITY, insecure=True)
+
+    # (a) not quarantined as invalid -- it loaded fine.
+    assert reloaded.quarantined == []
+    assert "prod-peak" in reloaded.constraints
+    # one clear warning, not "unknown tz" noise.
+    assert "tzdata missing: time-windowed constraints cannot be evaluated" in reloaded.warnings
+    assert reloaded.tzdata_available is False
+
+    now = datetime(2026, 1, 5, 12, 0, tzinfo=UTC)  # a Monday, 12:00 UTC
+    intent = InfrastructureIntent(resource="node/x", action="scale", provider="kubernetes")
+
+    # (c) not silently never-matching: get_matching_constraints correctly
+    # excludes it (the window truly can't be evaluated)...
+    assert reloaded.get_matching_constraints(intent, now) == []
+    # ...but it's reported separately so the interceptor can fail closed.
+    unresolved = reloaded.get_time_window_unresolved(intent, now)
+    assert [c.id for c in unresolved] == ["prod-peak"]
 
 
 def test_load_rejects_a_top_level_list(tmp_path):

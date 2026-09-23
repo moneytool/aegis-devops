@@ -424,6 +424,13 @@ class PlanConstraintStore:
                 warning = f"Quarantined plan constraint {pc.id}: provenance hash mismatch"
                 store.warnings.append(warning)
                 logger.warning(warning)
+        if not entries:
+            # REVIEW-4 L5: plan constraints are optional -- an empty file is
+            # not an error -- but say so rather than loading silently, so an
+            # operator who *meant* to have plan-level constraints notices.
+            warning = f"{path}: no plan_constraints entries (plan-level constraints are optional)"
+            store.warnings.append(warning)
+            logger.warning(warning)
         return store
 
 

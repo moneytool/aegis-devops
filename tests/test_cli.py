@@ -928,10 +928,37 @@ def test_authority_typo_principal_key_is_a_hard_fail(capsys, tmp_path):
     _assert_hard_fail(capsys, code)
 
 
+def test_authority_null_principal_classes_loads_without_traceback(capsys, tmp_path):
+    """REVIEW-4 L1: 'principals: {admin: null}' used to raise TypeError
+    from set(None) inside load_authority_map. It must load cleanly instead,
+    treating a null value the same as an empty list (that principal is
+    authorized for nothing) -- not a hard fail, since the file is otherwise
+    well-formed and has at least one principal."""
+    authority = tmp_path / "authority.yaml"
+    authority.write_text("principals:\n  admin: null\n  sre_lead: [scaling]\n")
+    code = main(["check", "kubectl", "--constraints", CONSTRAINTS, "--authority",
+                 _signed(authority), "--", "kubectl", "get", "pods"])
+    captured = capsys.readouterr()
+    assert "Traceback" not in captured.err
+    assert code in (0, 2, 3)
+    assert '"verdict"' in captured.out
+
+
 def test_empty_constraints_file_is_a_hard_fail(capsys, tmp_path):
     empty = tmp_path / "empty.yaml"
     empty.write_text("")
     code = main(["check", "kubectl", "--constraints", _signed(empty), "--authority", AUTHORITY,
+                 "--", "kubectl", "get", "pods"])
+    _assert_hard_fail(capsys, code)
+
+
+def test_constraints_key_explicitly_null_is_a_hard_fail(capsys, tmp_path):
+    """REVIEW-4 L5: 'constraints: null' (as opposed to the key being
+    entirely absent) must be treated the same as zero constraints -- a
+    hard fail, not an allow-all store -- and must not traceback."""
+    path = tmp_path / "constraints.yaml"
+    path.write_text("constraints: null\n")
+    code = main(["check", "kubectl", "--constraints", _signed(path), "--authority", AUTHORITY,
                  "--", "kubectl", "get", "pods"])
     _assert_hard_fail(capsys, code)
 
@@ -1065,6 +1092,28 @@ def test_bad_plan_json_is_data_error_65(capsys, tmp_path):
     bad.write_text("{not json")
     code = main(["check", "terraform", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
                  str(bad)])
+    _assert_one_line_error(capsys, code, 65)
+
+
+def test_valid_json_but_not_a_plan_is_data_error_65_not_empty_allow(capsys, tmp_path):
+    """REVIEW-4 L1: {} is valid JSON but has no 'resource_changes' -- it
+    must not silently parse to zero intents and print an empty ALLOW."""
+    not_a_plan = tmp_path / "plan.json"
+    not_a_plan.write_text("{}")
+    code = main(["check", "terraform", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
+                 str(not_a_plan)])
+    captured = capsys.readouterr()
+    assert code == 65
+    assert "not a terraform plan" in captured.err
+    assert "resource_changes" in captured.err
+    assert len(captured.err.strip().splitlines()) == 1
+
+
+def test_wrong_type_top_level_key_in_plan_is_data_error_65(capsys, tmp_path):
+    not_a_plan = tmp_path / "plan.json"
+    not_a_plan.write_text('{"resource_changes": "oops"}')
+    code = main(["check", "terraform", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
+                 str(not_a_plan)])
     _assert_one_line_error(capsys, code, 65)
 
 
@@ -1432,8 +1481,10 @@ def test_example_key_is_discovered_next_to_the_constraints_with_a_warning(capsys
     main(["check", "kubectl", "--constraints", CONSTRAINTS, "--authority", AUTHORITY, "--pretty",
           "--", "kubectl", "get", "pods"])
     out = capsys.readouterr().out.splitlines()
-    assert "WARNING: using example signing key" in out
-    assert out[-1].startswith("STORE: ")
+    # REVIEW-4 L3: warnings print one line each under STORE:, not above it.
+    store_idx = next(i for i, line in enumerate(out) if line.startswith("STORE: "))
+    warning_idx = out.index("  warning: using example signing key")
+    assert warning_idx > store_idx
 
 
 def test_sources_directory_next_to_constraints_is_used_by_default(capsys, tmp_path):
@@ -1735,6 +1786,24 @@ def test_json_and_pretty_are_mutually_exclusive(capsys):
     err = capsys.readouterr().err
     assert code == 64
     assert "not allowed with argument" in err
+
+
+def test_store_health_warnings_print_one_line_each_under_store_in_pretty_mode(capsys, tmp_path):
+    """REVIEW-4 L3: every store_health.warnings entry gets its own
+    '  warning: ...' line grouped under the STORE: summary line, the same
+    way quarantined entries already are -- not scattered elsewhere."""
+    path = _bit_flip(tmp_path, "no-delete-nodes")  # produces a quarantine warning
+    code = main(
+        ["check", "kubectl", "--constraints", path, "--authority", AUTHORITY, "--pretty",
+         "--", "kubectl", "get", "pods"]
+    )
+    out = capsys.readouterr().out.splitlines()
+    assert code == 0
+    store_idx = next(i for i, line in enumerate(out) if line.startswith("STORE: "))
+    warning_lines = [i for i, line in enumerate(out) if line.startswith("  warning: ")]
+    assert warning_lines, "expected at least one '  warning: ...' line"
+    assert all(i > store_idx for i in warning_lines)
+    assert any("Quarantined constraint no-delete-nodes" in out[i] for i in warning_lines)
 
 
 def test_dry_run_uncovered_message_is_not_would_be_none(capsys):

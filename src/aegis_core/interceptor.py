@@ -112,8 +112,18 @@ class AegisInterceptor:
         quarantined_matches = self.store.get_matching_quarantined(intent, now)
         get_env_unresolved = getattr(self.store, "get_env_unresolved", None)
         env_unresolved = get_env_unresolved(intent, now) if get_env_unresolved else []
+        get_time_window_unresolved = getattr(self.store, "get_time_window_unresolved", None)
+        time_window_unresolved = (
+            get_time_window_unresolved(intent, now) if get_time_window_unresolved else []
+        )
         unknown_target = intent.params.get("unknown_target") is True
-        if not matches and not quarantined_matches and not env_unresolved:
+        uncovered = (
+            not matches
+            and not quarantined_matches
+            and not env_unresolved
+            and not time_window_unresolved
+        )
+        if uncovered:
             verdict, notes = "ALLOW", []
             if self.fail_closed:
                 verdict, notes = "ESCALATE", ["fail-closed: uncovered"]
@@ -137,6 +147,9 @@ class AegisInterceptor:
         for c in env_unresolved:
             fail_closed = True
             notes.append(f"env-unresolved: {c.id}")
+        for c in time_window_unresolved:
+            fail_closed = True
+            notes.append(f"time-window-unresolved: {c.id}")
         if unknown_target:
             fail_closed = True
             notes.append("unknown-target")
@@ -146,6 +159,17 @@ class AegisInterceptor:
                 fail_closed = True
                 notes.append(f"fail-closed: {c.id} ({reason})")
         for c in matches:
+            # REVIEW-4 L4: re-verify integrity here even though
+            # ConstraintStore.load already did it for every constraint that
+            # made it into `store.constraints`. This isn't redundant: a
+            # library caller can hold a reference to a live Constraint
+            # object and mutate one of its fields in place (e.g. widening
+            # `actions` or flipping `effect`) between load time and a later
+            # `intercept()` call -- load-time verification has no way to
+            # see that. The cost is bounded (~4 sha256 hashes per matched
+            # rule, not per loaded rule -- see get_matching_constraints'
+            # index), so we pay it on every decision instead of trusting a
+            # verification result that may be stale by the time it matters.
             reason = None
             if not c.verify_integrity():
                 reason = "tampered"

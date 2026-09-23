@@ -57,6 +57,7 @@ load for the CLI's ``store_health`` output.
 
 import fnmatch
 import hashlib
+import json
 import logging
 import re
 from collections import OrderedDict
@@ -264,11 +265,39 @@ def _valid_edge(edge: str, value: str) -> bool:
     return edge == "end" and value == _END_OF_DAY
 
 
-def _validate_time_window(window: Any, default_tz: str | None = None) -> str | None:
+def _tzdata_available() -> bool:
+    """Probes whether the ``tzdata`` database is usable at all (REVIEW-4
+    L1) -- distinct from a single unresolvable ``tz`` name. A slim
+    container with no IANA database installed makes *every* ``ZoneInfo(...)``
+    call raise ``ZoneInfoNotFoundError``, including for ``"UTC"``; treating
+    that the same as "this one constraint names a bad tz" would quarantine
+    every time-windowed constraint in the store as individually ``invalid``,
+    which is misleading (it's an environment problem, not a policy one) and
+    can trip the quarantine-ratio hard fail for reasons that have nothing
+    to do with the policy files. Called fresh (never cached at import time)
+    so tests can simulate the missing-tzdata case by monkeypatching
+    ``zoneinfo.ZoneInfo``."""
+    try:
+        ZoneInfo("UTC")
+        return True
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        return False
+
+
+def _validate_time_window(
+    window: Any, default_tz: str | None = None, tzdata_available: bool = True
+) -> str | None:
     """Shape-checks one ``time_window`` mapping.
 
     ``default_tz`` is the store-level fallback (REVIEW-4 T2.4): a window
     with no ``tz`` of its own is valid only when the store carries one.
+
+    ``tzdata_available=False`` (REVIEW-4 L1) skips the ``ZoneInfo(tz)``
+    resolvability check -- every name would fail identically when the
+    tzdata database itself is missing, so that check would misreport a
+    system problem as "unknown tz" on every time-windowed constraint. The
+    interceptor instead fails closed on these at decision time (see
+    ``ConstraintStore.get_time_window_unresolved``).
     """
     if window is None:
         return None
@@ -288,26 +317,29 @@ def _validate_time_window(window: Any, default_tz: str | None = None) -> str | N
     if tz is not None:
         if not isinstance(tz, str):
             return "tz must be a string"
-        try:
-            ZoneInfo(tz)
-        except (ZoneInfoNotFoundError, ValueError, OSError):
-            return f"unknown tz {tz!r}"
+        if tzdata_available:
+            try:
+                ZoneInfo(tz)
+            except (ZoneInfoNotFoundError, ValueError, OSError):
+                return f"unknown tz {tz!r}"
     elif default_tz is None:
         return "time_window.tz missing and no default_tz"
     return None
 
 
-def _validate_default_tz(default_tz: Any) -> str | None:
+def _validate_default_tz(default_tz: Any, tzdata_available: bool = True) -> str | None:
     """Shape-checks the store-level ``default_tz`` key. Returns a short
-    reason (no prefix) when invalid, else ``None``."""
+    reason (no prefix) when invalid, else ``None``. See
+    :func:`_validate_time_window` for ``tzdata_available``."""
     if default_tz is None:
         return None
     if not isinstance(default_tz, str):
         return "default_tz must be a string"
-    try:
-        ZoneInfo(default_tz)
-    except (ZoneInfoNotFoundError, ValueError, OSError):
-        return f"unknown default_tz {default_tz!r}"
+    if tzdata_available:
+        try:
+            ZoneInfo(default_tz)
+        except (ZoneInfoNotFoundError, ValueError, OSError):
+            return f"unknown default_tz {default_tz!r}"
     return None
 
 
@@ -330,12 +362,22 @@ def _validate_rate_limit(rate_limit: Any) -> str | None:
     return None
 
 
-def validate_constraint_dict(data: Any, default_tz: str | None = None) -> str | None:
+def validate_constraint_dict(
+    data: Any,
+    default_tz: str | None = None,
+    tzdata_available: bool = True,
+    warnings: list[str] | None = None,
+) -> str | None:
     """Shape-checks one raw constraint entry. Returns ``None`` when it is
     well-formed, else a short reason (without the ``"invalid: "`` prefix).
 
     ``default_tz`` is the store-level fallback used to validate a
-    ``time_window`` with no ``tz`` of its own (REVIEW-4 T2.4)."""
+    ``time_window`` with no ``tz`` of its own (REVIEW-4 T2.4).
+    ``tzdata_available`` see :func:`_validate_time_window` (REVIEW-4 L1).
+    ``warnings``, if given, collects non-fatal load-time notes (e.g. an
+    upper-case ``resource_pattern``) for a *well-formed* entry -- it is
+    never appended to for a malformed one, which reports its reason via
+    the return value instead."""
     if not isinstance(data, dict):
         return "entry must be a mapping"
     for key in _REQUIRED_KEYS:
@@ -356,7 +398,19 @@ def validate_constraint_dict(data: Any, default_tz: str | None = None) -> str | 
         return "actions must be a non-empty list of strings"
     if data.get("scope") is not None and not isinstance(data["scope"], dict):
         return "scope must be a mapping"
-    reason = _validate_time_window(data.get("time_window"), default_tz)
+    resource_pattern = data["resource_pattern"]
+    if resource_pattern != resource_pattern.lower() and warnings is not None:
+        # REVIEW-4 extras / adversarial 'evade-case-variant': the parser
+        # normalises a kubectl resource *kind* to lower-case (parser.py
+        # `_split_resource_token`), so an intent built via the CLI never
+        # carries an upper-case kind. But `resource_matches` uses a
+        # case-sensitive fnmatch, so a constraint author who writes
+        # `resource_pattern: "Deployment/*"` writes a rule that then never
+        # fires against any CLI-derived intent (which is always
+        # lower-case) -- a self-inflicted authoring mistake, not an
+        # attacker-controlled evasion, but worth a load-time nudge.
+        warnings.append(f"resource_pattern is matched case-sensitively: {resource_pattern!r}")
+    reason = _validate_time_window(data.get("time_window"), default_tz, tzdata_available)
     if reason:
         return reason
     return _validate_rate_limit(data.get("rate_limit"))
@@ -531,7 +585,11 @@ def resource_matches(pattern: str, intent: InfrastructureIntent) -> bool:
 
 
 def _matches_except_scope(
-    c: Constraint, intent: InfrastructureIntent, now: datetime, default_tz: str | None = None
+    c: Constraint,
+    intent: InfrastructureIntent,
+    now: datetime,
+    default_tz: str | None = None,
+    tzdata_available: bool = True,
 ) -> bool:
     if c.provider != intent.provider:
         return False
@@ -539,18 +597,34 @@ def _matches_except_scope(
         return False
     if intent.action not in c.actions and ANY_ACTION not in c.actions:
         return False
-    if c.time_window and not _time_window_matches(c.time_window, now, default_tz):
-        return False
+    if c.time_window:
+        # REVIEW-4 L1: when tzdata itself is missing, the window can't be
+        # evaluated at all -- neither "matches" nor "doesn't match" is
+        # honest. Never fall through to ALLOW here: report "doesn't match"
+        # so this constraint isn't honoured, and let
+        # ConstraintStore.get_time_window_unresolved flag it separately so
+        # the interceptor can fail closed to ESCALATE instead of silently
+        # never matching (see module docstring / interceptor.py).
+        if not tzdata_available:
+            return False
+        if not _time_window_matches(c.time_window, now, default_tz):
+            return False
     return True
 
 
 def _constraint_matches(
-    c: Constraint, intent: InfrastructureIntent, now: datetime, default_tz: str | None = None
+    c: Constraint,
+    intent: InfrastructureIntent,
+    now: datetime,
+    default_tz: str | None = None,
+    tzdata_available: bool = True,
 ) -> bool:
     """Whether ``c``'s (provider, resource_pattern, actions, scope,
     time_window) apply to ``intent`` at ``now``. Shared by the live and the
     quarantined match so both use exactly the same semantics."""
-    return _matches_except_scope(c, intent, now, default_tz) and _scope_matches(c.scope, intent)
+    return _matches_except_scope(
+        c, intent, now, default_tz, tzdata_available
+    ) and _scope_matches(c.scope, intent)
 
 
 def env_unresolved(scope: dict[str, Any], intent: InfrastructureIntent) -> bool:
@@ -566,15 +640,51 @@ def env_unresolved(scope: dict[str, Any], intent: InfrastructureIntent) -> bool:
                                                   if k != "env"})
 
 
+def time_window_unresolved(
+    c: Constraint,
+    intent: InfrastructureIntent,
+    now: datetime,
+    default_tz: str | None,
+    tzdata_available: bool,
+) -> bool:
+    """Whether ``c`` carries a ``time_window`` that can't be evaluated
+    because tzdata is missing entirely, while everything else about ``c``
+    (provider, resource, action, scope) matches ``intent`` (REVIEW-4 L1).
+    Mirrors :func:`env_unresolved`'s shape: the interceptor turns this into
+    an ESCALATE with a ``time-window-unresolved: <id>`` note instead of
+    treating an unevaluable window as "doesn't apply"."""
+    if tzdata_available or not c.time_window:
+        return False
+    if c.provider != intent.provider:
+        return False
+    if not resource_matches(c.resource_pattern, intent):
+        return False
+    if intent.action not in c.actions and ANY_ACTION not in c.actions:
+        return False
+    return _scope_matches(c.scope, intent)
+
+
 def _source_failure_reason(
     constraint: Constraint, fetcher: SourceFetcher, warnings: list[str] | None = None
 ) -> str | None:
     """``verify_source_reason`` with a missing/unreadable/malformed source
-    normalised to ``"forged"`` instead of propagating
-    ``FileNotFoundError``/``KeyError``/``ValueError``."""
+    normalised to a quarantine reason instead of propagating an exception
+    (REVIEW-4 L1): one bad source file must not crash the whole load.
+
+    * a source file that exists but isn't the JSON object
+      ``verify_source_reason`` expects -- ``{not json`` (``JSONDecodeError``,
+      a ``ValueError`` subclass) or a JSON array instead of an object
+      (``TypeError`` when it's indexed by field name) -- quarantines as
+      ``"invalid-source"``: the file is broken, not necessarily an
+      adversarial forgery;
+    * a missing file or a well-formed-but-wrong-content source quarantines
+      as ``"forged"``, as before.
+    """
     try:
         return verify_source_reason(constraint, fetcher, warnings)
-    except (FileNotFoundError, KeyError, ValueError, TypeError):
+    except (json.JSONDecodeError, TypeError):
+        return "invalid-source"
+    except (FileNotFoundError, KeyError, ValueError):
         return "forged"
 
 
@@ -590,6 +700,7 @@ def _verify_source_safe(constraint: Constraint, fetcher: SourceFetcher) -> bool:
 _SOURCE_FAILURE_MESSAGES = {
     "forged": "source does not back its claimed fields",
     "principal-mismatch": "source transport attributes it to a different principal",
+    "invalid-source": "source file is not readable JSON (bad content or wrong shape)",
 }
 
 
@@ -686,6 +797,10 @@ class ConstraintStore:
         # store-level setting, not a constraint field) -- see the YAML
         # loader/saver docstrings.
         self.default_tz: str | None = default_tz
+        # REVIEW-4 L1: whether the tzdata database is usable at all -- set
+        # from a fresh probe by `load()`; a store built directly (as most
+        # unit tests do) assumes it's available, matching prior behaviour.
+        self.tzdata_available: bool = True
 
     @property
     def health(self) -> StoreHealth:
@@ -738,7 +853,11 @@ class ConstraintStore:
         if wildcard:
             seen = {id(c) for c in candidates}
             candidates = candidates + [c for c in wildcard if id(c) not in seen]
-        return [c for c in candidates if _constraint_matches(c, intent, now, self.default_tz)]
+        return [
+            c
+            for c in candidates
+            if _constraint_matches(c, intent, now, self.default_tz, self.tzdata_available)
+        ]
 
     def get_env_unresolved(self, intent: InfrastructureIntent, now: datetime) -> list[Constraint]:
         """Every loaded constraint that would apply to this intent except
@@ -749,8 +868,24 @@ class ConstraintStore:
         return [
             c
             for c in self.constraints.values()
-            if _matches_except_scope(c, intent, now, self.default_tz)
+            if _matches_except_scope(c, intent, now, self.default_tz, self.tzdata_available)
             and env_unresolved(c.scope, intent)
+        ]
+
+    def get_time_window_unresolved(
+        self, intent: InfrastructureIntent, now: datetime
+    ) -> list[Constraint]:
+        """Every loaded constraint whose ``time_window`` can't be evaluated
+        because tzdata is missing entirely, but which otherwise applies to
+        this intent (see :func:`time_window_unresolved`, REVIEW-4 L1). The
+        interceptor turns each into an ESCALATE with a
+        ``time-window-unresolved: <id>`` note instead of silently never
+        matching it."""
+        _require_tz_aware(now)
+        return [
+            c
+            for c in self.constraints.values()
+            if time_window_unresolved(c, intent, now, self.default_tz, self.tzdata_available)
         ]
 
     def get_matching_quarantined(
@@ -764,7 +899,7 @@ class ConstraintStore:
         return [
             (c, reasons.get(c.id, "quarantined"))
             for c in self.quarantined_constraints
-            if _constraint_matches(c, intent, now, self.default_tz)
+            if _constraint_matches(c, intent, now, self.default_tz, self.tzdata_available)
         ]
 
     def save(self, path: str | Path) -> None:
@@ -821,12 +956,19 @@ class ConstraintStore:
         check_signature(path, key, insecure, store.warnings)
         store._absorb_warnings(authority_map)
         store.constraints_sha256 = _sha256_file(path)
+        store.tzdata_available = _tzdata_available()
+        if not store.tzdata_available:
+            # REVIEW-4 L1: one clear warning, not one "unknown tz" per
+            # time-windowed constraint -- see _tzdata_available's docstring.
+            warning = "tzdata missing: time-windowed constraints cannot be evaluated"
+            store.warnings.append(warning)
+            logger.warning(warning)
         with open(path) as f:
             payload = yaml.load(f, Loader=_YAML_LOADER) or {}
         if not isinstance(payload, dict):
             raise ValueError(f"{path}: constraints file must be a mapping with a 'constraints' key")
         default_tz = payload.get("default_tz")
-        tz_reason = _validate_default_tz(default_tz)
+        tz_reason = _validate_default_tz(default_tz, store.tzdata_available)
         if tz_reason:
             raise ValueError(f"{path}: {tz_reason}")
         store.default_tz = default_tz
@@ -836,7 +978,9 @@ class ConstraintStore:
         caching_fetcher = CachingSourceFetcher(source_fetcher) if source_fetcher else None
         seen: set[str] = set()
         for entry in entries:
-            reason = validate_constraint_dict(entry, default_tz)
+            reason = validate_constraint_dict(
+                entry, default_tz, store.tzdata_available, store.warnings
+            )
             if reason is None and entry["id"] in seen:
                 reason = "duplicate id"
             if reason is not None:

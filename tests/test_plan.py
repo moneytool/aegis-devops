@@ -504,6 +504,29 @@ def test_save_load_round_trip_preserves_hashes(tmp_path):
         assert pc.provenance_hash == store.constraints[cid].provenance_hash
 
 
+def test_load_rejects_a_top_level_list(tmp_path):
+    """REVIEW-4 L1: a top-level YAML list (instead of a mapping with a
+    'plan_constraints' key) used to raise AttributeError from
+    payload.get(...). It must raise a clean ValueError instead."""
+    path = tmp_path / "plan_constraints.yaml"
+    path.write_text("- id: x\n")
+    with pytest.raises(ValueError, match="plan_constraints"):
+        PlanConstraintStore.load(path, authority_map=AUTHORITY, insecure=True)
+
+
+def test_empty_plan_constraints_file_is_allowed_but_warns(tmp_path):
+    """REVIEW-4 L5: unlike constraints/authority (hard fail on empty), an
+    empty plan-constraints file is allowed -- plan constraints are optional
+    -- but the load should still say so via a warning, not load silently
+    as if the operator meant to have none."""
+    path = tmp_path / "plan_constraints.yaml"
+    path.write_text("plan_constraints: []\n")
+    store = PlanConstraintStore.load(path, authority_map=AUTHORITY, insecure=True)
+    assert store.constraints == {}
+    assert store.quarantined == []
+    assert any("plan_constraints" in w and "optional" in w for w in store.warnings)
+
+
 def test_example_file_loads_with_zero_quarantined():
     store = PlanConstraintStore.load("data/plan_constraints.example.yaml", authority_map=AUTHORITY)
     assert store.quarantined == []

@@ -122,11 +122,26 @@ class FileSourceFetcher:
         self, source_ref: str, *, key: bytes | None = None, insecure: bool | None = None
     ) -> dict[str, Any]:
         """``key``/``insecure`` override the fetcher-wide settings for one
-        fetch. A ``source_ref`` containing a path separator is rejected
-        (``KeyError``) so a constraint can't cite ``../../x``."""
-        if "/" in source_ref or "\\" in source_ref or source_ref in ("", ".", ".."):
+        fetch. A ``source_ref`` containing a path separator, ``..``, a
+        leading ``~``, an absolute path, or a NUL byte is rejected
+        (``KeyError``) so a constraint can't cite ``../../x``, ``~/.ssh/id``,
+        ``/etc/passwd``, or similar (REVIEW-4 L2). The resolved path is also
+        confirmed to stay inside ``base_dir`` as defense-in-depth against any
+        shape the string checks above don't anticipate."""
+        if (
+            "/" in source_ref
+            or "\\" in source_ref
+            or "\x00" in source_ref
+            or source_ref in ("", ".", "..")
+            or source_ref.startswith("~")
+            or Path(source_ref).is_absolute()
+        ):
             raise KeyError(f"invalid source_ref {source_ref!r}")
         path = self.base_dir / f"{source_ref}.json"
+        resolved_base = self.base_dir.resolve()
+        resolved_path = path.resolve()
+        if not resolved_path.is_relative_to(resolved_base):
+            raise KeyError(f"invalid source_ref {source_ref!r}")
         if not path.exists():
             raise FileNotFoundError(path)
         check_signature(

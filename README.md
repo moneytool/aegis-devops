@@ -463,6 +463,19 @@ aegis sign   --key file:aegis-signing.key data/constraints.yaml data/sources   #
 aegis verify --key env:AEGIS_SIGNING_KEY  data/constraints.yaml data/sources
 ```
 
+**`aegis verify` scope on a directory.** `sign` on a directory covers everything under it (every
+`.yaml`/`.json`, recursively) — that's a deliberate "sign the whole tree" operation for a
+directory you've pointed it at on purpose, e.g. `data/sources`. `verify` on a directory is
+narrower on purpose: it only checks files that were *actually signed* — one with its own
+`<file>.sig`, or one listed in an `AEGIS-MANIFEST.sig` found at or below that directory — never
+every `.yaml`/`.json` it happens to find. A policy directory can legitimately hold unrelated,
+unsigned content next to real policy files — `data/corpus/seeds.yaml`, `split.json` and
+`stats.json` are corpus-generation artifacts no Aegis loader ever reads — and `aegis verify
+data/corpus` must not report those as `FAILED` just because of their extension. Passing a file
+directly (not discovered via a directory walk) is unaffected: it is always checked, signed or
+not, so a real gap still surfaces as `FAILED` on the file itself or by naming the directory that
+has — or should have — a manifest covering it.
+
 The key is resolved from `--key SOURCE` (`env:VAR`, `file:PATH`, or raw hex), then
 `$AEGIS_SIGNING_KEY`, then `<dir of --constraints>/example-signing.key` if it exists — with the
 store warning `using example signing key`, because **`data/example-signing.key` is public and

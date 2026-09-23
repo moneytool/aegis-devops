@@ -114,6 +114,45 @@ def _signable_files(path: Path) -> list[Path]:
     return [path]
 
 
+def _verifiable_files(path: Path) -> list[Path]:
+    """The files ``aegis verify`` actually checks under ``path`` (REVIEW-4
+    L1) -- unlike :func:`_signable_files` (used by ``sign``, which covers
+    everything under a directory the operator explicitly pointed it at),
+    ``verify`` only looks at files that were *actually signed*: one with
+    its own ``<file>.sig``, or one listed in an ``AEGIS-MANIFEST.sig``
+    found at or below ``path``.
+
+    A policy directory can legitimately contain unrelated, unsigned
+    content -- e.g. ``data/corpus/seeds.yaml``, ``split.json``,
+    ``stats.json`` are corpus-generation artifacts no Aegis loader ever
+    reads -- and those must never be reported ``FAILED`` just because they
+    happen to be ``.yaml``/``.json`` files sitting near real policy files.
+    Explicit file arguments are unaffected: passing one directly (not via a
+    directory walk) always checks it, signed or not (a real gap will still
+    surface as ``FAILED`` on the file itself, or by naming the directory
+    that has -- or should have -- a manifest covering it).
+    """
+    if not path.is_dir():
+        return [path]
+    found: dict[Path, None] = {}
+    for p in sorted(path.rglob("*")):
+        if p.is_file() and p.suffix in _SIGNED_SUFFIXES and p.name != MANIFEST_NAME:
+            if sig_path(p).exists():
+                found[p] = None
+    for manifest in sorted(path.rglob(MANIFEST_NAME)):
+        try:
+            document = json.loads(manifest.read_text())
+        except (OSError, ValueError):
+            continue
+        files = document.get("files") if isinstance(document, dict) else None
+        if not isinstance(files, dict):
+            continue
+        for rel in files:
+            candidate = (manifest.parent / str(rel)).resolve()
+            found[candidate] = None
+    return sorted(found)
+
+
 def manifest_path(directory: str | Path) -> Path:
     return Path(directory) / MANIFEST_NAME
 
@@ -249,7 +288,7 @@ def run(command: str, key: bytes, paths: list[str], out=None) -> int:
             for p in written:
                 print(f"signed  {p}", file=out)
             continue
-        for f in _signable_files(target):
+        for f in _verifiable_files(target):
             if verify_file(f, key):
                 print(f"ok      {f}", file=out)
             else:

@@ -149,6 +149,25 @@ def test_main_sign_and_verify_commands(tmp_path, capsys):
     assert "FAILED" in capsys.readouterr().out
 
 
+def test_verify_on_a_directory_ignores_legitimately_unsigned_non_policy_files(capsys):
+    """REVIEW-4 L1: data/corpus/ mixes real policy files (authority.yaml,
+    constraints.yaml, each individually signed) with corpus-generation
+    artifacts (seeds.yaml, split.json, stats.json) that no Aegis loader
+    ever reads and were never meant to be signed. 'aegis verify data/corpus'
+    must not report those as FAILED just because they're .yaml/.json files
+    sitting in the same directory -- verify only checks what was actually
+    signed (files with their own .sig, or listed in a manifest)."""
+    key = load_key(f"file:{EXAMPLE_KEY_PATH}")
+    assert _main(["verify", "--key", key.hex(), "data/corpus"]) == 0
+    out = capsys.readouterr().out
+    assert "FAILED" not in out
+    for name in ("seeds.yaml", "split.json", "stats.json"):
+        assert name not in out
+    # the real policy files were still checked.
+    assert "authority.yaml" in out
+    assert "constraints.yaml" in out
+
+
 def test_shipped_example_and_corpus_files_verify_under_the_example_key():
     key = load_key(f"file:{EXAMPLE_KEY_PATH}")
     for path in (
