@@ -1,14 +1,17 @@
 {
   "actions": [
-    "apply"
+    "apply",
+    "delete"
   ],
-  "constraint_class": "deployment",
+  "constraint_class": "configuration",
   "effect": "ESCALATE",
   "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "poddisruptionbudget/*",
-  "rule_text": "Escalate applying poddisruptionbudget/* with minAvailable equal to the target resource's replica count, per the gatekeeper-library `poddisruptionbudget` template.",
-  "scope": {},
+  "resource_pattern": "validatingwebhookconfiguration/*",
+  "rule_text": "Block ad-hoc changes to ValidatingWebhookConfiguration objects; Jetstack's postmortem shows a misconfigured admission webhook caused a GKE cluster outage and lost nodes.",
+  "scope": {
+    "namespace": "dev"
+  },
   "source_ref": "src-0110",
   "source_timestamp": "2026-01-14T18:00:00+00:00",
   "time_window": null

@@ -4,12 +4,14 @@
     "create"
   ],
   "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "contractor",
+  "effect": "BLOCK",
+  "principal": "sre_lead",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/billing-*",
-  "rule_text": "Escalate applying deployment/* missing required annotations, extending the gatekeeper-library `requiredlabels` pattern to annotations (see the sibling `requiredannotations` template in the same library).",
-  "scope": {},
+  "resource_pattern": "deployment/*",
+  "rule_text": "Escalate applying deployment/* missing required labels, per the gatekeeper-library `requiredlabels` template (\"Requires resources to contain specified labels, with values matching provided regular expressions\").",
+  "scope": {
+    "namespace": "staging"
+  },
   "source_ref": "src-0353",
   "source_timestamp": "2026-02-14T03:00:00+00:00",
   "time_window": null

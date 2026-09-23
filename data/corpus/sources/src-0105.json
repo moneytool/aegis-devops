@@ -1,14 +1,13 @@
 {
   "actions": [
-    "replace",
     "update"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "sre_lead",
-  "provider": "terraform",
-  "resource_pattern": "aws_autoscaling_group.*",
-  "rule_text": "Escalate terraform changes to AWS autoscaling groups; Toyota Connected's \"A Perfect DNS Storm\" postmortem and related ASG-rebalance issues in the failure-stories index show autoscaler churn causing outages.",
+  "principal": "platform_admin",
+  "provider": "mongodb",
+  "resource_pattern": "collection/billing-*",
+  "rule_text": "Escalate updateMany calls with an empty filter, extending the Kyverno policy library `other/restrict-secrets-by-name` policy's blast-radius-limiting intent to bulk document mutation.",
   "scope": {},
   "source_ref": "src-0105",
   "source_timestamp": "2026-01-14T03:00:00+00:00",

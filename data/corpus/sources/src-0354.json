@@ -1,14 +1,14 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "attach",
+    "put"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
+  "constraint_class": "access",
+  "effect": "BLOCK",
   "principal": "platform_admin",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/auth-*",
-  "rule_text": "Escalate applying deployment/* missing required annotations, extending the gatekeeper-library `requiredlabels` pattern to annotations (see the sibling `requiredannotations` template in the same library).",
+  "provider": "aws",
+  "resource_pattern": "iam/policy/*",
+  "rule_text": "Block attaching or putting an IAM policy that grants full \"*:*\" administrative privileges, per AWS Security Hub FSBP control IAM.1 (\"IAM policies should not allow full administrative privileges\").",
   "scope": {},
   "source_ref": "src-0354",
   "source_timestamp": "2026-02-14T06:00:00+00:00",

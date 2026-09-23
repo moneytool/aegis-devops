@@ -1,15 +1,15 @@
 {
   "actions": [
-    "scale"
+    "create"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "configuration",
   "effect": "BLOCK",
-  "principal": "security_lead",
+  "principal": "sre_lead",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/api-*",
-  "rule_text": "Block scaling changes to kube-system deployments outside a controlled change process; repeated CoreDNS-related outages in the failure-stories index trace back to uncontrolled control-plane-adjacent scaling.",
+  "resource_pattern": "pod/*",
+  "rule_text": "Block Pods sharing the host network, PID, or IPC namespaces in prod, per the Kyverno policy library `pod-security/baseline/disallow-host-namespaces` policy.",
   "scope": {
-    "namespace": "dev"
+    "namespace": "staging"
   },
   "source_ref": "src-0466",
   "source_timestamp": "2026-02-28T06:00:00+00:00",

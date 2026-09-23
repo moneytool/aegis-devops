@@ -9,7 +9,9 @@
   "provider": "kubernetes",
   "resource_pattern": "node/*",
   "rule_text": "Escalate node-level changes during autoscaler activity; Nordstrom's \"101 Ways to Crash Your Cluster\" talk lists eviction thresholds and cluster-autoscaler interaction as a cause of full production cluster outages.",
-  "scope": {},
+  "scope": {
+    "namespace": "staging"
+  },
   "source_ref": "src-0319",
   "source_timestamp": "2026-02-09T21:00:00+00:00",
   "time_window": null

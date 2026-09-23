@@ -1,15 +1,16 @@
 {
   "actions": [
-    "scale"
+    "attach",
+    "put"
   ],
-  "constraint_class": "scaling",
-  "effect": "ESCALATE",
-  "principal": "sre_oncall",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate scaling prod deployment/* below the minimum allowed replica count, per the gatekeeper-library `replicalimits` template.",
+  "constraint_class": "access",
+  "effect": "BLOCK",
+  "principal": "security_lead",
+  "provider": "aws",
+  "resource_pattern": "iam/policy/*",
+  "rule_text": "Block attaching or putting an IAM policy that grants full \"*:*\" administrative privileges, per AWS Security Hub FSBP control IAM.1 (\"IAM policies should not allow full administrative privileges\").",
   "scope": {
-    "namespace": "staging"
+    "region": "eu-west-1"
   },
   "source_ref": "src-0004",
   "source_timestamp": "2026-01-01T12:00:00+00:00",

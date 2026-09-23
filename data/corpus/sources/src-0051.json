@@ -1,14 +1,16 @@
 {
   "actions": [
-    "scale"
+    "update"
   ],
-  "constraint_class": "scaling",
-  "effect": "ESCALATE",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/coredns",
-  "rule_text": "Escalate any scale-down of the CoreDNS deployment; Preply's DNS postmortem traced a partial production outage to CoreDNS-autoscaler behavior under conntrack pressure.",
-  "scope": {},
+  "constraint_class": "configuration",
+  "effect": "BLOCK",
+  "principal": "security_lead",
+  "provider": "gcp",
+  "resource_pattern": "storage/bucket/cache-*",
+  "rule_text": "Block disabling public access prevention on a Cloud Storage bucket, extending the GCP organization policy constraint `storage.managed.retentionPolicySeconds` family to bucket-level access configuration.",
+  "scope": {
+    "region": "eu-west-1"
+  },
   "source_ref": "src-0051",
   "source_timestamp": "2026-01-07T09:00:00+00:00",
   "time_window": null

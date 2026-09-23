@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "apply"
   ],
-  "constraint_class": "access",
+  "constraint_class": "configuration",
   "effect": "BLOCK",
-  "principal": "contractor",
+  "principal": "sre_lead",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Block applying deployment/* whose image is outside the allowed registry prefixes, per the gatekeeper-library `allowedrepos` template (\"Requires container images to begin with a string from the specified list\").",
-  "scope": {},
+  "resource_pattern": "deployment/auth-*",
+  "rule_text": "Escalate deployments mounting hostPath volumes, per the Kyverno policy library `pod-security/baseline/disallow-host-path` policy.",
+  "scope": {
+    "namespace": "staging"
+  },
   "source_ref": "src-0067",
   "source_timestamp": "2026-01-09T09:00:00+00:00",
   "time_window": null

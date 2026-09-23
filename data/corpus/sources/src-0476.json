@@ -1,16 +1,15 @@
 {
   "actions": [
-    "apply",
-    "update"
+    "rollback"
   ],
-  "constraint_class": "deployment",
-  "effect": "BLOCK",
-  "principal": "ci_bot",
-  "provider": "kubernetes",
-  "resource_pattern": "poddisruptionbudget/*",
-  "rule_text": "Block applying prod poddisruptionbudget/* configurations that would block node draining, per the gatekeeper-library `poddisruptionbudget` template.",
+  "constraint_class": "configuration",
+  "effect": "ESCALATE",
+  "principal": "platform_admin",
+  "provider": "migration",
+  "resource_pattern": "migration/gateway-*",
+  "rule_text": "Escalate an `alembic downgrade` (schema rollback) in prod, extending the Kyverno policy library `other/time-bound-policy` policy's controlled-change intent to migration rollbacks.",
   "scope": {
-    "namespace": "kube-system"
+    "env": "staging"
   },
   "source_ref": "src-0476",
   "source_timestamp": "2026-03-01T12:00:00+00:00",

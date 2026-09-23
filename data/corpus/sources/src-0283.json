@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "delete"
   ],
-  "constraint_class": "deployment",
+  "constraint_class": "deletion",
   "effect": "BLOCK",
   "principal": "platform_admin",
-  "provider": "kubernetes",
-  "resource_pattern": "poddisruptionbudget/*",
-  "rule_text": "Block applying poddisruptionbudget/* with maxUnavailable == 0, per the gatekeeper-library `poddisruptionbudget` template (this blocks voluntary disruptions such as node draining).",
-  "scope": {},
+  "provider": "pulumi",
+  "resource_pattern": "stack/api-*",
+  "rule_text": "Block `pulumi destroy` against the prod stack, extending AWS Security Hub FSBP control DynamoDB.6's deletion-protection intent to whole Pulumi stacks.",
+  "scope": {
+    "stack": "prod"
+  },
   "source_ref": "src-0283",
   "source_timestamp": "2026-02-05T09:00:00+00:00",
   "time_window": null

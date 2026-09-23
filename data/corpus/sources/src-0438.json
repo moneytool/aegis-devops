@@ -1,15 +1,15 @@
 {
   "actions": [
-    "scale"
+    "update"
   ],
-  "constraint_class": "scaling",
-  "effect": "BLOCK",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/gateway-*",
-  "rule_text": "Block scaling changes to kube-system deployments outside a controlled change process; repeated CoreDNS-related outages in the failure-stories index trace back to uncontrolled control-plane-adjacent scaling.",
+  "constraint_class": "networking",
+  "effect": "ESCALATE",
+  "principal": "platform_admin",
+  "provider": "gcp",
+  "resource_pattern": "sql/instance/*",
+  "rule_text": "Escalate configuring a public IP or authorized network on a Cloud SQL instance, per the GCP organization policy constraints `sql.managed.restrictPublicIp` and `sql.managed.restrictAuthorizedNetworks`.",
   "scope": {
-    "namespace": "dev"
+    "region": "us-west-2"
   },
   "source_ref": "src-0438",
   "source_timestamp": "2026-02-24T18:00:00+00:00",

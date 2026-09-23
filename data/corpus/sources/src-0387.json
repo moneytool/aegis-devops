@@ -1,15 +1,16 @@
 {
   "actions": [
-    "label",
-    "patch"
+    "update"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "networking",
   "effect": "ESCALATE",
-  "principal": "developer",
-  "provider": "kubernetes",
-  "resource_pattern": "node/ingest-*",
-  "rule_text": "Escalate node label/taint changes; Grafana Labs' postmortem on Pod Priorities describes a production outage caused by cascading Pod evictions tied to scheduling metadata.",
-  "scope": {},
+  "principal": "security_lead",
+  "provider": "azure",
+  "resource_pattern": "web/functionapp/*",
+  "rule_text": "Escalate re-enabling public network access on a Function App, per the Azure Policy built-in \"App Service apps should disable public network access\" definition.",
+  "scope": {
+    "resource_group": "rg-prod-westus2"
+  },
   "source_ref": "src-0387",
   "source_timestamp": "2026-02-18T09:00:00+00:00",
   "time_window": null

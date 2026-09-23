@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
     "create"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
+  "constraint_class": "networking",
+  "effect": "BLOCK",
   "principal": "sre_oncall",
   "provider": "kubernetes",
   "resource_pattern": "service/*",
-  "rule_text": "Escalate creating service/* missing required labels, per the gatekeeper-library `requiredlabels` template.",
-  "scope": {},
+  "rule_text": "Block creating service/* of type LoadBalancer, per the gatekeeper-library `block-loadbalancer-services` template (\"Disallows all Services with type LoadBalancer\").",
+  "scope": {
+    "namespace": "staging"
+  },
   "source_ref": "src-0045",
   "source_timestamp": "2026-01-06T15:00:00+00:00",
   "time_window": null

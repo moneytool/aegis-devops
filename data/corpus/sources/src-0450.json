@@ -1,15 +1,16 @@
 {
   "actions": [
-    "delete",
-    "patch"
+    "exec"
   ],
-  "constraint_class": "deletion",
+  "constraint_class": "access",
   "effect": "ESCALATE",
-  "principal": "sre_lead",
+  "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "node/api-*",
-  "rule_text": "Escalate node-level changes during autoscaler activity; Nordstrom's \"101 Ways to Crash Your Cluster\" talk lists eviction thresholds and cluster-autoscaler interaction as a cause of full production cluster outages.",
-  "scope": {},
+  "resource_pattern": "pod/*",
+  "rule_text": "Escalate `kubectl exec` into Pods in prod, extending the Kyverno policy library `other/block-pod-exec-by-namespace` policy's intent to every pod in the namespace.",
+  "scope": {
+    "namespace": "kube-system"
+  },
   "source_ref": "src-0450",
   "source_timestamp": "2026-02-26T06:00:00+00:00",
   "time_window": null

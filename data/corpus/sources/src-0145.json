@@ -1,16 +1,29 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "delete",
+    "rollout-restart"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "developer",
+  "constraint_class": "deployment",
+  "effect": "BLOCK",
+  "principal": "platform_admin",
   "provider": "kubernetes",
   "resource_pattern": "deployment/*",
-  "rule_text": "Escalate applying deployment/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template (\"Requires containers to have memory and CPU limits set and constrains limits to be within the specified maximum values\").",
-  "scope": {},
+  "rule_text": "Block deployment restarts and deletions in prod during business hours; Monzo's KubeCon talk on the \"Anatomy of a Production Kubernetes Outage\" traces a ledger/platform outage to a risky in-hours API change.",
+  "scope": {
+    "namespace": "prod"
+  },
   "source_ref": "src-0145",
   "source_timestamp": "2026-01-19T03:00:00+00:00",
-  "time_window": null
+  "time_window": {
+    "days": [
+      "Mon",
+      "Tue",
+      "Wed",
+      "Thu",
+      "Fri"
+    ],
+    "end": "17:00",
+    "start": "09:00",
+    "tz": "America/New_York"
+  }
 }

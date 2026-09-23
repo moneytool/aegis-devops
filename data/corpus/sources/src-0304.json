@@ -1,13 +1,14 @@
 {
   "actions": [
-    "scale"
+    "apply",
+    "create"
   ],
-  "constraint_class": "scaling",
-  "effect": "BLOCK",
-  "principal": "developer",
+  "constraint_class": "configuration",
+  "effect": "ESCALATE",
+  "principal": "contractor",
   "provider": "kubernetes",
-  "resource_pattern": "statefulset/ingest-*",
-  "rule_text": "Block scaling statefulset/* outside the allowed replica range, per the gatekeeper-library `replicalimits` template.",
+  "resource_pattern": "pod/*",
+  "rule_text": "Escalate Pods scheduled without anti-affinity rules; Moonlight's postmortem describes all Pods landing on the same failing host and causing a 100% traffic-loss outage.",
   "scope": {},
   "source_ref": "src-0304",
   "source_timestamp": "2026-02-08T00:00:00+00:00",

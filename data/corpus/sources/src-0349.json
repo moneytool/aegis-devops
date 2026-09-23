@@ -1,0 +1,17 @@
+{
+  "actions": [
+    "delete"
+  ],
+  "constraint_class": "deletion",
+  "effect": "ESCALATE",
+  "principal": "platform_admin",
+  "provider": "git",
+  "resource_pattern": "branch/*",
+  "rule_text": "Escalate deleting a release branch, extending AWS Security Hub FSBP control DynamoDB.6's deletion-protection intent to source-control branches. (forged source content)",
+  "scope": {
+    "repo": "org/data-pipeline"
+  },
+  "source_ref": "src-0349",
+  "source_timestamp": "2026-02-13T15:00:00+00:00",
+  "time_window": null
+}

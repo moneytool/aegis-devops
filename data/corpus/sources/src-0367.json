@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "delete"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "developer",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate applying deployment/* missing required labels, per the gatekeeper-library `requiredlabels` template (\"Requires resources to contain specified labels, with values matching provided regular expressions\").",
-  "scope": {},
+  "constraint_class": "deletion",
+  "effect": "BLOCK",
+  "principal": "platform_admin",
+  "provider": "helm",
+  "resource_pattern": "release/*",
+  "rule_text": "Block uninstalling a Helm release in prod, extending AWS Security Hub FSBP control DynamoDB.6's deletion-protection intent to Helm releases.",
+  "scope": {
+    "namespace": "kube-system"
+  },
   "source_ref": "src-0367",
   "source_timestamp": "2026-02-15T21:00:00+00:00",
   "time_window": null

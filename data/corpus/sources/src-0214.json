@@ -1,15 +1,15 @@
 {
   "actions": [
-    "apply"
+    "delete"
   ],
-  "constraint_class": "networking",
+  "constraint_class": "deletion",
   "effect": "BLOCK",
-  "principal": "security_lead",
+  "principal": "sre_lead",
   "provider": "kubernetes",
-  "resource_pattern": "service/gateway-*",
-  "rule_text": "Block applying service/* of type NodePort in prod, per the gatekeeper-library `block-nodeport-services` template.",
+  "resource_pattern": "statefulset/*",
+  "rule_text": "Block deletion of prod StatefulSets; Gravitational's postmortem on running PostgreSQL on Kubernetes describes data loss from mishandled streaming replication during a disruptive operation.",
   "scope": {
-    "namespace": "prod"
+    "namespace": "kube-system"
   },
   "source_ref": "src-0214",
   "source_timestamp": "2026-01-27T18:00:00+00:00",

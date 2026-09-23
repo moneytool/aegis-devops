@@ -1,16 +1,15 @@
 {
   "actions": [
-    "scale"
+    "label",
+    "patch"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "sre_oncall",
+  "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate scaling prod deployment/* below the minimum allowed replica count, per the gatekeeper-library `replicalimits` template.",
-  "scope": {
-    "namespace": "staging"
-  },
+  "resource_pattern": "node/*",
+  "rule_text": "Escalate node label/taint changes; Grafana Labs' postmortem on Pod Priorities describes a production outage caused by cascading Pod evictions tied to scheduling metadata.",
+  "scope": {},
   "source_ref": "src-0184",
   "source_timestamp": "2026-01-24T00:00:00+00:00",
   "time_window": null

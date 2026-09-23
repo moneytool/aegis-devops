@@ -1,15 +1,15 @@
 {
   "actions": [
-    "delete"
+    "update"
   ],
-  "constraint_class": "deletion",
-  "effect": "BLOCK",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "namespace/*",
-  "rule_text": "Block deletion of namespaces in prod; Skyscanner's outage was caused by a GitOps templating bug that deleted a namespace it should not have touched.",
+  "constraint_class": "networking",
+  "effect": "ESCALATE",
+  "principal": "security_lead",
+  "provider": "gcp",
+  "resource_pattern": "container/cluster/ingest-*",
+  "rule_text": "Escalate creating or updating a GKE cluster without private nodes, per the GCP organization policy constraint `container.managed.enablePrivateNodes`.",
   "scope": {
-    "namespace": "dev"
+    "region": "us-west-2"
   },
   "source_ref": "src-0392",
   "source_timestamp": "2026-02-19T00:00:00+00:00",

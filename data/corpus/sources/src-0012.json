@@ -1,14 +1,13 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "delete"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "platform_admin",
-  "provider": "kubernetes",
-  "resource_pattern": "pod/*",
-  "rule_text": "Escalate creating pod/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template.",
+  "constraint_class": "deletion",
+  "effect": "BLOCK",
+  "principal": "sre_lead",
+  "provider": "flux",
+  "resource_pattern": "helmrelease/*",
+  "rule_text": "Block deleting a Flux HelmRelease, extending AWS Security Hub FSBP control DynamoDB.6's deletion-protection intent to Flux-managed HelmReleases.",
   "scope": {},
   "source_ref": "src-0012",
   "source_timestamp": "2026-01-02T12:00:00+00:00",

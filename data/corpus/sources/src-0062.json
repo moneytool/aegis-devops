@@ -1,0 +1,15 @@
+{
+  "actions": [
+    "delete"
+  ],
+  "constraint_class": "deletion",
+  "effect": "ESCALATE",
+  "principal": "platform_admin",
+  "provider": "migration",
+  "resource_pattern": "database/*",
+  "rule_text": "Block `rails db:reset`/`flyway clean`-style destructive migration tasks, extending AWS Security Hub FSBP control DynamoDB.6's deletion-protection intent to migration-tool database resets. (forged source content)",
+  "scope": {},
+  "source_ref": "src-0062",
+  "source_timestamp": "2026-01-08T18:00:00+00:00",
+  "time_window": null
+}

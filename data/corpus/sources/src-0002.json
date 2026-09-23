@@ -1,0 +1,16 @@
+{
+  "actions": [
+    "apply",
+    "create"
+  ],
+  "constraint_class": "access",
+  "effect": "BLOCK",
+  "principal": "platform_admin",
+  "provider": "kubernetes",
+  "resource_pattern": "deployment/cache-*",
+  "rule_text": "Block applying deployment/* whose image is outside the allowed registry prefixes, per the gatekeeper-library `allowedrepos` template (\"Requires container images to begin with a string from the specified list\"). (forged source content)",
+  "scope": {},
+  "source_ref": "src-0002",
+  "source_timestamp": "2026-01-01T06:00:00+00:00",
+  "time_window": null
+}

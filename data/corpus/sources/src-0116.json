@@ -1,15 +1,15 @@
 {
   "actions": [
-    "create"
+    "update"
   ],
-  "constraint_class": "networking",
+  "constraint_class": "access",
   "effect": "ESCALATE",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "service/*",
-  "rule_text": "Escalate creating prod service/* of type LoadBalancer, per the gatekeeper-library `block-loadbalancer-services` template.",
+  "principal": "platform_admin",
+  "provider": "azure",
+  "resource_pattern": "aks/cluster/*",
+  "rule_text": "Escalate disabling Azure AD integration or enabling local accounts on an AKS cluster, extending the Azure Policy Kubernetes category's identity built-ins.",
   "scope": {
-    "namespace": "dev"
+    "resource_group": "rg-prod-eastus"
   },
   "source_ref": "src-0116",
   "source_timestamp": "2026-01-15T12:00:00+00:00",

@@ -1,14 +1,13 @@
 {
   "actions": [
-    "apply",
     "create"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "platform_admin",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate applying deployment/* missing required annotations, extending the gatekeeper-library `requiredlabels` pattern to annotations (see the sibling `requiredannotations` template in the same library).",
+  "constraint_class": "access",
+  "effect": "BLOCK",
+  "principal": "security_lead",
+  "provider": "aws",
+  "resource_pattern": "iam/access-key/api-*",
+  "rule_text": "Block creation of IAM access keys for the root user, per AWS Security Hub FSBP control IAM.4 (\"IAM root user access key should not exist\").",
   "scope": {},
   "source_ref": "src-0493",
   "source_timestamp": "2026-03-03T15:00:00+00:00",

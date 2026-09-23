@@ -1,14 +1,16 @@
 {
   "actions": [
-    "scale"
+    "update"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "access",
   "effect": "ESCALATE",
-  "principal": "ci_bot",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/coredns",
-  "rule_text": "Escalate any scale-down of the CoreDNS deployment; Preply's DNS postmortem traced a partial production outage to CoreDNS-autoscaler behavior under conntrack pressure.",
-  "scope": {},
+  "principal": "contractor",
+  "provider": "gcp",
+  "resource_pattern": "compute/instance/*",
+  "rule_text": "Block re-enabling serial port access on a Compute Engine VM, per the GCP organization policy constraint `compute.disableSerialPortAccess`.",
+  "scope": {
+    "region": "eu-west-1"
+  },
   "source_ref": "src-0423",
   "source_timestamp": "2026-02-22T21:00:00+00:00",
   "time_window": null

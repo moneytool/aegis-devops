@@ -1,13 +1,13 @@
 {
   "actions": [
-    "apply"
+    "create"
   ],
-  "constraint_class": "deployment",
+  "constraint_class": "networking",
   "effect": "ESCALATE",
-  "principal": "contractor",
+  "principal": "sre_oncall",
   "provider": "kubernetes",
-  "resource_pattern": "poddisruptionbudget/*",
-  "rule_text": "Escalate applying poddisruptionbudget/* with minAvailable equal to the target resource's replica count, per the gatekeeper-library `poddisruptionbudget` template.",
+  "resource_pattern": "service/api-*",
+  "rule_text": "Block creating service/* of type LoadBalancer, per the gatekeeper-library `block-loadbalancer-services` template (\"Disallows all Services with type LoadBalancer\").",
   "scope": {},
   "source_ref": "src-0457",
   "source_timestamp": "2026-02-27T03:00:00+00:00",

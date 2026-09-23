@@ -1,15 +1,15 @@
 {
   "actions": [
-    "create"
+    "apply"
   ],
-  "constraint_class": "networking",
-  "effect": "ESCALATE",
+  "constraint_class": "configuration",
+  "effect": "BLOCK",
   "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "service/auth-*",
-  "rule_text": "Escalate creating prod service/* of type LoadBalancer, per the gatekeeper-library `block-loadbalancer-services` template.",
+  "resource_pattern": "statefulset/billing-*",
+  "rule_text": "Block applying prod statefulset/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template.",
   "scope": {
-    "namespace": "prod"
+    "namespace": "staging"
   },
   "source_ref": "src-0027",
   "source_timestamp": "2026-01-04T09:00:00+00:00",

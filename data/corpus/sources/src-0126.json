@@ -1,15 +1,16 @@
 {
   "actions": [
-    "delete",
     "update"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "sre_oncall",
-  "provider": "kubernetes",
-  "resource_pattern": "configmap/coredns",
-  "rule_text": "Escalate changes to the CoreDNS configmap; Zalando's \"Total DNS outage\" postmortem identified CoreDNS/ndots:5 configuration as a production outage cause.",
-  "scope": {},
+  "constraint_class": "access",
+  "effect": "BLOCK",
+  "principal": "sre_lead",
+  "provider": "azure",
+  "resource_pattern": "aks/cluster/*",
+  "rule_text": "Escalate disabling Azure AD integration or enabling local accounts on an AKS cluster, extending the Azure Policy Kubernetes category's identity built-ins.",
+  "scope": {
+    "resource_group": "rg-staging-eastus"
+  },
   "source_ref": "src-0126",
   "source_timestamp": "2026-01-16T18:00:00+00:00",
   "time_window": null

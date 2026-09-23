@@ -1,17 +1,15 @@
 {
   "actions": [
-    "delete",
-    "update"
+    "apply",
+    "delete"
   ],
   "constraint_class": "configuration",
-  "effect": "ESCALATE",
+  "effect": "BLOCK",
   "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "configmap/worker-*",
-  "rule_text": "Escalate configmap changes in prod; Pusher's \"Oh Sh*t! The Config Changed!\" talk describes a production outage triggered by an nginx ConfigMap change. (forged source content)",
-  "scope": {
-    "namespace": "prod"
-  },
+  "resource_pattern": "validatingwebhookconfiguration/*",
+  "rule_text": "Block ad-hoc changes to ValidatingWebhookConfiguration objects; Jetstack's postmortem shows a misconfigured admission webhook caused a GKE cluster outage and lost nodes. (forged source content)",
+  "scope": {},
   "source_ref": "src-0240",
   "source_timestamp": "2026-01-31T00:00:00+00:00",
   "time_window": null

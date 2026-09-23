@@ -1,16 +1,14 @@
 {
   "actions": [
-    "apply"
+    "delete"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "deletion",
   "effect": "BLOCK",
-  "principal": "security_lead",
+  "principal": "sre_lead",
   "provider": "kubernetes",
-  "resource_pattern": "statefulset/*",
-  "rule_text": "Block applying prod statefulset/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template.",
-  "scope": {
-    "namespace": "staging"
-  },
+  "resource_pattern": "node/web-*",
+  "rule_text": "Escalate node deletion or draining outside of a controlled runbook; loveholidays documented total ingress outages caused by mishandled load balancer behavior while draining nodes.",
+  "scope": {},
   "source_ref": "src-0009",
   "source_timestamp": "2026-01-02T03:00:00+00:00",
   "time_window": null

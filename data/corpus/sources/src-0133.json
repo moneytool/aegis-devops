@@ -1,14 +1,16 @@
 {
   "actions": [
-    "scale"
+    "create"
   ],
-  "constraint_class": "scaling",
-  "effect": "ESCALATE",
-  "principal": "sre_oncall",
+  "constraint_class": "configuration",
+  "effect": "BLOCK",
+  "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/coredns",
-  "rule_text": "Escalate any scale-down of the CoreDNS deployment; Preply's DNS postmortem traced a partial production outage to CoreDNS-autoscaler behavior under conntrack pressure.",
-  "scope": {},
+  "resource_pattern": "pod/web-*",
+  "rule_text": "Escalate Pods that do not run as a non-root user, per the Kyverno policy library `pod-security/restricted/require-run-as-nonroot` policy.",
+  "scope": {
+    "namespace": "kube-system"
+  },
   "source_ref": "src-0133",
   "source_timestamp": "2026-01-17T15:00:00+00:00",
   "time_window": null

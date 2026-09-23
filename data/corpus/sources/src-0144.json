@@ -1,16 +1,15 @@
 {
   "actions": [
-    "apply"
+    "delete",
+    "update"
   ],
-  "constraint_class": "networking",
+  "constraint_class": "deletion",
   "effect": "BLOCK",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "service/*",
-  "rule_text": "Block applying service/* of type LoadBalancer in us-east-1, per the gatekeeper-library `block-loadbalancer-services` template.",
-  "scope": {
-    "region": "us-west-2"
-  },
+  "principal": "platform_admin",
+  "provider": "aws",
+  "resource_pattern": "dynamodb/table/*",
+  "rule_text": "Block deleting a DynamoDB table or disabling its deletion protection, per AWS Security Hub FSBP control DynamoDB.6 (\"DynamoDB tables should have deletion protection enabled\").",
+  "scope": {},
   "source_ref": "src-0144",
   "source_timestamp": "2026-01-19T00:00:00+00:00",
   "time_window": null

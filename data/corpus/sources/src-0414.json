@@ -1,13 +1,13 @@
 {
   "actions": [
-    "scale"
+    "apply"
   ],
-  "constraint_class": "scaling",
-  "effect": "BLOCK",
-  "principal": "security_lead",
+  "constraint_class": "access",
+  "effect": "ESCALATE",
+  "principal": "contractor",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Block scaling deployment/* outside the allowed replica range, per the gatekeeper-library `replicalimits` template (\"Requires that objects with the field spec.replicas specify a number of replicas within defined ranges\").",
+  "resource_pattern": "deployment/api-*",
+  "rule_text": "Block applying deployment/* whose image is outside the allowed registry prefixes, per the gatekeeper-library `allowedrepos` template (\"Requires container images to begin with a string from the specified list\").",
   "scope": {},
   "source_ref": "src-0414",
   "source_timestamp": "2026-02-21T18:00:00+00:00",

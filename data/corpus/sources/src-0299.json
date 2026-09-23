@@ -1,14 +1,17 @@
 {
   "actions": [
-    "set-image"
+    "apply",
+    "create"
   ],
-  "constraint_class": "access",
-  "effect": "BLOCK",
-  "principal": "security_lead",
+  "constraint_class": "deployment",
+  "effect": "ESCALATE",
+  "principal": "sre_oncall",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Block set-image on deployment/* to an image outside the allowed registry prefixes, per the gatekeeper-library `allowedrepos` template.",
-  "scope": {},
+  "resource_pattern": "poddisruptionbudget/ingest-*",
+  "rule_text": "Block applying poddisruptionbudget/* with maxUnavailable == 0, per the gatekeeper-library `poddisruptionbudget` template (this blocks voluntary disruptions such as node draining).",
+  "scope": {
+    "namespace": "staging"
+  },
   "source_ref": "src-0299",
   "source_timestamp": "2026-02-07T09:00:00+00:00",
   "time_window": null

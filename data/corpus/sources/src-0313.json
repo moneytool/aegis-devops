@@ -2,13 +2,15 @@
   "actions": [
     "create"
   ],
-  "constraint_class": "access",
+  "constraint_class": "networking",
   "effect": "ESCALATE",
-  "principal": "contractor",
-  "provider": "kubernetes",
-  "resource_pattern": "pod/gateway-*",
-  "rule_text": "Escalate creating pod/* whose image is outside the allowed registry prefixes, per the gatekeeper-library `allowedrepos` template.",
-  "scope": {},
+  "principal": "ci_bot",
+  "provider": "gcp",
+  "resource_pattern": "container/cluster/*",
+  "rule_text": "Escalate creating or updating a GKE cluster without private nodes, per the GCP organization policy constraint `container.managed.enablePrivateNodes`.",
+  "scope": {
+    "region": "us-east-1"
+  },
   "source_ref": "src-0313",
   "source_timestamp": "2026-02-09T03:00:00+00:00",
   "time_window": null

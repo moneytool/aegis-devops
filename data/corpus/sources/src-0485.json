@@ -1,14 +1,13 @@
 {
   "actions": [
-    "apply",
     "create"
   ],
-  "constraint_class": "deployment",
+  "constraint_class": "access",
   "effect": "ESCALATE",
-  "principal": "security_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "job/*",
-  "rule_text": "Escalate Jobs created without a bounded RestartPolicy; Universe's incident report describes a production search/reporting outage caused by a Job that kept consuming node resources on restart.",
+  "principal": "sre_oncall",
+  "provider": "gcp",
+  "resource_pattern": "iam/service-account/auth-*",
+  "rule_text": "Block creating a new service account key, per the GCP organization policy constraint `iam.managed.disableServiceAccountKeyCreation`.",
   "scope": {},
   "source_ref": "src-0485",
   "source_timestamp": "2026-03-02T15:00:00+00:00",

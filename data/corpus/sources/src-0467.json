@@ -1,13 +1,13 @@
 {
   "actions": [
-    "apply"
+    "update"
   ],
   "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "security_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate deployments without resource requests/limits set; Blue Matador's Kubernetes Node OOM postmortem traces Pod kills to containers with no resource requests or limits.",
+  "principal": "developer",
+  "provider": "azure",
+  "resource_pattern": "web/app/worker-*",
+  "rule_text": "Block disabling HTTPS-only access on an App Service app, per the Azure Policy built-in \"App Service apps should only be accessible over HTTPS\" definition.",
   "scope": {},
   "source_ref": "src-0467",
   "source_timestamp": "2026-02-28T09:00:00+00:00",

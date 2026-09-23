@@ -1,13 +1,13 @@
 {
   "actions": [
-    "scale"
+    "create"
   ],
-  "constraint_class": "scaling",
-  "effect": "BLOCK",
-  "principal": "sre_oncall",
+  "constraint_class": "deployment",
+  "effect": "ESCALATE",
+  "principal": "sre_lead",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Block scaling deployment/* outside the allowed replica range, per the gatekeeper-library `replicalimits` template (\"Requires that objects with the field spec.replicas specify a number of replicas within defined ranges\").",
+  "resource_pattern": "job/*",
+  "rule_text": "Escalate Jobs created without a bounded RestartPolicy; Universe's incident report describes a production search/reporting outage caused by a Job that kept consuming node resources on restart.",
   "scope": {},
   "source_ref": "src-0188",
   "source_timestamp": "2026-01-24T12:00:00+00:00",

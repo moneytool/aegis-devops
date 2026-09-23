@@ -1,14 +1,14 @@
 {
   "actions": [
-    "apply",
-    "delete"
+    "delete",
+    "patch"
   ],
-  "constraint_class": "configuration",
-  "effect": "BLOCK",
-  "principal": "security_lead",
+  "constraint_class": "deletion",
+  "effect": "ESCALATE",
+  "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "validatingwebhookconfiguration/*",
-  "rule_text": "Block ad-hoc changes to ValidatingWebhookConfiguration objects; Jetstack's postmortem shows a misconfigured admission webhook caused a GKE cluster outage and lost nodes.",
+  "resource_pattern": "node/*",
+  "rule_text": "Escalate node-level changes during autoscaler activity; Nordstrom's \"101 Ways to Crash Your Cluster\" talk lists eviction thresholds and cluster-autoscaler interaction as a cause of full production cluster outages.",
   "scope": {},
   "source_ref": "src-0464",
   "source_timestamp": "2026-02-28T00:00:00+00:00",

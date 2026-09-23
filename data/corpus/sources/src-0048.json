@@ -1,15 +1,17 @@
 {
   "actions": [
-    "replace",
+    "delete",
     "update"
   ],
-  "constraint_class": "scaling",
-  "effect": "ESCALATE",
-  "principal": "security_lead",
-  "provider": "terraform",
-  "resource_pattern": "aws_autoscaling_group.*",
-  "rule_text": "Escalate terraform changes to AWS autoscaling groups; Toyota Connected's \"A Perfect DNS Storm\" postmortem and related ASG-rebalance issues in the failure-stories index show autoscaler churn causing outages.",
-  "scope": {},
+  "constraint_class": "deletion",
+  "effect": "BLOCK",
+  "principal": "contractor",
+  "provider": "aws",
+  "resource_pattern": "dynamodb/table/*",
+  "rule_text": "Block deleting a DynamoDB table or disabling its deletion protection, per AWS Security Hub FSBP control DynamoDB.6 (\"DynamoDB tables should have deletion protection enabled\").",
+  "scope": {
+    "region": "us-west-2"
+  },
   "source_ref": "src-0048",
   "source_timestamp": "2026-01-07T00:00:00+00:00",
   "time_window": null

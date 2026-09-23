@@ -1,13 +1,13 @@
 {
   "actions": [
-    "set-image"
+    "create"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "sre_lead",
+  "constraint_class": "networking",
+  "effect": "BLOCK",
+  "principal": "developer",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/api-*",
-  "rule_text": "Escalate deployments that set an unpinned or `imagePullPolicy Always` image; Datadog's \"10 Ways to Shoot Yourself in the Foot\" talk lists this among repeated causes of pending pods and slow deployments.",
+  "resource_pattern": "service/auth-*",
+  "rule_text": "Block creating service/* of type NodePort, per the gatekeeper-library `block-nodeport-services` template (\"Disallows all Services with type NodePort\").",
   "scope": {},
   "source_ref": "src-0431",
   "source_timestamp": "2026-02-23T21:00:00+00:00",

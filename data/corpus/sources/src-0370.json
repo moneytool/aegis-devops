@@ -1,14 +1,16 @@
 {
   "actions": [
-    "set-image"
+    "update"
   ],
-  "constraint_class": "access",
-  "effect": "BLOCK",
-  "principal": "security_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/api-*",
-  "rule_text": "Block set-image on deployment/* to an image outside the allowed registry prefixes, per the gatekeeper-library `allowedrepos` template.",
-  "scope": {},
+  "constraint_class": "networking",
+  "effect": "ESCALATE",
+  "principal": "sre_lead",
+  "provider": "gcp",
+  "resource_pattern": "sql/instance/*",
+  "rule_text": "Escalate configuring a public IP or authorized network on a Cloud SQL instance, per the GCP organization policy constraints `sql.managed.restrictPublicIp` and `sql.managed.restrictAuthorizedNetworks`.",
+  "scope": {
+    "region": "us-west-2"
+  },
   "source_ref": "src-0370",
   "source_timestamp": "2026-02-16T06:00:00+00:00",
   "time_window": null

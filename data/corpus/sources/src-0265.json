@@ -1,15 +1,15 @@
 {
   "actions": [
-    "scale"
+    "set-image"
   ],
-  "constraint_class": "scaling",
-  "effect": "ESCALATE",
-  "principal": "security_lead",
+  "constraint_class": "configuration",
+  "effect": "BLOCK",
+  "principal": "sre_oncall",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/ingest-*",
-  "rule_text": "Escalate scaling deployment/* outside the allowed replica range in the prod-us-east-1 cluster, per the gatekeeper-library `replicalimits` template.",
+  "resource_pattern": "deployment/*",
+  "rule_text": "Escalate deployments that set an unpinned or `imagePullPolicy Always` image; Datadog's \"10 Ways to Shoot Yourself in the Foot\" talk lists this among repeated causes of pending pods and slow deployments.",
   "scope": {
-    "cluster": "prod-us-east-1"
+    "namespace": "kube-system"
   },
   "source_ref": "src-0265",
   "source_timestamp": "2026-02-03T03:00:00+00:00",

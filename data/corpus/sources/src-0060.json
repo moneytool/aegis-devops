@@ -1,14 +1,13 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "delete"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "platform_admin",
-  "provider": "kubernetes",
-  "resource_pattern": "pod/*",
-  "rule_text": "Escalate Pods scheduled without anti-affinity rules; Moonlight's postmortem describes all Pods landing on the same failing host and causing a 100% traffic-loss outage.",
+  "constraint_class": "deletion",
+  "effect": "BLOCK",
+  "principal": "sre_lead",
+  "provider": "mongodb",
+  "resource_pattern": "collection/*",
+  "rule_text": "Block deleteMany calls with an empty filter (deletes every document), extending AWS Security Hub FSBP control EC2.1's \"not publicly/unboundedly exposed\" intent to unbounded collection deletes.",
   "scope": {},
   "source_ref": "src-0060",
   "source_timestamp": "2026-01-08T12:00:00+00:00",

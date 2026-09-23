@@ -1,14 +1,16 @@
 {
   "actions": [
-    "delete"
+    "update"
   ],
-  "constraint_class": "deletion",
+  "constraint_class": "configuration",
   "effect": "BLOCK",
-  "principal": "sre_oncall",
-  "provider": "kubernetes",
-  "resource_pattern": "namespace/kube-system",
-  "rule_text": "Never delete namespace/kube-system; multiple public incidents trace outages back to accidental namespace deletion.",
-  "scope": {},
+  "principal": "contractor",
+  "provider": "azure",
+  "resource_pattern": "storage/account/worker-*",
+  "rule_text": "Block disabling \"secure transfer required\" / HTTPS-only traffic on a storage account, per the Azure Policy built-in \"Storage accounts should have secure transfer enabled\" definition (App Service / Storage category).",
+  "scope": {
+    "resource_group": "rg-prod-eastus"
+  },
   "source_ref": "src-0100",
   "source_timestamp": "2026-01-13T12:00:00+00:00",
   "time_window": null

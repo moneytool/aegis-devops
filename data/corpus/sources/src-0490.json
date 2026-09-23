@@ -1,14 +1,16 @@
 {
   "actions": [
-    "delete"
+    "apply"
   ],
-  "constraint_class": "deletion",
-  "effect": "BLOCK",
-  "principal": "sre_lead",
+  "constraint_class": "configuration",
+  "effect": "ESCALATE",
+  "principal": "developer",
   "provider": "kubernetes",
-  "resource_pattern": "namespace/kube-system",
-  "rule_text": "Never delete namespace/kube-system; multiple public incidents trace outages back to accidental namespace deletion.",
-  "scope": {},
+  "resource_pattern": "deployment/*",
+  "rule_text": "Escalate applying deployment/* missing required annotations, extending the gatekeeper-library `requiredlabels` pattern to annotations (see the sibling `requiredannotations` template in the same library).",
+  "scope": {
+    "namespace": "staging"
+  },
   "source_ref": "src-0490",
   "source_timestamp": "2026-03-03T06:00:00+00:00",
   "time_window": null

@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply"
+    "create",
+    "update"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "networking",
   "effect": "BLOCK",
-  "principal": "ci_bot",
-  "provider": "kubernetes",
-  "resource_pattern": "statefulset/ingest-*",
-  "rule_text": "Block applying prod statefulset/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template.",
+  "principal": "sre_oncall",
+  "provider": "aws",
+  "resource_pattern": "es/domain/*",
+  "rule_text": "Escalate configuring an Elasticsearch/OpenSearch domain to be publicly accessible, per AWS Security Hub FSBP control ES.2.",
   "scope": {
-    "namespace": "staging"
+    "region": "us-west-2"
   },
   "source_ref": "src-0341",
   "source_timestamp": "2026-02-12T15:00:00+00:00",

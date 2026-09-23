@@ -1,14 +1,16 @@
 {
   "actions": [
-    "delete"
+    "update"
   ],
-  "constraint_class": "deletion",
-  "effect": "ESCALATE",
-  "principal": "security_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "node/*",
-  "rule_text": "Escalate node deletion or draining outside of a controlled runbook; loveholidays documented total ingress outages caused by mishandled load balancer behavior while draining nodes.",
-  "scope": {},
+  "constraint_class": "configuration",
+  "effect": "BLOCK",
+  "principal": "sre_oncall",
+  "provider": "azure",
+  "resource_pattern": "web/app/*",
+  "rule_text": "Block disabling HTTPS-only access on an App Service app, per the Azure Policy built-in \"App Service apps should only be accessible over HTTPS\" definition.",
+  "scope": {
+    "resource_group": "rg-prod-westus2"
+  },
   "source_ref": "src-0148",
   "source_timestamp": "2026-01-19T12:00:00+00:00",
   "time_window": null

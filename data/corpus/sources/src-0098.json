@@ -1,0 +1,15 @@
+{
+  "actions": [
+    "update"
+  ],
+  "constraint_class": "configuration",
+  "effect": "ESCALATE",
+  "principal": "developer",
+  "provider": "gcp",
+  "resource_pattern": "container/cluster/cache-*",
+  "rule_text": "Escalate disabling Binary Authorization on a GKE cluster, per the GCP organization policy constraint `container.managed.enableBinaryAuthorization`. (forged source content)",
+  "scope": {},
+  "source_ref": "src-0098",
+  "source_timestamp": "2026-01-13T06:00:00+00:00",
+  "time_window": null
+}

@@ -1,15 +1,17 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "create",
+    "update"
   ],
-  "constraint_class": "deployment",
+  "constraint_class": "networking",
   "effect": "ESCALATE",
-  "principal": "ci_bot",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/cache-*",
-  "rule_text": "Escalate deployments that pull public/unpinned images; Sr. SRE Medya Ghazizadeh's \"How NOT to do Kubernetes\" talk lists a public container registry and `latest`-style tags among practices that hurt cluster stability.",
-  "scope": {},
+  "principal": "security_lead",
+  "provider": "aws",
+  "resource_pattern": "es/domain/*",
+  "rule_text": "Escalate configuring an Elasticsearch/OpenSearch domain to be publicly accessible, per AWS Security Hub FSBP control ES.2.",
+  "scope": {
+    "region": "us-east-1"
+  },
   "source_ref": "src-0402",
   "source_timestamp": "2026-02-20T06:00:00+00:00",
   "time_window": null

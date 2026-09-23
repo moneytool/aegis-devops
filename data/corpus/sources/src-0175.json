@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "rewrite"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "developer",
-  "provider": "kubernetes",
-  "resource_pattern": "pod/*",
-  "rule_text": "Escalate Pods scheduled without anti-affinity rules; Moonlight's postmortem describes all Pods landing on the same failing host and causing a 100% traffic-loss outage.",
-  "scope": {},
+  "constraint_class": "deletion",
+  "effect": "BLOCK",
+  "principal": "platform_admin",
+  "provider": "git",
+  "resource_pattern": "history/*",
+  "rule_text": "Block force-pushes that rewrite published history on infra repos, extending the Kyverno policy library `other/verify-manifest-integrity` policy's supply-chain-integrity intent to the git history that produces the manifests.",
+  "scope": {
+    "repo": "org/platform"
+  },
   "source_ref": "src-0175",
   "source_timestamp": "2026-01-22T21:00:00+00:00",
   "time_window": null

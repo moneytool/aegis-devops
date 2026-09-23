@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "delete"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "pod/*",
-  "rule_text": "Escalate creating pod/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template.",
-  "scope": {},
+  "constraint_class": "deletion",
+  "effect": "BLOCK",
+  "principal": "sre_oncall",
+  "provider": "sql",
+  "resource_pattern": "table/*",
+  "rule_text": "Block TRUNCATE/DROP TABLE against prod tables, extending AWS Security Hub FSBP control DynamoDB.6's deletion-protection intent to relational tables.",
+  "scope": {
+    "database": "prod"
+  },
   "source_ref": "src-0106",
   "source_timestamp": "2026-01-14T06:00:00+00:00",
   "time_window": null

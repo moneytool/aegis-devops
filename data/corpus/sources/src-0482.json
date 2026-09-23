@@ -1,16 +1,15 @@
 {
   "actions": [
-    "apply",
-    "update"
+    "scale"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "developer",
+  "constraint_class": "scaling",
+  "effect": "BLOCK",
+  "principal": "sre_lead",
   "provider": "kubernetes",
-  "resource_pattern": "cronjob/cache-*",
-  "rule_text": "Escalate changes to CronJobs in kube-system; Zalando's \"Kubernetes Failure Stories\" talk lists frozen/stuck CronJobs among repeated causes of production outages.",
+  "resource_pattern": "statefulset/cache-*",
+  "rule_text": "Block scaling statefulset/* outside the allowed replica range, per the gatekeeper-library `replicalimits` template.",
   "scope": {
-    "namespace": "dev"
+    "namespace": "staging"
   },
   "source_ref": "src-0482",
   "source_timestamp": "2026-03-02T06:00:00+00:00",

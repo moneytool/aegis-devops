@@ -1,15 +1,17 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "delete",
+    "replace"
   ],
-  "constraint_class": "deployment",
+  "constraint_class": "deletion",
   "effect": "BLOCK",
-  "principal": "developer",
-  "provider": "kubernetes",
-  "resource_pattern": "poddisruptionbudget/*",
-  "rule_text": "Block applying poddisruptionbudget/* with maxUnavailable == 0, per the gatekeeper-library `poddisruptionbudget` template (this blocks voluntary disruptions such as node draining).",
-  "scope": {},
+  "principal": "security_lead",
+  "provider": "pulumi",
+  "resource_pattern": "aws/rds/instance/*",
+  "rule_text": "Escalate a Pulumi preview step that deletes or replaces an RDS instance, extending AWS Security Hub FSBP control DynamoDB.6's deletion-protection intent to Pulumi-managed RDS resources.",
+  "scope": {
+    "region": "eu-west-1"
+  },
   "source_ref": "src-0063",
   "source_timestamp": "2026-01-08T21:00:00+00:00",
   "time_window": null

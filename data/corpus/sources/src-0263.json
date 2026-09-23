@@ -1,15 +1,15 @@
 {
   "actions": [
-    "scale"
+    "rewrite"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "deletion",
   "effect": "BLOCK",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Block scaling changes to kube-system deployments outside a controlled change process; repeated CoreDNS-related outages in the failure-stories index trace back to uncontrolled control-plane-adjacent scaling.",
+  "principal": "platform_admin",
+  "provider": "git",
+  "resource_pattern": "history/*",
+  "rule_text": "Block force-pushes that rewrite published history on infra repos, extending the Kyverno policy library `other/verify-manifest-integrity` policy's supply-chain-integrity intent to the git history that produces the manifests.",
   "scope": {
-    "namespace": "dev"
+    "repo": "org/webapp"
   },
   "source_ref": "src-0263",
   "source_timestamp": "2026-02-02T21:00:00+00:00",

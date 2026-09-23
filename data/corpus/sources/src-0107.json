@@ -1,13 +1,13 @@
 {
   "actions": [
-    "scale"
+    "delete"
   ],
-  "constraint_class": "scaling",
-  "effect": "ESCALATE",
-  "principal": "security_lead",
+  "constraint_class": "deletion",
+  "effect": "BLOCK",
+  "principal": "sre_oncall",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate scaling prod deployment/* below the minimum allowed replica count, per the gatekeeper-library `replicalimits` template.",
+  "resource_pattern": "namespace/*",
+  "rule_text": "Block deletion of namespaces in prod; Skyscanner's outage was caused by a GitOps templating bug that deleted a namespace it should not have touched.",
   "scope": {
     "namespace": "kube-system"
   },

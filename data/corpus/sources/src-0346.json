@@ -1,13 +1,13 @@
 {
   "actions": [
-    "apply"
+    "delete"
   ],
-  "constraint_class": "deployment",
-  "effect": "ESCALATE",
-  "principal": "ci_bot",
-  "provider": "kubernetes",
-  "resource_pattern": "poddisruptionbudget/*",
-  "rule_text": "Escalate applying poddisruptionbudget/* with minAvailable equal to the target resource's replica count, per the gatekeeper-library `poddisruptionbudget` template.",
+  "constraint_class": "deletion",
+  "effect": "BLOCK",
+  "principal": "sre_lead",
+  "provider": "mongodb",
+  "resource_pattern": "collection/billing-*",
+  "rule_text": "Block deleteMany calls with an empty filter (deletes every document), extending AWS Security Hub FSBP control EC2.1's \"not publicly/unboundedly exposed\" intent to unbounded collection deletes.",
   "scope": {},
   "source_ref": "src-0346",
   "source_timestamp": "2026-02-13T06:00:00+00:00",

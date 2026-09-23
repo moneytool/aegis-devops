@@ -6,11 +6,9 @@
   "effect": "ESCALATE",
   "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate scaling prod deployment/* below the minimum allowed replica count, per the gatekeeper-library `replicalimits` template.",
-  "scope": {
-    "namespace": "staging"
-  },
+  "resource_pattern": "deployment/coredns",
+  "rule_text": "Escalate any scale-down of the CoreDNS deployment; Preply's DNS postmortem traced a partial production outage to CoreDNS-autoscaler behavior under conntrack pressure.",
+  "scope": {},
   "source_ref": "src-0151",
   "source_timestamp": "2026-01-19T21:00:00+00:00",
   "time_window": null

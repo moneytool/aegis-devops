@@ -1,13 +1,14 @@
 {
   "actions": [
-    "set-image"
+    "apply",
+    "create"
   ],
   "constraint_class": "configuration",
-  "effect": "BLOCK",
+  "effect": "ESCALATE",
   "principal": "platform_admin",
   "provider": "kubernetes",
   "resource_pattern": "deployment/*",
-  "rule_text": "Block set-image on deployment/* to a disallowed image tag (e.g. `:latest`), per the gatekeeper-library `disallowedtags` template (\"Requires container images to have an image tag different from the ones in the specified list\").",
+  "rule_text": "Escalate applying deployment/* missing required annotations, extending the gatekeeper-library `requiredlabels` pattern to annotations (see the sibling `requiredannotations` template in the same library).",
   "scope": {},
   "source_ref": "src-0018",
   "source_timestamp": "2026-01-03T06:00:00+00:00",

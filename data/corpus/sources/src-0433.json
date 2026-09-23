@@ -1,13 +1,14 @@
 {
   "actions": [
-    "apply"
+    "apply",
+    "update"
   ],
-  "constraint_class": "deployment",
-  "effect": "ESCALATE",
+  "constraint_class": "networking",
+  "effect": "BLOCK",
   "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "poddisruptionbudget/*",
-  "rule_text": "Escalate applying poddisruptionbudget/* with minAvailable equal to the target resource's replica count, per the gatekeeper-library `poddisruptionbudget` template.",
+  "resource_pattern": "service/worker-*",
+  "rule_text": "Escalate Service changes that alter externalTrafficPolicy; the DevOps Hof postmortem on load-balancer configuration during node draining traces a total ingress outage to this setting.",
   "scope": {},
   "source_ref": "src-0433",
   "source_timestamp": "2026-02-24T03:00:00+00:00",

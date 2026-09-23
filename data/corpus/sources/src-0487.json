@@ -1,14 +1,16 @@
 {
   "actions": [
-    "scale"
+    "update"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "configuration",
   "effect": "BLOCK",
-  "principal": "sre_oncall",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Block scaling deployment/* outside the allowed replica range, per the gatekeeper-library `replicalimits` template (\"Requires that objects with the field spec.replicas specify a number of replicas within defined ranges\").",
-  "scope": {},
+  "principal": "platform_admin",
+  "provider": "gcp",
+  "resource_pattern": "storage/bucket/*",
+  "rule_text": "Block disabling public access prevention on a Cloud Storage bucket, extending the GCP organization policy constraint `storage.managed.retentionPolicySeconds` family to bucket-level access configuration.",
+  "scope": {
+    "region": "us-west-2"
+  },
   "source_ref": "src-0487",
   "source_timestamp": "2026-03-02T21:00:00+00:00",
   "time_window": null

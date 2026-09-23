@@ -2,13 +2,15 @@
   "actions": [
     "create"
   ],
-  "constraint_class": "access",
-  "effect": "ESCALATE",
-  "principal": "sre_lead",
+  "constraint_class": "configuration",
+  "effect": "BLOCK",
+  "principal": "contractor",
   "provider": "kubernetes",
-  "resource_pattern": "pod/gateway-*",
-  "rule_text": "Escalate creating pod/* whose image is outside the allowed registry prefixes, per the gatekeeper-library `allowedrepos` template.",
-  "scope": {},
+  "resource_pattern": "pod/cache-*",
+  "rule_text": "Block Pods sharing the host network, PID, or IPC namespaces in prod, per the Kyverno policy library `pod-security/baseline/disallow-host-namespaces` policy.",
+  "scope": {
+    "namespace": "prod"
+  },
   "source_ref": "src-0200",
   "source_timestamp": "2026-01-26T00:00:00+00:00",
   "time_window": null

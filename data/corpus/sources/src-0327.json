@@ -3,10 +3,10 @@
     "apply"
   ],
   "constraint_class": "deployment",
-  "effect": "ESCALATE",
-  "principal": "sre_oncall",
+  "effect": "BLOCK",
+  "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "poddisruptionbudget/*",
+  "resource_pattern": "poddisruptionbudget/ingest-*",
   "rule_text": "Escalate applying poddisruptionbudget/* with minAvailable equal to the target resource's replica count, per the gatekeeper-library `poddisruptionbudget` template.",
   "scope": {},
   "source_ref": "src-0327",

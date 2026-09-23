@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "attach"
   ],
-  "constraint_class": "deployment",
+  "constraint_class": "access",
   "effect": "ESCALATE",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/gateway-*",
-  "rule_text": "Escalate deployments that pull public/unpinned images; Sr. SRE Medya Ghazizadeh's \"How NOT to do Kubernetes\" talk lists a public container registry and `latest`-style tags among practices that hurt cluster stability.",
-  "scope": {},
+  "principal": "platform_admin",
+  "provider": "aws",
+  "resource_pattern": "iam/policy/api-*",
+  "rule_text": "Block attaching or putting an IAM policy that grants full \"*:*\" administrative privileges, per AWS Security Hub FSBP control IAM.1 (\"IAM policies should not allow full administrative privileges\").",
+  "scope": {
+    "region": "us-west-2"
+  },
   "source_ref": "src-0294",
   "source_timestamp": "2026-02-06T18:00:00+00:00",
   "time_window": null

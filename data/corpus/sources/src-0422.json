@@ -1,14 +1,14 @@
 {
   "actions": [
     "apply",
-    "delete"
+    "create"
   ],
   "constraint_class": "configuration",
-  "effect": "BLOCK",
-  "principal": "contractor",
+  "effect": "ESCALATE",
+  "principal": "sre_lead",
   "provider": "kubernetes",
-  "resource_pattern": "validatingwebhookconfiguration/*",
-  "rule_text": "Block ad-hoc changes to ValidatingWebhookConfiguration objects; Jetstack's postmortem shows a misconfigured admission webhook caused a GKE cluster outage and lost nodes.",
+  "resource_pattern": "pod/*",
+  "rule_text": "Escalate creating pod/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template.",
   "scope": {},
   "source_ref": "src-0422",
   "source_timestamp": "2026-02-22T18:00:00+00:00",

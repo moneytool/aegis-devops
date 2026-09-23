@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "update"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "access",
   "effect": "ESCALATE",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "pod/gateway-*",
-  "rule_text": "Escalate creating pod/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template.",
-  "scope": {},
+  "principal": "contractor",
+  "provider": "helm",
+  "resource_pattern": "release/*",
+  "rule_text": "Escalate a Helm release upgrade whose chart values reference an image registry outside the allow-list, extending the Kyverno policy library `best-practices/restrict-image-registries` policy to Helm releases.",
+  "scope": {
+    "namespace": "kube-system"
+  },
   "source_ref": "src-0247",
   "source_timestamp": "2026-01-31T21:00:00+00:00",
   "time_window": null

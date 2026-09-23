@@ -1,15 +1,15 @@
 {
   "actions": [
-    "apply"
+    "rollback"
   ],
-  "constraint_class": "networking",
-  "effect": "BLOCK",
-  "principal": "contractor",
-  "provider": "kubernetes",
-  "resource_pattern": "service/*",
-  "rule_text": "Block applying service/* of type LoadBalancer in us-east-1, per the gatekeeper-library `block-loadbalancer-services` template.",
+  "constraint_class": "configuration",
+  "effect": "ESCALATE",
+  "principal": "ci_bot",
+  "provider": "migration",
+  "resource_pattern": "migration/*",
+  "rule_text": "Escalate an `alembic downgrade` (schema rollback) in prod, extending the Kyverno policy library `other/time-bound-policy` policy's controlled-change intent to migration rollbacks.",
   "scope": {
-    "region": "us-east-1"
+    "env": "staging"
   },
   "source_ref": "src-0308",
   "source_timestamp": "2026-02-08T12:00:00+00:00",

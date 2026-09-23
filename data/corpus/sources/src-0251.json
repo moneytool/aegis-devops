@@ -1,14 +1,16 @@
 {
   "actions": [
-    "apply"
+    "scale"
   ],
-  "constraint_class": "deployment",
-  "effect": "ESCALATE",
+  "constraint_class": "scaling",
+  "effect": "BLOCK",
   "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "poddisruptionbudget/*",
-  "rule_text": "Escalate applying poddisruptionbudget/* with minAvailable equal to the target resource's replica count, per the gatekeeper-library `poddisruptionbudget` template.",
-  "scope": {},
+  "resource_pattern": "deployment/*",
+  "rule_text": "Block scaling changes to kube-system deployments outside a controlled change process; repeated CoreDNS-related outages in the failure-stories index trace back to uncontrolled control-plane-adjacent scaling.",
+  "scope": {
+    "namespace": "kube-system"
+  },
   "source_ref": "src-0251",
   "source_timestamp": "2026-02-01T09:00:00+00:00",
   "time_window": null

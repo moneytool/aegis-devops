@@ -6,11 +6,9 @@
   "effect": "ESCALATE",
   "principal": "sre_lead",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/billing-*",
-  "rule_text": "Escalate scaling prod deployment/* below the minimum allowed replica count, per the gatekeeper-library `replicalimits` template.",
-  "scope": {
-    "namespace": "staging"
-  },
+  "resource_pattern": "deployment/*",
+  "rule_text": "Block scaling deployment/* outside the allowed replica range, per the gatekeeper-library `replicalimits` template (\"Requires that objects with the field spec.replicas specify a number of replicas within defined ranges\").",
+  "scope": {},
   "source_ref": "src-0371",
   "source_timestamp": "2026-02-16T09:00:00+00:00",
   "time_window": null

@@ -1,15 +1,15 @@
 {
   "actions": [
-    "delete"
+    "update"
   ],
-  "constraint_class": "deletion",
-  "effect": "BLOCK",
-  "principal": "contractor",
-  "provider": "kubernetes",
-  "resource_pattern": "namespace/*",
-  "rule_text": "Block deletion of namespaces in prod; Skyscanner's outage was caused by a GitOps templating bug that deleted a namespace it should not have touched.",
+  "constraint_class": "configuration",
+  "effect": "ESCALATE",
+  "principal": "sre_lead",
+  "provider": "sql",
+  "resource_pattern": "table/*",
+  "rule_text": "Escalate unbounded UPDATE statements (no WHERE clause) against prod tables, extending the Kyverno policy library `other/restrict-secrets-by-name` policy's blast-radius-limiting intent to bulk row mutation.",
   "scope": {
-    "namespace": "staging"
+    "database": "prod"
   },
   "source_ref": "src-0500",
   "source_timestamp": "2026-03-04T12:00:00+00:00",

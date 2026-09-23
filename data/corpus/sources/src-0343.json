@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "delete"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "deletion",
   "effect": "ESCALATE",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "pod/*",
-  "rule_text": "Escalate creating pod/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template.",
-  "scope": {},
+  "principal": "developer",
+  "provider": "azure",
+  "resource_pattern": "keyvault/vault/ingest-*",
+  "rule_text": "Block deleting or purging a Key Vault, extending the Azure Policy Key Vault category's soft-delete/purge-protection built-ins to the delete action itself.",
+  "scope": {
+    "resource_group": "rg-staging-eastus"
+  },
   "source_ref": "src-0343",
   "source_timestamp": "2026-02-12T21:00:00+00:00",
   "time_window": null

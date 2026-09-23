@@ -1,16 +1,15 @@
 {
   "actions": [
-    "create"
+    "apply",
+    "set-image"
   ],
-  "constraint_class": "networking",
-  "effect": "ESCALATE",
-  "principal": "sre_lead",
+  "constraint_class": "access",
+  "effect": "BLOCK",
+  "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "service/*",
-  "rule_text": "Escalate creating prod service/* of type LoadBalancer, per the gatekeeper-library `block-loadbalancer-services` template.",
-  "scope": {
-    "namespace": "prod"
-  },
+  "resource_pattern": "deployment/*",
+  "rule_text": "Block deployments whose container images come from a registry outside the allow-list, per the Kyverno policy library `best-practices/restrict-image-registries` policy.",
+  "scope": {},
   "source_ref": "src-0336",
   "source_timestamp": "2026-02-12T00:00:00+00:00",
   "time_window": null

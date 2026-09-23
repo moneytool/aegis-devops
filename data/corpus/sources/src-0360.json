@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "update"
   ],
-  "constraint_class": "deployment",
+  "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "platform_admin",
-  "provider": "kubernetes",
-  "resource_pattern": "job/*",
-  "rule_text": "Escalate Jobs created without a bounded RestartPolicy; Universe's incident report describes a production search/reporting outage caused by a Job that kept consuming node resources on restart.",
-  "scope": {},
+  "principal": "developer",
+  "provider": "azure",
+  "resource_pattern": "storage/account/*",
+  "rule_text": "Block disabling \"secure transfer required\" / HTTPS-only traffic on a storage account, per the Azure Policy built-in \"Storage accounts should have secure transfer enabled\" definition (App Service / Storage category).",
+  "scope": {
+    "resource_group": "rg-prod-eastus"
+  },
   "source_ref": "src-0360",
   "source_timestamp": "2026-02-15T00:00:00+00:00",
   "time_window": null

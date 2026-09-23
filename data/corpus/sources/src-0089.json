@@ -1,13 +1,13 @@
 {
   "actions": [
-    "apply"
+    "delete"
   ],
-  "constraint_class": "deployment",
+  "constraint_class": "deletion",
   "effect": "ESCALATE",
-  "principal": "ci_bot",
+  "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "poddisruptionbudget/*",
-  "rule_text": "Escalate applying poddisruptionbudget/* with minAvailable equal to the target resource's replica count, per the gatekeeper-library `poddisruptionbudget` template.",
+  "resource_pattern": "node/*",
+  "rule_text": "Escalate node deletion or draining outside of a controlled runbook; loveholidays documented total ingress outages caused by mishandled load balancer behavior while draining nodes.",
   "scope": {},
   "source_ref": "src-0089",
   "source_timestamp": "2026-01-12T03:00:00+00:00",

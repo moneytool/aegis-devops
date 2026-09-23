@@ -1,13 +1,13 @@
 {
   "actions": [
-    "create"
+    "scale"
   ],
-  "constraint_class": "networking",
+  "constraint_class": "scaling",
   "effect": "BLOCK",
-  "principal": "sre_lead",
+  "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "service/*",
-  "rule_text": "Block creating service/* of type LoadBalancer, per the gatekeeper-library `block-loadbalancer-services` template (\"Disallows all Services with type LoadBalancer\").",
+  "resource_pattern": "deployment/*",
+  "rule_text": "Block scaling deployment/* outside the allowed replica range, per the gatekeeper-library `replicalimits` template (\"Requires that objects with the field spec.replicas specify a number of replicas within defined ranges\").",
   "scope": {},
   "source_ref": "src-0021",
   "source_timestamp": "2026-01-03T15:00:00+00:00",

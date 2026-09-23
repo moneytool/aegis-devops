@@ -1,15 +1,16 @@
 {
   "actions": [
-    "scale"
+    "apply",
+    "update"
   ],
-  "constraint_class": "scaling",
-  "effect": "ESCALATE",
+  "constraint_class": "deployment",
+  "effect": "BLOCK",
   "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/cache-*",
-  "rule_text": "Escalate scaling deployment/* outside the allowed replica range in the prod-us-east-1 cluster, per the gatekeeper-library `replicalimits` template.",
+  "resource_pattern": "poddisruptionbudget/*",
+  "rule_text": "Block applying prod poddisruptionbudget/* configurations that would block node draining, per the gatekeeper-library `poddisruptionbudget` template.",
   "scope": {
-    "cluster": "staging-us-west-2"
+    "namespace": "staging"
   },
   "source_ref": "src-0035",
   "source_timestamp": "2026-01-05T09:00:00+00:00",

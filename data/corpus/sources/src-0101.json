@@ -1,14 +1,13 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "update"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "networking",
   "effect": "ESCALATE",
   "principal": "security_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "pod/*",
-  "rule_text": "Escalate Pods scheduled without anti-affinity rules; Moonlight's postmortem describes all Pods landing on the same failing host and causing a 100% traffic-loss outage.",
+  "provider": "aws",
+  "resource_pattern": "ec2/security-group/*",
+  "rule_text": "Escalate security-group rules that open RDP (3389) ingress to 0.0.0.0/0 or ::/0, per AWS Security Hub FSBP control EC2.14.",
   "scope": {},
   "source_ref": "src-0101",
   "source_timestamp": "2026-01-13T15:00:00+00:00",

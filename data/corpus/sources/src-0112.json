@@ -1,14 +1,16 @@
 {
   "actions": [
-    "create"
+    "delete"
   ],
-  "constraint_class": "networking",
-  "effect": "BLOCK",
+  "constraint_class": "deletion",
+  "effect": "ESCALATE",
   "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "service/*",
-  "rule_text": "Block creating service/* of type NodePort, per the gatekeeper-library `block-nodeport-services` template (\"Disallows all Services with type NodePort\").",
-  "scope": {},
+  "resource_pattern": "namespace/gateway-*",
+  "rule_text": "Block deletion of namespaces in prod; Skyscanner's outage was caused by a GitOps templating bug that deleted a namespace it should not have touched.",
+  "scope": {
+    "namespace": "staging"
+  },
   "source_ref": "src-0112",
   "source_timestamp": "2026-01-15T00:00:00+00:00",
   "time_window": null

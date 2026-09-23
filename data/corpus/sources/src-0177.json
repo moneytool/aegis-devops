@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "delete"
+    "create"
   ],
   "constraint_class": "configuration",
   "effect": "BLOCK",
-  "principal": "developer",
+  "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "validatingwebhookconfiguration/*",
-  "rule_text": "Block ad-hoc changes to ValidatingWebhookConfiguration objects; Jetstack's postmortem shows a misconfigured admission webhook caused a GKE cluster outage and lost nodes.",
-  "scope": {},
+  "resource_pattern": "pod/*",
+  "rule_text": "Escalate Pods created without CPU/memory requests and limits, per the Kyverno policy library `best-practices/require-pod-requests-limits` policy.",
+  "scope": {
+    "namespace": "staging"
+  },
   "source_ref": "src-0177",
   "source_timestamp": "2026-01-23T03:00:00+00:00",
   "time_window": null

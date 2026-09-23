@@ -1,15 +1,15 @@
 {
   "actions": [
-    "scale"
+    "update"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "networking",
   "effect": "ESCALATE",
   "principal": "platform_admin",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate scaling prod deployment/* below the minimum allowed replica count, per the gatekeeper-library `replicalimits` template.",
+  "provider": "gcp",
+  "resource_pattern": "sql/instance/*",
+  "rule_text": "Escalate configuring a public IP or authorized network on a Cloud SQL instance, per the GCP organization policy constraints `sql.managed.restrictPublicIp` and `sql.managed.restrictAuthorizedNetworks`.",
   "scope": {
-    "namespace": "kube-system"
+    "region": "us-west-2"
   },
   "source_ref": "src-0385",
   "source_timestamp": "2026-02-18T03:00:00+00:00",

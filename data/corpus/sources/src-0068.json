@@ -1,13 +1,13 @@
 {
   "actions": [
-    "set-image"
+    "create"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "networking",
   "effect": "ESCALATE",
   "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/auth-*",
-  "rule_text": "Escalate deployments that set an unpinned or `imagePullPolicy Always` image; Datadog's \"10 Ways to Shoot Yourself in the Foot\" talk lists this among repeated causes of pending pods and slow deployments.",
+  "resource_pattern": "service/*",
+  "rule_text": "Block creating service/* of type LoadBalancer, per the gatekeeper-library `block-loadbalancer-services` template (\"Disallows all Services with type LoadBalancer\").",
   "scope": {},
   "source_ref": "src-0068",
   "source_timestamp": "2026-01-09T12:00:00+00:00",

@@ -1,14 +1,17 @@
 {
   "actions": [
-    "set-image"
+    "create",
+    "update"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "access",
   "effect": "ESCALATE",
-  "principal": "developer",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate deployments that set an unpinned or `imagePullPolicy Always` image; Datadog's \"10 Ways to Shoot Yourself in the Foot\" talk lists this among repeated causes of pending pods and slow deployments.",
-  "scope": {},
+  "principal": "platform_admin",
+  "provider": "github",
+  "resource_pattern": "secret/*",
+  "rule_text": "Block creating or updating a repository secret without review, extending the GCP organization policy constraint `iam.managed.disableServiceAccountKeyCreation`'s credential-material-creation intent to GitHub Actions secrets.",
+  "scope": {
+    "repo": "org/infra"
+  },
   "source_ref": "src-0118",
   "source_timestamp": "2026-01-15T18:00:00+00:00",
   "time_window": null

@@ -1,14 +1,16 @@
 {
   "actions": [
-    "set-image"
+    "update"
   ],
-  "constraint_class": "access",
+  "constraint_class": "networking",
   "effect": "BLOCK",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Block set-image on deployment/* to an image outside the allowed registry prefixes, per the gatekeeper-library `allowedrepos` template.",
-  "scope": {},
+  "principal": "sre_oncall",
+  "provider": "azure",
+  "resource_pattern": "web/functionapp/*",
+  "rule_text": "Escalate re-enabling public network access on a Function App, per the Azure Policy built-in \"App Service apps should disable public network access\" definition.",
+  "scope": {
+    "resource_group": "rg-prod-westus2"
+  },
   "source_ref": "src-0049",
   "source_timestamp": "2026-01-07T03:00:00+00:00",
   "time_window": null

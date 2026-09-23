@@ -4,11 +4,13 @@
   ],
   "constraint_class": "deletion",
   "effect": "ESCALATE",
-  "principal": "platform_admin",
+  "principal": "sre_lead",
   "provider": "kubernetes",
-  "resource_pattern": "node/*",
-  "rule_text": "Escalate node deletion or draining outside of a controlled runbook; loveholidays documented total ingress outages caused by mishandled load balancer behavior while draining nodes.",
-  "scope": {},
+  "resource_pattern": "namespace/cache-*",
+  "rule_text": "Block deletion of namespaces in prod; Skyscanner's outage was caused by a GitOps templating bug that deleted a namespace it should not have touched.",
+  "scope": {
+    "namespace": "dev"
+  },
   "source_ref": "src-0425",
   "source_timestamp": "2026-02-23T03:00:00+00:00",
   "time_window": null

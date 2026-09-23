@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "update"
+    "set-image"
   ],
-  "constraint_class": "networking",
+  "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "sre_oncall",
+  "principal": "ci_bot",
   "provider": "kubernetes",
-  "resource_pattern": "service/*",
-  "rule_text": "Escalate Service changes that alter externalTrafficPolicy; the DevOps Hof postmortem on load-balancer configuration during node draining traces a total ingress outage to this setting.",
-  "scope": {},
+  "resource_pattern": "deployment/worker-*",
+  "rule_text": "Escalate set-image on prod deployment/* to a disallowed image tag, per the gatekeeper-library `disallowedtags` template.",
+  "scope": {
+    "namespace": "staging"
+  },
   "source_ref": "src-0034",
   "source_timestamp": "2026-01-05T06:00:00+00:00",
   "time_window": null

@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "apply"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "networking",
   "effect": "ESCALATE",
-  "principal": "security_lead",
+  "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/web-*",
-  "rule_text": "Escalate applying deployment/* missing required labels, per the gatekeeper-library `requiredlabels` template (\"Requires resources to contain specified labels, with values matching provided regular expressions\").",
-  "scope": {},
+  "resource_pattern": "service/api-*",
+  "rule_text": "Block applying service/* of type LoadBalancer in us-east-1, per the gatekeeper-library `block-loadbalancer-services` template.",
+  "scope": {
+    "region": "us-east-1"
+  },
   "source_ref": "src-0403",
   "source_timestamp": "2026-02-20T09:00:00+00:00",
   "time_window": null

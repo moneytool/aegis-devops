@@ -1,14 +1,16 @@
 {
   "actions": [
-    "create"
+    "update"
   ],
   "constraint_class": "networking",
-  "effect": "BLOCK",
-  "principal": "security_lead",
+  "effect": "ESCALATE",
+  "principal": "sre_lead",
   "provider": "kubernetes",
-  "resource_pattern": "service/billing-*",
-  "rule_text": "Block creating service/* of type LoadBalancer, per the gatekeeper-library `block-loadbalancer-services` template (\"Disallows all Services with type LoadBalancer\").",
-  "scope": {},
+  "resource_pattern": "ingress/worker-*",
+  "rule_text": "Escalate Ingress changes; Ravelin's postmortem on Kubernetes' endpoint behavior describes occasional 502 errors traced to Ingress/replication-controller interaction during shutdown.",
+  "scope": {
+    "namespace": "staging"
+  },
   "source_ref": "src-0275",
   "source_timestamp": "2026-02-04T09:00:00+00:00",
   "time_window": null

@@ -1,16 +1,15 @@
 {
   "actions": [
-    "delete",
-    "replace"
+    "update"
   ],
-  "constraint_class": "deletion",
-  "effect": "ESCALATE",
-  "principal": "sre_lead",
-  "provider": "terraform",
-  "resource_pattern": "aws_instance.*",
-  "rule_text": "Escalate destructive terraform changes to EC2 instances in us-east-1; Veracode's \"Outages? Downtime?\" postmortem describes a QA/dev cluster outage during an AWS IAM/region migration done with Terraform.",
+  "constraint_class": "access",
+  "effect": "BLOCK",
+  "principal": "platform_admin",
+  "provider": "azure",
+  "resource_pattern": "aks/cluster/*",
+  "rule_text": "Escalate disabling Azure AD integration or enabling local accounts on an AKS cluster, extending the Azure Policy Kubernetes category's identity built-ins.",
   "scope": {
-    "region": "eu-west-1"
+    "resource_group": "rg-prod-eastus"
   },
   "source_ref": "src-0238",
   "source_timestamp": "2026-01-30T18:00:00+00:00",

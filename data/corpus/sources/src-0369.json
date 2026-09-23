@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "apply"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "security_lead",
+  "constraint_class": "networking",
+  "effect": "BLOCK",
+  "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "pod/*",
-  "rule_text": "Escalate Pods scheduled without anti-affinity rules; Moonlight's postmortem describes all Pods landing on the same failing host and causing a 100% traffic-loss outage.",
-  "scope": {},
+  "resource_pattern": "service/api-*",
+  "rule_text": "Block applying service/* of type LoadBalancer in us-east-1, per the gatekeeper-library `block-loadbalancer-services` template.",
+  "scope": {
+    "region": "us-west-2"
+  },
   "source_ref": "src-0369",
   "source_timestamp": "2026-02-16T03:00:00+00:00",
   "time_window": null

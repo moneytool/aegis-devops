@@ -1,15 +1,28 @@
 {
   "actions": [
-    "apply"
+    "run"
   ],
   "constraint_class": "deployment",
   "effect": "ESCALATE",
-  "principal": "sre_oncall",
-  "provider": "kubernetes",
-  "resource_pattern": "poddisruptionbudget/ingest-*",
-  "rule_text": "Escalate applying poddisruptionbudget/* with minAvailable equal to the target resource's replica count, per the gatekeeper-library `poddisruptionbudget` template.",
-  "scope": {},
+  "principal": "sre_lead",
+  "provider": "github",
+  "resource_pattern": "workflow/*",
+  "rule_text": "Escalate running a deploy workflow during business hours, extending the Kyverno policy library `other/time-bound-policy` policy's window-gating intent to GitHub Actions workflow dispatches.",
+  "scope": {
+    "repo": "org/data-pipeline"
+  },
   "source_ref": "src-0492",
   "source_timestamp": "2026-03-03T12:00:00+00:00",
-  "time_window": null
+  "time_window": {
+    "days": [
+      "Mon",
+      "Tue",
+      "Wed",
+      "Thu",
+      "Fri"
+    ],
+    "end": "17:00",
+    "start": "09:00",
+    "tz": "America/New_York"
+  }
 }

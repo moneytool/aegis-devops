@@ -1,14 +1,14 @@
 {
   "actions": [
-    "label",
-    "patch"
+    "delete",
+    "update"
   ],
   "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "sre_lead",
+  "principal": "contractor",
   "provider": "kubernetes",
-  "resource_pattern": "node/cache-*",
-  "rule_text": "Escalate node label/taint changes; Grafana Labs' postmortem on Pod Priorities describes a production outage caused by cascading Pod evictions tied to scheduling metadata.",
+  "resource_pattern": "configmap/coredns",
+  "rule_text": "Escalate changes to the CoreDNS configmap; Zalando's \"Total DNS outage\" postmortem identified CoreDNS/ndots:5 configuration as a production outage cause.",
   "scope": {},
   "source_ref": "src-0215",
   "source_timestamp": "2026-01-27T21:00:00+00:00",

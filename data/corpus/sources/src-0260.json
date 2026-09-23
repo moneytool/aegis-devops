@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
     "update"
   ],
-  "constraint_class": "networking",
+  "constraint_class": "access",
   "effect": "ESCALATE",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "service/*",
-  "rule_text": "Escalate Service changes that alter externalTrafficPolicy; the DevOps Hof postmortem on load-balancer configuration during node draining traces a total ingress outage to this setting.",
-  "scope": {},
+  "principal": "platform_admin",
+  "provider": "gcp",
+  "resource_pattern": "compute/instance/*",
+  "rule_text": "Block re-enabling serial port access on a Compute Engine VM, per the GCP organization policy constraint `compute.disableSerialPortAccess`.",
+  "scope": {
+    "region": "us-west-2"
+  },
   "source_ref": "src-0260",
   "source_timestamp": "2026-02-02T12:00:00+00:00",
   "time_window": null

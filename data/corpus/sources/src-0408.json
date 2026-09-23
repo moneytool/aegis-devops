@@ -1,14 +1,16 @@
 {
   "actions": [
-    "set-image"
+    "apply"
   ],
   "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "developer",
+  "effect": "BLOCK",
+  "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate deployments that set an unpinned or `imagePullPolicy Always` image; Datadog's \"10 Ways to Shoot Yourself in the Foot\" talk lists this among repeated causes of pending pods and slow deployments.",
-  "scope": {},
+  "resource_pattern": "statefulset/*",
+  "rule_text": "Block applying prod statefulset/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template.",
+  "scope": {
+    "namespace": "staging"
+  },
   "source_ref": "src-0408",
   "source_timestamp": "2026-02-21T00:00:00+00:00",
   "time_window": null

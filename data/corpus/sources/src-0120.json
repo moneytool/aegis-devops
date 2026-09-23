@@ -1,14 +1,16 @@
 {
   "actions": [
-    "scale"
+    "update"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "networking",
   "effect": "ESCALATE",
-  "principal": "sre_oncall",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/coredns",
-  "rule_text": "Escalate any scale-down of the CoreDNS deployment; Preply's DNS postmortem traced a partial production outage to CoreDNS-autoscaler behavior under conntrack pressure.",
-  "scope": {},
+  "principal": "security_lead",
+  "provider": "azure",
+  "resource_pattern": "web/functionapp/*",
+  "rule_text": "Escalate re-enabling public network access on a Function App, per the Azure Policy built-in \"App Service apps should disable public network access\" definition.",
+  "scope": {
+    "resource_group": "rg-prod-eastus"
+  },
   "source_ref": "src-0120",
   "source_timestamp": "2026-01-16T00:00:00+00:00",
   "time_window": null

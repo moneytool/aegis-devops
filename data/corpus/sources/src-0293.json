@@ -1,0 +1,17 @@
+{
+  "actions": [
+    "apply"
+  ],
+  "constraint_class": "configuration",
+  "effect": "ESCALATE",
+  "principal": "security_lead",
+  "provider": "kubernetes",
+  "resource_pattern": "deployment/*",
+  "rule_text": "Escalate deployments mounting hostPath volumes, per the Kyverno policy library `pod-security/baseline/disallow-host-path` policy. (forged source content)",
+  "scope": {
+    "namespace": "prod"
+  },
+  "source_ref": "src-0293",
+  "source_timestamp": "2026-02-06T15:00:00+00:00",
+  "time_window": null
+}

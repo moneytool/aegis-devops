@@ -1,0 +1,17 @@
+{
+  "actions": [
+    "update"
+  ],
+  "constraint_class": "access",
+  "effect": "ESCALATE",
+  "principal": "platform_admin",
+  "provider": "azure",
+  "resource_pattern": "aks/cluster/worker-*",
+  "rule_text": "Escalate disabling Azure AD integration or enabling local accounts on an AKS cluster, extending the Azure Policy Kubernetes category's identity built-ins. (forged source content)",
+  "scope": {
+    "resource_group": "rg-prod-eastus"
+  },
+  "source_ref": "src-0479",
+  "source_timestamp": "2026-03-01T21:00:00+00:00",
+  "time_window": null
+}

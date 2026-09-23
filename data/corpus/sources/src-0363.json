@@ -1,16 +1,14 @@
 {
   "actions": [
-    "scale"
+    "replace"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "deletion",
   "effect": "ESCALATE",
-  "principal": "platform_admin",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/billing-*",
-  "rule_text": "Escalate scaling deployment/* outside the allowed replica range in the prod-us-east-1 cluster, per the gatekeeper-library `replicalimits` template.",
-  "scope": {
-    "cluster": "prod-eu-west-1"
-  },
+  "principal": "sre_lead",
+  "provider": "terraform",
+  "resource_pattern": "google_container_cluster.*",
+  "rule_text": "Escalate any terraform delete or replace of a GKE cluster; Spotify's postmortem describes accidentally deleting all its Kube clusters via a stale Terraform global state file.",
+  "scope": {},
   "source_ref": "src-0363",
   "source_timestamp": "2026-02-15T09:00:00+00:00",
   "time_window": null

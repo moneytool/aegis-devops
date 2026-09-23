@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "update"
   ],
   "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "developer",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate applying deployment/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template (\"Requires containers to have memory and CPU limits set and constrains limits to be within the specified maximum values\").",
-  "scope": {},
+  "principal": "platform_admin",
+  "provider": "terraform",
+  "resource_pattern": "aws_s3_bucket.*",
+  "rule_text": "Block a terraform update that disables an S3 bucket's public-access block configuration, extending AWS Security Hub FSBP control EC2.1's \"not publicly exposed\" intent to S3 bucket ACL/policy state.",
+  "scope": {
+    "region": "eu-west-1"
+  },
   "source_ref": "src-0255",
   "source_timestamp": "2026-02-01T21:00:00+00:00",
   "time_window": null

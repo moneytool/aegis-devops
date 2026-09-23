@@ -1,14 +1,14 @@
 {
   "actions": [
     "apply",
-    "create"
+    "set-image"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
+  "constraint_class": "access",
+  "effect": "BLOCK",
   "principal": "sre_lead",
   "provider": "kubernetes",
   "resource_pattern": "deployment/*",
-  "rule_text": "Escalate applying deployment/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template (\"Requires containers to have memory and CPU limits set and constrains limits to be within the specified maximum values\").",
+  "rule_text": "Block deployments whose container images come from a registry outside the allow-list, per the Kyverno policy library `best-practices/restrict-image-registries` policy.",
   "scope": {},
   "source_ref": "src-0459",
   "source_timestamp": "2026-02-27T09:00:00+00:00",

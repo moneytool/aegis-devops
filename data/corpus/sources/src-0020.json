@@ -1,14 +1,16 @@
 {
   "actions": [
-    "set-image"
+    "scale"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "scaling",
   "effect": "ESCALATE",
   "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate deployments that set an unpinned or `imagePullPolicy Always` image; Datadog's \"10 Ways to Shoot Yourself in the Foot\" talk lists this among repeated causes of pending pods and slow deployments.",
-  "scope": {},
+  "resource_pattern": "deployment/gateway-*",
+  "rule_text": "Block scaling changes to kube-system deployments outside a controlled change process; repeated CoreDNS-related outages in the failure-stories index trace back to uncontrolled control-plane-adjacent scaling.",
+  "scope": {
+    "namespace": "staging"
+  },
   "source_ref": "src-0020",
   "source_timestamp": "2026-01-03T12:00:00+00:00",
   "time_window": null

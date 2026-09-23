@@ -1,15 +1,15 @@
 {
   "actions": [
-    "delete"
+    "update"
   ],
-  "constraint_class": "deletion",
-  "effect": "BLOCK",
-  "principal": "platform_admin",
-  "provider": "kubernetes",
-  "resource_pattern": "statefulset/*",
-  "rule_text": "Block deletion of prod StatefulSets; Gravitational's postmortem on running PostgreSQL on Kubernetes describes data loss from mishandled streaming replication during a disruptive operation.",
+  "constraint_class": "access",
+  "effect": "ESCALATE",
+  "principal": "security_lead",
+  "provider": "aws",
+  "resource_pattern": "ec2/snapshot/*",
+  "rule_text": "Block making an EBS snapshot publicly restorable, per AWS Security Hub FSBP controls EC2.1 and EC2.182 (\"EBS snapshots should not be publicly restorable / accessible\").",
   "scope": {
-    "namespace": "staging"
+    "region": "us-west-2"
   },
   "source_ref": "src-0015",
   "source_timestamp": "2026-01-02T21:00:00+00:00",

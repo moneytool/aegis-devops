@@ -1,15 +1,17 @@
 {
   "actions": [
-    "label",
-    "patch"
+    "create",
+    "update"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "security_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "node/*",
-  "rule_text": "Escalate node label/taint changes; Grafana Labs' postmortem on Pod Priorities describes a production outage caused by cascading Pod evictions tied to scheduling metadata.",
-  "scope": {},
+  "constraint_class": "networking",
+  "effect": "BLOCK",
+  "principal": "sre_lead",
+  "provider": "aws",
+  "resource_pattern": "ec2/security-group/*",
+  "rule_text": "Block security-group rules that open SSH (22) ingress to 0.0.0.0/0 or ::/0, per AWS Security Hub FSBP control EC2.13.",
+  "scope": {
+    "region": "eu-west-1"
+  },
   "source_ref": "src-0404",
   "source_timestamp": "2026-02-20T12:00:00+00:00",
   "time_window": null

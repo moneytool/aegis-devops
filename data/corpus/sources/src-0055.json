@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "update"
+    "scale"
   ],
-  "constraint_class": "networking",
+  "constraint_class": "scaling",
   "effect": "ESCALATE",
   "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "ingress/cache-*",
-  "rule_text": "Escalate Ingress changes; Ravelin's postmortem on Kubernetes' endpoint behavior describes occasional 502 errors traced to Ingress/replication-controller interaction during shutdown.",
-  "scope": {},
+  "resource_pattern": "deployment/*",
+  "rule_text": "Escalate scaling prod deployment/* below the minimum allowed replica count, per the gatekeeper-library `replicalimits` template.",
+  "scope": {
+    "namespace": "prod"
+  },
   "source_ref": "src-0055",
   "source_timestamp": "2026-01-07T21:00:00+00:00",
   "time_window": null

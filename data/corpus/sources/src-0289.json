@@ -1,15 +1,17 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "label",
+    "patch"
   ],
-  "constraint_class": "deployment",
-  "effect": "BLOCK",
-  "principal": "sre_lead",
+  "constraint_class": "configuration",
+  "effect": "ESCALATE",
+  "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "poddisruptionbudget/*",
-  "rule_text": "Block applying poddisruptionbudget/* with maxUnavailable == 0, per the gatekeeper-library `poddisruptionbudget` template (this blocks voluntary disruptions such as node draining).",
-  "scope": {},
+  "resource_pattern": "node/*",
+  "rule_text": "Escalate node label/taint changes; Grafana Labs' postmortem on Pod Priorities describes a production outage caused by cascading Pod evictions tied to scheduling metadata.",
+  "scope": {
+    "namespace": "staging"
+  },
   "source_ref": "src-0289",
   "source_timestamp": "2026-02-06T03:00:00+00:00",
   "time_window": null

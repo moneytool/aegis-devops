@@ -1,14 +1,16 @@
 {
   "actions": [
-    "create"
+    "scale"
   ],
-  "constraint_class": "configuration",
-  "effect": "BLOCK",
-  "principal": "security_lead",
+  "constraint_class": "scaling",
+  "effect": "ESCALATE",
+  "principal": "sre_oncall",
   "provider": "kubernetes",
-  "resource_pattern": "namespace/*",
-  "rule_text": "Block creating namespace/* missing required labels, per the gatekeeper-library `requiredlabels` template.",
-  "scope": {},
+  "resource_pattern": "deployment/coredns",
+  "rule_text": "Escalate any scale-down of the CoreDNS deployment; Preply's DNS postmortem traced a partial production outage to CoreDNS-autoscaler behavior under conntrack pressure.",
+  "scope": {
+    "namespace": "prod"
+  },
   "source_ref": "src-0097",
   "source_timestamp": "2026-01-13T03:00:00+00:00",
   "time_window": null

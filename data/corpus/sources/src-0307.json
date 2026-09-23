@@ -1,14 +1,13 @@
 {
   "actions": [
-    "apply",
     "create"
   ],
   "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "developer",
+  "effect": "BLOCK",
+  "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/auth-*",
-  "rule_text": "Escalate applying deployment/* missing required annotations, extending the gatekeeper-library `requiredlabels` pattern to annotations (see the sibling `requiredannotations` template in the same library).",
+  "resource_pattern": "pod/*",
+  "rule_text": "Escalate Pods created without CPU/memory requests and limits, per the Kyverno policy library `best-practices/require-pod-requests-limits` policy.",
   "scope": {},
   "source_ref": "src-0307",
   "source_timestamp": "2026-02-08T09:00:00+00:00",

@@ -1,13 +1,13 @@
 {
   "actions": [
-    "scale"
+    "delete"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "deletion",
   "effect": "BLOCK",
-  "principal": "developer",
-  "provider": "kubernetes",
-  "resource_pattern": "statefulset/cache-*",
-  "rule_text": "Block scaling statefulset/* outside the allowed replica range, per the gatekeeper-library `replicalimits` template.",
+  "principal": "ci_bot",
+  "provider": "sql",
+  "resource_pattern": "database/web-*",
+  "rule_text": "Block DROP DATABASE/DROP SCHEMA statements, extending AWS Security Hub FSBP control DynamoDB.6's deletion-protection intent to entire databases.",
   "scope": {},
   "source_ref": "src-0312",
   "source_timestamp": "2026-02-09T00:00:00+00:00",

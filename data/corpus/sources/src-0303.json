@@ -1,15 +1,15 @@
 {
   "actions": [
-    "scale"
+    "create"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "networking",
   "effect": "ESCALATE",
-  "principal": "ci_bot",
+  "principal": "developer",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate scaling deployment/* outside the allowed replica range in the prod-us-east-1 cluster, per the gatekeeper-library `replicalimits` template.",
+  "resource_pattern": "service/worker-*",
+  "rule_text": "Block creating service/* of type LoadBalancer, per the gatekeeper-library `block-loadbalancer-services` template (\"Disallows all Services with type LoadBalancer\").",
   "scope": {
-    "cluster": "staging-us-west-2"
+    "namespace": "prod"
   },
   "source_ref": "src-0303",
   "source_timestamp": "2026-02-07T21:00:00+00:00",

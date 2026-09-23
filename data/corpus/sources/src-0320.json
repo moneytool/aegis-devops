@@ -1,13 +1,14 @@
 {
   "actions": [
-    "scale"
+    "delete",
+    "update"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "sre_lead",
+  "principal": "developer",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/coredns",
-  "rule_text": "Escalate any scale-down of the CoreDNS deployment; Preply's DNS postmortem traced a partial production outage to CoreDNS-autoscaler behavior under conntrack pressure.",
+  "resource_pattern": "configmap/coredns",
+  "rule_text": "Escalate changes to the CoreDNS configmap; Zalando's \"Total DNS outage\" postmortem identified CoreDNS/ndots:5 configuration as a production outage cause.",
   "scope": {},
   "source_ref": "src-0320",
   "source_timestamp": "2026-02-10T00:00:00+00:00",

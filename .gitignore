@@ -13,3 +13,11 @@ build/
 !.env.example.ruff_cache/
 data/*.jsonl
 results/
+# ...but the published benchmark artefacts are part of the paper record:
+!results/benchmark.md
+!results/benchmark.json
+!results/latency.md
+!results/latency.json
+!results/llm-external.md
+!results/llm-cache-naive.jsonl
+!results/llm-cache-aware.jsonl

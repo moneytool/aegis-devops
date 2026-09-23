@@ -1,15 +1,16 @@
 {
   "actions": [
-    "delete",
     "update"
   ],
   "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "contractor",
-  "provider": "kubernetes",
-  "resource_pattern": "configmap/coredns",
-  "rule_text": "Escalate changes to the CoreDNS configmap; Zalando's \"Total DNS outage\" postmortem identified CoreDNS/ndots:5 configuration as a production outage cause.",
-  "scope": {},
+  "effect": "BLOCK",
+  "principal": "ci_bot",
+  "provider": "azure",
+  "resource_pattern": "storage/account/ingest-*",
+  "rule_text": "Block disabling \"secure transfer required\" / HTTPS-only traffic on a storage account, per the Azure Policy built-in \"Storage accounts should have secure transfer enabled\" definition (App Service / Storage category).",
+  "scope": {
+    "resource_group": "rg-prod-westus2"
+  },
   "source_ref": "src-0170",
   "source_timestamp": "2026-01-22T06:00:00+00:00",
   "time_window": null

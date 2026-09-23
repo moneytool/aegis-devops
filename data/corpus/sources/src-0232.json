@@ -1,16 +1,14 @@
 {
   "actions": [
-    "create"
+    "update"
   ],
-  "constraint_class": "networking",
-  "effect": "ESCALATE",
-  "principal": "platform_admin",
-  "provider": "kubernetes",
-  "resource_pattern": "service/*",
-  "rule_text": "Escalate creating prod service/* of type LoadBalancer, per the gatekeeper-library `block-loadbalancer-services` template.",
-  "scope": {
-    "namespace": "dev"
-  },
+  "constraint_class": "configuration",
+  "effect": "BLOCK",
+  "principal": "developer",
+  "provider": "gcp",
+  "resource_pattern": "storage/bucket/gateway-*",
+  "rule_text": "Block disabling public access prevention on a Cloud Storage bucket, extending the GCP organization policy constraint `storage.managed.retentionPolicySeconds` family to bucket-level access configuration.",
+  "scope": {},
   "source_ref": "src-0232",
   "source_timestamp": "2026-01-30T00:00:00+00:00",
   "time_window": null

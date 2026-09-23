@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
     "create"
   ],
   "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "contractor",
+  "effect": "BLOCK",
+  "principal": "ci_bot",
   "provider": "kubernetes",
   "resource_pattern": "pod/*",
-  "rule_text": "Escalate creating pod/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template.",
-  "scope": {},
+  "rule_text": "Block Pods sharing the host network, PID, or IPC namespaces in prod, per the Kyverno policy library `pod-security/baseline/disallow-host-namespaces` policy.",
+  "scope": {
+    "namespace": "kube-system"
+  },
   "source_ref": "src-0411",
   "source_timestamp": "2026-02-21T09:00:00+00:00",
   "time_window": null

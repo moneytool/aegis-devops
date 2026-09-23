@@ -1,14 +1,16 @@
 {
   "actions": [
-    "create"
+    "rewrite"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "deletion",
   "effect": "BLOCK",
-  "principal": "ci_bot",
-  "provider": "kubernetes",
-  "resource_pattern": "namespace/*",
-  "rule_text": "Block creating namespace/* missing required labels, per the gatekeeper-library `requiredlabels` template.",
-  "scope": {},
+  "principal": "contractor",
+  "provider": "git",
+  "resource_pattern": "history/gateway-*",
+  "rule_text": "Block force-pushes that rewrite published history on infra repos, extending the Kyverno policy library `other/verify-manifest-integrity` policy's supply-chain-integrity intent to the git history that produces the manifests.",
+  "scope": {
+    "repo": "org/infra"
+  },
   "source_ref": "src-0076",
   "source_timestamp": "2026-01-10T12:00:00+00:00",
   "time_window": null

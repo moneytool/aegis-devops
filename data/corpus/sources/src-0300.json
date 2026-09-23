@@ -1,13 +1,13 @@
 {
   "actions": [
-    "scale"
+    "delete"
   ],
-  "constraint_class": "scaling",
-  "effect": "BLOCK",
+  "constraint_class": "deletion",
+  "effect": "ESCALATE",
   "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Block scaling deployment/* outside the allowed replica range, per the gatekeeper-library `replicalimits` template (\"Requires that objects with the field spec.replicas specify a number of replicas within defined ranges\").",
+  "resource_pattern": "node/*",
+  "rule_text": "Escalate node deletion or draining outside of a controlled runbook; loveholidays documented total ingress outages caused by mishandled load balancer behavior while draining nodes.",
   "scope": {},
   "source_ref": "src-0300",
   "source_timestamp": "2026-02-07T12:00:00+00:00",

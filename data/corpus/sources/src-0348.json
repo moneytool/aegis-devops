@@ -1,16 +1,15 @@
 {
   "actions": [
-    "delete",
-    "update"
+    "create"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "sre_oncall",
-  "provider": "kubernetes",
-  "resource_pattern": "configmap/auth-*",
-  "rule_text": "Escalate configmap changes in prod; Pusher's \"Oh Sh*t! The Config Changed!\" talk describes a production outage triggered by an nginx ConfigMap change.",
+  "constraint_class": "access",
+  "effect": "BLOCK",
+  "principal": "contractor",
+  "provider": "gcp",
+  "resource_pattern": "iam/service-account/*",
+  "rule_text": "Block creating a new service account key, per the GCP organization policy constraint `iam.managed.disableServiceAccountKeyCreation`.",
   "scope": {
-    "namespace": "dev"
+    "region": "eu-west-1"
   },
   "source_ref": "src-0348",
   "source_timestamp": "2026-02-13T12:00:00+00:00",

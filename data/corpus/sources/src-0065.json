@@ -1,15 +1,17 @@
 {
   "actions": [
-    "delete",
-    "patch"
+    "apply",
+    "create"
   ],
-  "constraint_class": "deletion",
+  "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "platform_admin",
+  "principal": "developer",
   "provider": "kubernetes",
-  "resource_pattern": "node/worker-*",
-  "rule_text": "Escalate node-level changes during autoscaler activity; Nordstrom's \"101 Ways to Crash Your Cluster\" talk lists eviction thresholds and cluster-autoscaler interaction as a cause of full production cluster outages.",
-  "scope": {},
+  "resource_pattern": "deployment/*",
+  "rule_text": "Escalate applying deployment/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template (\"Requires containers to have memory and CPU limits set and constrains limits to be within the specified maximum values\").",
+  "scope": {
+    "namespace": "dev"
+  },
   "source_ref": "src-0065",
   "source_timestamp": "2026-01-09T03:00:00+00:00",
   "time_window": null

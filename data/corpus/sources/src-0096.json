@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "scale"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "developer",
+  "constraint_class": "scaling",
+  "effect": "BLOCK",
+  "principal": "platform_admin",
   "provider": "kubernetes",
   "resource_pattern": "deployment/*",
-  "rule_text": "Escalate applying deployment/* missing required annotations, extending the gatekeeper-library `requiredlabels` pattern to annotations (see the sibling `requiredannotations` template in the same library).",
-  "scope": {},
+  "rule_text": "Block scaling changes to kube-system deployments outside a controlled change process; repeated CoreDNS-related outages in the failure-stories index trace back to uncontrolled control-plane-adjacent scaling.",
+  "scope": {
+    "namespace": "prod"
+  },
   "source_ref": "src-0096",
   "source_timestamp": "2026-01-13T00:00:00+00:00",
   "time_window": null

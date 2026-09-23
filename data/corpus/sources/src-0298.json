@@ -1,16 +1,15 @@
 {
   "actions": [
-    "scale"
+    "attach",
+    "put"
   ],
-  "constraint_class": "scaling",
-  "effect": "ESCALATE",
-  "principal": "sre_oncall",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/worker-*",
-  "rule_text": "Escalate deployment scaling changes in prod; loveholidays' postmortem on GKE running out of IP addresses describes stuck deployments and blocked autoscaling of both pods and nodes.",
-  "scope": {
-    "namespace": "staging"
-  },
+  "constraint_class": "access",
+  "effect": "BLOCK",
+  "principal": "security_lead",
+  "provider": "aws",
+  "resource_pattern": "iam/policy/*",
+  "rule_text": "Block attaching or putting an IAM policy that grants full \"*:*\" administrative privileges, per AWS Security Hub FSBP control IAM.1 (\"IAM policies should not allow full administrative privileges\").",
+  "scope": {},
   "source_ref": "src-0298",
   "source_timestamp": "2026-02-07T06:00:00+00:00",
   "time_window": null

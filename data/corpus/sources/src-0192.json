@@ -1,14 +1,16 @@
 {
   "actions": [
-    "delete"
+    "scale"
   ],
-  "constraint_class": "deletion",
-  "effect": "BLOCK",
-  "principal": "sre_lead",
+  "constraint_class": "scaling",
+  "effect": "ESCALATE",
+  "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "namespace/kube-system",
-  "rule_text": "Never delete namespace/kube-system; multiple public incidents trace outages back to accidental namespace deletion.",
-  "scope": {},
+  "resource_pattern": "deployment/*",
+  "rule_text": "Escalate scaling prod deployment/* below the minimum allowed replica count, per the gatekeeper-library `replicalimits` template.",
+  "scope": {
+    "namespace": "dev"
+  },
   "source_ref": "src-0192",
   "source_timestamp": "2026-01-25T00:00:00+00:00",
   "time_window": null

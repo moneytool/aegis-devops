@@ -1,16 +1,14 @@
 {
   "actions": [
-    "apply"
+    "delete"
   ],
-  "constraint_class": "networking",
+  "constraint_class": "deletion",
   "effect": "BLOCK",
-  "principal": "security_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "service/*",
-  "rule_text": "Block applying service/* of type LoadBalancer in us-east-1, per the gatekeeper-library `block-loadbalancer-services` template. (forged source content)",
-  "scope": {
-    "region": "eu-west-1"
-  },
+  "principal": "sre_lead",
+  "provider": "mongodb",
+  "resource_pattern": "collection/*",
+  "rule_text": "Block deleteMany calls with an empty filter (deletes every document), extending AWS Security Hub FSBP control EC2.1's \"not publicly/unboundedly exposed\" intent to unbounded collection deletes. (forged source content)",
+  "scope": {},
   "source_ref": "src-0075",
   "source_timestamp": "2026-01-10T09:00:00+00:00",
   "time_window": null

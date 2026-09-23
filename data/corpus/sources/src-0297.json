@@ -1,16 +1,14 @@
 {
   "actions": [
-    "apply"
+    "delete"
   ],
-  "constraint_class": "networking",
+  "constraint_class": "deletion",
   "effect": "BLOCK",
   "principal": "platform_admin",
-  "provider": "kubernetes",
-  "resource_pattern": "service/*",
-  "rule_text": "Block applying service/* of type NodePort in prod, per the gatekeeper-library `block-nodeport-services` template.",
-  "scope": {
-    "namespace": "kube-system"
-  },
+  "provider": "flux",
+  "resource_pattern": "helmrelease/web-*",
+  "rule_text": "Block deleting a Flux HelmRelease, extending AWS Security Hub FSBP control DynamoDB.6's deletion-protection intent to Flux-managed HelmReleases.",
+  "scope": {},
   "source_ref": "src-0297",
   "source_timestamp": "2026-02-07T03:00:00+00:00",
   "time_window": null

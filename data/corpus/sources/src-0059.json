@@ -1,17 +1,14 @@
 {
   "actions": [
-    "delete",
-    "replace"
+    "delete"
   ],
   "constraint_class": "deletion",
-  "effect": "ESCALATE",
-  "principal": "platform_admin",
-  "provider": "terraform",
-  "resource_pattern": "aws_instance.*",
-  "rule_text": "Escalate destructive terraform changes to EC2 instances in us-east-1; Veracode's \"Outages? Downtime?\" postmortem describes a QA/dev cluster outage during an AWS IAM/region migration done with Terraform.",
-  "scope": {
-    "region": "eu-west-1"
-  },
+  "effect": "BLOCK",
+  "principal": "sre_lead",
+  "provider": "migration",
+  "resource_pattern": "database/*",
+  "rule_text": "Block `rails db:reset`/`flyway clean`-style destructive migration tasks, extending AWS Security Hub FSBP control DynamoDB.6's deletion-protection intent to migration-tool database resets.",
+  "scope": {},
   "source_ref": "src-0059",
   "source_timestamp": "2026-01-08T09:00:00+00:00",
   "time_window": null

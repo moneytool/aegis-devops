@@ -1,13 +1,14 @@
 {
   "actions": [
-    "apply"
+    "apply",
+    "set-image"
   ],
-  "constraint_class": "deployment",
-  "effect": "ESCALATE",
-  "principal": "sre_lead",
+  "constraint_class": "access",
+  "effect": "BLOCK",
+  "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "poddisruptionbudget/cache-*",
-  "rule_text": "Escalate applying poddisruptionbudget/* with minAvailable equal to the target resource's replica count, per the gatekeeper-library `poddisruptionbudget` template.",
+  "resource_pattern": "deployment/*",
+  "rule_text": "Block deployments whose container images come from a registry outside the allow-list, per the Kyverno policy library `best-practices/restrict-image-registries` policy.",
   "scope": {},
   "source_ref": "src-0274",
   "source_timestamp": "2026-02-04T06:00:00+00:00",

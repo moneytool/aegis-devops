@@ -1,29 +1,17 @@
 {
   "actions": [
-    "delete",
-    "rollout-restart"
+    "update"
   ],
-  "constraint_class": "deployment",
-  "effect": "BLOCK",
-  "principal": "security_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/ingest-*",
-  "rule_text": "Block deployment restarts and deletions in prod during business hours; Monzo's KubeCon talk on the \"Anatomy of a Production Kubernetes Outage\" traces a ledger/platform outage to a risky in-hours API change.",
+  "constraint_class": "configuration",
+  "effect": "ESCALATE",
+  "principal": "contractor",
+  "provider": "terraform",
+  "resource_pattern": "aws_s3_bucket.*",
+  "rule_text": "Block a terraform update that disables an S3 bucket's public-access block configuration, extending AWS Security Hub FSBP control EC2.1's \"not publicly exposed\" intent to S3 bucket ACL/policy state.",
   "scope": {
-    "namespace": "kube-system"
+    "region": "us-west-2"
   },
   "source_ref": "src-0103",
   "source_timestamp": "2026-01-13T21:00:00+00:00",
-  "time_window": {
-    "days": [
-      "Mon",
-      "Tue",
-      "Wed",
-      "Thu",
-      "Fri"
-    ],
-    "end": "20:00",
-    "start": "08:00",
-    "tz": "America/Los_Angeles"
-  }
+  "time_window": null
 }

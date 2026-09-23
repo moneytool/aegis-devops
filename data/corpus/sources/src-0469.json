@@ -1,16 +1,15 @@
 {
   "actions": [
-    "apply",
-    "update"
+    "delete"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
+  "constraint_class": "deletion",
+  "effect": "BLOCK",
   "principal": "platform_admin",
-  "provider": "kubernetes",
-  "resource_pattern": "cronjob/*",
-  "rule_text": "Escalate changes to CronJobs in kube-system; Zalando's \"Kubernetes Failure Stories\" talk lists frozen/stuck CronJobs among repeated causes of production outages.",
+  "provider": "aws",
+  "resource_pattern": "dynamodb/table/*",
+  "rule_text": "Block deleting a DynamoDB table or disabling its deletion protection, per AWS Security Hub FSBP control DynamoDB.6 (\"DynamoDB tables should have deletion protection enabled\").",
   "scope": {
-    "namespace": "prod"
+    "region": "eu-west-1"
   },
   "source_ref": "src-0469",
   "source_timestamp": "2026-02-28T15:00:00+00:00",

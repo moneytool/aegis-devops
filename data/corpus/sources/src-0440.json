@@ -1,16 +1,15 @@
 {
   "actions": [
-    "apply"
+    "create",
+    "update"
   ],
   "constraint_class": "networking",
-  "effect": "BLOCK",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "service/*",
-  "rule_text": "Block applying service/* of type NodePort in prod, per the gatekeeper-library `block-nodeport-services` template.",
-  "scope": {
-    "namespace": "prod"
-  },
+  "effect": "ESCALATE",
+  "principal": "security_lead",
+  "provider": "aws",
+  "resource_pattern": "es/domain/*",
+  "rule_text": "Escalate configuring an Elasticsearch/OpenSearch domain to be publicly accessible, per AWS Security Hub FSBP control ES.2.",
+  "scope": {},
   "source_ref": "src-0440",
   "source_timestamp": "2026-02-25T00:00:00+00:00",
   "time_window": null

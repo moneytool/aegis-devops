@@ -1,16 +1,16 @@
 {
   "actions": [
-    "apply",
-    "update"
+    "label",
+    "patch"
   ],
   "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "sre_oncall",
+  "principal": "contractor",
   "provider": "kubernetes",
-  "resource_pattern": "cronjob/*",
-  "rule_text": "Escalate changes to CronJobs in kube-system; Zalando's \"Kubernetes Failure Stories\" talk lists frozen/stuck CronJobs among repeated causes of production outages.",
+  "resource_pattern": "node/*",
+  "rule_text": "Escalate node label/taint changes; Grafana Labs' postmortem on Pod Priorities describes a production outage caused by cascading Pod evictions tied to scheduling metadata.",
   "scope": {
-    "namespace": "dev"
+    "namespace": "prod"
   },
   "source_ref": "src-0261",
   "source_timestamp": "2026-02-02T15:00:00+00:00",

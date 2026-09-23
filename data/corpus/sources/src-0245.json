@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "scale"
   ],
-  "constraint_class": "deployment",
-  "effect": "ESCALATE",
-  "principal": "sre_lead",
+  "constraint_class": "scaling",
+  "effect": "BLOCK",
+  "principal": "sre_oncall",
   "provider": "kubernetes",
-  "resource_pattern": "job/*",
-  "rule_text": "Escalate Jobs created without a bounded RestartPolicy; Universe's incident report describes a production search/reporting outage caused by a Job that kept consuming node resources on restart.",
-  "scope": {},
+  "resource_pattern": "deployment/*",
+  "rule_text": "Escalate deployment scaling changes in prod; loveholidays' postmortem on GKE running out of IP addresses describes stuck deployments and blocked autoscaling of both pods and nodes.",
+  "scope": {
+    "namespace": "kube-system"
+  },
   "source_ref": "src-0245",
   "source_timestamp": "2026-01-31T15:00:00+00:00",
   "time_window": null

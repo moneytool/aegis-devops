@@ -1,13 +1,13 @@
 {
   "actions": [
-    "scale"
+    "set-image"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "configuration",
   "effect": "ESCALATE",
   "principal": "ci_bot",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/gateway-*",
-  "rule_text": "Escalate deployment scaling changes in prod; loveholidays' postmortem on GKE running out of IP addresses describes stuck deployments and blocked autoscaling of both pods and nodes.",
+  "resource_pattern": "deployment/billing-*",
+  "rule_text": "Escalate deployments that set an unpinned or `imagePullPolicy Always` image; Datadog's \"10 Ways to Shoot Yourself in the Foot\" talk lists this among repeated causes of pending pods and slow deployments.",
   "scope": {
     "namespace": "dev"
   },

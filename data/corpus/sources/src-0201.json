@@ -1,16 +1,15 @@
 {
   "actions": [
-    "apply",
-    "update"
+    "delete"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "developer",
-  "provider": "kubernetes",
-  "resource_pattern": "cronjob/*",
-  "rule_text": "Escalate changes to CronJobs in kube-system; Zalando's \"Kubernetes Failure Stories\" talk lists frozen/stuck CronJobs among repeated causes of production outages.",
+  "constraint_class": "deletion",
+  "effect": "BLOCK",
+  "principal": "sre_lead",
+  "provider": "helm",
+  "resource_pattern": "release/*",
+  "rule_text": "Block uninstalling a Helm release in prod, extending AWS Security Hub FSBP control DynamoDB.6's deletion-protection intent to Helm releases.",
   "scope": {
-    "namespace": "prod"
+    "namespace": "staging"
   },
   "source_ref": "src-0201",
   "source_timestamp": "2026-01-26T03:00:00+00:00",

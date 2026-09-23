@@ -4,9 +4,9 @@
   ],
   "constraint_class": "networking",
   "effect": "BLOCK",
-  "principal": "platform_admin",
+  "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "service/billing-*",
+  "resource_pattern": "service/web-*",
   "rule_text": "Block applying service/* of type LoadBalancer in us-east-1, per the gatekeeper-library `block-loadbalancer-services` template.",
   "scope": {
     "region": "eu-west-1"

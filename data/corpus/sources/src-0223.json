@@ -1,29 +1,15 @@
 {
   "actions": [
-    "delete",
-    "rollout-restart"
+    "create"
   ],
-  "constraint_class": "deployment",
-  "effect": "BLOCK",
-  "principal": "sre_oncall",
+  "constraint_class": "networking",
+  "effect": "ESCALATE",
+  "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Block deployment restarts and deletions in prod during business hours; Monzo's KubeCon talk on the \"Anatomy of a Production Kubernetes Outage\" traces a ledger/platform outage to a risky in-hours API change.",
-  "scope": {
-    "namespace": "dev"
-  },
+  "resource_pattern": "service/*",
+  "rule_text": "Block creating service/* of type LoadBalancer, per the gatekeeper-library `block-loadbalancer-services` template (\"Disallows all Services with type LoadBalancer\").",
+  "scope": {},
   "source_ref": "src-0223",
   "source_timestamp": "2026-01-28T21:00:00+00:00",
-  "time_window": {
-    "days": [
-      "Mon",
-      "Tue",
-      "Wed",
-      "Thu",
-      "Fri"
-    ],
-    "end": "17:00",
-    "start": "09:00",
-    "tz": "America/New_York"
-  }
+  "time_window": null
 }

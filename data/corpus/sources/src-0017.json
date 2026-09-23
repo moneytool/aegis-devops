@@ -1,14 +1,16 @@
 {
   "actions": [
-    "create"
+    "update"
   ],
   "constraint_class": "configuration",
   "effect": "BLOCK",
-  "principal": "platform_admin",
-  "provider": "kubernetes",
-  "resource_pattern": "namespace/*",
-  "rule_text": "Block creating namespace/* missing required labels, per the gatekeeper-library `requiredlabels` template.",
-  "scope": {},
+  "principal": "developer",
+  "provider": "terraform",
+  "resource_pattern": "aws_s3_bucket.*",
+  "rule_text": "Block a terraform update that disables an S3 bucket's public-access block configuration, extending AWS Security Hub FSBP control EC2.1's \"not publicly exposed\" intent to S3 bucket ACL/policy state.",
+  "scope": {
+    "region": "us-east-1"
+  },
   "source_ref": "src-0017",
   "source_timestamp": "2026-01-03T03:00:00+00:00",
   "time_window": null

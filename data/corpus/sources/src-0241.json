@@ -1,16 +1,14 @@
 {
   "actions": [
-    "scale"
+    "create"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "access",
   "effect": "BLOCK",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Block scaling changes to kube-system deployments outside a controlled change process; repeated CoreDNS-related outages in the failure-stories index trace back to uncontrolled control-plane-adjacent scaling.",
-  "scope": {
-    "namespace": "prod"
-  },
+  "principal": "security_lead",
+  "provider": "gcp",
+  "resource_pattern": "iam/service-account/*",
+  "rule_text": "Block creating a new service account key, per the GCP organization policy constraint `iam.managed.disableServiceAccountKeyCreation`.",
+  "scope": {},
   "source_ref": "src-0241",
   "source_timestamp": "2026-01-31T03:00:00+00:00",
   "time_window": null

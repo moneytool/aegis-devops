@@ -1,17 +1,14 @@
 {
   "actions": [
-    "delete",
-    "update"
+    "delete"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "ci_bot",
+  "constraint_class": "deletion",
+  "effect": "BLOCK",
+  "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "configmap/*",
-  "rule_text": "Escalate configmap changes in prod; Pusher's \"Oh Sh*t! The Config Changed!\" talk describes a production outage triggered by an nginx ConfigMap change.",
-  "scope": {
-    "namespace": "kube-system"
-  },
+  "resource_pattern": "namespace/kube-system",
+  "rule_text": "Never delete namespace/kube-system; multiple public incidents trace outages back to accidental namespace deletion.",
+  "scope": {},
   "source_ref": "src-0108",
   "source_timestamp": "2026-01-14T12:00:00+00:00",
   "time_window": null

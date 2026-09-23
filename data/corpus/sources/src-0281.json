@@ -1,16 +1,16 @@
 {
   "actions": [
-    "apply",
-    "update"
+    "delete",
+    "replace"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "deletion",
   "effect": "ESCALATE",
   "principal": "contractor",
-  "provider": "kubernetes",
-  "resource_pattern": "cronjob/*",
-  "rule_text": "Escalate changes to CronJobs in kube-system; Zalando's \"Kubernetes Failure Stories\" talk lists frozen/stuck CronJobs among repeated causes of production outages.",
+  "provider": "terraform",
+  "resource_pattern": "aws_db_instance.*",
+  "rule_text": "Escalate a terraform delete or replace of an RDS instance, per AWS Security Hub FSBP control RDS-related deletion-protection guidance (see DynamoDB.6 for the analogous DynamoDB control) applied to `aws_db_instance`.",
   "scope": {
-    "namespace": "prod"
+    "region": "us-east-1"
   },
   "source_ref": "src-0281",
   "source_timestamp": "2026-02-05T03:00:00+00:00",

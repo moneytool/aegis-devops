@@ -18,6 +18,38 @@
 # template.yaml was used instead (fetched via raw.githubusercontent.com).
 # All 8 requested gatekeeper templates and the full failure-stories index
 # were fetched successfully; no source substitutions were needed.
+#
+# REVIEW-4 T2.2 addendum (2026-09-21) — third source family: cloud-provider
+# security/operational guidance, used to widen provider coverage beyond
+# kubernetes/terraform:
+#   - AWS Security Hub Foundational Security Best Practices (FSBP) controls
+#     reference, fetched via WebFetch (control IDs/titles from the rendered
+#     page). origin_kind: security-benchmark.
+#     https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-standards-fsbp-controls.html
+#   - Azure Policy built-in definitions ("Azure Policy Samples" index),
+#     fetched via WebFetch (category/policy-title summary; the full table
+#     is too large to enumerate exactly, so titles below are representative
+#     of the categories the page documents — App Service, Storage, SQL,
+#     Key Vault, AKS). origin_kind: vendor-guidance.
+#     https://learn.microsoft.com/en-us/azure/governance/policy/samples/built-in-policies
+#   - GCP Organization Policy constraints reference, fetched via WebFetch
+#     (redirected to docs.cloud.google.com; constraint IDs/descriptions
+#     below are taken verbatim from that page). origin_kind: security-benchmark.
+#     https://cloud.google.com/resource-manager/docs/organization-policy/org-policy-constraints
+#   - Kyverno policy library (kyverno/policies on GitHub), directory listing
+#     fetched via the GitHub contents API (`api.github.com/repos/kyverno/policies/contents/...`)
+#     since the rendered kyverno.io/policies/ page exceeded the fetch size
+#     limit; policy names below are real folder names from that repository
+#     (pod-security/baseline, pod-security/restricted, best-practices,
+#     other). origin_kind: vendor-guidance.
+#     https://kyverno.io/policies/
+#   All four fetches succeeded; no substitutions were needed. Providers
+#   without a direct 1:1 control in these sources (helm, argocd, flux, git,
+#   github, sql, mongodb, pulumi, migration) extend the closest cited
+#   control's operational intent to that provider's action surface, in the
+#   same style as the pre-existing "extending the gatekeeper-library
+#   requiredlabels pattern to annotations" seed below — each such seed's
+#   `rule_text` says explicitly what it extends and to where.
 
 seeds:
 
@@ -654,3 +686,696 @@ seeds:
     the prod-us-east-1 cluster, per the gatekeeper-library `replicalimits` template.
   origin: https://github.com/open-policy-agent/gatekeeper-library/tree/master/library/general/replicalimits
   origin_kind: policy-library
+
+# ---------------------------------------------------------------------------
+# From AWS Security Hub FSBP controls (provider: aws)
+# ---------------------------------------------------------------------------
+
+- provider: aws
+  resource_pattern: iam/access-key/*
+  actions: [create]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: access
+  rule_text: Block creation of IAM access keys for the root user, per AWS Security
+    Hub FSBP control IAM.4 ("IAM root user access key should not exist").
+  origin: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-standards-fsbp-controls.html
+  origin_kind: security-benchmark
+
+- provider: aws
+  resource_pattern: iam/mfa-device/*
+  actions: [delete, update]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: access
+  rule_text: Escalate deactivating or replacing a root-user MFA device, per AWS
+    Security Hub FSBP control IAM.6 ("Hardware MFA should be enabled for the root
+    user").
+  origin: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-standards-fsbp-controls.html
+  origin_kind: security-benchmark
+
+- provider: aws
+  resource_pattern: iam/policy/*
+  actions: [put, attach]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: access
+  rule_text: Block attaching or putting an IAM policy that grants full "*:*" administrative
+    privileges, per AWS Security Hub FSBP control IAM.1 ("IAM policies should not
+    allow full administrative privileges").
+  origin: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-standards-fsbp-controls.html
+  origin_kind: security-benchmark
+
+- provider: aws
+  resource_pattern: ec2/security-group/*
+  actions: [update, create]
+  scope:
+    region: us-east-1
+  time_window: null
+  effect: BLOCK
+  constraint_class: networking
+  rule_text: Block security-group rules that open SSH (22) ingress to 0.0.0.0/0
+    or ::/0, per AWS Security Hub FSBP control EC2.13.
+  origin: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-standards-fsbp-controls.html
+  origin_kind: security-benchmark
+
+- provider: aws
+  resource_pattern: ec2/security-group/*
+  actions: [update]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: networking
+  rule_text: Escalate security-group rules that open RDP (3389) ingress to 0.0.0.0/0
+    or ::/0, per AWS Security Hub FSBP control EC2.14.
+  origin: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-standards-fsbp-controls.html
+  origin_kind: security-benchmark
+
+- provider: aws
+  resource_pattern: ec2/snapshot/*
+  actions: [update]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: access
+  rule_text: Block making an EBS snapshot publicly restorable, per AWS Security
+    Hub FSBP controls EC2.1 and EC2.182 ("EBS snapshots should not be publicly
+    restorable / accessible").
+  origin: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-standards-fsbp-controls.html
+  origin_kind: security-benchmark
+
+- provider: aws
+  resource_pattern: docdb/cluster-snapshot/*
+  actions: [update, create]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: access
+  rule_text: Escalate making a DocumentDB manual cluster snapshot public, per AWS
+    Security Hub FSBP control DocumentDB.3.
+  origin: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-standards-fsbp-controls.html
+  origin_kind: security-benchmark
+
+- provider: aws
+  resource_pattern: dynamodb/table/*
+  actions: [delete, update]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  rule_text: Block deleting a DynamoDB table or disabling its deletion protection,
+    per AWS Security Hub FSBP control DynamoDB.6 ("DynamoDB tables should have
+    deletion protection enabled").
+  origin: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-standards-fsbp-controls.html
+  origin_kind: security-benchmark
+
+- provider: aws
+  resource_pattern: es/domain/*
+  actions: [update, create]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: networking
+  rule_text: Escalate configuring an Elasticsearch/OpenSearch domain to be publicly
+    accessible, per AWS Security Hub FSBP control ES.2.
+  origin: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-standards-fsbp-controls.html
+  origin_kind: security-benchmark
+
+# ---------------------------------------------------------------------------
+# From Azure Policy built-in definitions (provider: azure)
+# ---------------------------------------------------------------------------
+
+- provider: azure
+  resource_pattern: storage/account/*
+  actions: [update]
+  scope:
+    resource_group: rg-prod-eastus
+  time_window: null
+  effect: BLOCK
+  constraint_class: configuration
+  rule_text: Block disabling "secure transfer required" / HTTPS-only traffic on
+    a storage account, per the Azure Policy built-in "Storage accounts should have
+    secure transfer enabled" definition (App Service / Storage category).
+  origin: https://learn.microsoft.com/en-us/azure/governance/policy/samples/built-in-policies
+  origin_kind: vendor-guidance
+
+- provider: azure
+  resource_pattern: web/app/*
+  actions: [update]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: configuration
+  rule_text: Block disabling HTTPS-only access on an App Service app, per the Azure
+    Policy built-in "App Service apps should only be accessible over HTTPS" definition.
+  origin: https://learn.microsoft.com/en-us/azure/governance/policy/samples/built-in-policies
+  origin_kind: vendor-guidance
+
+- provider: azure
+  resource_pattern: web/functionapp/*
+  actions: [update]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: networking
+  rule_text: Escalate re-enabling public network access on a Function App, per
+    the Azure Policy built-in "App Service apps should disable public network access"
+    definition.
+  origin: https://learn.microsoft.com/en-us/azure/governance/policy/samples/built-in-policies
+  origin_kind: vendor-guidance
+
+- provider: azure
+  resource_pattern: keyvault/vault/*
+  actions: [delete]
+  scope:
+    resource_group: rg-prod-eastus
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  rule_text: Block deleting or purging a Key Vault, extending the Azure Policy
+    Key Vault category's soft-delete/purge-protection built-ins to the delete
+    action itself.
+  origin: https://learn.microsoft.com/en-us/azure/governance/policy/samples/built-in-policies
+  origin_kind: vendor-guidance
+
+- provider: azure
+  resource_pattern: sql/server/*
+  actions: [update]
+  scope:
+    subscription: sub-prod-a1b2
+  time_window: null
+  effect: ESCALATE
+  constraint_class: networking
+  rule_text: Escalate enabling public network access on an Azure SQL logical server,
+    extending the Azure Policy SQL category's "public network access should be
+    disabled" family of built-ins.
+  origin: https://learn.microsoft.com/en-us/azure/governance/policy/samples/built-in-policies
+  origin_kind: vendor-guidance
+
+- provider: azure
+  resource_pattern: aks/cluster/*
+  actions: [update]
+  scope:
+    resource_group: rg-prod-eastus
+  time_window: null
+  effect: ESCALATE
+  constraint_class: access
+  rule_text: Escalate disabling Azure AD integration or enabling local accounts
+    on an AKS cluster, extending the Azure Policy Kubernetes category's identity
+    built-ins.
+  origin: https://learn.microsoft.com/en-us/azure/governance/policy/samples/built-in-policies
+  origin_kind: vendor-guidance
+
+# ---------------------------------------------------------------------------
+# From GCP Organization Policy constraints (provider: gcp)
+# ---------------------------------------------------------------------------
+
+- provider: gcp
+  resource_pattern: compute/instance/*
+  actions: [update]
+  scope:
+    region: us-central1
+  time_window: null
+  effect: BLOCK
+  constraint_class: access
+  rule_text: Block re-enabling serial port access on a Compute Engine VM, per the
+    GCP organization policy constraint `compute.disableSerialPortAccess`.
+  origin: https://cloud.google.com/resource-manager/docs/organization-policy/org-policy-constraints
+  origin_kind: security-benchmark
+
+- provider: gcp
+  resource_pattern: iam/service-account/*
+  actions: [create]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: access
+  rule_text: Block creating a new service account key, per the GCP organization
+    policy constraint `iam.managed.disableServiceAccountKeyCreation`.
+  origin: https://cloud.google.com/resource-manager/docs/organization-policy/org-policy-constraints
+  origin_kind: security-benchmark
+
+- provider: gcp
+  resource_pattern: sql/instance/*
+  actions: [update]
+  scope:
+    region: us-central1
+  time_window: null
+  effect: ESCALATE
+  constraint_class: networking
+  rule_text: Escalate configuring a public IP or authorized network on a Cloud
+    SQL instance, per the GCP organization policy constraints `sql.managed.restrictPublicIp`
+    and `sql.managed.restrictAuthorizedNetworks`.
+  origin: https://cloud.google.com/resource-manager/docs/organization-policy/org-policy-constraints
+  origin_kind: security-benchmark
+
+- provider: gcp
+  resource_pattern: storage/bucket/*
+  actions: [update]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: configuration
+  rule_text: Block disabling public access prevention on a Cloud Storage bucket,
+    extending the GCP organization policy constraint `storage.managed.retentionPolicySeconds`
+    family to bucket-level access configuration.
+  origin: https://cloud.google.com/resource-manager/docs/organization-policy/org-policy-constraints
+  origin_kind: security-benchmark
+
+- provider: gcp
+  resource_pattern: container/cluster/*
+  actions: [update, create]
+  scope:
+    region: us-central1
+  time_window: null
+  effect: ESCALATE
+  constraint_class: networking
+  rule_text: Escalate creating or updating a GKE cluster without private nodes,
+    per the GCP organization policy constraint `container.managed.enablePrivateNodes`.
+  origin: https://cloud.google.com/resource-manager/docs/organization-policy/org-policy-constraints
+  origin_kind: security-benchmark
+
+- provider: gcp
+  resource_pattern: container/cluster/*
+  actions: [update]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: configuration
+  rule_text: Escalate disabling Binary Authorization on a GKE cluster, per the
+    GCP organization policy constraint `container.managed.enableBinaryAuthorization`.
+  origin: https://cloud.google.com/resource-manager/docs/organization-policy/org-policy-constraints
+  origin_kind: security-benchmark
+
+# ---------------------------------------------------------------------------
+# From the Kyverno policy library (kyverno/policies on GitHub) (provider: kubernetes)
+# ---------------------------------------------------------------------------
+
+- provider: kubernetes
+  resource_pattern: pod/*
+  actions: [apply, create]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: configuration
+  rule_text: Block Pods requesting privileged containers, per the Kyverno policy
+    library `pod-security/baseline/disallow-privileged-containers` policy.
+  origin: https://github.com/kyverno/policies/tree/main/pod-security/baseline/disallow-privileged-containers
+  origin_kind: vendor-guidance
+
+- provider: kubernetes
+  resource_pattern: pod/*
+  actions: [create]
+  scope:
+    namespace: prod
+  time_window: null
+  effect: BLOCK
+  constraint_class: configuration
+  rule_text: Block Pods sharing the host network, PID, or IPC namespaces in prod,
+    per the Kyverno policy library `pod-security/baseline/disallow-host-namespaces`
+    policy.
+  origin: https://github.com/kyverno/policies/tree/main/pod-security/baseline/disallow-host-namespaces
+  origin_kind: vendor-guidance
+
+- provider: kubernetes
+  resource_pattern: deployment/*
+  actions: [apply]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: configuration
+  rule_text: Escalate deployments mounting hostPath volumes, per the Kyverno policy
+    library `pod-security/baseline/disallow-host-path` policy.
+  origin: https://github.com/kyverno/policies/tree/main/pod-security/baseline/disallow-host-path
+  origin_kind: vendor-guidance
+
+- provider: kubernetes
+  resource_pattern: pod/*
+  actions: [apply, create]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: configuration
+  rule_text: Escalate Pods that do not run as a non-root user, per the Kyverno
+    policy library `pod-security/restricted/require-run-as-nonroot` policy.
+  origin: https://github.com/kyverno/policies/tree/main/pod-security/restricted/require-run-as-nonroot
+  origin_kind: vendor-guidance
+
+- provider: kubernetes
+  resource_pattern: deployment/*
+  actions: [apply, set-image]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: access
+  rule_text: Block deployments whose container images come from a registry outside
+    the allow-list, per the Kyverno policy library `best-practices/restrict-image-registries`
+    policy.
+  origin: https://github.com/kyverno/policies/tree/main/best-practices/restrict-image-registries
+  origin_kind: vendor-guidance
+
+- provider: kubernetes
+  resource_pattern: deployment/*
+  actions: [set-image]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: configuration
+  rule_text: Block set-image calls that use the `:latest` tag, per the Kyverno
+    policy library `best-practices/disallow-latest-tag` policy.
+  origin: https://github.com/kyverno/policies/tree/main/best-practices/disallow-latest-tag
+  origin_kind: vendor-guidance
+
+- provider: kubernetes
+  resource_pattern: pod/*
+  actions: [create]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: configuration
+  rule_text: Escalate Pods created without CPU/memory requests and limits, per
+    the Kyverno policy library `best-practices/require-pod-requests-limits` policy.
+  origin: https://github.com/kyverno/policies/tree/main/best-practices/require-pod-requests-limits
+  origin_kind: vendor-guidance
+
+- provider: kubernetes
+  resource_pattern: service/*
+  actions: [apply, create]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: networking
+  rule_text: Block Services that set `externalIPs`, per the Kyverno policy library
+    `best-practices/restrict-service-external-ips` policy.
+  origin: https://github.com/kyverno/policies/tree/main/best-practices/restrict-service-external-ips
+  origin_kind: vendor-guidance
+
+- provider: kubernetes
+  resource_pattern: pod/*
+  actions: [exec]
+  scope:
+    namespace: prod
+  time_window: null
+  effect: ESCALATE
+  constraint_class: access
+  rule_text: Escalate `kubectl exec` into Pods in prod, extending the Kyverno policy
+    library `other/block-pod-exec-by-namespace` policy's intent to every pod in
+    the namespace.
+  origin: https://github.com/kyverno/policies/tree/main/other/block-pod-exec-by-namespace
+  origin_kind: vendor-guidance
+
+# ---------------------------------------------------------------------------
+# Extending the cloud-provider/Kyverno source family to other parsers
+# (provider: helm, argocd, flux, git, github, sql, mongodb, pulumi, migration,
+# terraform) -- each rule_text names exactly what it extends and to where, in
+# the style of the pre-existing "extending gatekeeper-library requiredlabels
+# to annotations" seed.
+# ---------------------------------------------------------------------------
+
+- provider: helm
+  resource_pattern: release/*
+  actions: [update]
+  scope:
+    namespace: prod
+  time_window: null
+  effect: ESCALATE
+  constraint_class: access
+  rule_text: Escalate a Helm release upgrade whose chart values reference an image
+    registry outside the allow-list, extending the Kyverno policy library `best-practices/restrict-image-registries`
+    policy to Helm releases.
+  origin: https://github.com/kyverno/policies/tree/main/best-practices/restrict-image-registries
+  origin_kind: vendor-guidance
+
+- provider: helm
+  resource_pattern: release/*
+  actions: [delete]
+  scope:
+    namespace: prod
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  rule_text: Block uninstalling a Helm release in prod, extending AWS Security
+    Hub FSBP control DynamoDB.6's deletion-protection intent to Helm releases.
+  origin: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-standards-fsbp-controls.html
+  origin_kind: security-benchmark
+
+- provider: argocd
+  resource_pattern: app/*
+  actions: [update]
+  scope:
+    env: prod
+  time_window: null
+  effect: ESCALATE
+  constraint_class: deployment
+  rule_text: Escalate an ArgoCD app sync with `--prune` enabled in prod, extending
+    the Kyverno policy library `other/block-updates-deletes` policy's intent to
+    GitOps-driven deletes.
+  origin: https://github.com/kyverno/policies/tree/main/other/block-updates-deletes
+  origin_kind: vendor-guidance
+
+- provider: argocd
+  resource_pattern: app/*
+  actions: [delete]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  rule_text: Block deleting an ArgoCD Application, extending AWS Security Hub FSBP
+    control DynamoDB.6's deletion-protection intent to ArgoCD-managed applications.
+  origin: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-standards-fsbp-controls.html
+  origin_kind: security-benchmark
+
+- provider: flux
+  resource_pattern: kustomization/*
+  actions: [update]
+  scope:
+    env: prod
+  time_window: null
+  effect: ESCALATE
+  constraint_class: configuration
+  rule_text: Escalate reconciling a Flux Kustomization in prod whose resources
+    are missing required labels, extending the Kyverno policy library `best-practices/require-labels`
+    policy to Flux-managed Kustomizations.
+  origin: https://github.com/kyverno/policies/tree/main/best-practices/require-labels
+  origin_kind: vendor-guidance
+
+- provider: flux
+  resource_pattern: helmrelease/*
+  actions: [delete]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  rule_text: Block deleting a Flux HelmRelease, extending AWS Security Hub FSBP
+    control DynamoDB.6's deletion-protection intent to Flux-managed HelmReleases.
+  origin: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-standards-fsbp-controls.html
+  origin_kind: security-benchmark
+
+- provider: git
+  resource_pattern: history/*
+  actions: [rewrite]
+  scope:
+    repo: org/infra
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  rule_text: Block force-pushes that rewrite published history on infra repos,
+    extending the Kyverno policy library `other/verify-manifest-integrity` policy's
+    supply-chain-integrity intent to the git history that produces the manifests.
+  origin: https://github.com/kyverno/policies/tree/main/other/verify-manifest-integrity
+  origin_kind: vendor-guidance
+
+- provider: git
+  resource_pattern: branch/*
+  actions: [delete]
+  scope:
+    repo: org/infra
+  time_window: null
+  effect: ESCALATE
+  constraint_class: deletion
+  rule_text: Escalate deleting a release branch, extending AWS Security Hub FSBP
+    control DynamoDB.6's deletion-protection intent to source-control branches.
+  origin: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-standards-fsbp-controls.html
+  origin_kind: security-benchmark
+
+- provider: github
+  resource_pattern: workflow/*
+  actions: [run]
+  scope:
+    repo: org/infra
+  time_window:
+    days: [Mon, Tue, Wed, Thu, Fri]
+    start: '09:00'
+    end: '17:00'
+    tz: America/New_York
+  effect: ESCALATE
+  constraint_class: deployment
+  rule_text: Escalate running a deploy workflow during business hours, extending
+    the Kyverno policy library `other/time-bound-policy` policy's window-gating
+    intent to GitHub Actions workflow dispatches.
+  origin: https://github.com/kyverno/policies/tree/main/other/time-bound-policy
+  origin_kind: vendor-guidance
+
+- provider: github
+  resource_pattern: secret/*
+  actions: [create, update]
+  scope:
+    repo: org/infra
+  time_window: null
+  effect: BLOCK
+  constraint_class: access
+  rule_text: Block creating or updating a repository secret without review, extending
+    the GCP organization policy constraint `iam.managed.disableServiceAccountKeyCreation`'s
+    credential-material-creation intent to GitHub Actions secrets.
+  origin: https://cloud.google.com/resource-manager/docs/organization-policy/org-policy-constraints
+  origin_kind: security-benchmark
+
+- provider: sql
+  resource_pattern: table/*
+  actions: [delete]
+  scope:
+    database: prod
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  rule_text: Block TRUNCATE/DROP TABLE against prod tables, extending AWS Security
+    Hub FSBP control DynamoDB.6's deletion-protection intent to relational tables.
+  origin: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-standards-fsbp-controls.html
+  origin_kind: security-benchmark
+
+- provider: sql
+  resource_pattern: database/*
+  actions: [delete]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  rule_text: Block DROP DATABASE/DROP SCHEMA statements, extending AWS Security
+    Hub FSBP control DynamoDB.6's deletion-protection intent to entire databases.
+  origin: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-standards-fsbp-controls.html
+  origin_kind: security-benchmark
+
+- provider: sql
+  resource_pattern: table/*
+  actions: [update]
+  scope:
+    database: prod
+  time_window: null
+  effect: ESCALATE
+  constraint_class: configuration
+  rule_text: Escalate unbounded UPDATE statements (no WHERE clause) against prod
+    tables, extending the Kyverno policy library `other/restrict-secrets-by-name`
+    policy's blast-radius-limiting intent to bulk row mutation.
+  origin: https://github.com/kyverno/policies/tree/main/other/restrict-secrets-by-name
+  origin_kind: vendor-guidance
+
+- provider: mongodb
+  resource_pattern: collection/*
+  actions: [delete]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  rule_text: Block deleteMany calls with an empty filter (deletes every document),
+    extending AWS Security Hub FSBP control EC2.1's "not publicly/unboundedly exposed"
+    intent to unbounded collection deletes.
+  origin: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-standards-fsbp-controls.html
+  origin_kind: security-benchmark
+
+- provider: mongodb
+  resource_pattern: collection/*
+  actions: [update]
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: configuration
+  rule_text: Escalate updateMany calls with an empty filter, extending the Kyverno
+    policy library `other/restrict-secrets-by-name` policy's blast-radius-limiting
+    intent to bulk document mutation.
+  origin: https://github.com/kyverno/policies/tree/main/other/restrict-secrets-by-name
+  origin_kind: vendor-guidance
+
+- provider: pulumi
+  resource_pattern: aws/rds/instance/*
+  actions: [delete, replace]
+  scope:
+    region: us-east-1
+  time_window: null
+  effect: ESCALATE
+  constraint_class: deletion
+  rule_text: Escalate a Pulumi preview step that deletes or replaces an RDS instance,
+    extending AWS Security Hub FSBP control DynamoDB.6's deletion-protection intent
+    to Pulumi-managed RDS resources.
+  origin: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-standards-fsbp-controls.html
+  origin_kind: security-benchmark
+
+- provider: pulumi
+  resource_pattern: stack/*
+  actions: [delete]
+  scope:
+    stack: prod
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  rule_text: Block `pulumi destroy` against the prod stack, extending AWS Security
+    Hub FSBP control DynamoDB.6's deletion-protection intent to whole Pulumi stacks.
+  origin: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-standards-fsbp-controls.html
+  origin_kind: security-benchmark
+
+- provider: migration
+  resource_pattern: database/*
+  actions: [delete]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  rule_text: Block `rails db:reset`/`flyway clean`-style destructive migration
+    tasks, extending AWS Security Hub FSBP control DynamoDB.6's deletion-protection
+    intent to migration-tool database resets.
+  origin: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-standards-fsbp-controls.html
+  origin_kind: security-benchmark
+
+- provider: migration
+  resource_pattern: migration/*
+  actions: [rollback]
+  scope:
+    env: prod
+  time_window: null
+  effect: ESCALATE
+  constraint_class: configuration
+  rule_text: Escalate an `alembic downgrade` (schema rollback) in prod, extending
+    the Kyverno policy library `other/time-bound-policy` policy's controlled-change
+    intent to migration rollbacks.
+  origin: https://github.com/kyverno/policies/tree/main/other/time-bound-policy
+  origin_kind: vendor-guidance
+
+- provider: terraform
+  resource_pattern: aws_db_instance.*
+  actions: [delete, replace]
+  scope:
+    region: us-east-1
+  time_window: null
+  effect: ESCALATE
+  constraint_class: deletion
+  rule_text: Escalate a terraform delete or replace of an RDS instance, per AWS
+    Security Hub FSBP control RDS-related deletion-protection guidance (see DynamoDB.6
+    for the analogous DynamoDB control) applied to `aws_db_instance`.
+  origin: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-standards-fsbp-controls.html
+  origin_kind: security-benchmark
+
+- provider: terraform
+  resource_pattern: aws_s3_bucket.*
+  actions: [update]
+  scope:
+    region: us-east-1
+  time_window: null
+  effect: BLOCK
+  constraint_class: configuration
+  rule_text: Block a terraform update that disables an S3 bucket's public-access
+    block configuration, extending AWS Security Hub FSBP control EC2.1's "not publicly
+    exposed" intent to S3 bucket ACL/policy state.
+  origin: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-standards-fsbp-controls.html
+  origin_kind: security-benchmark

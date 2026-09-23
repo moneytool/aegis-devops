@@ -5,11 +5,13 @@
   ],
   "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "platform_admin",
+  "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "pod/*",
-  "rule_text": "Escalate Pods scheduled without anti-affinity rules; Moonlight's postmortem describes all Pods landing on the same failing host and causing a 100% traffic-loss outage.",
-  "scope": {},
+  "resource_pattern": "deployment/*",
+  "rule_text": "Escalate applying deployment/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template (\"Requires containers to have memory and CPU limits set and constrains limits to be within the specified maximum values\").",
+  "scope": {
+    "namespace": "prod"
+  },
   "source_ref": "src-0180",
   "source_timestamp": "2026-01-23T12:00:00+00:00",
   "time_window": null

@@ -1,14 +1,13 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "update"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "networking",
   "effect": "ESCALATE",
-  "principal": "security_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate applying deployment/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template (\"Requires containers to have memory and CPU limits set and constrains limits to be within the specified maximum values\").",
+  "principal": "sre_lead",
+  "provider": "aws",
+  "resource_pattern": "es/domain/ingest-*",
+  "rule_text": "Escalate configuring an Elasticsearch/OpenSearch domain to be publicly accessible, per AWS Security Hub FSBP control ES.2.",
   "scope": {},
   "source_ref": "src-0046",
   "source_timestamp": "2026-01-06T18:00:00+00:00",

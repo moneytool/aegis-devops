@@ -1,13 +1,13 @@
 {
   "actions": [
-    "apply"
+    "exec"
   ],
-  "constraint_class": "configuration",
-  "effect": "BLOCK",
-  "principal": "platform_admin",
+  "constraint_class": "access",
+  "effect": "ESCALATE",
+  "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "statefulset/*",
-  "rule_text": "Block applying prod statefulset/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template. (forged source content)",
+  "resource_pattern": "pod/*",
+  "rule_text": "Escalate `kubectl exec` into Pods in prod, extending the Kyverno policy library `other/block-pod-exec-by-namespace` policy's intent to every pod in the namespace. (forged source content)",
   "scope": {
     "namespace": "staging"
   },

@@ -1,14 +1,13 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "apply"
   ],
-  "constraint_class": "access",
-  "effect": "BLOCK",
-  "principal": "sre_lead",
+  "constraint_class": "configuration",
+  "effect": "ESCALATE",
+  "principal": "contractor",
   "provider": "kubernetes",
   "resource_pattern": "deployment/*",
-  "rule_text": "Block applying deployment/* whose image is outside the allowed registry prefixes, per the gatekeeper-library `allowedrepos` template (\"Requires container images to begin with a string from the specified list\").",
+  "rule_text": "Escalate deployments without resource requests/limits set; Blue Matador's Kubernetes Node OOM postmortem traces Pod kills to containers with no resource requests or limits.",
   "scope": {},
   "source_ref": "src-0461",
   "source_timestamp": "2026-02-27T15:00:00+00:00",

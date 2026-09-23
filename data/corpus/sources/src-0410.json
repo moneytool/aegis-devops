@@ -1,14 +1,16 @@
 {
   "actions": [
-    "scale"
+    "delete"
   ],
-  "constraint_class": "scaling",
-  "effect": "BLOCK",
+  "constraint_class": "deletion",
+  "effect": "ESCALATE",
   "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "statefulset/ingest-*",
-  "rule_text": "Block scaling statefulset/* outside the allowed replica range, per the gatekeeper-library `replicalimits` template.",
-  "scope": {},
+  "provider": "sql",
+  "resource_pattern": "table/*",
+  "rule_text": "Block TRUNCATE/DROP TABLE against prod tables, extending AWS Security Hub FSBP control DynamoDB.6's deletion-protection intent to relational tables.",
+  "scope": {
+    "database": "prod"
+  },
   "source_ref": "src-0410",
   "source_timestamp": "2026-02-21T06:00:00+00:00",
   "time_window": null

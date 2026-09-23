@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "apply"
   ],
-  "constraint_class": "deployment",
+  "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "security_lead",
+  "principal": "ci_bot",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/cache-*",
-  "rule_text": "Escalate deployments that pull public/unpinned images; Sr. SRE Medya Ghazizadeh's \"How NOT to do Kubernetes\" talk lists a public container registry and `latest`-style tags among practices that hurt cluster stability.",
-  "scope": {},
+  "resource_pattern": "deployment/*",
+  "rule_text": "Escalate deployments mounting hostPath volumes, per the Kyverno policy library `pod-security/baseline/disallow-host-path` policy.",
+  "scope": {
+    "namespace": "staging"
+  },
   "source_ref": "src-0252",
   "source_timestamp": "2026-02-01T12:00:00+00:00",
   "time_window": null

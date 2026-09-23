@@ -1,13 +1,13 @@
 {
   "actions": [
-    "delete"
+    "update"
   ],
-  "constraint_class": "deletion",
+  "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "node/*",
-  "rule_text": "Escalate node deletion or draining outside of a controlled runbook; loveholidays documented total ingress outages caused by mishandled load balancer behavior while draining nodes.",
+  "principal": "platform_admin",
+  "provider": "gcp",
+  "resource_pattern": "storage/bucket/gateway-*",
+  "rule_text": "Block disabling public access prevention on a Cloud Storage bucket, extending the GCP organization policy constraint `storage.managed.retentionPolicySeconds` family to bucket-level access configuration.",
   "scope": {},
   "source_ref": "src-0010",
   "source_timestamp": "2026-01-02T06:00:00+00:00",

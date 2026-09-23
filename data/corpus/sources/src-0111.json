@@ -1,16 +1,15 @@
 {
   "actions": [
-    "delete",
-    "replace"
+    "set-image"
   ],
-  "constraint_class": "deletion",
+  "constraint_class": "configuration",
   "effect": "ESCALATE",
   "principal": "contractor",
-  "provider": "terraform",
-  "resource_pattern": "aws_instance.*",
-  "rule_text": "Escalate destructive terraform changes to EC2 instances in us-east-1; Veracode's \"Outages? Downtime?\" postmortem describes a QA/dev cluster outage during an AWS IAM/region migration done with Terraform.",
+  "provider": "kubernetes",
+  "resource_pattern": "deployment/*",
+  "rule_text": "Escalate set-image on prod deployment/* to a disallowed image tag, per the gatekeeper-library `disallowedtags` template.",
   "scope": {
-    "region": "eu-west-1"
+    "namespace": "staging"
   },
   "source_ref": "src-0111",
   "source_timestamp": "2026-01-14T21:00:00+00:00",

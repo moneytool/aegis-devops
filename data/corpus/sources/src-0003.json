@@ -1,15 +1,15 @@
 {
   "actions": [
-    "scale"
+    "exec"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "access",
   "effect": "BLOCK",
-  "principal": "sre_oncall",
+  "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Block scaling changes to kube-system deployments outside a controlled change process; repeated CoreDNS-related outages in the failure-stories index trace back to uncontrolled control-plane-adjacent scaling.",
+  "resource_pattern": "pod/*",
+  "rule_text": "Escalate `kubectl exec` into Pods in prod, extending the Kyverno policy library `other/block-pod-exec-by-namespace` policy's intent to every pod in the namespace.",
   "scope": {
-    "namespace": "dev"
+    "namespace": "kube-system"
   },
   "source_ref": "src-0003",
   "source_timestamp": "2026-01-01T09:00:00+00:00",

@@ -1,15 +1,15 @@
 {
   "actions": [
-    "scale"
+    "delete"
   ],
-  "constraint_class": "scaling",
-  "effect": "ESCALATE",
+  "constraint_class": "deletion",
+  "effect": "BLOCK",
   "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate scaling prod deployment/* below the minimum allowed replica count, per the gatekeeper-library `replicalimits` template. (forged source content)",
+  "provider": "sql",
+  "resource_pattern": "table/*",
+  "rule_text": "Block TRUNCATE/DROP TABLE against prod tables, extending AWS Security Hub FSBP control DynamoDB.6's deletion-protection intent to relational tables. (forged source content)",
   "scope": {
-    "namespace": "dev"
+    "database": "prod"
   },
   "source_ref": "src-0329",
   "source_timestamp": "2026-02-11T03:00:00+00:00",

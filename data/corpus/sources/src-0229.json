@@ -1,14 +1,16 @@
 {
   "actions": [
-    "scale"
+    "apply"
   ],
-  "constraint_class": "scaling",
-  "effect": "BLOCK",
-  "principal": "sre_oncall",
+  "constraint_class": "networking",
+  "effect": "ESCALATE",
+  "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "statefulset/*",
-  "rule_text": "Block scaling statefulset/* outside the allowed replica range, per the gatekeeper-library `replicalimits` template.",
-  "scope": {},
+  "resource_pattern": "service/cache-*",
+  "rule_text": "Block applying service/* of type NodePort in prod, per the gatekeeper-library `block-nodeport-services` template.",
+  "scope": {
+    "namespace": "prod"
+  },
   "source_ref": "src-0229",
   "source_timestamp": "2026-01-29T15:00:00+00:00",
   "time_window": null

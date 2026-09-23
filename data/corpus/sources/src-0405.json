@@ -3,12 +3,14 @@
     "create"
   ],
   "constraint_class": "networking",
-  "effect": "BLOCK",
-  "principal": "contractor",
+  "effect": "ESCALATE",
+  "principal": "ci_bot",
   "provider": "kubernetes",
   "resource_pattern": "service/*",
-  "rule_text": "Block creating service/* of type LoadBalancer, per the gatekeeper-library `block-loadbalancer-services` template (\"Disallows all Services with type LoadBalancer\").",
-  "scope": {},
+  "rule_text": "Escalate creating prod service/* of type LoadBalancer, per the gatekeeper-library `block-loadbalancer-services` template.",
+  "scope": {
+    "namespace": "staging"
+  },
   "source_ref": "src-0405",
   "source_timestamp": "2026-02-20T15:00:00+00:00",
   "time_window": null

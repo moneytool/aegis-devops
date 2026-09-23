@@ -1,14 +1,16 @@
 {
   "actions": [
-    "set-image"
+    "update"
   ],
-  "constraint_class": "configuration",
-  "effect": "BLOCK",
-  "principal": "security_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/cache-*",
-  "rule_text": "Block set-image on deployment/* to a disallowed image tag (e.g. `:latest`), per the gatekeeper-library `disallowedtags` template (\"Requires container images to have an image tag different from the ones in the specified list\").",
-  "scope": {},
+  "constraint_class": "access",
+  "effect": "ESCALATE",
+  "principal": "platform_admin",
+  "provider": "azure",
+  "resource_pattern": "aks/cluster/*",
+  "rule_text": "Escalate disabling Azure AD integration or enabling local accounts on an AKS cluster, extending the Azure Policy Kubernetes category's identity built-ins.",
+  "scope": {
+    "resource_group": "rg-prod-eastus"
+  },
   "source_ref": "src-0154",
   "source_timestamp": "2026-01-20T06:00:00+00:00",
   "time_window": null

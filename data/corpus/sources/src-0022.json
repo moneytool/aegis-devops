@@ -1,16 +1,14 @@
 {
   "actions": [
-    "set-image"
+    "create"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "access",
   "effect": "ESCALATE",
-  "principal": "platform_admin",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate set-image on prod deployment/* to a disallowed image tag, per the gatekeeper-library `disallowedtags` template.",
-  "scope": {
-    "namespace": "staging"
-  },
+  "principal": "security_lead",
+  "provider": "aws",
+  "resource_pattern": "iam/access-key/*",
+  "rule_text": "Block creation of IAM access keys for the root user, per AWS Security Hub FSBP control IAM.4 (\"IAM root user access key should not exist\").",
+  "scope": {},
   "source_ref": "src-0022",
   "source_timestamp": "2026-01-03T18:00:00+00:00",
   "time_window": null

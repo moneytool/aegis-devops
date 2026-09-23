@@ -1,14 +1,16 @@
 {
   "actions": [
-    "create"
+    "update"
   ],
-  "constraint_class": "networking",
+  "constraint_class": "configuration",
   "effect": "BLOCK",
-  "principal": "security_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "service/*",
-  "rule_text": "Block creating service/* of type LoadBalancer, per the gatekeeper-library `block-loadbalancer-services` template (\"Disallows all Services with type LoadBalancer\").",
-  "scope": {},
+  "principal": "developer",
+  "provider": "terraform",
+  "resource_pattern": "aws_s3_bucket.*",
+  "rule_text": "Block a terraform update that disables an S3 bucket's public-access block configuration, extending AWS Security Hub FSBP control EC2.1's \"not publicly exposed\" intent to S3 bucket ACL/policy state.",
+  "scope": {
+    "region": "eu-west-1"
+  },
   "source_ref": "src-0122",
   "source_timestamp": "2026-01-16T06:00:00+00:00",
   "time_window": null

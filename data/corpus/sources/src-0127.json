@@ -1,15 +1,17 @@
 {
   "actions": [
-    "replace",
-    "update"
+    "apply",
+    "create"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "deployment",
   "effect": "ESCALATE",
-  "principal": "sre_lead",
-  "provider": "terraform",
-  "resource_pattern": "aws_autoscaling_group.*",
-  "rule_text": "Escalate terraform changes to AWS autoscaling groups; Toyota Connected's \"A Perfect DNS Storm\" postmortem and related ASG-rebalance issues in the failure-stories index show autoscaler churn causing outages.",
-  "scope": {},
+  "principal": "ci_bot",
+  "provider": "kubernetes",
+  "resource_pattern": "job/*",
+  "rule_text": "Escalate Jobs created without a bounded RestartPolicy; Universe's incident report describes a production search/reporting outage caused by a Job that kept consuming node resources on restart.",
+  "scope": {
+    "namespace": "staging"
+  },
   "source_ref": "src-0127",
   "source_timestamp": "2026-01-16T21:00:00+00:00",
   "time_window": null

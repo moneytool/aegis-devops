@@ -1,16 +1,15 @@
 {
   "actions": [
-    "scale"
+    "delete",
+    "update"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "deletion",
   "effect": "BLOCK",
-  "principal": "sre_oncall",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Block scaling changes to kube-system deployments outside a controlled change process; repeated CoreDNS-related outages in the failure-stories index trace back to uncontrolled control-plane-adjacent scaling.",
-  "scope": {
-    "namespace": "dev"
-  },
+  "principal": "platform_admin",
+  "provider": "aws",
+  "resource_pattern": "dynamodb/table/*",
+  "rule_text": "Block deleting a DynamoDB table or disabling its deletion protection, per AWS Security Hub FSBP control DynamoDB.6 (\"DynamoDB tables should have deletion protection enabled\").",
+  "scope": {},
   "source_ref": "src-0268",
   "source_timestamp": "2026-02-03T12:00:00+00:00",
   "time_window": null

@@ -1,15 +1,15 @@
 {
   "actions": [
-    "create"
+    "delete"
   ],
-  "constraint_class": "networking",
+  "constraint_class": "deletion",
   "effect": "ESCALATE",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "service/api-*",
-  "rule_text": "Escalate creating prod service/* of type LoadBalancer, per the gatekeeper-library `block-loadbalancer-services` template. (forged source content)",
+  "principal": "platform_admin",
+  "provider": "sql",
+  "resource_pattern": "table/auth-*",
+  "rule_text": "Block TRUNCATE/DROP TABLE against prod tables, extending AWS Security Hub FSBP control DynamoDB.6's deletion-protection intent to relational tables. (forged source content)",
   "scope": {
-    "namespace": "kube-system"
+    "database": "prod"
   },
   "source_ref": "src-0250",
   "source_timestamp": "2026-02-01T06:00:00+00:00",

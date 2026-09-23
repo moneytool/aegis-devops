@@ -1,14 +1,16 @@
 {
   "actions": [
-    "set-image"
+    "create"
   ],
-  "constraint_class": "access",
+  "constraint_class": "networking",
   "effect": "BLOCK",
-  "principal": "platform_admin",
+  "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/worker-*",
-  "rule_text": "Block set-image on deployment/* to an image outside the allowed registry prefixes, per the gatekeeper-library `allowedrepos` template.",
-  "scope": {},
+  "resource_pattern": "service/*",
+  "rule_text": "Escalate creating prod service/* of type LoadBalancer, per the gatekeeper-library `block-loadbalancer-services` template.",
+  "scope": {
+    "namespace": "staging"
+  },
   "source_ref": "src-0140",
   "source_timestamp": "2026-01-18T12:00:00+00:00",
   "time_window": null

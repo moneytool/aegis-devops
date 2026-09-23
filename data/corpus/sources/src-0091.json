@@ -1,14 +1,13 @@
 {
   "actions": [
-    "apply",
     "create"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "access",
   "effect": "ESCALATE",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate applying deployment/* missing required annotations, extending the gatekeeper-library `requiredlabels` pattern to annotations (see the sibling `requiredannotations` template in the same library).",
+  "principal": "sre_oncall",
+  "provider": "gcp",
+  "resource_pattern": "iam/service-account/api-*",
+  "rule_text": "Block creating a new service account key, per the GCP organization policy constraint `iam.managed.disableServiceAccountKeyCreation`.",
   "scope": {},
   "source_ref": "src-0091",
   "source_timestamp": "2026-01-12T09:00:00+00:00",

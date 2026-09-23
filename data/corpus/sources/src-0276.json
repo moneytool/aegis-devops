@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "update"
   ],
   "constraint_class": "deployment",
-  "effect": "BLOCK",
-  "principal": "ci_bot",
-  "provider": "kubernetes",
-  "resource_pattern": "poddisruptionbudget/*",
-  "rule_text": "Block applying poddisruptionbudget/* with maxUnavailable == 0, per the gatekeeper-library `poddisruptionbudget` template (this blocks voluntary disruptions such as node draining).",
-  "scope": {},
+  "effect": "ESCALATE",
+  "principal": "sre_lead",
+  "provider": "argocd",
+  "resource_pattern": "app/api-*",
+  "rule_text": "Escalate an ArgoCD app sync with `--prune` enabled in prod, extending the Kyverno policy library `other/block-updates-deletes` policy's intent to GitOps-driven deletes.",
+  "scope": {
+    "env": "staging"
+  },
   "source_ref": "src-0276",
   "source_timestamp": "2026-02-04T12:00:00+00:00",
   "time_window": null

@@ -1,14 +1,17 @@
 {
   "actions": [
-    "create"
+    "delete",
+    "replace"
   ],
-  "constraint_class": "networking",
-  "effect": "BLOCK",
-  "principal": "security_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "service/*",
-  "rule_text": "Block creating service/* of type LoadBalancer, per the gatekeeper-library `block-loadbalancer-services` template (\"Disallows all Services with type LoadBalancer\").",
-  "scope": {},
+  "constraint_class": "deletion",
+  "effect": "ESCALATE",
+  "principal": "platform_admin",
+  "provider": "pulumi",
+  "resource_pattern": "aws/rds/instance/*",
+  "rule_text": "Escalate a Pulumi preview step that deletes or replaces an RDS instance, extending AWS Security Hub FSBP control DynamoDB.6's deletion-protection intent to Pulumi-managed RDS resources.",
+  "scope": {
+    "region": "eu-west-1"
+  },
   "source_ref": "src-0040",
   "source_timestamp": "2026-01-06T00:00:00+00:00",
   "time_window": null

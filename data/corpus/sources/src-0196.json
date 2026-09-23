@@ -1,15 +1,15 @@
 {
   "actions": [
-    "scale"
+    "create"
   ],
-  "constraint_class": "scaling",
-  "effect": "ESCALATE",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate deployment scaling changes in prod; loveholidays' postmortem on GKE running out of IP addresses describes stuck deployments and blocked autoscaling of both pods and nodes.",
+  "constraint_class": "access",
+  "effect": "BLOCK",
+  "principal": "security_lead",
+  "provider": "github",
+  "resource_pattern": "secret/web-*",
+  "rule_text": "Block creating or updating a repository secret without review, extending the GCP organization policy constraint `iam.managed.disableServiceAccountKeyCreation`'s credential-material-creation intent to GitHub Actions secrets.",
   "scope": {
-    "namespace": "prod"
+    "repo": "org/webapp"
   },
   "source_ref": "src-0196",
   "source_timestamp": "2026-01-25T12:00:00+00:00",

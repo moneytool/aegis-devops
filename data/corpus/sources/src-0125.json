@@ -1,0 +1,16 @@
+{
+  "actions": [
+    "apply",
+    "set-image"
+  ],
+  "constraint_class": "access",
+  "effect": "BLOCK",
+  "principal": "security_lead",
+  "provider": "kubernetes",
+  "resource_pattern": "deployment/*",
+  "rule_text": "Block deployments whose container images come from a registry outside the allow-list, per the Kyverno policy library `best-practices/restrict-image-registries` policy. (forged source content)",
+  "scope": {},
+  "source_ref": "src-0125",
+  "source_timestamp": "2026-01-16T15:00:00+00:00",
+  "time_window": null
+}

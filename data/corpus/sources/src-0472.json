@@ -1,29 +1,18 @@
 {
   "actions": [
-    "delete",
-    "rollout-restart"
+    "create",
+    "update"
   ],
-  "constraint_class": "deployment",
+  "constraint_class": "access",
   "effect": "BLOCK",
-  "principal": "platform_admin",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/cache-*",
-  "rule_text": "Block deployment restarts and deletions in prod during business hours; Monzo's KubeCon talk on the \"Anatomy of a Production Kubernetes Outage\" traces a ledger/platform outage to a risky in-hours API change.",
+  "principal": "security_lead",
+  "provider": "github",
+  "resource_pattern": "secret/*",
+  "rule_text": "Block creating or updating a repository secret without review, extending the GCP organization policy constraint `iam.managed.disableServiceAccountKeyCreation`'s credential-material-creation intent to GitHub Actions secrets.",
   "scope": {
-    "namespace": "prod"
+    "repo": "org/platform"
   },
   "source_ref": "src-0472",
   "source_timestamp": "2026-03-01T00:00:00+00:00",
-  "time_window": {
-    "days": [
-      "Mon",
-      "Tue",
-      "Wed",
-      "Thu",
-      "Fri"
-    ],
-    "end": "17:00",
-    "start": "09:00",
-    "tz": "America/New_York"
-  }
+  "time_window": null
 }

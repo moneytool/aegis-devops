@@ -1,15 +1,16 @@
 {
   "actions": [
-    "replace",
     "update"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "access",
   "effect": "ESCALATE",
-  "principal": "platform_admin",
-  "provider": "terraform",
-  "resource_pattern": "aws_autoscaling_group.*",
-  "rule_text": "Escalate terraform changes to AWS autoscaling groups; Toyota Connected's \"A Perfect DNS Storm\" postmortem and related ASG-rebalance issues in the failure-stories index show autoscaler churn causing outages.",
-  "scope": {},
+  "principal": "security_lead",
+  "provider": "gcp",
+  "resource_pattern": "compute/instance/*",
+  "rule_text": "Block re-enabling serial port access on a Compute Engine VM, per the GCP organization policy constraint `compute.disableSerialPortAccess`.",
+  "scope": {
+    "region": "eu-west-1"
+  },
   "source_ref": "src-0376",
   "source_timestamp": "2026-02-17T00:00:00+00:00",
   "time_window": null

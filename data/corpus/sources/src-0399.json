@@ -1,14 +1,16 @@
 {
   "actions": [
-    "delete"
+    "update"
   ],
-  "constraint_class": "deletion",
+  "constraint_class": "access",
   "effect": "BLOCK",
-  "principal": "security_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "namespace/kube-system",
-  "rule_text": "Never delete namespace/kube-system; multiple public incidents trace outages back to accidental namespace deletion.",
-  "scope": {},
+  "principal": "contractor",
+  "provider": "azure",
+  "resource_pattern": "aks/cluster/ingest-*",
+  "rule_text": "Escalate disabling Azure AD integration or enabling local accounts on an AKS cluster, extending the Azure Policy Kubernetes category's identity built-ins.",
+  "scope": {
+    "resource_group": "rg-prod-eastus"
+  },
   "source_ref": "src-0399",
   "source_timestamp": "2026-02-19T21:00:00+00:00",
   "time_window": null

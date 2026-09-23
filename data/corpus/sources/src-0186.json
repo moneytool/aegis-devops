@@ -1,14 +1,13 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "update"
   ],
   "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "ci_bot",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate applying deployment/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template (\"Requires containers to have memory and CPU limits set and constrains limits to be within the specified maximum values\").",
+  "principal": "contractor",
+  "provider": "mongodb",
+  "resource_pattern": "collection/api-*",
+  "rule_text": "Escalate updateMany calls with an empty filter, extending the Kyverno policy library `other/restrict-secrets-by-name` policy's blast-radius-limiting intent to bulk document mutation.",
   "scope": {},
   "source_ref": "src-0186",
   "source_timestamp": "2026-01-24T06:00:00+00:00",

@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "update"
+    "delete"
   ],
-  "constraint_class": "networking",
-  "effect": "ESCALATE",
+  "constraint_class": "deletion",
+  "effect": "BLOCK",
   "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "service/*",
-  "rule_text": "Escalate Service changes that alter externalTrafficPolicy; the DevOps Hof postmortem on load-balancer configuration during node draining traces a total ingress outage to this setting.",
-  "scope": {},
+  "provider": "sql",
+  "resource_pattern": "table/web-*",
+  "rule_text": "Block TRUNCATE/DROP TABLE against prod tables, extending AWS Security Hub FSBP control DynamoDB.6's deletion-protection intent to relational tables.",
+  "scope": {
+    "database": "prod"
+  },
   "source_ref": "src-0424",
   "source_timestamp": "2026-02-23T00:00:00+00:00",
   "time_window": null

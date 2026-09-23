@@ -1,15 +1,16 @@
 {
   "actions": [
-    "replace",
-    "update"
+    "delete"
   ],
-  "constraint_class": "scaling",
-  "effect": "ESCALATE",
-  "principal": "platform_admin",
-  "provider": "terraform",
-  "resource_pattern": "aws_autoscaling_group.*",
-  "rule_text": "Escalate terraform changes to AWS autoscaling groups; Toyota Connected's \"A Perfect DNS Storm\" postmortem and related ASG-rebalance issues in the failure-stories index show autoscaler churn causing outages.",
-  "scope": {},
+  "constraint_class": "deletion",
+  "effect": "BLOCK",
+  "principal": "sre_lead",
+  "provider": "kubernetes",
+  "resource_pattern": "namespace/billing-*",
+  "rule_text": "Block deletion of namespaces in prod; Skyscanner's outage was caused by a GitOps templating bug that deleted a namespace it should not have touched.",
+  "scope": {
+    "namespace": "kube-system"
+  },
   "source_ref": "src-0456",
   "source_timestamp": "2026-02-27T00:00:00+00:00",
   "time_window": null

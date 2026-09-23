@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "update"
   ],
   "constraint_class": "configuration",
   "effect": "ESCALATE",
   "principal": "security_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate applying deployment/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template (\"Requires containers to have memory and CPU limits set and constrains limits to be within the specified maximum values\").",
-  "scope": {},
+  "provider": "azure",
+  "resource_pattern": "web/app/*",
+  "rule_text": "Block disabling HTTPS-only access on an App Service app, per the Azure Policy built-in \"App Service apps should only be accessible over HTTPS\" definition.",
+  "scope": {
+    "resource_group": "rg-prod-westus2"
+  },
   "source_ref": "src-0256",
   "source_timestamp": "2026-02-02T00:00:00+00:00",
   "time_window": null

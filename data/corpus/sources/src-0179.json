@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "exec"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "access",
   "effect": "ESCALATE",
-  "principal": "developer",
+  "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/api-*",
-  "rule_text": "Escalate applying deployment/* missing required annotations, extending the gatekeeper-library `requiredlabels` pattern to annotations (see the sibling `requiredannotations` template in the same library).",
-  "scope": {},
+  "resource_pattern": "pod/*",
+  "rule_text": "Escalate `kubectl exec` into Pods in prod, extending the Kyverno policy library `other/block-pod-exec-by-namespace` policy's intent to every pod in the namespace.",
+  "scope": {
+    "namespace": "prod"
+  },
   "source_ref": "src-0179",
   "source_timestamp": "2026-01-23T09:00:00+00:00",
   "time_window": null

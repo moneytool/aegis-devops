@@ -1,14 +1,16 @@
 {
   "actions": [
-    "scale"
+    "update"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "access",
   "effect": "BLOCK",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Block scaling deployment/* outside the allowed replica range, per the gatekeeper-library `replicalimits` template (\"Requires that objects with the field spec.replicas specify a number of replicas within defined ranges\").",
-  "scope": {},
+  "principal": "security_lead",
+  "provider": "helm",
+  "resource_pattern": "release/*",
+  "rule_text": "Escalate a Helm release upgrade whose chart values reference an image registry outside the allow-list, extending the Kyverno policy library `best-practices/restrict-image-registries` policy to Helm releases.",
+  "scope": {
+    "namespace": "dev"
+  },
   "source_ref": "src-0473",
   "source_timestamp": "2026-03-01T03:00:00+00:00",
   "time_window": null

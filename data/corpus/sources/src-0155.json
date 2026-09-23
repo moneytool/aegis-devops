@@ -1,15 +1,16 @@
 {
   "actions": [
-    "replace",
     "update"
   ],
-  "constraint_class": "scaling",
-  "effect": "ESCALATE",
-  "principal": "sre_lead",
+  "constraint_class": "configuration",
+  "effect": "BLOCK",
+  "principal": "developer",
   "provider": "terraform",
-  "resource_pattern": "aws_autoscaling_group.*",
-  "rule_text": "Escalate terraform changes to AWS autoscaling groups; Toyota Connected's \"A Perfect DNS Storm\" postmortem and related ASG-rebalance issues in the failure-stories index show autoscaler churn causing outages.",
-  "scope": {},
+  "resource_pattern": "aws_s3_bucket.*",
+  "rule_text": "Block a terraform update that disables an S3 bucket's public-access block configuration, extending AWS Security Hub FSBP control EC2.1's \"not publicly exposed\" intent to S3 bucket ACL/policy state.",
+  "scope": {
+    "region": "us-east-1"
+  },
   "source_ref": "src-0155",
   "source_timestamp": "2026-01-20T09:00:00+00:00",
   "time_window": null

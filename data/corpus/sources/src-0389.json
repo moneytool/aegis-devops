@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "update"
+    "rewrite"
   ],
-  "constraint_class": "networking",
-  "effect": "ESCALATE",
-  "principal": "contractor",
-  "provider": "kubernetes",
-  "resource_pattern": "service/web-*",
-  "rule_text": "Escalate Service changes that alter externalTrafficPolicy; the DevOps Hof postmortem on load-balancer configuration during node draining traces a total ingress outage to this setting.",
-  "scope": {},
+  "constraint_class": "deletion",
+  "effect": "BLOCK",
+  "principal": "security_lead",
+  "provider": "git",
+  "resource_pattern": "history/*",
+  "rule_text": "Block force-pushes that rewrite published history on infra repos, extending the Kyverno policy library `other/verify-manifest-integrity` policy's supply-chain-integrity intent to the git history that produces the manifests.",
+  "scope": {
+    "repo": "org/platform"
+  },
   "source_ref": "src-0389",
   "source_timestamp": "2026-02-18T15:00:00+00:00",
   "time_window": null

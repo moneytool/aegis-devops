@@ -1,16 +1,25 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "delete"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "ci_bot",
+  "constraint_class": "deployment",
+  "effect": "BLOCK",
+  "principal": "developer",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate applying deployment/* missing required labels, per the gatekeeper-library `requiredlabels` template (\"Requires resources to contain specified labels, with values matching provided regular expressions\").",
-  "scope": {},
+  "resource_pattern": "deployment/gateway-*",
+  "rule_text": "Block deployment restarts and deletions in prod during business hours; Monzo's KubeCon talk on the \"Anatomy of a Production Kubernetes Outage\" traces a ledger/platform outage to a risky in-hours API change.",
+  "scope": {
+    "namespace": "staging"
+  },
   "source_ref": "src-0358",
   "source_timestamp": "2026-02-14T18:00:00+00:00",
-  "time_window": null
+  "time_window": {
+    "days": [
+      "Sat",
+      "Sun"
+    ],
+    "end": "23:59",
+    "start": "00:00",
+    "tz": "UTC"
+  }
 }

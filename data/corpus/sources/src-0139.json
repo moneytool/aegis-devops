@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
     "update"
   ],
-  "constraint_class": "networking",
+  "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "sre_oncall",
-  "provider": "kubernetes",
-  "resource_pattern": "service/*",
-  "rule_text": "Escalate Service changes that alter externalTrafficPolicy; the DevOps Hof postmortem on load-balancer configuration during node draining traces a total ingress outage to this setting.",
-  "scope": {},
+  "principal": "contractor",
+  "provider": "azure",
+  "resource_pattern": "storage/account/*",
+  "rule_text": "Block disabling \"secure transfer required\" / HTTPS-only traffic on a storage account, per the Azure Policy built-in \"Storage accounts should have secure transfer enabled\" definition (App Service / Storage category).",
+  "scope": {
+    "resource_group": "rg-prod-westus2"
+  },
   "source_ref": "src-0139",
   "source_timestamp": "2026-01-18T09:00:00+00:00",
   "time_window": null

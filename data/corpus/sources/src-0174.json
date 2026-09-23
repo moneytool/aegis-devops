@@ -1,15 +1,28 @@
 {
   "actions": [
-    "scale"
+    "run"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "deployment",
   "effect": "ESCALATE",
   "principal": "sre_oncall",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/coredns",
-  "rule_text": "Escalate any scale-down of the CoreDNS deployment; Preply's DNS postmortem traced a partial production outage to CoreDNS-autoscaler behavior under conntrack pressure.",
-  "scope": {},
+  "provider": "github",
+  "resource_pattern": "workflow/*",
+  "rule_text": "Escalate running a deploy workflow during business hours, extending the Kyverno policy library `other/time-bound-policy` policy's window-gating intent to GitHub Actions workflow dispatches.",
+  "scope": {
+    "repo": "org/infra"
+  },
   "source_ref": "src-0174",
   "source_timestamp": "2026-01-22T18:00:00+00:00",
-  "time_window": null
+  "time_window": {
+    "days": [
+      "Mon",
+      "Tue",
+      "Wed",
+      "Thu",
+      "Fri"
+    ],
+    "end": "17:00",
+    "start": "09:00",
+    "tz": "America/New_York"
+  }
 }

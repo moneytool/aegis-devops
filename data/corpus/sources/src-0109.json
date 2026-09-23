@@ -1,15 +1,17 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "label",
+    "patch"
   ],
-  "constraint_class": "deployment",
-  "effect": "ESCALATE",
-  "principal": "platform_admin",
+  "constraint_class": "configuration",
+  "effect": "BLOCK",
+  "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "job/*",
-  "rule_text": "Escalate Jobs created without a bounded RestartPolicy; Universe's incident report describes a production search/reporting outage caused by a Job that kept consuming node resources on restart.",
-  "scope": {},
+  "resource_pattern": "node/*",
+  "rule_text": "Escalate node label/taint changes; Grafana Labs' postmortem on Pod Priorities describes a production outage caused by cascading Pod evictions tied to scheduling metadata.",
+  "scope": {
+    "namespace": "dev"
+  },
   "source_ref": "src-0109",
   "source_timestamp": "2026-01-14T15:00:00+00:00",
   "time_window": null

@@ -1,0 +1,230 @@
+{
+  "meta": {
+    "n_constraints": 500,
+    "n_distinct_patterns": 145,
+    "n_distinct_rule_text": 118,
+    "n_distinct_structural": 323,
+    "n_intents": 120,
+    "oracle": "reference",
+    "oracle_path": "scripts/reference_oracle.py",
+    "poison_candidates": 30,
+    "poison_candidates_by_kind": {
+      "forged": 8,
+      "tampered": 12,
+      "unauthorized": 10
+    },
+    "split": "holdout",
+    "verifiers_requested": [
+      "aegis",
+      "llm-heuristic",
+      "opa",
+      "opa-signed"
+    ]
+  },
+  "verifiers": {
+    "aegis": {
+      "metrics": {
+        "confusion_matrix": {
+          "ALLOW": {
+            "ALLOW": 30,
+            "BLOCK": 0,
+            "ESCALATE": 30
+          },
+          "BLOCK": {
+            "ALLOW": 0,
+            "BLOCK": 43,
+            "ESCALATE": 0
+          },
+          "ESCALATE": {
+            "ALLOW": 0,
+            "BLOCK": 0,
+            "ESCALATE": 17
+          }
+        },
+        "coverage": 0.75,
+        "exact_match_rate": 0.75,
+        "f1": 0.8,
+        "fn": 0,
+        "fp": 30,
+        "latency_p50_ms": 0.08214599802158773,
+        "latency_p95_ms": 0.2679826946405228,
+        "latency_p99_ms": 0.31150654263910843,
+        "n": 120,
+        "over_block_rate": 0.5,
+        "pe_forged": 1.0,
+        "pe_tampered": 1.0,
+        "pe_unauthorized": 1.0,
+        "poison_candidate_count": 30,
+        "poison_candidates_forged": 8,
+        "poison_candidates_tampered": 12,
+        "poison_candidates_unauthorized": 10,
+        "poison_susceptibility": 1.0,
+        "precision": 0.6666666666666666,
+        "ps_forged": 0.0,
+        "ps_tampered": 0.0,
+        "ps_unauthorized": 0.0,
+        "recall": 1.0,
+        "strict_precision": 0.6666666666666666,
+        "tn": 30,
+        "tp": 60
+      },
+      "n_constraints_fed": 500,
+      "skipped": false,
+      "stub": false,
+      "wall_ms": 14.764500010642223
+    },
+    "llm-heuristic": {
+      "metrics": {
+        "confusion_matrix": {
+          "ALLOW": {
+            "ALLOW": 30,
+            "BLOCK": 20,
+            "ESCALATE": 10
+          },
+          "BLOCK": {
+            "ALLOW": 0,
+            "BLOCK": 43,
+            "ESCALATE": 0
+          },
+          "ESCALATE": {
+            "ALLOW": 0,
+            "BLOCK": 14,
+            "ESCALATE": 3
+          }
+        },
+        "coverage": 0.75,
+        "exact_match_rate": 0.6333333333333333,
+        "f1": 0.8,
+        "fn": 0,
+        "fp": 30,
+        "latency_p50_ms": 0.031728995963931084,
+        "latency_p95_ms": 0.09436699983780271,
+        "latency_p99_ms": 0.11627771469647999,
+        "n": 120,
+        "over_block_rate": 0.5,
+        "pe_forged": 0.25,
+        "pe_tampered": 0.16666666666666666,
+        "pe_unauthorized": 0.6,
+        "poison_candidate_count": 30,
+        "poison_candidates_forged": 8,
+        "poison_candidates_tampered": 12,
+        "poison_candidates_unauthorized": 10,
+        "poison_susceptibility": 1.0,
+        "precision": 0.6666666666666666,
+        "ps_forged": 0.75,
+        "ps_tampered": 0.8333333333333334,
+        "ps_unauthorized": 0.4,
+        "recall": 1.0,
+        "strict_precision": 0.5111111111111111,
+        "tn": 30,
+        "tp": 60
+      },
+      "n_constraints_fed": 500,
+      "skipped": false,
+      "stub": false,
+      "wall_ms": 6.724833001499064
+    },
+    "opa": {
+      "metrics": {
+        "confusion_matrix": {
+          "ALLOW": {
+            "ALLOW": 30,
+            "BLOCK": 13,
+            "ESCALATE": 17
+          },
+          "BLOCK": {
+            "ALLOW": 0,
+            "BLOCK": 43,
+            "ESCALATE": 0
+          },
+          "ESCALATE": {
+            "ALLOW": 0,
+            "BLOCK": 7,
+            "ESCALATE": 10
+          }
+        },
+        "coverage": 0.75,
+        "exact_match_rate": 0.6916666666666667,
+        "f1": 0.8,
+        "fn": 0,
+        "fp": 30,
+        "latency_p50_ms": 28.141353999671992,
+        "latency_p95_ms": 29.950220500177238,
+        "latency_p99_ms": 34.757741255161825,
+        "n": 120,
+        "over_block_rate": 0.5,
+        "pe_forged": 0.625,
+        "pe_tampered": 0.25,
+        "pe_unauthorized": 0.9,
+        "poison_candidate_count": 30,
+        "poison_candidates_forged": 8,
+        "poison_candidates_tampered": 12,
+        "poison_candidates_unauthorized": 10,
+        "poison_susceptibility": 1.0,
+        "precision": 0.6666666666666666,
+        "ps_forged": 0.375,
+        "ps_tampered": 0.75,
+        "ps_unauthorized": 0.1,
+        "recall": 1.0,
+        "strict_precision": 0.5888888888888889,
+        "tn": 30,
+        "tp": 60
+      },
+      "n_constraints_fed": 500,
+      "skipped": false,
+      "stub": false,
+      "wall_ms": 3409.186332995887
+    },
+    "opa-signed": {
+      "metrics": {
+        "confusion_matrix": {
+          "ALLOW": {
+            "ALLOW": 45,
+            "BLOCK": 4,
+            "ESCALATE": 11
+          },
+          "BLOCK": {
+            "ALLOW": 0,
+            "BLOCK": 43,
+            "ESCALATE": 0
+          },
+          "ESCALATE": {
+            "ALLOW": 0,
+            "BLOCK": 2,
+            "ESCALATE": 15
+          }
+        },
+        "coverage": 0.75,
+        "exact_match_rate": 0.8583333333333333,
+        "f1": 0.888888888888889,
+        "fn": 0,
+        "fp": 15,
+        "latency_p50_ms": 23.725791499600746,
+        "latency_p95_ms": 25.076353543408914,
+        "latency_p99_ms": 65.80937000690031,
+        "n": 120,
+        "over_block_rate": 0.25,
+        "pe_forged": 0.125,
+        "pe_tampered": 0.08333333333333333,
+        "pe_unauthorized": 0.9,
+        "poison_candidate_count": 30,
+        "poison_candidates_forged": 8,
+        "poison_candidates_tampered": 12,
+        "poison_candidates_unauthorized": 10,
+        "poison_susceptibility": 0.5,
+        "precision": 0.8,
+        "ps_forged": 0.375,
+        "ps_tampered": 0.0,
+        "ps_unauthorized": 0.1,
+        "recall": 1.0,
+        "strict_precision": 0.7733333333333333,
+        "tn": 45,
+        "tp": 60
+      },
+      "n_constraints_fed": 375,
+      "skipped": false,
+      "stub": false,
+      "wall_ms": 3019.800916008535
+    }
+  }
+}

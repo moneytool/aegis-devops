@@ -1,16 +1,15 @@
 {
   "actions": [
-    "apply"
+    "apply",
+    "create"
   ],
-  "constraint_class": "networking",
+  "constraint_class": "access",
   "effect": "BLOCK",
   "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "service/ingest-*",
-  "rule_text": "Block applying service/* of type LoadBalancer in us-east-1, per the gatekeeper-library `block-loadbalancer-services` template.",
-  "scope": {
-    "region": "us-west-2"
-  },
+  "resource_pattern": "deployment/*",
+  "rule_text": "Block applying deployment/* whose image is outside the allowed registry prefixes, per the gatekeeper-library `allowedrepos` template (\"Requires container images to begin with a string from the specified list\").",
+  "scope": {},
   "source_ref": "src-0152",
   "source_timestamp": "2026-01-20T00:00:00+00:00",
   "time_window": null

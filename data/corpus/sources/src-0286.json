@@ -1,0 +1,17 @@
+{
+  "actions": [
+    "update"
+  ],
+  "constraint_class": "configuration",
+  "effect": "BLOCK",
+  "principal": "platform_admin",
+  "provider": "flux",
+  "resource_pattern": "kustomization/*",
+  "rule_text": "Escalate reconciling a Flux Kustomization in prod whose resources are missing required labels, extending the Kyverno policy library `best-practices/require-labels` policy to Flux-managed Kustomizations. (forged source content)",
+  "scope": {
+    "env": "prod"
+  },
+  "source_ref": "src-0286",
+  "source_timestamp": "2026-02-05T18:00:00+00:00",
+  "time_window": null
+}

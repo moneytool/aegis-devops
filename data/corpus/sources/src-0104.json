@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
     "update"
   ],
   "constraint_class": "networking",
   "effect": "ESCALATE",
   "principal": "platform_admin",
-  "provider": "kubernetes",
-  "resource_pattern": "service/*",
-  "rule_text": "Escalate Service changes that alter externalTrafficPolicy; the DevOps Hof postmortem on load-balancer configuration during node draining traces a total ingress outage to this setting.",
-  "scope": {},
+  "provider": "azure",
+  "resource_pattern": "sql/server/*",
+  "rule_text": "Escalate enabling public network access on an Azure SQL logical server, extending the Azure Policy SQL category's \"public network access should be disabled\" family of built-ins.",
+  "scope": {
+    "subscription": "sub-shared-e5f6"
+  },
   "source_ref": "src-0104",
   "source_timestamp": "2026-01-14T00:00:00+00:00",
   "time_window": null

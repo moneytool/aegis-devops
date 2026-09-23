@@ -1,14 +1,13 @@
 {
   "actions": [
-    "delete",
-    "patch"
+    "delete"
   ],
   "constraint_class": "deletion",
-  "effect": "ESCALATE",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "node/*",
-  "rule_text": "Escalate node-level changes during autoscaler activity; Nordstrom's \"101 Ways to Crash Your Cluster\" talk lists eviction thresholds and cluster-autoscaler interaction as a cause of full production cluster outages.",
+  "effect": "BLOCK",
+  "principal": "platform_admin",
+  "provider": "argocd",
+  "resource_pattern": "app/*",
+  "rule_text": "Block deleting an ArgoCD Application, extending AWS Security Hub FSBP control DynamoDB.6's deletion-protection intent to ArgoCD-managed applications.",
   "scope": {},
   "source_ref": "src-0161",
   "source_timestamp": "2026-01-21T03:00:00+00:00",

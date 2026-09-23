@@ -1,15 +1,15 @@
 {
   "actions": [
-    "scale"
+    "apply"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "ci_bot",
+  "principal": "contractor",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/ingest-*",
-  "rule_text": "Escalate scaling deployment/* outside the allowed replica range in the prod-us-east-1 cluster, per the gatekeeper-library `replicalimits` template.",
+  "resource_pattern": "deployment/*",
+  "rule_text": "Escalate deployments mounting hostPath volumes, per the Kyverno policy library `pod-security/baseline/disallow-host-path` policy.",
   "scope": {
-    "cluster": "staging-us-west-2"
+    "namespace": "dev"
   },
   "source_ref": "src-0202",
   "source_timestamp": "2026-01-26T06:00:00+00:00",

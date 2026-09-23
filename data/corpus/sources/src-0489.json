@@ -1,14 +1,16 @@
 {
   "actions": [
-    "delete"
+    "update"
   ],
-  "constraint_class": "deletion",
+  "constraint_class": "access",
   "effect": "ESCALATE",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "node/auth-*",
-  "rule_text": "Escalate node deletion or draining outside of a controlled runbook; loveholidays documented total ingress outages caused by mishandled load balancer behavior while draining nodes.",
-  "scope": {},
+  "principal": "security_lead",
+  "provider": "azure",
+  "resource_pattern": "aks/cluster/api-*",
+  "rule_text": "Escalate disabling Azure AD integration or enabling local accounts on an AKS cluster, extending the Azure Policy Kubernetes category's identity built-ins.",
+  "scope": {
+    "resource_group": "rg-staging-eastus"
+  },
   "source_ref": "src-0489",
   "source_timestamp": "2026-03-03T03:00:00+00:00",
   "time_window": null

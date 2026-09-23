@@ -1,13 +1,13 @@
 {
   "actions": [
-    "create"
+    "apply"
   ],
-  "constraint_class": "networking",
+  "constraint_class": "configuration",
   "effect": "BLOCK",
-  "principal": "platform_admin",
+  "principal": "developer",
   "provider": "kubernetes",
-  "resource_pattern": "service/billing-*",
-  "rule_text": "Block creating service/* of type NodePort, per the gatekeeper-library `block-nodeport-services` template (\"Disallows all Services with type NodePort\"). (forged source content)",
+  "resource_pattern": "deployment/cache-*",
+  "rule_text": "Escalate deployments without resource requests/limits set; Blue Matador's Kubernetes Node OOM postmortem traces Pod kills to containers with no resource requests or limits. (forged source content)",
   "scope": {},
   "source_ref": "src-0142",
   "source_timestamp": "2026-01-18T18:00:00+00:00",

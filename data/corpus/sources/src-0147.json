@@ -1,15 +1,15 @@
 {
   "actions": [
-    "apply"
+    "set-image"
   ],
   "constraint_class": "configuration",
-  "effect": "BLOCK",
-  "principal": "security_lead",
+  "effect": "ESCALATE",
+  "principal": "developer",
   "provider": "kubernetes",
-  "resource_pattern": "statefulset/*",
-  "rule_text": "Block applying prod statefulset/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template.",
+  "resource_pattern": "deployment/*",
+  "rule_text": "Escalate set-image on prod deployment/* to a disallowed image tag, per the gatekeeper-library `disallowedtags` template.",
   "scope": {
-    "namespace": "kube-system"
+    "namespace": "staging"
   },
   "source_ref": "src-0147",
   "source_timestamp": "2026-01-19T09:00:00+00:00",

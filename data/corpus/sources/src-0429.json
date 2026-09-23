@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "update"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "networking",
   "effect": "ESCALATE",
-  "principal": "platform_admin",
-  "provider": "kubernetes",
-  "resource_pattern": "pod/auth-*",
-  "rule_text": "Escalate Pods scheduled without anti-affinity rules; Moonlight's postmortem describes all Pods landing on the same failing host and causing a 100% traffic-loss outage.",
-  "scope": {},
+  "principal": "sre_lead",
+  "provider": "gcp",
+  "resource_pattern": "sql/instance/*",
+  "rule_text": "Escalate configuring a public IP or authorized network on a Cloud SQL instance, per the GCP organization policy constraints `sql.managed.restrictPublicIp` and `sql.managed.restrictAuthorizedNetworks`.",
+  "scope": {
+    "region": "us-west-2"
+  },
   "source_ref": "src-0429",
   "source_timestamp": "2026-02-23T15:00:00+00:00",
   "time_window": null

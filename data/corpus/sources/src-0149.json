@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "update"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "access",
   "effect": "ESCALATE",
-  "principal": "developer",
-  "provider": "kubernetes",
-  "resource_pattern": "pod/*",
-  "rule_text": "Escalate Pods scheduled without anti-affinity rules; Moonlight's postmortem describes all Pods landing on the same failing host and causing a 100% traffic-loss outage.",
-  "scope": {},
+  "principal": "security_lead",
+  "provider": "helm",
+  "resource_pattern": "release/*",
+  "rule_text": "Escalate a Helm release upgrade whose chart values reference an image registry outside the allow-list, extending the Kyverno policy library `best-practices/restrict-image-registries` policy to Helm releases.",
+  "scope": {
+    "namespace": "dev"
+  },
   "source_ref": "src-0149",
   "source_timestamp": "2026-01-19T15:00:00+00:00",
   "time_window": null

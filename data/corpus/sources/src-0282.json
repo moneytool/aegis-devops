@@ -1,15 +1,15 @@
 {
   "actions": [
-    "delete"
+    "update"
   ],
-  "constraint_class": "deletion",
-  "effect": "BLOCK",
+  "constraint_class": "access",
+  "effect": "ESCALATE",
   "principal": "developer",
-  "provider": "kubernetes",
-  "resource_pattern": "statefulset/*",
-  "rule_text": "Block deletion of prod StatefulSets; Gravitational's postmortem on running PostgreSQL on Kubernetes describes data loss from mishandled streaming replication during a disruptive operation.",
+  "provider": "azure",
+  "resource_pattern": "aks/cluster/billing-*",
+  "rule_text": "Escalate disabling Azure AD integration or enabling local accounts on an AKS cluster, extending the Azure Policy Kubernetes category's identity built-ins.",
   "scope": {
-    "namespace": "prod"
+    "resource_group": "rg-staging-eastus"
   },
   "source_ref": "src-0282",
   "source_timestamp": "2026-02-05T06:00:00+00:00",

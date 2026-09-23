@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "update"
   ],
   "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "developer",
-  "provider": "kubernetes",
-  "resource_pattern": "pod/*",
-  "rule_text": "Escalate Pods scheduled without anti-affinity rules; Moonlight's postmortem describes all Pods landing on the same failing host and causing a 100% traffic-loss outage.",
-  "scope": {},
+  "principal": "platform_admin",
+  "provider": "sql",
+  "resource_pattern": "table/*",
+  "rule_text": "Escalate unbounded UPDATE statements (no WHERE clause) against prod tables, extending the Kyverno policy library `other/restrict-secrets-by-name` policy's blast-radius-limiting intent to bulk row mutation.",
+  "scope": {
+    "database": "prod"
+  },
   "source_ref": "src-0115",
   "source_timestamp": "2026-01-15T09:00:00+00:00",
   "time_window": null

@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "update"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "platform_admin",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/gateway-*",
-  "rule_text": "Escalate applying deployment/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template (\"Requires containers to have memory and CPU limits set and constrains limits to be within the specified maximum values\").",
-  "scope": {},
+  "constraint_class": "networking",
+  "effect": "BLOCK",
+  "principal": "security_lead",
+  "provider": "azure",
+  "resource_pattern": "sql/server/cache-*",
+  "rule_text": "Escalate enabling public network access on an Azure SQL logical server, extending the Azure Policy SQL category's \"public network access should be disabled\" family of built-ins.",
+  "scope": {
+    "subscription": "sub-prod-a1b2"
+  },
   "source_ref": "src-0134",
   "source_timestamp": "2026-01-17T18:00:00+00:00",
   "time_window": null

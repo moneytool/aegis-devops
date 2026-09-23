@@ -1,15 +1,16 @@
 {
   "actions": [
-    "scale"
+    "delete",
+    "replace"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "deletion",
   "effect": "ESCALATE",
   "principal": "contractor",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate deployment scaling changes in prod; loveholidays' postmortem on GKE running out of IP addresses describes stuck deployments and blocked autoscaling of both pods and nodes.",
+  "provider": "terraform",
+  "resource_pattern": "aws_instance.*",
+  "rule_text": "Escalate destructive terraform changes to EC2 instances in us-east-1; Veracode's \"Outages? Downtime?\" postmortem describes a QA/dev cluster outage during an AWS IAM/region migration done with Terraform.",
   "scope": {
-    "namespace": "prod"
+    "region": "eu-west-1"
   },
   "source_ref": "src-0270",
   "source_timestamp": "2026-02-03T18:00:00+00:00",

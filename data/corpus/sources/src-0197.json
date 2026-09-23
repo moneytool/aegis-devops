@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "update"
+    "delete"
   ],
-  "constraint_class": "networking",
-  "effect": "ESCALATE",
+  "constraint_class": "deletion",
+  "effect": "BLOCK",
   "principal": "platform_admin",
-  "provider": "kubernetes",
-  "resource_pattern": "service/*",
-  "rule_text": "Escalate Service changes that alter externalTrafficPolicy; the DevOps Hof postmortem on load-balancer configuration during node draining traces a total ingress outage to this setting.",
-  "scope": {},
+  "provider": "pulumi",
+  "resource_pattern": "stack/billing-*",
+  "rule_text": "Block `pulumi destroy` against the prod stack, extending AWS Security Hub FSBP control DynamoDB.6's deletion-protection intent to whole Pulumi stacks.",
+  "scope": {
+    "stack": "prod"
+  },
   "source_ref": "src-0197",
   "source_timestamp": "2026-01-25T15:00:00+00:00",
   "time_window": null

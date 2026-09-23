@@ -2,13 +2,15 @@
   "actions": [
     "create"
   ],
-  "constraint_class": "networking",
-  "effect": "BLOCK",
-  "principal": "sre_lead",
+  "constraint_class": "access",
+  "effect": "ESCALATE",
+  "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "service/*",
-  "rule_text": "Block creating service/* of type NodePort, per the gatekeeper-library `block-nodeport-services` template (\"Disallows all Services with type NodePort\").",
-  "scope": {},
+  "resource_pattern": "pod/*",
+  "rule_text": "Escalate creating pod/* whose image is outside the allowed registry prefixes, per the gatekeeper-library `allowedrepos` template.",
+  "scope": {
+    "namespace": "staging"
+  },
   "source_ref": "src-0077",
   "source_timestamp": "2026-01-10T15:00:00+00:00",
   "time_window": null

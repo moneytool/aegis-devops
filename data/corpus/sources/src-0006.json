@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "update"
   ],
-  "constraint_class": "deployment",
-  "effect": "ESCALATE",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "job/*",
-  "rule_text": "Escalate Jobs created without a bounded RestartPolicy; Universe's incident report describes a production search/reporting outage caused by a Job that kept consuming node resources on restart.",
-  "scope": {},
+  "constraint_class": "access",
+  "effect": "BLOCK",
+  "principal": "security_lead",
+  "provider": "gcp",
+  "resource_pattern": "compute/instance/api-*",
+  "rule_text": "Block re-enabling serial port access on a Compute Engine VM, per the GCP organization policy constraint `compute.disableSerialPortAccess`.",
+  "scope": {
+    "region": "us-west-2"
+  },
   "source_ref": "src-0006",
   "source_timestamp": "2026-01-01T18:00:00+00:00",
   "time_window": null

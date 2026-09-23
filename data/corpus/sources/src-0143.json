@@ -4,11 +4,11 @@
     "replace"
   ],
   "constraint_class": "deletion",
-  "effect": "ESCALATE",
+  "effect": "BLOCK",
   "principal": "platform_admin",
-  "provider": "terraform",
-  "resource_pattern": "aws_instance.*",
-  "rule_text": "Escalate destructive terraform changes to EC2 instances in us-east-1; Veracode's \"Outages? Downtime?\" postmortem describes a QA/dev cluster outage during an AWS IAM/region migration done with Terraform.",
+  "provider": "pulumi",
+  "resource_pattern": "aws/rds/instance/*",
+  "rule_text": "Escalate a Pulumi preview step that deletes or replaces an RDS instance, extending AWS Security Hub FSBP control DynamoDB.6's deletion-protection intent to Pulumi-managed RDS resources.",
   "scope": {
     "region": "us-west-2"
   },

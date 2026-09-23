@@ -1,13 +1,14 @@
 {
   "actions": [
-    "scale"
+    "delete",
+    "update"
   ],
-  "constraint_class": "scaling",
-  "effect": "ESCALATE",
-  "principal": "security_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/coredns",
-  "rule_text": "Escalate any scale-down of the CoreDNS deployment; Preply's DNS postmortem traced a partial production outage to CoreDNS-autoscaler behavior under conntrack pressure.",
+  "constraint_class": "deletion",
+  "effect": "BLOCK",
+  "principal": "contractor",
+  "provider": "aws",
+  "resource_pattern": "dynamodb/table/worker-*",
+  "rule_text": "Block deleting a DynamoDB table or disabling its deletion protection, per AWS Security Hub FSBP control DynamoDB.6 (\"DynamoDB tables should have deletion protection enabled\").",
   "scope": {},
   "source_ref": "src-0019",
   "source_timestamp": "2026-01-03T09:00:00+00:00",

@@ -1,14 +1,13 @@
 {
   "actions": [
-    "apply",
     "create"
   ],
-  "constraint_class": "deployment",
+  "constraint_class": "networking",
   "effect": "BLOCK",
-  "principal": "platform_admin",
+  "principal": "sre_lead",
   "provider": "kubernetes",
-  "resource_pattern": "poddisruptionbudget/*",
-  "rule_text": "Block applying poddisruptionbudget/* with maxUnavailable == 0, per the gatekeeper-library `poddisruptionbudget` template (this blocks voluntary disruptions such as node draining).",
+  "resource_pattern": "service/auth-*",
+  "rule_text": "Block creating service/* of type LoadBalancer, per the gatekeeper-library `block-loadbalancer-services` template (\"Disallows all Services with type LoadBalancer\").",
   "scope": {},
   "source_ref": "src-0435",
   "source_timestamp": "2026-02-24T09:00:00+00:00",

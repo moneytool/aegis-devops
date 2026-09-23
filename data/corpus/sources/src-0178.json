@@ -1,16 +1,15 @@
 {
   "actions": [
-    "apply"
+    "create",
+    "update"
   ],
-  "constraint_class": "networking",
-  "effect": "BLOCK",
+  "constraint_class": "access",
+  "effect": "ESCALATE",
   "principal": "security_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "service/*",
-  "rule_text": "Block applying service/* of type LoadBalancer in us-east-1, per the gatekeeper-library `block-loadbalancer-services` template.",
-  "scope": {
-    "region": "eu-west-1"
-  },
+  "provider": "aws",
+  "resource_pattern": "docdb/cluster-snapshot/*",
+  "rule_text": "Escalate making a DocumentDB manual cluster snapshot public, per AWS Security Hub FSBP control DocumentDB.3.",
+  "scope": {},
   "source_ref": "src-0178",
   "source_timestamp": "2026-01-23T06:00:00+00:00",
   "time_window": null

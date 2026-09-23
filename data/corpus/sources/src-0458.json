@@ -4,13 +4,13 @@
     "update"
   ],
   "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "security_lead",
+  "effect": "BLOCK",
+  "principal": "developer",
   "provider": "kubernetes",
-  "resource_pattern": "configmap/*",
+  "resource_pattern": "configmap/cache-*",
   "rule_text": "Escalate configmap changes in prod; Pusher's \"Oh Sh*t! The Config Changed!\" talk describes a production outage triggered by an nginx ConfigMap change.",
   "scope": {
-    "namespace": "staging"
+    "namespace": "dev"
   },
   "source_ref": "src-0458",
   "source_timestamp": "2026-02-27T06:00:00+00:00",

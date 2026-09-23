@@ -1,15 +1,15 @@
 {
   "actions": [
-    "delete"
+    "set-image"
   ],
-  "constraint_class": "deletion",
+  "constraint_class": "configuration",
   "effect": "BLOCK",
-  "principal": "sre_lead",
+  "principal": "developer",
   "provider": "kubernetes",
-  "resource_pattern": "namespace/*",
-  "rule_text": "Block deletion of namespaces in prod; Skyscanner's outage was caused by a GitOps templating bug that deleted a namespace it should not have touched.",
+  "resource_pattern": "deployment/*",
+  "rule_text": "Block set-image calls that use the `:latest` tag, per the Kyverno policy library `best-practices/disallow-latest-tag` policy.",
   "scope": {
-    "namespace": "kube-system"
+    "namespace": "staging"
   },
   "source_ref": "src-0452",
   "source_timestamp": "2026-02-26T12:00:00+00:00",

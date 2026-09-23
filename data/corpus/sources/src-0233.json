@@ -1,17 +1,14 @@
 {
   "actions": [
-    "delete",
-    "replace"
+    "create"
   ],
-  "constraint_class": "deletion",
-  "effect": "ESCALATE",
+  "constraint_class": "access",
+  "effect": "BLOCK",
   "principal": "platform_admin",
-  "provider": "terraform",
-  "resource_pattern": "aws_instance.*",
-  "rule_text": "Escalate destructive terraform changes to EC2 instances in us-east-1; Veracode's \"Outages? Downtime?\" postmortem describes a QA/dev cluster outage during an AWS IAM/region migration done with Terraform.",
-  "scope": {
-    "region": "eu-west-1"
-  },
+  "provider": "gcp",
+  "resource_pattern": "iam/service-account/auth-*",
+  "rule_text": "Block creating a new service account key, per the GCP organization policy constraint `iam.managed.disableServiceAccountKeyCreation`.",
+  "scope": {},
   "source_ref": "src-0233",
   "source_timestamp": "2026-01-30T03:00:00+00:00",
   "time_window": null

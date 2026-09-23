@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "set-image"
   ],
   "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "developer",
+  "effect": "BLOCK",
+  "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "pod/*",
-  "rule_text": "Escalate creating pod/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template.",
-  "scope": {},
+  "resource_pattern": "deployment/*",
+  "rule_text": "Block set-image calls that use the `:latest` tag, per the Kyverno policy library `best-practices/disallow-latest-tag` policy.",
+  "scope": {
+    "namespace": "dev"
+  },
   "source_ref": "src-0430",
   "source_timestamp": "2026-02-23T18:00:00+00:00",
   "time_window": null

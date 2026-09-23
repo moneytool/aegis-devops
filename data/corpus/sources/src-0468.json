@@ -1,14 +1,13 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "delete"
   ],
-  "constraint_class": "deployment",
+  "constraint_class": "deletion",
   "effect": "BLOCK",
-  "principal": "developer",
-  "provider": "kubernetes",
-  "resource_pattern": "poddisruptionbudget/*",
-  "rule_text": "Block applying poddisruptionbudget/* with maxUnavailable == 0, per the gatekeeper-library `poddisruptionbudget` template (this blocks voluntary disruptions such as node draining).",
+  "principal": "sre_oncall",
+  "provider": "flux",
+  "resource_pattern": "helmrelease/*",
+  "rule_text": "Block deleting a Flux HelmRelease, extending AWS Security Hub FSBP control DynamoDB.6's deletion-protection intent to Flux-managed HelmReleases.",
   "scope": {},
   "source_ref": "src-0468",
   "source_timestamp": "2026-02-28T12:00:00+00:00",

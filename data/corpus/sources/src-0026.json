@@ -1,14 +1,13 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "apply"
   ],
-  "constraint_class": "access",
-  "effect": "BLOCK",
+  "constraint_class": "configuration",
+  "effect": "ESCALATE",
   "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Block applying deployment/* whose image is outside the allowed registry prefixes, per the gatekeeper-library `allowedrepos` template (\"Requires container images to begin with a string from the specified list\").",
+  "resource_pattern": "service/*",
+  "rule_text": "Escalate creating service/* missing required labels, per the gatekeeper-library `requiredlabels` template.",
   "scope": {},
   "source_ref": "src-0026",
   "source_timestamp": "2026-01-04T06:00:00+00:00",

@@ -1,0 +1,15 @@
+{
+  "actions": [
+    "create"
+  ],
+  "constraint_class": "configuration",
+  "effect": "ESCALATE",
+  "principal": "developer",
+  "provider": "kubernetes",
+  "resource_pattern": "namespace/*",
+  "rule_text": "Block creating namespace/* missing required labels, per the gatekeeper-library `requiredlabels` template. (forged source content)",
+  "scope": {},
+  "source_ref": "src-0335",
+  "source_timestamp": "2026-02-11T21:00:00+00:00",
+  "time_window": null
+}

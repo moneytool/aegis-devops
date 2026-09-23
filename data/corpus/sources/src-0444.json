@@ -1,16 +1,28 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "run"
   ],
-  "constraint_class": "access",
-  "effect": "BLOCK",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Block applying deployment/* whose image is outside the allowed registry prefixes, per the gatekeeper-library `allowedrepos` template (\"Requires container images to begin with a string from the specified list\").",
-  "scope": {},
+  "constraint_class": "deployment",
+  "effect": "ESCALATE",
+  "principal": "security_lead",
+  "provider": "github",
+  "resource_pattern": "workflow/*",
+  "rule_text": "Escalate running a deploy workflow during business hours, extending the Kyverno policy library `other/time-bound-policy` policy's window-gating intent to GitHub Actions workflow dispatches.",
+  "scope": {
+    "repo": "org/platform"
+  },
   "source_ref": "src-0444",
   "source_timestamp": "2026-02-25T12:00:00+00:00",
-  "time_window": null
+  "time_window": {
+    "days": [
+      "Mon",
+      "Tue",
+      "Wed",
+      "Thu",
+      "Fri"
+    ],
+    "end": "17:00",
+    "start": "09:00",
+    "tz": "America/New_York"
+  }
 }

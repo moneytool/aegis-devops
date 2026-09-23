@@ -1,17 +1,28 @@
 {
   "actions": [
-    "scale"
+    "run"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "deployment",
   "effect": "ESCALATE",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/billing-*",
-  "rule_text": "Escalate scaling prod deployment/* below the minimum allowed replica count, per the gatekeeper-library `replicalimits` template.",
+  "principal": "sre_oncall",
+  "provider": "github",
+  "resource_pattern": "workflow/gateway-*",
+  "rule_text": "Escalate running a deploy workflow during business hours, extending the Kyverno policy library `other/time-bound-policy` policy's window-gating intent to GitHub Actions workflow dispatches.",
   "scope": {
-    "namespace": "prod"
+    "repo": "org/platform"
   },
   "source_ref": "src-0496",
   "source_timestamp": "2026-03-04T00:00:00+00:00",
-  "time_window": null
+  "time_window": {
+    "days": [
+      "Mon",
+      "Tue",
+      "Wed",
+      "Thu",
+      "Fri"
+    ],
+    "end": "17:00",
+    "start": "09:00",
+    "tz": "America/New_York"
+  }
 }

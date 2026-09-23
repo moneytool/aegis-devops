@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "apply"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "security_lead",
+  "constraint_class": "deployment",
+  "effect": "BLOCK",
+  "principal": "sre_oncall",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate applying deployment/* missing required annotations, extending the gatekeeper-library `requiredlabels` pattern to annotations (see the sibling `requiredannotations` template in the same library). (forged source content)",
-  "scope": {},
+  "resource_pattern": "poddisruptionbudget/*",
+  "rule_text": "Block applying poddisruptionbudget/* with maxUnavailable == 0, per the gatekeeper-library `poddisruptionbudget` template (this blocks voluntary disruptions such as node draining). (forged source content)",
+  "scope": {
+    "namespace": "staging"
+  },
   "source_ref": "src-0290",
   "source_timestamp": "2026-02-06T06:00:00+00:00",
   "time_window": null

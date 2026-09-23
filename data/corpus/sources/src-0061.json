@@ -1,14 +1,16 @@
 {
   "actions": [
-    "scale"
+    "set-image"
   ],
-  "constraint_class": "scaling",
-  "effect": "ESCALATE",
-  "principal": "sre_oncall",
+  "constraint_class": "configuration",
+  "effect": "BLOCK",
+  "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/coredns",
-  "rule_text": "Escalate any scale-down of the CoreDNS deployment; Preply's DNS postmortem traced a partial production outage to CoreDNS-autoscaler behavior under conntrack pressure.",
-  "scope": {},
+  "resource_pattern": "deployment/billing-*",
+  "rule_text": "Escalate set-image on prod deployment/* to a disallowed image tag, per the gatekeeper-library `disallowedtags` template.",
+  "scope": {
+    "namespace": "kube-system"
+  },
   "source_ref": "src-0061",
   "source_timestamp": "2026-01-08T15:00:00+00:00",
   "time_window": null

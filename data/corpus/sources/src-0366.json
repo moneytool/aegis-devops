@@ -1,14 +1,13 @@
 {
   "actions": [
-    "apply",
-    "update"
+    "apply"
   ],
-  "constraint_class": "networking",
+  "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "platform_admin",
+  "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "ingress/*",
-  "rule_text": "Escalate Ingress changes; Ravelin's postmortem on Kubernetes' endpoint behavior describes occasional 502 errors traced to Ingress/replication-controller interaction during shutdown.",
+  "resource_pattern": "deployment/*",
+  "rule_text": "Escalate deployments without resource requests/limits set; Blue Matador's Kubernetes Node OOM postmortem traces Pod kills to containers with no resource requests or limits.",
   "scope": {},
   "source_ref": "src-0366",
   "source_timestamp": "2026-02-15T18:00:00+00:00",

@@ -1,15 +1,17 @@
 {
   "actions": [
-    "replace",
-    "update"
+    "delete",
+    "replace"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "deletion",
   "effect": "ESCALATE",
-  "principal": "ci_bot",
+  "principal": "developer",
   "provider": "terraform",
-  "resource_pattern": "aws_autoscaling_group.*",
-  "rule_text": "Escalate terraform changes to AWS autoscaling groups; Toyota Connected's \"A Perfect DNS Storm\" postmortem and related ASG-rebalance issues in the failure-stories index show autoscaler churn causing outages.",
-  "scope": {},
+  "resource_pattern": "aws_instance.*",
+  "rule_text": "Escalate destructive terraform changes to EC2 instances in us-east-1; Veracode's \"Outages? Downtime?\" postmortem describes a QA/dev cluster outage during an AWS IAM/region migration done with Terraform.",
+  "scope": {
+    "region": "us-east-1"
+  },
   "source_ref": "src-0441",
   "source_timestamp": "2026-02-25T03:00:00+00:00",
   "time_window": null

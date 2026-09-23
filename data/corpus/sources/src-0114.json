@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
     "create"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "developer",
+  "constraint_class": "networking",
+  "effect": "BLOCK",
+  "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/auth-*",
-  "rule_text": "Escalate applying deployment/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template (\"Requires containers to have memory and CPU limits set and constrains limits to be within the specified maximum values\").",
-  "scope": {},
+  "resource_pattern": "service/*",
+  "rule_text": "Block creating service/* of type NodePort, per the gatekeeper-library `block-nodeport-services` template (\"Disallows all Services with type NodePort\").",
+  "scope": {
+    "namespace": "dev"
+  },
   "source_ref": "src-0114",
   "source_timestamp": "2026-01-15T06:00:00+00:00",
   "time_window": null

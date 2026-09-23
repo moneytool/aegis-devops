@@ -1,15 +1,17 @@
 {
   "actions": [
     "apply",
-    "create"
+    "update"
   ],
   "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "security_lead",
+  "effect": "BLOCK",
+  "principal": "developer",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/web-*",
-  "rule_text": "Escalate applying deployment/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template (\"Requires containers to have memory and CPU limits set and constrains limits to be within the specified maximum values\").",
-  "scope": {},
+  "resource_pattern": "cronjob/*",
+  "rule_text": "Escalate changes to CronJobs in kube-system; Zalando's \"Kubernetes Failure Stories\" talk lists frozen/stuck CronJobs among repeated causes of production outages.",
+  "scope": {
+    "namespace": "dev"
+  },
   "source_ref": "src-0210",
   "source_timestamp": "2026-01-27T06:00:00+00:00",
   "time_window": null

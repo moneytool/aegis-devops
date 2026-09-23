@@ -3,14 +3,14 @@
     "apply",
     "update"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "networking",
   "effect": "ESCALATE",
-  "principal": "ci_bot",
+  "principal": "developer",
   "provider": "kubernetes",
-  "resource_pattern": "cronjob/*",
-  "rule_text": "Escalate changes to CronJobs in kube-system; Zalando's \"Kubernetes Failure Stories\" talk lists frozen/stuck CronJobs among repeated causes of production outages.",
+  "resource_pattern": "ingress/*",
+  "rule_text": "Escalate Ingress changes; Ravelin's postmortem on Kubernetes' endpoint behavior describes occasional 502 errors traced to Ingress/replication-controller interaction during shutdown.",
   "scope": {
-    "namespace": "staging"
+    "namespace": "prod"
   },
   "source_ref": "src-0295",
   "source_timestamp": "2026-02-06T21:00:00+00:00",

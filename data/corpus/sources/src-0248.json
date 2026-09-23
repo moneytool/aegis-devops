@@ -1,16 +1,15 @@
 {
   "actions": [
-    "apply",
-    "update"
+    "rewrite"
   ],
-  "constraint_class": "deployment",
-  "effect": "BLOCK",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "poddisruptionbudget/*",
-  "rule_text": "Block applying prod poddisruptionbudget/* configurations that would block node draining, per the gatekeeper-library `poddisruptionbudget` template.",
+  "constraint_class": "deletion",
+  "effect": "ESCALATE",
+  "principal": "platform_admin",
+  "provider": "git",
+  "resource_pattern": "history/billing-*",
+  "rule_text": "Block force-pushes that rewrite published history on infra repos, extending the Kyverno policy library `other/verify-manifest-integrity` policy's supply-chain-integrity intent to the git history that produces the manifests.",
   "scope": {
-    "namespace": "prod"
+    "repo": "org/data-pipeline"
   },
   "source_ref": "src-0248",
   "source_timestamp": "2026-02-01T00:00:00+00:00",

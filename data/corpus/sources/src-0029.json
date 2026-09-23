@@ -1,14 +1,16 @@
 {
   "actions": [
-    "scale"
+    "create"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "access",
   "effect": "BLOCK",
   "principal": "contractor",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/cache-*",
-  "rule_text": "Block scaling deployment/* outside the allowed replica range, per the gatekeeper-library `replicalimits` template (\"Requires that objects with the field spec.replicas specify a number of replicas within defined ranges\").",
-  "scope": {},
+  "provider": "aws",
+  "resource_pattern": "iam/access-key/*",
+  "rule_text": "Block creation of IAM access keys for the root user, per AWS Security Hub FSBP control IAM.4 (\"IAM root user access key should not exist\").",
+  "scope": {
+    "region": "eu-west-1"
+  },
   "source_ref": "src-0029",
   "source_timestamp": "2026-01-04T15:00:00+00:00",
   "time_window": null

@@ -1,16 +1,15 @@
 {
   "actions": [
-    "delete",
-    "update"
+    "create"
   ],
   "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "security_lead",
+  "effect": "BLOCK",
+  "principal": "developer",
   "provider": "kubernetes",
-  "resource_pattern": "configmap/cache-*",
-  "rule_text": "Escalate configmap changes in prod; Pusher's \"Oh Sh*t! The Config Changed!\" talk describes a production outage triggered by an nginx ConfigMap change.",
+  "resource_pattern": "namespace/*",
+  "rule_text": "Block creating namespace/* missing required labels, per the gatekeeper-library `requiredlabels` template.",
   "scope": {
-    "namespace": "dev"
+    "namespace": "staging"
   },
   "source_ref": "src-0311",
   "source_timestamp": "2026-02-08T21:00:00+00:00",

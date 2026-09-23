@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
     "update"
   ],
-  "constraint_class": "networking",
+  "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "security_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "service/worker-*",
-  "rule_text": "Escalate Service changes that alter externalTrafficPolicy; the DevOps Hof postmortem on load-balancer configuration during node draining traces a total ingress outage to this setting.",
-  "scope": {},
+  "principal": "developer",
+  "provider": "gcp",
+  "resource_pattern": "container/cluster/*",
+  "rule_text": "Escalate disabling Binary Authorization on a GKE cluster, per the GCP organization policy constraint `container.managed.enableBinaryAuthorization`.",
+  "scope": {
+    "region": "us-east-1"
+  },
   "source_ref": "src-0454",
   "source_timestamp": "2026-02-26T18:00:00+00:00",
   "time_window": null

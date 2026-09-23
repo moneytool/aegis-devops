@@ -1,13 +1,13 @@
 {
   "actions": [
-    "set-image"
+    "update"
   ],
-  "constraint_class": "access",
+  "constraint_class": "deletion",
   "effect": "BLOCK",
-  "principal": "platform_admin",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Block set-image on deployment/* to an image outside the allowed registry prefixes, per the gatekeeper-library `allowedrepos` template.",
+  "principal": "sre_lead",
+  "provider": "aws",
+  "resource_pattern": "dynamodb/table/*",
+  "rule_text": "Block deleting a DynamoDB table or disabling its deletion protection, per AWS Security Hub FSBP control DynamoDB.6 (\"DynamoDB tables should have deletion protection enabled\").",
   "scope": {},
   "source_ref": "src-0477",
   "source_timestamp": "2026-03-01T15:00:00+00:00",

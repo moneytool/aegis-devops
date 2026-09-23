@@ -1,16 +1,15 @@
 {
   "actions": [
-    "apply",
-    "update"
+    "replace"
   ],
-  "constraint_class": "deployment",
+  "constraint_class": "deletion",
   "effect": "BLOCK",
-  "principal": "sre_oncall",
-  "provider": "kubernetes",
-  "resource_pattern": "poddisruptionbudget/*",
-  "rule_text": "Block applying prod poddisruptionbudget/* configurations that would block node draining, per the gatekeeper-library `poddisruptionbudget` template.",
+  "principal": "sre_lead",
+  "provider": "terraform",
+  "resource_pattern": "aws_db_instance.*",
+  "rule_text": "Escalate a terraform delete or replace of an RDS instance, per AWS Security Hub FSBP control RDS-related deletion-protection guidance (see DynamoDB.6 for the analogous DynamoDB control) applied to `aws_db_instance`.",
   "scope": {
-    "namespace": "kube-system"
+    "region": "us-east-1"
   },
   "source_ref": "src-0337",
   "source_timestamp": "2026-02-12T03:00:00+00:00",

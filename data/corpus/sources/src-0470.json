@@ -1,14 +1,13 @@
 {
   "actions": [
-    "apply",
-    "delete"
+    "update"
   ],
   "constraint_class": "configuration",
   "effect": "BLOCK",
-  "principal": "developer",
-  "provider": "kubernetes",
-  "resource_pattern": "validatingwebhookconfiguration/*",
-  "rule_text": "Block ad-hoc changes to ValidatingWebhookConfiguration objects; Jetstack's postmortem shows a misconfigured admission webhook caused a GKE cluster outage and lost nodes.",
+  "principal": "security_lead",
+  "provider": "azure",
+  "resource_pattern": "web/app/worker-*",
+  "rule_text": "Block disabling HTTPS-only access on an App Service app, per the Azure Policy built-in \"App Service apps should only be accessible over HTTPS\" definition.",
   "scope": {},
   "source_ref": "src-0470",
   "source_timestamp": "2026-02-28T18:00:00+00:00",

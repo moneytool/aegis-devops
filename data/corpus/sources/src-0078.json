@@ -1,14 +1,13 @@
 {
   "actions": [
-    "label",
-    "patch"
+    "update"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "security_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "node/*",
-  "rule_text": "Escalate node label/taint changes; Grafana Labs' postmortem on Pod Priorities describes a production outage caused by cascading Pod evictions tied to scheduling metadata.",
+  "constraint_class": "networking",
+  "effect": "BLOCK",
+  "principal": "sre_lead",
+  "provider": "aws",
+  "resource_pattern": "es/domain/*",
+  "rule_text": "Escalate configuring an Elasticsearch/OpenSearch domain to be publicly accessible, per AWS Security Hub FSBP control ES.2.",
   "scope": {},
   "source_ref": "src-0078",
   "source_timestamp": "2026-01-10T18:00:00+00:00",

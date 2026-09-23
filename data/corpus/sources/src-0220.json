@@ -1,16 +1,15 @@
 {
   "actions": [
-    "delete"
+    "apply",
+    "create"
   ],
-  "constraint_class": "deletion",
-  "effect": "BLOCK",
-  "principal": "sre_lead",
+  "constraint_class": "configuration",
+  "effect": "ESCALATE",
+  "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "namespace/*",
-  "rule_text": "Block deletion of namespaces in prod; Skyscanner's outage was caused by a GitOps templating bug that deleted a namespace it should not have touched.",
-  "scope": {
-    "namespace": "staging"
-  },
+  "resource_pattern": "pod/*",
+  "rule_text": "Escalate creating pod/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template.",
+  "scope": {},
   "source_ref": "src-0220",
   "source_timestamp": "2026-01-28T12:00:00+00:00",
   "time_window": null

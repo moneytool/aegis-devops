@@ -1,14 +1,17 @@
 {
   "actions": [
-    "set-image"
+    "delete",
+    "replace"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "deletion",
   "effect": "ESCALATE",
-  "principal": "platform_admin",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate deployments that set an unpinned or `imagePullPolicy Always` image; Datadog's \"10 Ways to Shoot Yourself in the Foot\" talk lists this among repeated causes of pending pods and slow deployments.",
-  "scope": {},
+  "principal": "sre_lead",
+  "provider": "pulumi",
+  "resource_pattern": "aws/rds/instance/*",
+  "rule_text": "Escalate a Pulumi preview step that deletes or replaces an RDS instance, extending AWS Security Hub FSBP control DynamoDB.6's deletion-protection intent to Pulumi-managed RDS resources.",
+  "scope": {
+    "region": "eu-west-1"
+  },
   "source_ref": "src-0124",
   "source_timestamp": "2026-01-16T12:00:00+00:00",
   "time_window": null

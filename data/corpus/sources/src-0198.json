@@ -1,16 +1,15 @@
 {
   "actions": [
+    "apply",
     "create"
   ],
   "constraint_class": "networking",
-  "effect": "ESCALATE",
-  "principal": "platform_admin",
+  "effect": "BLOCK",
+  "principal": "security_lead",
   "provider": "kubernetes",
   "resource_pattern": "service/*",
-  "rule_text": "Escalate creating prod service/* of type LoadBalancer, per the gatekeeper-library `block-loadbalancer-services` template.",
-  "scope": {
-    "namespace": "prod"
-  },
+  "rule_text": "Block Services that set `externalIPs`, per the Kyverno policy library `best-practices/restrict-service-external-ips` policy.",
+  "scope": {},
   "source_ref": "src-0198",
   "source_timestamp": "2026-01-25T18:00:00+00:00",
   "time_window": null

@@ -1,14 +1,13 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "update"
   ],
-  "constraint_class": "access",
+  "constraint_class": "configuration",
   "effect": "BLOCK",
   "principal": "security_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Block applying deployment/* whose image is outside the allowed registry prefixes, per the gatekeeper-library `allowedrepos` template (\"Requires container images to begin with a string from the specified list\").",
+  "provider": "gcp",
+  "resource_pattern": "storage/bucket/*",
+  "rule_text": "Block disabling public access prevention on a Cloud Storage bucket, extending the GCP organization policy constraint `storage.managed.retentionPolicySeconds` family to bucket-level access configuration.",
   "scope": {},
   "source_ref": "src-0038",
   "source_timestamp": "2026-01-05T18:00:00+00:00",

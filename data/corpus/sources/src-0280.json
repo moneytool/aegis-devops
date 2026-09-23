@@ -1,14 +1,13 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "update"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "scaling",
   "effect": "ESCALATE",
-  "principal": "platform_admin",
-  "provider": "kubernetes",
-  "resource_pattern": "service/gateway-*",
-  "rule_text": "Escalate creating service/* missing required labels, per the gatekeeper-library `requiredlabels` template.",
+  "principal": "sre_oncall",
+  "provider": "terraform",
+  "resource_pattern": "aws_autoscaling_group.*",
+  "rule_text": "Escalate terraform changes to AWS autoscaling groups; Toyota Connected's \"A Perfect DNS Storm\" postmortem and related ASG-rebalance issues in the failure-stories index show autoscaler churn causing outages.",
   "scope": {},
   "source_ref": "src-0280",
   "source_timestamp": "2026-02-05T00:00:00+00:00",

@@ -1,14 +1,16 @@
 {
   "actions": [
-    "apply"
+    "rollback"
   ],
-  "constraint_class": "deployment",
+  "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "sre_oncall",
-  "provider": "kubernetes",
-  "resource_pattern": "poddisruptionbudget/billing-*",
-  "rule_text": "Escalate applying poddisruptionbudget/* with minAvailable equal to the target resource's replica count, per the gatekeeper-library `poddisruptionbudget` template.",
-  "scope": {},
+  "principal": "platform_admin",
+  "provider": "migration",
+  "resource_pattern": "migration/*",
+  "rule_text": "Escalate an `alembic downgrade` (schema rollback) in prod, extending the Kyverno policy library `other/time-bound-policy` policy's controlled-change intent to migration rollbacks.",
+  "scope": {
+    "env": "staging"
+  },
   "source_ref": "src-0167",
   "source_timestamp": "2026-01-21T21:00:00+00:00",
   "time_window": null

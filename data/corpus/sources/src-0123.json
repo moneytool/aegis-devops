@@ -1,14 +1,16 @@
 {
   "actions": [
-    "create"
+    "set-image"
   ],
-  "constraint_class": "networking",
+  "constraint_class": "access",
   "effect": "BLOCK",
   "principal": "contractor",
   "provider": "kubernetes",
-  "resource_pattern": "service/billing-*",
-  "rule_text": "Block creating service/* of type LoadBalancer, per the gatekeeper-library `block-loadbalancer-services` template (\"Disallows all Services with type LoadBalancer\").",
-  "scope": {},
+  "resource_pattern": "deployment/*",
+  "rule_text": "Block deployments whose container images come from a registry outside the allow-list, per the Kyverno policy library `best-practices/restrict-image-registries` policy.",
+  "scope": {
+    "namespace": "dev"
+  },
   "source_ref": "src-0123",
   "source_timestamp": "2026-01-16T09:00:00+00:00",
   "time_window": null

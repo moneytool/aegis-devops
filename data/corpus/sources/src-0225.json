@@ -1,15 +1,15 @@
 {
   "actions": [
-    "apply"
+    "update"
   ],
-  "constraint_class": "networking",
+  "constraint_class": "configuration",
   "effect": "BLOCK",
   "principal": "security_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "service/worker-*",
-  "rule_text": "Block applying service/* of type NodePort in prod, per the gatekeeper-library `block-nodeport-services` template.",
+  "provider": "terraform",
+  "resource_pattern": "aws_s3_bucket.*",
+  "rule_text": "Block a terraform update that disables an S3 bucket's public-access block configuration, extending AWS Security Hub FSBP control EC2.1's \"not publicly exposed\" intent to S3 bucket ACL/policy state.",
   "scope": {
-    "namespace": "kube-system"
+    "region": "us-east-1"
   },
   "source_ref": "src-0225",
   "source_timestamp": "2026-01-29T03:00:00+00:00",

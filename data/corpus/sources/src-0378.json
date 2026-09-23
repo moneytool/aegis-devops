@@ -1,16 +1,14 @@
 {
   "actions": [
-    "scale"
+    "delete"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "deletion",
   "effect": "ESCALATE",
   "principal": "sre_lead",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate deployment scaling changes in prod; loveholidays' postmortem on GKE running out of IP addresses describes stuck deployments and blocked autoscaling of both pods and nodes.",
-  "scope": {
-    "namespace": "staging"
-  },
+  "resource_pattern": "node/cache-*",
+  "rule_text": "Escalate node deletion or draining outside of a controlled runbook; loveholidays documented total ingress outages caused by mishandled load balancer behavior while draining nodes.",
+  "scope": {},
   "source_ref": "src-0378",
   "source_timestamp": "2026-02-17T06:00:00+00:00",
   "time_window": null

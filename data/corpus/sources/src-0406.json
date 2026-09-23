@@ -1,14 +1,13 @@
 {
   "actions": [
-    "apply",
     "create"
   ],
   "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "sre_lead",
+  "principal": "contractor",
   "provider": "kubernetes",
-  "resource_pattern": "service/*",
-  "rule_text": "Escalate creating service/* missing required labels, per the gatekeeper-library `requiredlabels` template.",
+  "resource_pattern": "pod/*",
+  "rule_text": "Escalate Pods created without CPU/memory requests and limits, per the Kyverno policy library `best-practices/require-pod-requests-limits` policy.",
   "scope": {},
   "source_ref": "src-0406",
   "source_timestamp": "2026-02-20T18:00:00+00:00",

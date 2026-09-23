@@ -1,14 +1,16 @@
 {
   "actions": [
-    "create"
+    "update"
   ],
   "constraint_class": "configuration",
-  "effect": "BLOCK",
-  "principal": "security_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "namespace/auth-*",
-  "rule_text": "Block creating namespace/* missing required labels, per the gatekeeper-library `requiredlabels` template.",
-  "scope": {},
+  "effect": "ESCALATE",
+  "principal": "platform_admin",
+  "provider": "flux",
+  "resource_pattern": "kustomization/*",
+  "rule_text": "Escalate reconciling a Flux Kustomization in prod whose resources are missing required labels, extending the Kyverno policy library `best-practices/require-labels` policy to Flux-managed Kustomizations.",
+  "scope": {
+    "env": "staging"
+  },
   "source_ref": "src-0465",
   "source_timestamp": "2026-02-28T03:00:00+00:00",
   "time_window": null

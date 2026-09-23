@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "update"
   ],
-  "constraint_class": "deployment",
+  "constraint_class": "networking",
   "effect": "ESCALATE",
   "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "job/*",
-  "rule_text": "Escalate Jobs created without a bounded RestartPolicy; Universe's incident report describes a production search/reporting outage caused by a Job that kept consuming node resources on restart.",
-  "scope": {},
+  "provider": "gcp",
+  "resource_pattern": "sql/instance/ingest-*",
+  "rule_text": "Escalate configuring a public IP or authorized network on a Cloud SQL instance, per the GCP organization policy constraints `sql.managed.restrictPublicIp` and `sql.managed.restrictAuthorizedNetworks`.",
+  "scope": {
+    "region": "us-west-2"
+  },
   "source_ref": "src-0080",
   "source_timestamp": "2026-01-11T00:00:00+00:00",
   "time_window": null

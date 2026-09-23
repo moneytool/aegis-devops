@@ -1,16 +1,15 @@
 {
   "actions": [
-    "scale"
+    "replace",
+    "update"
   ],
   "constraint_class": "scaling",
   "effect": "ESCALATE",
   "principal": "ci_bot",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/billing-*",
-  "rule_text": "Escalate deployment scaling changes in prod; loveholidays' postmortem on GKE running out of IP addresses describes stuck deployments and blocked autoscaling of both pods and nodes.",
-  "scope": {
-    "namespace": "kube-system"
-  },
+  "provider": "terraform",
+  "resource_pattern": "aws_autoscaling_group.*",
+  "rule_text": "Escalate terraform changes to AWS autoscaling groups; Toyota Connected's \"A Perfect DNS Storm\" postmortem and related ASG-rebalance issues in the failure-stories index show autoscaler churn causing outages.",
+  "scope": {},
   "source_ref": "src-0047",
   "source_timestamp": "2026-01-06T21:00:00+00:00",
   "time_window": null

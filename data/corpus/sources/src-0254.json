@@ -1,16 +1,14 @@
 {
   "actions": [
-    "apply"
+    "create"
   ],
   "constraint_class": "networking",
-  "effect": "BLOCK",
-  "principal": "sre_oncall",
+  "effect": "ESCALATE",
+  "principal": "developer",
   "provider": "kubernetes",
   "resource_pattern": "service/*",
-  "rule_text": "Block applying service/* of type NodePort in prod, per the gatekeeper-library `block-nodeport-services` template.",
-  "scope": {
-    "namespace": "dev"
-  },
+  "rule_text": "Block creating service/* of type LoadBalancer, per the gatekeeper-library `block-loadbalancer-services` template (\"Disallows all Services with type LoadBalancer\").",
+  "scope": {},
   "source_ref": "src-0254",
   "source_timestamp": "2026-02-01T18:00:00+00:00",
   "time_window": null

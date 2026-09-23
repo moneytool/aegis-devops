@@ -6,44 +6,44 @@
   "intents": {
     "all": {
       "by_expected_verdict": {
-        "ALLOW": 282,
-        "BLOCK": 208,
-        "ESCALATE": 110
+        "ALLOW": 300,
+        "BLOCK": 216,
+        "ESCALATE": 84
       },
       "n": 600,
-      "poison_candidates": 132,
+      "poison_candidates": 150,
       "poison_candidates_by_kind": {
-        "forged": 32,
-        "tampered": 72,
-        "unauthorized": 28
+        "forged": 41,
+        "tampered": 66,
+        "unauthorized": 43
       }
     },
     "dev": {
       "by_expected_verdict": {
-        "ALLOW": 226,
-        "BLOCK": 166,
-        "ESCALATE": 88
+        "ALLOW": 240,
+        "BLOCK": 173,
+        "ESCALATE": 67
       },
       "n": 480,
-      "poison_candidates": 106,
+      "poison_candidates": 120,
       "poison_candidates_by_kind": {
-        "forged": 25,
-        "tampered": 59,
-        "unauthorized": 22
+        "forged": 33,
+        "tampered": 54,
+        "unauthorized": 33
       }
     },
     "holdout": {
       "by_expected_verdict": {
-        "ALLOW": 56,
-        "BLOCK": 42,
-        "ESCALATE": 22
+        "ALLOW": 60,
+        "BLOCK": 43,
+        "ESCALATE": 17
       },
       "n": 120,
-      "poison_candidates": 26,
+      "poison_candidates": 30,
       "poison_candidates_by_kind": {
-        "forged": 7,
-        "tampered": 13,
-        "unauthorized": 6
+        "forged": 8,
+        "tampered": 12,
+        "unauthorized": 10
       }
     }
   },
@@ -53,9 +53,9 @@
     "Untrusted": 125
   },
   "n_constraints": 500,
-  "n_distinct_patterns": 71,
-  "n_distinct_rule_text": 66,
-  "n_distinct_structural": 196,
+  "n_distinct_patterns": 145,
+  "n_distinct_rule_text": 118,
+  "n_distinct_structural": 323,
   "reasons": {
     "authorized": 250,
     "forged": 63,

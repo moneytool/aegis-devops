@@ -1,13 +1,13 @@
 {
   "actions": [
-    "scale"
+    "create"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "configuration",
   "effect": "BLOCK",
-  "principal": "platform_admin",
+  "principal": "developer",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Block scaling deployment/* outside the allowed replica range, per the gatekeeper-library `replicalimits` template (\"Requires that objects with the field spec.replicas specify a number of replicas within defined ranges\").",
+  "resource_pattern": "namespace/*",
+  "rule_text": "Block creating namespace/* missing required labels, per the gatekeeper-library `requiredlabels` template.",
   "scope": {},
   "source_ref": "src-0183",
   "source_timestamp": "2026-01-23T21:00:00+00:00",

@@ -1,14 +1,13 @@
 {
   "actions": [
-    "delete",
-    "replace"
+    "delete"
   ],
   "constraint_class": "deletion",
-  "effect": "ESCALATE",
-  "principal": "sre_lead",
-  "provider": "terraform",
-  "resource_pattern": "google_container_cluster.*",
-  "rule_text": "Escalate any terraform delete or replace of a GKE cluster; Spotify's postmortem describes accidentally deleting all its Kube clusters via a stale Terraform global state file.",
+  "effect": "BLOCK",
+  "principal": "platform_admin",
+  "provider": "argocd",
+  "resource_pattern": "app/*",
+  "rule_text": "Block deleting an ArgoCD Application, extending AWS Security Hub FSBP control DynamoDB.6's deletion-protection intent to ArgoCD-managed applications.",
   "scope": {},
   "source_ref": "src-0277",
   "source_timestamp": "2026-02-04T15:00:00+00:00",

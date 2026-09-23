@@ -1,15 +1,17 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "create",
+    "update"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "ci_bot",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate applying deployment/* missing required labels, per the gatekeeper-library `requiredlabels` template (\"Requires resources to contain specified labels, with values matching provided regular expressions\").",
-  "scope": {},
+  "constraint_class": "networking",
+  "effect": "BLOCK",
+  "principal": "sre_oncall",
+  "provider": "aws",
+  "resource_pattern": "ec2/security-group/gateway-*",
+  "rule_text": "Block security-group rules that open SSH (22) ingress to 0.0.0.0/0 or ::/0, per AWS Security Hub FSBP control EC2.13.",
+  "scope": {
+    "region": "us-west-2"
+  },
   "source_ref": "src-0483",
   "source_timestamp": "2026-03-02T09:00:00+00:00",
   "time_window": null

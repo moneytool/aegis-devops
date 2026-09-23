@@ -1,14 +1,16 @@
 {
   "actions": [
-    "create"
+    "delete"
   ],
-  "constraint_class": "networking",
-  "effect": "BLOCK",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "service/*",
-  "rule_text": "Block creating service/* of type NodePort, per the gatekeeper-library `block-nodeport-services` template (\"Disallows all Services with type NodePort\").",
-  "scope": {},
+  "constraint_class": "deletion",
+  "effect": "ESCALATE",
+  "principal": "platform_admin",
+  "provider": "terraform",
+  "resource_pattern": "aws_db_instance.*",
+  "rule_text": "Escalate a terraform delete or replace of an RDS instance, per AWS Security Hub FSBP control RDS-related deletion-protection guidance (see DynamoDB.6 for the analogous DynamoDB control) applied to `aws_db_instance`.",
+  "scope": {
+    "region": "us-west-2"
+  },
   "source_ref": "src-0193",
   "source_timestamp": "2026-01-25T03:00:00+00:00",
   "time_window": null

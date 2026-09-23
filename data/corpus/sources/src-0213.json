@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
     "create"
   ],
-  "constraint_class": "access",
-  "effect": "BLOCK",
-  "principal": "platform_admin",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Block applying deployment/* whose image is outside the allowed registry prefixes, per the gatekeeper-library `allowedrepos` template (\"Requires container images to begin with a string from the specified list\").",
-  "scope": {},
+  "constraint_class": "networking",
+  "effect": "ESCALATE",
+  "principal": "sre_lead",
+  "provider": "aws",
+  "resource_pattern": "es/domain/*",
+  "rule_text": "Escalate configuring an Elasticsearch/OpenSearch domain to be publicly accessible, per AWS Security Hub FSBP control ES.2.",
+  "scope": {
+    "region": "eu-west-1"
+  },
   "source_ref": "src-0213",
   "source_timestamp": "2026-01-27T15:00:00+00:00",
   "time_window": null

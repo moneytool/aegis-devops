@@ -1,14 +1,17 @@
 {
   "actions": [
+    "apply",
     "create"
   ],
-  "constraint_class": "access",
+  "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "security_lead",
+  "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "pod/cache-*",
-  "rule_text": "Escalate creating pod/* whose image is outside the allowed registry prefixes, per the gatekeeper-library `allowedrepos` template.",
-  "scope": {},
+  "resource_pattern": "deployment/*",
+  "rule_text": "Escalate applying deployment/* missing required labels, per the gatekeeper-library `requiredlabels` template (\"Requires resources to contain specified labels, with values matching provided regular expressions\").",
+  "scope": {
+    "namespace": "staging"
+  },
   "source_ref": "src-0259",
   "source_timestamp": "2026-02-02T09:00:00+00:00",
   "time_window": null

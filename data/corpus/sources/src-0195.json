@@ -1,13 +1,14 @@
 {
   "actions": [
-    "create"
+    "delete",
+    "update"
   ],
-  "constraint_class": "networking",
+  "constraint_class": "deletion",
   "effect": "BLOCK",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "service/*",
-  "rule_text": "Block creating service/* of type NodePort, per the gatekeeper-library `block-nodeport-services` template (\"Disallows all Services with type NodePort\"). (forged source content)",
+  "principal": "platform_admin",
+  "provider": "aws",
+  "resource_pattern": "dynamodb/table/*",
+  "rule_text": "Block deleting a DynamoDB table or disabling its deletion protection, per AWS Security Hub FSBP control DynamoDB.6 (\"DynamoDB tables should have deletion protection enabled\"). (forged source content)",
   "scope": {},
   "source_ref": "src-0195",
   "source_timestamp": "2026-01-25T09:00:00+00:00",

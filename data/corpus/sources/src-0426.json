@@ -1,14 +1,13 @@
 {
   "actions": [
-    "apply",
     "create"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "developer",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate applying deployment/* missing required labels, per the gatekeeper-library `requiredlabels` template (\"Requires resources to contain specified labels, with values matching provided regular expressions\").",
+  "constraint_class": "access",
+  "effect": "BLOCK",
+  "principal": "platform_admin",
+  "provider": "gcp",
+  "resource_pattern": "iam/service-account/gateway-*",
+  "rule_text": "Block creating a new service account key, per the GCP organization policy constraint `iam.managed.disableServiceAccountKeyCreation`.",
   "scope": {},
   "source_ref": "src-0426",
   "source_timestamp": "2026-02-23T06:00:00+00:00",

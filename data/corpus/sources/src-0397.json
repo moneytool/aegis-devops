@@ -1,14 +1,13 @@
 {
   "actions": [
-    "delete",
-    "update"
+    "create"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "access",
   "effect": "ESCALATE",
   "principal": "security_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "configmap/coredns",
-  "rule_text": "Escalate changes to the CoreDNS configmap; Zalando's \"Total DNS outage\" postmortem identified CoreDNS/ndots:5 configuration as a production outage cause.",
+  "provider": "aws",
+  "resource_pattern": "iam/access-key/*",
+  "rule_text": "Block creation of IAM access keys for the root user, per AWS Security Hub FSBP control IAM.4 (\"IAM root user access key should not exist\").",
   "scope": {},
   "source_ref": "src-0397",
   "source_timestamp": "2026-02-19T15:00:00+00:00",

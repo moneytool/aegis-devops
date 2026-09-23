@@ -1,14 +1,16 @@
 {
   "actions": [
-    "create"
+    "update"
   ],
   "constraint_class": "access",
-  "effect": "ESCALATE",
+  "effect": "BLOCK",
   "principal": "platform_admin",
-  "provider": "kubernetes",
-  "resource_pattern": "pod/*",
-  "rule_text": "Escalate creating pod/* whose image is outside the allowed registry prefixes, per the gatekeeper-library `allowedrepos` template.",
-  "scope": {},
+  "provider": "helm",
+  "resource_pattern": "release/*",
+  "rule_text": "Escalate a Helm release upgrade whose chart values reference an image registry outside the allow-list, extending the Kyverno policy library `best-practices/restrict-image-registries` policy to Helm releases.",
+  "scope": {
+    "namespace": "dev"
+  },
   "source_ref": "src-0448",
   "source_timestamp": "2026-02-26T00:00:00+00:00",
   "time_window": null

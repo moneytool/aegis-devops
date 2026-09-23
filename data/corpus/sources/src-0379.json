@@ -1,14 +1,14 @@
 {
   "actions": [
     "apply",
-    "delete"
+    "set-image"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "access",
   "effect": "BLOCK",
   "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "validatingwebhookconfiguration/*",
-  "rule_text": "Block ad-hoc changes to ValidatingWebhookConfiguration objects; Jetstack's postmortem shows a misconfigured admission webhook caused a GKE cluster outage and lost nodes.",
+  "resource_pattern": "deployment/*",
+  "rule_text": "Block deployments whose container images come from a registry outside the allow-list, per the Kyverno policy library `best-practices/restrict-image-registries` policy.",
   "scope": {},
   "source_ref": "src-0379",
   "source_timestamp": "2026-02-17T09:00:00+00:00",

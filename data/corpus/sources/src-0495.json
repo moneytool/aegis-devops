@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "rollback"
   ],
-  "constraint_class": "deployment",
+  "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "job/worker-*",
-  "rule_text": "Escalate Jobs created without a bounded RestartPolicy; Universe's incident report describes a production search/reporting outage caused by a Job that kept consuming node resources on restart.",
-  "scope": {},
+  "principal": "developer",
+  "provider": "migration",
+  "resource_pattern": "migration/*",
+  "rule_text": "Escalate an `alembic downgrade` (schema rollback) in prod, extending the Kyverno policy library `other/time-bound-policy` policy's controlled-change intent to migration rollbacks.",
+  "scope": {
+    "env": "dev"
+  },
   "source_ref": "src-0495",
   "source_timestamp": "2026-03-03T21:00:00+00:00",
   "time_window": null

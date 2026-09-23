@@ -1,14 +1,16 @@
 {
   "actions": [
-    "create"
+    "update"
   ],
   "constraint_class": "networking",
   "effect": "BLOCK",
-  "principal": "sre_lead",
+  "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "service/api-*",
-  "rule_text": "Block creating service/* of type NodePort, per the gatekeeper-library `block-nodeport-services` template (\"Disallows all Services with type NodePort\").",
-  "scope": {},
+  "resource_pattern": "ingress/gateway-*",
+  "rule_text": "Escalate Ingress changes; Ravelin's postmortem on Kubernetes' endpoint behavior describes occasional 502 errors traced to Ingress/replication-controller interaction during shutdown.",
+  "scope": {
+    "namespace": "staging"
+  },
   "source_ref": "src-0330",
   "source_timestamp": "2026-02-11T06:00:00+00:00",
   "time_window": null

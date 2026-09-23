@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "rollback"
   ],
   "constraint_class": "configuration",
   "effect": "ESCALATE",
   "principal": "platform_admin",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/billing-*",
-  "rule_text": "Escalate applying deployment/* missing required labels, per the gatekeeper-library `requiredlabels` template (\"Requires resources to contain specified labels, with values matching provided regular expressions\").",
-  "scope": {},
+  "provider": "migration",
+  "resource_pattern": "migration/*",
+  "rule_text": "Escalate an `alembic downgrade` (schema rollback) in prod, extending the Kyverno policy library `other/time-bound-policy` policy's controlled-change intent to migration rollbacks.",
+  "scope": {
+    "env": "prod"
+  },
   "source_ref": "src-0056",
   "source_timestamp": "2026-01-08T00:00:00+00:00",
   "time_window": null

@@ -1,14 +1,14 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "create",
+    "update"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "access",
   "effect": "ESCALATE",
-  "principal": "sre_oncall",
-  "provider": "kubernetes",
-  "resource_pattern": "pod/cache-*",
-  "rule_text": "Escalate creating pod/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template.",
+  "principal": "ci_bot",
+  "provider": "aws",
+  "resource_pattern": "docdb/cluster-snapshot/*",
+  "rule_text": "Escalate making a DocumentDB manual cluster snapshot public, per AWS Security Hub FSBP control DocumentDB.3.",
   "scope": {},
   "source_ref": "src-0023",
   "source_timestamp": "2026-01-03T21:00:00+00:00",

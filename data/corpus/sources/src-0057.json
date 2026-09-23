@@ -1,16 +1,28 @@
 {
   "actions": [
-    "apply",
-    "update"
+    "run"
   ],
-  "constraint_class": "networking",
+  "constraint_class": "deployment",
   "effect": "ESCALATE",
-  "principal": "ci_bot",
-  "provider": "kubernetes",
-  "resource_pattern": "service/*",
-  "rule_text": "Escalate Service changes that alter externalTrafficPolicy; the DevOps Hof postmortem on load-balancer configuration during node draining traces a total ingress outage to this setting.",
-  "scope": {},
+  "principal": "security_lead",
+  "provider": "github",
+  "resource_pattern": "workflow/*",
+  "rule_text": "Escalate running a deploy workflow during business hours, extending the Kyverno policy library `other/time-bound-policy` policy's window-gating intent to GitHub Actions workflow dispatches.",
+  "scope": {
+    "repo": "org/data-pipeline"
+  },
   "source_ref": "src-0057",
   "source_timestamp": "2026-01-08T03:00:00+00:00",
-  "time_window": null
+  "time_window": {
+    "days": [
+      "Mon",
+      "Tue",
+      "Wed",
+      "Thu",
+      "Fri"
+    ],
+    "end": "17:00",
+    "start": "09:00",
+    "tz": "America/New_York"
+  }
 }

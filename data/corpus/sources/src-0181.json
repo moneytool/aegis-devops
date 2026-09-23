@@ -1,13 +1,14 @@
 {
   "actions": [
-    "delete"
+    "apply",
+    "create"
   ],
-  "constraint_class": "deletion",
+  "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "platform_admin",
+  "principal": "developer",
   "provider": "kubernetes",
-  "resource_pattern": "node/*",
-  "rule_text": "Escalate node deletion or draining outside of a controlled runbook; loveholidays documented total ingress outages caused by mishandled load balancer behavior while draining nodes.",
+  "resource_pattern": "pod/*",
+  "rule_text": "Escalate Pods scheduled without anti-affinity rules; Moonlight's postmortem describes all Pods landing on the same failing host and causing a 100% traffic-loss outage.",
   "scope": {},
   "source_ref": "src-0181",
   "source_timestamp": "2026-01-23T15:00:00+00:00",

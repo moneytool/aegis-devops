@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "delete"
   ],
-  "constraint_class": "deployment",
+  "constraint_class": "deletion",
   "effect": "BLOCK",
-  "principal": "contractor",
-  "provider": "kubernetes",
-  "resource_pattern": "poddisruptionbudget/*",
-  "rule_text": "Block applying poddisruptionbudget/* with maxUnavailable == 0, per the gatekeeper-library `poddisruptionbudget` template (this blocks voluntary disruptions such as node draining).",
-  "scope": {},
+  "principal": "developer",
+  "provider": "azure",
+  "resource_pattern": "keyvault/vault/*",
+  "rule_text": "Block deleting or purging a Key Vault, extending the Azure Policy Key Vault category's soft-delete/purge-protection built-ins to the delete action itself.",
+  "scope": {
+    "resource_group": "rg-prod-eastus"
+  },
   "source_ref": "src-0093",
   "source_timestamp": "2026-01-12T15:00:00+00:00",
   "time_window": null

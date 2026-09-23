@@ -97,6 +97,34 @@ REGIONS = ["us-east-1", "us-west-2", "eu-west-1"]
 CLUSTERS = ["prod-us-east-1", "prod-eu-west-1", "staging-us-west-2"]
 RESOURCE_NAMES = ["api", "web", "worker", "cache", "billing", "auth", "gateway", "ingest"]
 
+# REVIEW-4 T2.2: scope-key variation pools for the providers added alongside
+# the third seed source family (cloud-provider security/operational
+# guidance) -- azure (resource_group/subscription), github/git (repo),
+# kubernetes/helm/argocd/flux (env). Existing pools above (NAMESPACES,
+# REGIONS, CLUSTERS) keep covering namespace/region/cluster.
+RESOURCE_GROUPS = ["rg-prod-eastus", "rg-prod-westus2", "rg-staging-eastus"]
+SUBSCRIPTIONS = ["sub-prod-a1b2", "sub-staging-c3d4", "sub-shared-e5f6"]
+REPOS = ["org/infra", "org/platform", "org/webapp", "org/data-pipeline"]
+ENVS = ["prod", "staging", "dev"]
+
+# REVIEW-4 T2.2: additional variation axes so 500 constraints produce more
+# distinct (provider, resource_pattern, actions, scope) structures.
+ACTION_SUBSET_PROBABILITY = 0.55
+EFFECT_FLIP_PROBABILITY = 0.25
+EXTRA_SCOPE_PROBABILITY = 0.35
+EXTRA_SCOPE_BY_PROVIDER = {
+    "kubernetes": ("namespace", NAMESPACES),
+    "terraform": ("region", REGIONS),
+    "aws": ("region", REGIONS),
+    "gcp": ("region", REGIONS),
+    "azure": ("resource_group", RESOURCE_GROUPS),
+    "helm": ("namespace", NAMESPACES),
+    "argocd": ("env", ENVS),
+    "flux": ("env", ENVS),
+    "github": ("repo", REPOS),
+    "git": ("repo", REPOS),
+}
+
 _WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri"]
 TIME_WINDOW_POOL = [
     {"days": _WEEKDAYS, "start": "09:00", "end": "17:00", "tz": "America/New_York"},
@@ -138,7 +166,41 @@ def vary_scope(seed_scope: dict, rng: random.Random) -> dict:
             scope[key] = rng.choice(REGIONS)
         elif key == "cluster":
             scope[key] = rng.choice(CLUSTERS)
+        elif key == "resource_group":
+            scope[key] = rng.choice(RESOURCE_GROUPS)
+        elif key == "subscription":
+            scope[key] = rng.choice(SUBSCRIPTIONS)
+        elif key == "repo":
+            scope[key] = rng.choice(REPOS)
+        elif key == "env":
+            scope[key] = rng.choice(ENVS)
+        # Other scope keys (e.g. sql's "database", pulumi's "stack") are
+        # seed-specific and left as-is -- they still contribute to
+        # structural diversity via the differing resource_pattern/actions
+        # each such seed carries, just without per-draw variation of their
+        # own value.
     return scope
+
+
+def vary_actions(seed_actions: list, rng: random.Random) -> set:
+    """REVIEW-4 T2.2: occasionally narrows a seed's action list to a random
+    non-empty subset, so the same seed produces constraints with distinct
+    `actions` tuples (and thus distinct structural keys) across draws."""
+    actions = list(seed_actions)
+    if len(actions) > 1 and rng.random() < ACTION_SUBSET_PROBABILITY:
+        k = rng.randint(1, len(actions))
+        return set(rng.sample(actions, k))
+    return set(actions)
+
+
+def vary_effect(seed_effect: str, rng: random.Random) -> str:
+    """REVIEW-4 T2.2: occasionally flips BLOCK<->ESCALATE so the same
+    (provider, resource_pattern, actions, scope) seed also appears with the
+    other effect across the corpus, widening rule diversity without
+    changing the seed's own authored intent."""
+    if rng.random() < EFFECT_FLIP_PROBABILITY:
+        return "ESCALATE" if seed_effect == "BLOCK" else "BLOCK"
+    return seed_effect
 
 
 def vary_time_window(seed_tw: dict | None, rng: random.Random) -> dict | None:
@@ -229,11 +291,16 @@ def apply_tamper(constraint: Constraint, rng: random.Random) -> str:
         widened.add("exec" if "exec" not in widened else "delete")
         constraint.actions = widened
     elif mutation == "scope":
+        # Drop one scope key -- any key, not just the original
+        # namespace/region/cluster trio (REVIEW-4 T2.2 added
+        # resource_group/subscription/repo/env/database/stack-keyed seeds;
+        # restricting this to the original three left those scopes
+        # untouched, a no-op mutation that kept the hash valid despite the
+        # "tampered" label -- pick deterministically via rng so the
+        # mutation is always a real change when scope is non-empty).
         scope = dict(constraint.scope)
-        for key in ("namespace", "region", "cluster"):
-            if key in scope:
-                del scope[key]
-                break
+        key = rng.choice(sorted(scope.keys()))
+        del scope[key]
         constraint.scope = scope
     return mutation
 
@@ -295,13 +362,20 @@ def build_constraints(seeds: list[dict], rng: random.Random):
         seed = rng.choice(seeds)
         label = labels[i]
 
+        scope = vary_scope(seed.get("scope") or {}, rng)
+        if not scope and rng.random() < EXTRA_SCOPE_PROBABILITY:
+            extra = EXTRA_SCOPE_BY_PROVIDER.get(seed["provider"])
+            if extra is not None:
+                extra_key, extra_pool = extra
+                scope = {extra_key: rng.choice(extra_pool)}
+
         material = {
             "provider": seed["provider"],
             "resource_pattern": narrow_pattern(seed["resource_pattern"], rng),
-            "actions": set(seed["actions"]),
-            "scope": vary_scope(seed.get("scope") or {}, rng),
+            "actions": vary_actions(seed["actions"], rng),
+            "scope": scope,
             "time_window": vary_time_window(seed.get("time_window"), rng),
-            "effect": seed["effect"],
+            "effect": vary_effect(seed["effect"], rng),
             "constraint_class": seed["constraint_class"],
             "rule_text": seed["rule_text"],
             "source_ref": f"src-{n:04d}",

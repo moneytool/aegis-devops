@@ -1,16 +1,16 @@
 {
   "actions": [
-    "apply",
+    "create",
     "update"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "developer",
-  "provider": "kubernetes",
-  "resource_pattern": "cronjob/ingest-*",
-  "rule_text": "Escalate changes to CronJobs in kube-system; Zalando's \"Kubernetes Failure Stories\" talk lists frozen/stuck CronJobs among repeated causes of production outages.",
+  "constraint_class": "networking",
+  "effect": "BLOCK",
+  "principal": "sre_lead",
+  "provider": "gcp",
+  "resource_pattern": "container/cluster/*",
+  "rule_text": "Escalate creating or updating a GKE cluster without private nodes, per the GCP organization policy constraint `container.managed.enablePrivateNodes`.",
   "scope": {
-    "namespace": "staging"
+    "region": "eu-west-1"
   },
   "source_ref": "src-0481",
   "source_timestamp": "2026-03-02T03:00:00+00:00",

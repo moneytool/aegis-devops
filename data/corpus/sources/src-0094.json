@@ -1,15 +1,15 @@
 {
   "actions": [
-    "delete"
+    "update"
   ],
-  "constraint_class": "deletion",
-  "effect": "BLOCK",
-  "principal": "sre_oncall",
-  "provider": "kubernetes",
-  "resource_pattern": "namespace/*",
-  "rule_text": "Block deletion of namespaces in prod; Skyscanner's outage was caused by a GitOps templating bug that deleted a namespace it should not have touched.",
+  "constraint_class": "configuration",
+  "effect": "ESCALATE",
+  "principal": "sre_lead",
+  "provider": "flux",
+  "resource_pattern": "kustomization/*",
+  "rule_text": "Escalate reconciling a Flux Kustomization in prod whose resources are missing required labels, extending the Kyverno policy library `best-practices/require-labels` policy to Flux-managed Kustomizations.",
   "scope": {
-    "namespace": "dev"
+    "env": "dev"
   },
   "source_ref": "src-0094",
   "source_timestamp": "2026-01-12T18:00:00+00:00",

@@ -1,15 +1,15 @@
 {
   "actions": [
-    "scale"
+    "update"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "sre_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/worker-*",
-  "rule_text": "Escalate deployment scaling changes in prod; loveholidays' postmortem on GKE running out of IP addresses describes stuck deployments and blocked autoscaling of both pods and nodes.",
+  "principal": "security_lead",
+  "provider": "azure",
+  "resource_pattern": "storage/account/web-*",
+  "rule_text": "Block disabling \"secure transfer required\" / HTTPS-only traffic on a storage account, per the Azure Policy built-in \"Storage accounts should have secure transfer enabled\" definition (App Service / Storage category).",
   "scope": {
-    "namespace": "prod"
+    "resource_group": "rg-prod-eastus"
   },
   "source_ref": "src-0455",
   "source_timestamp": "2026-02-26T21:00:00+00:00",

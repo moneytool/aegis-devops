@@ -1,16 +1,14 @@
 {
   "actions": [
-    "apply"
+    "update"
   ],
-  "constraint_class": "networking",
+  "constraint_class": "configuration",
   "effect": "BLOCK",
   "principal": "security_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "service/gateway-*",
-  "rule_text": "Block applying service/* of type LoadBalancer in us-east-1, per the gatekeeper-library `block-loadbalancer-services` template.",
-  "scope": {
-    "region": "us-west-2"
-  },
+  "provider": "azure",
+  "resource_pattern": "web/app/api-*",
+  "rule_text": "Block disabling HTTPS-only access on an App Service app, per the Azure Policy built-in \"App Service apps should only be accessible over HTTPS\" definition.",
+  "scope": {},
   "source_ref": "src-0185",
   "source_timestamp": "2026-01-24T03:00:00+00:00",
   "time_window": null

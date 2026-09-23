@@ -1,13 +1,13 @@
 {
   "actions": [
-    "create"
+    "scale"
   ],
-  "constraint_class": "access",
+  "constraint_class": "scaling",
   "effect": "ESCALATE",
-  "principal": "ci_bot",
+  "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "pod/gateway-*",
-  "rule_text": "Escalate creating pod/* whose image is outside the allowed registry prefixes, per the gatekeeper-library `allowedrepos` template.",
+  "resource_pattern": "deployment/coredns",
+  "rule_text": "Escalate any scale-down of the CoreDNS deployment; Preply's DNS postmortem traced a partial production outage to CoreDNS-autoscaler behavior under conntrack pressure.",
   "scope": {},
   "source_ref": "src-0301",
   "source_timestamp": "2026-02-07T15:00:00+00:00",

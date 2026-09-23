@@ -367,6 +367,28 @@ def test_corpus_has_exactly_500_constraints(labels):
     assert len(labels) == 500
 
 
+def test_n_distinct_structural_meets_review4_t2_2_floor(stats):
+    """REVIEW-4 T2.2 accept criterion: n_distinct_structural >= 300 (up from
+    196), reached via a third seed source family (cloud-provider security
+    benchmarks / vendor policy libraries) plus more variation axes in
+    build_corpus.py. Regression guard, not a specific target value."""
+    assert stats["n_distinct_structural"] >= 300
+    assert stats["n_distinct_patterns"] >= 120
+
+
+def test_seeds_span_at_least_the_parser_provider_families():
+    import yaml
+
+    with open(CORPUS_DIR / "seeds.yaml") as f:
+        payload = yaml.safe_load(f)
+    providers = {s["provider"] for s in payload["seeds"]}
+    expected = {
+        "aws", "azure", "gcp", "helm", "argocd", "flux", "git", "github",
+        "sql", "mongodb", "pulumi", "migration", "kubernetes", "terraform",
+    }
+    assert expected <= providers
+
+
 def test_label_proportions_within_5_percent_of_50_25_25(labels):
     counts = Counter(r["label"] for r in labels)
     total = sum(counts.values())

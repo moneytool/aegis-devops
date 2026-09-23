@@ -1,16 +1,15 @@
 {
   "actions": [
-    "scale"
+    "apply",
+    "create"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "sre_lead",
+  "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/billing-*",
-  "rule_text": "Escalate scaling prod deployment/* below the minimum allowed replica count, per the gatekeeper-library `replicalimits` template.",
-  "scope": {
-    "namespace": "prod"
-  },
+  "resource_pattern": "pod/cache-*",
+  "rule_text": "Escalate Pods scheduled without anti-affinity rules; Moonlight's postmortem describes all Pods landing on the same failing host and causing a 100% traffic-loss outage.",
+  "scope": {},
   "source_ref": "src-0168",
   "source_timestamp": "2026-01-22T00:00:00+00:00",
   "time_window": null

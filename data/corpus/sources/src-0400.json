@@ -1,15 +1,16 @@
 {
   "actions": [
-    "replace",
-    "update"
+    "rewrite"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "deletion",
   "effect": "ESCALATE",
   "principal": "platform_admin",
-  "provider": "terraform",
-  "resource_pattern": "aws_autoscaling_group.*",
-  "rule_text": "Escalate terraform changes to AWS autoscaling groups; Toyota Connected's \"A Perfect DNS Storm\" postmortem and related ASG-rebalance issues in the failure-stories index show autoscaler churn causing outages.",
-  "scope": {},
+  "provider": "git",
+  "resource_pattern": "history/*",
+  "rule_text": "Block force-pushes that rewrite published history on infra repos, extending the Kyverno policy library `other/verify-manifest-integrity` policy's supply-chain-integrity intent to the git history that produces the manifests.",
+  "scope": {
+    "repo": "org/infra"
+  },
   "source_ref": "src-0400",
   "source_timestamp": "2026-02-20T00:00:00+00:00",
   "time_window": null

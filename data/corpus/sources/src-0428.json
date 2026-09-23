@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "update"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "developer",
+  "constraint_class": "deployment",
+  "effect": "BLOCK",
+  "principal": "sre_lead",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate applying deployment/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template (\"Requires containers to have memory and CPU limits set and constrains limits to be within the specified maximum values\").",
-  "scope": {},
+  "resource_pattern": "poddisruptionbudget/*",
+  "rule_text": "Block applying prod poddisruptionbudget/* configurations that would block node draining, per the gatekeeper-library `poddisruptionbudget` template.",
+  "scope": {
+    "namespace": "dev"
+  },
   "source_ref": "src-0428",
   "source_timestamp": "2026-02-23T12:00:00+00:00",
   "time_window": null

@@ -1,14 +1,13 @@
 {
   "actions": [
-    "label",
-    "patch"
+    "apply"
   ],
   "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "developer",
+  "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "node/*",
-  "rule_text": "Escalate node label/taint changes; Grafana Labs' postmortem on Pod Priorities describes a production outage caused by cascading Pod evictions tied to scheduling metadata.",
+  "resource_pattern": "deployment/*",
+  "rule_text": "Escalate deployments without resource requests/limits set; Blue Matador's Kubernetes Node OOM postmortem traces Pod kills to containers with no resource requests or limits.",
   "scope": {},
   "source_ref": "src-0039",
   "source_timestamp": "2026-01-05T21:00:00+00:00",

@@ -1,16 +1,15 @@
 {
   "actions": [
-    "apply"
+    "apply",
+    "create"
   ],
-  "constraint_class": "networking",
-  "effect": "BLOCK",
-  "principal": "platform_admin",
+  "constraint_class": "configuration",
+  "effect": "ESCALATE",
+  "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "service/api-*",
-  "rule_text": "Block applying service/* of type NodePort in prod, per the gatekeeper-library `block-nodeport-services` template.",
-  "scope": {
-    "namespace": "kube-system"
-  },
+  "resource_pattern": "service/*",
+  "rule_text": "Escalate creating service/* missing required labels, per the gatekeeper-library `requiredlabels` template.",
+  "scope": {},
   "source_ref": "src-0242",
   "source_timestamp": "2026-01-31T06:00:00+00:00",
   "time_window": null

@@ -1,13 +1,14 @@
 {
   "actions": [
-    "scale"
+    "apply",
+    "create"
   ],
-  "constraint_class": "scaling",
-  "effect": "ESCALATE",
-  "principal": "contractor",
+  "constraint_class": "configuration",
+  "effect": "BLOCK",
+  "principal": "sre_lead",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/coredns",
-  "rule_text": "Escalate any scale-down of the CoreDNS deployment; Preply's DNS postmortem traced a partial production outage to CoreDNS-autoscaler behavior under conntrack pressure.",
+  "resource_pattern": "deployment/*",
+  "rule_text": "Escalate applying deployment/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template (\"Requires containers to have memory and CPU limits set and constrains limits to be within the specified maximum values\").",
   "scope": {},
   "source_ref": "src-0226",
   "source_timestamp": "2026-01-29T06:00:00+00:00",

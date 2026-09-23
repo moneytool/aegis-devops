@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "update"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "developer",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate applying deployment/* missing required annotations, extending the gatekeeper-library `requiredlabels` pattern to annotations (see the sibling `requiredannotations` template in the same library).",
-  "scope": {},
+  "constraint_class": "networking",
+  "effect": "BLOCK",
+  "principal": "security_lead",
+  "provider": "aws",
+  "resource_pattern": "ec2/security-group/*",
+  "rule_text": "Block security-group rules that open SSH (22) ingress to 0.0.0.0/0 or ::/0, per AWS Security Hub FSBP control EC2.13.",
+  "scope": {
+    "region": "eu-west-1"
+  },
   "source_ref": "src-0359",
   "source_timestamp": "2026-02-14T21:00:00+00:00",
   "time_window": null

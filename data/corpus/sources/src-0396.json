@@ -1,14 +1,17 @@
 {
   "actions": [
-    "set-image"
+    "delete",
+    "replace"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "deletion",
   "effect": "ESCALATE",
-  "principal": "developer",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate deployments that set an unpinned or `imagePullPolicy Always` image; Datadog's \"10 Ways to Shoot Yourself in the Foot\" talk lists this among repeated causes of pending pods and slow deployments.",
-  "scope": {},
+  "principal": "platform_admin",
+  "provider": "terraform",
+  "resource_pattern": "aws_db_instance.*",
+  "rule_text": "Escalate a terraform delete or replace of an RDS instance, per AWS Security Hub FSBP control RDS-related deletion-protection guidance (see DynamoDB.6 for the analogous DynamoDB control) applied to `aws_db_instance`.",
+  "scope": {
+    "region": "eu-west-1"
+  },
   "source_ref": "src-0396",
   "source_timestamp": "2026-02-19T12:00:00+00:00",
   "time_window": null

@@ -1,15 +1,15 @@
 {
   "actions": [
-    "scale"
+    "update"
   ],
-  "constraint_class": "scaling",
-  "effect": "ESCALATE",
+  "constraint_class": "configuration",
+  "effect": "BLOCK",
   "principal": "ci_bot",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/gateway-*",
-  "rule_text": "Escalate scaling prod deployment/* below the minimum allowed replica count, per the gatekeeper-library `replicalimits` template.",
+  "provider": "sql",
+  "resource_pattern": "table/*",
+  "rule_text": "Escalate unbounded UPDATE statements (no WHERE clause) against prod tables, extending the Kyverno policy library `other/restrict-secrets-by-name` policy's blast-radius-limiting intent to bulk row mutation.",
   "scope": {
-    "namespace": "kube-system"
+    "database": "prod"
   },
   "source_ref": "src-0409",
   "source_timestamp": "2026-02-21T03:00:00+00:00",

@@ -1,15 +1,16 @@
 {
   "actions": [
-    "delete",
-    "patch"
+    "delete"
   ],
   "constraint_class": "deletion",
-  "effect": "ESCALATE",
+  "effect": "BLOCK",
   "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "node/cache-*",
-  "rule_text": "Escalate node-level changes during autoscaler activity; Nordstrom's \"101 Ways to Crash Your Cluster\" talk lists eviction thresholds and cluster-autoscaler interaction as a cause of full production cluster outages.",
-  "scope": {},
+  "resource_pattern": "statefulset/*",
+  "rule_text": "Block deletion of prod StatefulSets; Gravitational's postmortem on running PostgreSQL on Kubernetes describes data loss from mishandled streaming replication during a disruptive operation.",
+  "scope": {
+    "namespace": "kube-system"
+  },
   "source_ref": "src-0491",
   "source_timestamp": "2026-03-03T09:00:00+00:00",
   "time_window": null

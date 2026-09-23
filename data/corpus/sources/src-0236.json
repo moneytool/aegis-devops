@@ -1,13 +1,13 @@
 {
   "actions": [
-    "create"
+    "delete"
   ],
   "constraint_class": "configuration",
-  "effect": "BLOCK",
-  "principal": "security_lead",
+  "effect": "ESCALATE",
+  "principal": "developer",
   "provider": "kubernetes",
-  "resource_pattern": "namespace/*",
-  "rule_text": "Block creating namespace/* missing required labels, per the gatekeeper-library `requiredlabels` template.",
+  "resource_pattern": "configmap/coredns",
+  "rule_text": "Escalate changes to the CoreDNS configmap; Zalando's \"Total DNS outage\" postmortem identified CoreDNS/ndots:5 configuration as a production outage cause.",
   "scope": {},
   "source_ref": "src-0236",
   "source_timestamp": "2026-01-30T12:00:00+00:00",

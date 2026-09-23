@@ -1,14 +1,13 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "apply"
   ],
   "constraint_class": "configuration",
-  "effect": "ESCALATE",
+  "effect": "BLOCK",
   "principal": "platform_admin",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate applying deployment/* missing required labels, per the gatekeeper-library `requiredlabels` template (\"Requires resources to contain specified labels, with values matching provided regular expressions\").",
+  "resource_pattern": "pod/*",
+  "rule_text": "Block Pods requesting privileged containers, per the Kyverno policy library `pod-security/baseline/disallow-privileged-containers` policy.",
   "scope": {},
   "source_ref": "src-0415",
   "source_timestamp": "2026-02-21T21:00:00+00:00",

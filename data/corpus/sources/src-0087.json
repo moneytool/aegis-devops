@@ -1,15 +1,16 @@
 {
   "actions": [
-    "scale"
+    "create",
+    "update"
   ],
-  "constraint_class": "scaling",
+  "constraint_class": "networking",
   "effect": "ESCALATE",
   "principal": "contractor",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate scaling prod deployment/* below the minimum allowed replica count, per the gatekeeper-library `replicalimits` template.",
+  "provider": "gcp",
+  "resource_pattern": "container/cluster/worker-*",
+  "rule_text": "Escalate creating or updating a GKE cluster without private nodes, per the GCP organization policy constraint `container.managed.enablePrivateNodes`.",
   "scope": {
-    "namespace": "kube-system"
+    "region": "us-west-2"
   },
   "source_ref": "src-0087",
   "source_timestamp": "2026-01-11T21:00:00+00:00",

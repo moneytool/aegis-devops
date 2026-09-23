@@ -1,0 +1,15 @@
+{
+  "actions": [
+    "create"
+  ],
+  "constraint_class": "networking",
+  "effect": "BLOCK",
+  "principal": "security_lead",
+  "provider": "kubernetes",
+  "resource_pattern": "service/*",
+  "rule_text": "Block creating service/* of type LoadBalancer, per the gatekeeper-library `block-loadbalancer-services` template (\"Disallows all Services with type LoadBalancer\"). (forged source content)",
+  "scope": {},
+  "source_ref": "src-0253",
+  "source_timestamp": "2026-02-01T15:00:00+00:00",
+  "time_window": null
+}

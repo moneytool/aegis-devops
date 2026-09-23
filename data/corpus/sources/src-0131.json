@@ -1,15 +1,17 @@
 {
   "actions": [
-    "apply",
+    "delete",
     "update"
   ],
-  "constraint_class": "networking",
-  "effect": "ESCALATE",
-  "principal": "platform_admin",
+  "constraint_class": "configuration",
+  "effect": "BLOCK",
+  "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "ingress/*",
-  "rule_text": "Escalate Ingress changes; Ravelin's postmortem on Kubernetes' endpoint behavior describes occasional 502 errors traced to Ingress/replication-controller interaction during shutdown.",
-  "scope": {},
+  "resource_pattern": "configmap/gateway-*",
+  "rule_text": "Escalate configmap changes in prod; Pusher's \"Oh Sh*t! The Config Changed!\" talk describes a production outage triggered by an nginx ConfigMap change.",
+  "scope": {
+    "namespace": "dev"
+  },
   "source_ref": "src-0131",
   "source_timestamp": "2026-01-17T09:00:00+00:00",
   "time_window": null

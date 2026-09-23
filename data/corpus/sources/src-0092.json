@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "delete"
+    "update"
   ],
-  "constraint_class": "configuration",
-  "effect": "BLOCK",
-  "principal": "sre_oncall",
-  "provider": "kubernetes",
-  "resource_pattern": "validatingwebhookconfiguration/*",
-  "rule_text": "Block ad-hoc changes to ValidatingWebhookConfiguration objects; Jetstack's postmortem shows a misconfigured admission webhook caused a GKE cluster outage and lost nodes.",
-  "scope": {},
+  "constraint_class": "networking",
+  "effect": "ESCALATE",
+  "principal": "ci_bot",
+  "provider": "gcp",
+  "resource_pattern": "sql/instance/cache-*",
+  "rule_text": "Escalate configuring a public IP or authorized network on a Cloud SQL instance, per the GCP organization policy constraints `sql.managed.restrictPublicIp` and `sql.managed.restrictAuthorizedNetworks`.",
+  "scope": {
+    "region": "eu-west-1"
+  },
   "source_ref": "src-0092",
   "source_timestamp": "2026-01-12T12:00:00+00:00",
   "time_window": null

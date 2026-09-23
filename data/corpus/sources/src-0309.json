@@ -1,16 +1,15 @@
 {
   "actions": [
-    "delete",
     "update"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "developer",
-  "provider": "kubernetes",
-  "resource_pattern": "configmap/*",
-  "rule_text": "Escalate configmap changes in prod; Pusher's \"Oh Sh*t! The Config Changed!\" talk describes a production outage triggered by an nginx ConfigMap change.",
+  "constraint_class": "deployment",
+  "effect": "BLOCK",
+  "principal": "sre_lead",
+  "provider": "argocd",
+  "resource_pattern": "app/ingest-*",
+  "rule_text": "Escalate an ArgoCD app sync with `--prune` enabled in prod, extending the Kyverno policy library `other/block-updates-deletes` policy's intent to GitOps-driven deletes.",
   "scope": {
-    "namespace": "prod"
+    "env": "staging"
   },
   "source_ref": "src-0309",
   "source_timestamp": "2026-02-08T15:00:00+00:00",

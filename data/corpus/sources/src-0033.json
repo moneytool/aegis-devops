@@ -1,16 +1,14 @@
 {
   "actions": [
-    "apply"
+    "delete"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "deletion",
   "effect": "BLOCK",
-  "principal": "platform_admin",
+  "principal": "sre_lead",
   "provider": "kubernetes",
-  "resource_pattern": "statefulset/*",
-  "rule_text": "Block applying prod statefulset/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template.",
-  "scope": {
-    "namespace": "prod"
-  },
+  "resource_pattern": "namespace/kube-system",
+  "rule_text": "Never delete namespace/kube-system; multiple public incidents trace outages back to accidental namespace deletion.",
+  "scope": {},
   "source_ref": "src-0033",
   "source_timestamp": "2026-01-05T03:00:00+00:00",
   "time_window": null

@@ -1,14 +1,17 @@
 {
   "actions": [
-    "create"
+    "delete",
+    "update"
   ],
-  "constraint_class": "configuration",
-  "effect": "BLOCK",
+  "constraint_class": "access",
+  "effect": "ESCALATE",
   "principal": "security_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "namespace/auth-*",
-  "rule_text": "Block creating namespace/* missing required labels, per the gatekeeper-library `requiredlabels` template.",
-  "scope": {},
+  "provider": "aws",
+  "resource_pattern": "iam/mfa-device/*",
+  "rule_text": "Escalate deactivating or replacing a root-user MFA device, per AWS Security Hub FSBP control IAM.6 (\"Hardware MFA should be enabled for the root user\").",
+  "scope": {
+    "region": "eu-west-1"
+  },
   "source_ref": "src-0488",
   "source_timestamp": "2026-03-03T00:00:00+00:00",
   "time_window": null

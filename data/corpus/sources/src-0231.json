@@ -1,13 +1,13 @@
 {
   "actions": [
-    "create"
+    "scale"
   ],
-  "constraint_class": "networking",
-  "effect": "ESCALATE",
-  "principal": "security_lead",
+  "constraint_class": "scaling",
+  "effect": "BLOCK",
+  "principal": "sre_oncall",
   "provider": "kubernetes",
-  "resource_pattern": "service/*",
-  "rule_text": "Escalate creating prod service/* of type LoadBalancer, per the gatekeeper-library `block-loadbalancer-services` template.",
+  "resource_pattern": "deployment/*",
+  "rule_text": "Escalate scaling prod deployment/* below the minimum allowed replica count, per the gatekeeper-library `replicalimits` template.",
   "scope": {
     "namespace": "kube-system"
   },

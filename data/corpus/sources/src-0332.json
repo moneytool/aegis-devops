@@ -1,13 +1,14 @@
 {
   "actions": [
+    "apply",
     "create"
   ],
-  "constraint_class": "networking",
+  "constraint_class": "configuration",
   "effect": "BLOCK",
-  "principal": "sre_lead",
+  "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "service/*",
-  "rule_text": "Block creating service/* of type NodePort, per the gatekeeper-library `block-nodeport-services` template (\"Disallows all Services with type NodePort\").",
+  "resource_pattern": "deployment/*",
+  "rule_text": "Escalate applying deployment/* missing required labels, per the gatekeeper-library `requiredlabels` template (\"Requires resources to contain specified labels, with values matching provided regular expressions\").",
   "scope": {},
   "source_ref": "src-0332",
   "source_timestamp": "2026-02-11T12:00:00+00:00",

@@ -1,13 +1,13 @@
 {
   "actions": [
-    "set-image"
+    "scale"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "security_lead",
+  "constraint_class": "scaling",
+  "effect": "BLOCK",
+  "principal": "sre_oncall",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/cache-*",
-  "rule_text": "Escalate deployments that set an unpinned or `imagePullPolicy Always` image; Datadog's \"10 Ways to Shoot Yourself in the Foot\" talk lists this among repeated causes of pending pods and slow deployments.",
+  "resource_pattern": "statefulset/*",
+  "rule_text": "Block scaling statefulset/* outside the allowed replica range, per the gatekeeper-library `replicalimits` template.",
   "scope": {},
   "source_ref": "src-0285",
   "source_timestamp": "2026-02-05T15:00:00+00:00",

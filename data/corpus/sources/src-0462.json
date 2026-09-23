@@ -1,15 +1,15 @@
 {
   "actions": [
-    "scale"
+    "apply"
   ],
-  "constraint_class": "scaling",
-  "effect": "ESCALATE",
-  "principal": "developer",
+  "constraint_class": "configuration",
+  "effect": "BLOCK",
+  "principal": "contractor",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate scaling prod deployment/* below the minimum allowed replica count, per the gatekeeper-library `replicalimits` template.",
+  "resource_pattern": "statefulset/*",
+  "rule_text": "Block applying prod statefulset/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template.",
   "scope": {
-    "namespace": "dev"
+    "namespace": "staging"
   },
   "source_ref": "src-0462",
   "source_timestamp": "2026-02-27T18:00:00+00:00",

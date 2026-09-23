@@ -1,15 +1,15 @@
 {
   "actions": [
-    "apply"
+    "update"
   ],
-  "constraint_class": "networking",
-  "effect": "BLOCK",
+  "constraint_class": "configuration",
+  "effect": "ESCALATE",
   "principal": "security_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "service/cache-*",
-  "rule_text": "Block applying service/* of type NodePort in prod, per the gatekeeper-library `block-nodeport-services` template.",
+  "provider": "sql",
+  "resource_pattern": "table/cache-*",
+  "rule_text": "Escalate unbounded UPDATE statements (no WHERE clause) against prod tables, extending the Kyverno policy library `other/restrict-secrets-by-name` policy's blast-radius-limiting intent to bulk row mutation.",
   "scope": {
-    "namespace": "prod"
+    "database": "prod"
   },
   "source_ref": "src-0182",
   "source_timestamp": "2026-01-23T18:00:00+00:00",

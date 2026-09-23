@@ -1,14 +1,16 @@
 {
   "actions": [
-    "create"
+    "update"
   ],
-  "constraint_class": "networking",
+  "constraint_class": "deployment",
   "effect": "BLOCK",
-  "principal": "sre_oncall",
+  "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "service/*",
-  "rule_text": "Block creating service/* of type NodePort, per the gatekeeper-library `block-nodeport-services` template (\"Disallows all Services with type NodePort\").",
-  "scope": {},
+  "resource_pattern": "poddisruptionbudget/api-*",
+  "rule_text": "Block applying prod poddisruptionbudget/* configurations that would block node draining, per the gatekeeper-library `poddisruptionbudget` template.",
+  "scope": {
+    "namespace": "kube-system"
+  },
   "source_ref": "src-0130",
   "source_timestamp": "2026-01-17T06:00:00+00:00",
   "time_window": null

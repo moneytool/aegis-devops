@@ -1,16 +1,15 @@
 {
   "actions": [
-    "set-image"
+    "apply",
+    "create"
   ],
   "constraint_class": "configuration",
   "effect": "ESCALATE",
-  "principal": "sre_lead",
+  "principal": "ci_bot",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate set-image on prod deployment/* to a disallowed image tag, per the gatekeeper-library `disallowedtags` template.",
-  "scope": {
-    "namespace": "staging"
-  },
+  "resource_pattern": "pod/web-*",
+  "rule_text": "Escalate creating pod/* without CPU and memory limits set, per the gatekeeper-library `containerlimits` template.",
+  "scope": {},
   "source_ref": "src-0099",
   "source_timestamp": "2026-01-13T09:00:00+00:00",
   "time_window": null

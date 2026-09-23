@@ -1,14 +1,16 @@
 {
   "actions": [
-    "set-image"
+    "update"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "networking",
   "effect": "BLOCK",
-  "principal": "developer",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Block set-image on deployment/* to a disallowed image tag (e.g. `:latest`), per the gatekeeper-library `disallowedtags` template (\"Requires container images to have an image tag different from the ones in the specified list\").",
-  "scope": {},
+  "principal": "platform_admin",
+  "provider": "aws",
+  "resource_pattern": "ec2/security-group/gateway-*",
+  "rule_text": "Escalate security-group rules that open RDP (3389) ingress to 0.0.0.0/0 or ::/0, per AWS Security Hub FSBP control EC2.14.",
+  "scope": {
+    "region": "eu-west-1"
+  },
   "source_ref": "src-0279",
   "source_timestamp": "2026-02-04T21:00:00+00:00",
   "time_window": null

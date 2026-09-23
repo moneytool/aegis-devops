@@ -1,16 +1,14 @@
 {
   "actions": [
-    "set-image"
+    "scale"
   ],
-  "constraint_class": "configuration",
+  "constraint_class": "scaling",
   "effect": "ESCALATE",
-  "principal": "sre_lead",
+  "principal": "contractor",
   "provider": "kubernetes",
   "resource_pattern": "deployment/*",
-  "rule_text": "Escalate set-image on prod deployment/* to a disallowed image tag, per the gatekeeper-library `disallowedtags` template.",
-  "scope": {
-    "namespace": "dev"
-  },
+  "rule_text": "Block scaling deployment/* outside the allowed replica range, per the gatekeeper-library `replicalimits` template (\"Requires that objects with the field spec.replicas specify a number of replicas within defined ranges\").",
+  "scope": {},
   "source_ref": "src-0342",
   "source_timestamp": "2026-02-12T18:00:00+00:00",
   "time_window": null

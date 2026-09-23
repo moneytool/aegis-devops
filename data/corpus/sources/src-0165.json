@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "apply"
   ],
-  "constraint_class": "deployment",
-  "effect": "ESCALATE",
-  "principal": "platform_admin",
+  "constraint_class": "networking",
+  "effect": "BLOCK",
+  "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "job/*",
-  "rule_text": "Escalate Jobs created without a bounded RestartPolicy; Universe's incident report describes a production search/reporting outage caused by a Job that kept consuming node resources on restart.",
-  "scope": {},
+  "resource_pattern": "service/gateway-*",
+  "rule_text": "Block applying service/* of type NodePort in prod, per the gatekeeper-library `block-nodeport-services` template.",
+  "scope": {
+    "namespace": "prod"
+  },
   "source_ref": "src-0165",
   "source_timestamp": "2026-01-21T15:00:00+00:00",
   "time_window": null

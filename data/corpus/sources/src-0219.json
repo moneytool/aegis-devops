@@ -1,14 +1,16 @@
 {
   "actions": [
-    "delete"
+    "update"
   ],
-  "constraint_class": "deletion",
-  "effect": "BLOCK",
-  "principal": "developer",
-  "provider": "kubernetes",
-  "resource_pattern": "namespace/kube-system",
-  "rule_text": "Never delete namespace/kube-system; multiple public incidents trace outages back to accidental namespace deletion.",
-  "scope": {},
+  "constraint_class": "networking",
+  "effect": "ESCALATE",
+  "principal": "ci_bot",
+  "provider": "azure",
+  "resource_pattern": "web/functionapp/*",
+  "rule_text": "Escalate re-enabling public network access on a Function App, per the Azure Policy built-in \"App Service apps should disable public network access\" definition.",
+  "scope": {
+    "resource_group": "rg-prod-eastus"
+  },
   "source_ref": "src-0219",
   "source_timestamp": "2026-01-28T09:00:00+00:00",
   "time_window": null

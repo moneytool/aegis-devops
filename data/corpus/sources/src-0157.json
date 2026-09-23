@@ -1,15 +1,16 @@
 {
   "actions": [
-    "apply",
-    "create"
+    "update"
   ],
   "constraint_class": "access",
   "effect": "BLOCK",
   "principal": "security_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Block applying deployment/* whose image is outside the allowed registry prefixes, per the gatekeeper-library `allowedrepos` template (\"Requires container images to begin with a string from the specified list\").",
-  "scope": {},
+  "provider": "gcp",
+  "resource_pattern": "compute/instance/*",
+  "rule_text": "Block re-enabling serial port access on a Compute Engine VM, per the GCP organization policy constraint `compute.disableSerialPortAccess`.",
+  "scope": {
+    "region": "us-west-2"
+  },
   "source_ref": "src-0157",
   "source_timestamp": "2026-01-20T15:00:00+00:00",
   "time_window": null

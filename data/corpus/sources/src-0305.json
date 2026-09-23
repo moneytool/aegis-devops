@@ -1,29 +1,15 @@
 {
   "actions": [
-    "delete",
-    "rollout-restart"
+    "create"
   ],
-  "constraint_class": "deployment",
+  "constraint_class": "configuration",
   "effect": "BLOCK",
-  "principal": "ci_bot",
+  "principal": "security_lead",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/cache-*",
-  "rule_text": "Block deployment restarts and deletions in prod during business hours; Monzo's KubeCon talk on the \"Anatomy of a Production Kubernetes Outage\" traces a ledger/platform outage to a risky in-hours API change.",
-  "scope": {
-    "namespace": "kube-system"
-  },
+  "resource_pattern": "pod/billing-*",
+  "rule_text": "Block Pods requesting privileged containers, per the Kyverno policy library `pod-security/baseline/disallow-privileged-containers` policy.",
+  "scope": {},
   "source_ref": "src-0305",
   "source_timestamp": "2026-02-08T03:00:00+00:00",
-  "time_window": {
-    "days": [
-      "Mon",
-      "Tue",
-      "Wed",
-      "Thu",
-      "Fri"
-    ],
-    "end": "17:00",
-    "start": "09:00",
-    "tz": "America/New_York"
-  }
+  "time_window": null
 }

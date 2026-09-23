@@ -1,14 +1,17 @@
 {
   "actions": [
-    "set-image"
+    "apply",
+    "update"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "sre_lead",
+  "constraint_class": "networking",
+  "effect": "BLOCK",
+  "principal": "sre_oncall",
   "provider": "kubernetes",
-  "resource_pattern": "deployment/*",
-  "rule_text": "Escalate deployments that set an unpinned or `imagePullPolicy Always` image; Datadog's \"10 Ways to Shoot Yourself in the Foot\" talk lists this among repeated causes of pending pods and slow deployments.",
-  "scope": {},
+  "resource_pattern": "service/*",
+  "rule_text": "Escalate Service changes that alter externalTrafficPolicy; the DevOps Hof postmortem on load-balancer configuration during node draining traces a total ingress outage to this setting.",
+  "scope": {
+    "namespace": "kube-system"
+  },
   "source_ref": "src-0318",
   "source_timestamp": "2026-02-09T18:00:00+00:00",
   "time_window": null

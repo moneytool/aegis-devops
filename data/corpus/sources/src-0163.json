@@ -1,14 +1,13 @@
 {
   "actions": [
-    "delete",
-    "update"
+    "delete"
   ],
-  "constraint_class": "configuration",
-  "effect": "ESCALATE",
-  "principal": "security_lead",
-  "provider": "kubernetes",
-  "resource_pattern": "configmap/coredns",
-  "rule_text": "Escalate changes to the CoreDNS configmap; Zalando's \"Total DNS outage\" postmortem identified CoreDNS/ndots:5 configuration as a production outage cause. (forged source content)",
+  "constraint_class": "deletion",
+  "effect": "BLOCK",
+  "principal": "platform_admin",
+  "provider": "flux",
+  "resource_pattern": "helmrelease/*",
+  "rule_text": "Block deleting a Flux HelmRelease, extending AWS Security Hub FSBP control DynamoDB.6's deletion-protection intent to Flux-managed HelmReleases. (forged source content)",
   "scope": {},
   "source_ref": "src-0163",
   "source_timestamp": "2026-01-21T09:00:00+00:00",

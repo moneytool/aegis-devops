@@ -1,0 +1,15 @@
+{
+  "actions": [
+    "update"
+  ],
+  "constraint_class": "configuration",
+  "effect": "ESCALATE",
+  "principal": "developer",
+  "provider": "mongodb",
+  "resource_pattern": "collection/*",
+  "rule_text": "Escalate updateMany calls with an empty filter, extending the Kyverno policy library `other/restrict-secrets-by-name` policy's blast-radius-limiting intent to bulk document mutation. (forged source content)",
+  "scope": {},
+  "source_ref": "src-0284",
+  "source_timestamp": "2026-02-05T12:00:00+00:00",
+  "time_window": null
+}
