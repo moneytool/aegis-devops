@@ -1,0 +1,338 @@
+constraints:
+- id: no-scale-prod-peak
+  provider: kubernetes
+  resource_pattern: deployment/*
+  actions:
+  - scale
+  scope:
+    namespace: prod
+  time_window:
+    days:
+    - Mon
+    - Tue
+    - Wed
+    - Thu
+    - Fri
+    start: 09:00
+    end: '17:00'
+    tz: America/New_York
+  effect: BLOCK
+  constraint_class: scaling
+  principal: sre_lead
+  source_ref: jira-1001
+  source_timestamp: '2026-01-15T09:00:00+00:00'
+  rule_text: Do not scale deployments in prod during business hours (09:00-17:00 ET,
+    weekdays).
+  provenance_hash: f3af697890dc757effcf13cdfcc9e4624e32aa65dd3114c348674ddcda0f2244
+- id: no-delete-nodes
+  provider: kubernetes
+  resource_pattern: node/*
+  actions:
+  - delete
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  principal: admin
+  source_ref: git-abc123
+  source_timestamp: '2026-02-01T12:00:00+00:00'
+  rule_text: Never delete cluster nodes directly; drain and cordon through the runbook
+    instead.
+  provenance_hash: fd5a01ddabc24b1203b65dd2503be114d88d5de909b2bb1ca41ecbd2e02d078a
+- id: escalate-terraform-prod-destroy
+  provider: terraform
+  resource_pattern: aws_instance.*
+  actions:
+  - delete
+  - replace
+  scope:
+    region: us-east-1
+  time_window: null
+  effect: ESCALATE
+  constraint_class: deletion
+  principal: admin
+  source_ref: slack-perma-1
+  source_timestamp: '2026-02-10T18:30:00+00:00'
+  rule_text: Escalate any destructive terraform change to prod EC2 instances in us-east-1
+    for human review.
+  provenance_hash: 6d366d7ed1a8abbcc4e2979cbfe54fc0d2414f75ca1728ddbe4e689d3e8e23c7
+- id: escalate-configmap-changes
+  provider: kubernetes
+  resource_pattern: configmap/*
+  actions:
+  - delete
+  - update
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: configuration
+  principal: developer
+  source_ref: jira-1002
+  source_timestamp: '2026-03-01T08:00:00+00:00'
+  rule_text: Escalate configmap changes for review before they are applied.
+  provenance_hash: 3dcb8a4cbe56e36e338a8db7ac50ef9436e9314a8be49d1c914abb148c5a23dd
+- id: no-direct-asg-changes
+  provider: terraform
+  resource_pattern: aws_autoscaling_group.*
+  actions:
+  - update
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: scaling
+  principal: admin
+  source_ref: git-bcd234
+  source_timestamp: '2026-03-05T14:00:00+00:00'
+  rule_text: Block direct terraform changes to autoscaling groups; use the scaling
+    API instead.
+  provenance_hash: afa75ac708a069a8b6f7c7594f46719a450dcaf7818c29090099bd1e80b4deb6
+- id: aws-no-delete-ec2-us-east-1
+  provider: aws
+  resource_pattern: ec2/instance/*
+  actions:
+  - delete
+  scope:
+    region: us-east-1
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  principal: admin
+  source_ref: jira-2001
+  source_timestamp: '2026-03-10T09:00:00+00:00'
+  rule_text: Block deleting EC2 instances in us-east-1; terminate through the runbook
+    instead.
+  provenance_hash: b7e90e442b18df6b94af766bc3b881bf4a4c50341a1df770ab004b024fb6c5a1
+- id: azure-escalate-aks-scale-delete
+  provider: azure
+  resource_pattern: aks/cluster/*
+  actions:
+  - delete
+  - scale
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: scaling
+  principal: sre_lead
+  source_ref: git-def456
+  source_timestamp: '2026-03-12T11:00:00+00:00'
+  rule_text: Escalate scaling or deleting AKS clusters for human review.
+  provenance_hash: 8281e310fb3d5cc7b4a4041de2e8c62cc97e93eacb00f74e416f8fc9625acf6a
+- id: gcp-no-delete-sql-instance
+  provider: gcp
+  resource_pattern: sql/instance/*
+  actions:
+  - delete
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  principal: admin
+  source_ref: jira-2002
+  source_timestamp: '2026-03-14T13:00:00+00:00'
+  rule_text: Block deleting Cloud SQL instances directly; use the decommission runbook
+    instead.
+  provenance_hash: 597d1cc37a6e19d8508ede3c762ad2be3afb384a50a603c2df34d263712cfd7b
+- id: no-delete-in-prod-env
+  provider: kubernetes
+  resource_pattern: '*'
+  actions:
+  - delete
+  scope:
+    env: prod
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  principal: admin
+  source_ref: git-789abc
+  source_timestamp: '2026-03-18T10:00:00+00:00'
+  rule_text: Block deleting any resource in a production environment, regardless of
+    kind; only the runbook may delete in prod.
+  provenance_hash: 4c9c7f43f3d7e404ce0f9d4fc50cae305473aae9ee176f99028096754e042c72
+- id: no-delete-in-prod-namespace
+  provider: kubernetes
+  resource_pattern: '*'
+  actions:
+  - delete
+  scope:
+    namespace: prod
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  principal: admin
+  source_ref: jira-3004
+  source_timestamp: '2026-03-21T09:00:00+00:00'
+  rule_text: Block deleting any resource in the prod namespace (including deleting
+    the namespace itself, which cascades to everything in it); only the runbook may
+    delete in prod.
+  provenance_hash: f113e23d4a503ef45fbab68655f41d8cf434f1dbcf16f0fb646e5636bedb30e0
+- id: helm-block-release-delete-prod
+  provider: helm
+  resource_pattern: release/*
+  actions:
+  - delete
+  scope:
+    namespace: prod
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  principal: admin
+  source_ref: jira-3001
+  source_timestamp: '2026-03-20T09:00:00+00:00'
+  rule_text: Block deleting Helm releases in the prod namespace; use the decommission
+    runbook instead.
+  provenance_hash: 95a7e5c38de10083ba86e99ac6b75d9e18bfbf148710e6a037bdc7c438b84bf7
+- id: argocd-escalate-prod-sync-prune
+  provider: argocd
+  resource_pattern: app/prod-*
+  actions:
+  - sync
+  scope:
+    prune: true
+  time_window: null
+  effect: ESCALATE
+  constraint_class: configuration
+  principal: sre_lead
+  source_ref: jira-3003
+  source_timestamp: '2026-03-20T09:30:00+00:00'
+  rule_text: Escalate ArgoCD syncs of prod applications with --prune for human review.
+  provenance_hash: d2f69433e0f103545173689e92f40ef40e29ad8fb35b55eea735775b7fd880d0
+- id: git-block-force-push-main
+  provider: git
+  resource_pattern: ref/main
+  actions:
+  - push
+  scope:
+    force: true
+  time_window: null
+  effect: BLOCK
+  constraint_class: configuration
+  principal: sre_lead
+  source_ref: git-4001
+  source_timestamp: '2026-03-20T10:00:00+00:00'
+  rule_text: Block force-pushing to main; history rewrites on the shared branch are
+    never allowed.
+  provenance_hash: cc77094b73548458a4d8bade2ed7ac1c300ee196345f82b2c88a4d98f867f4f7
+- id: github-escalate-deploy-prod-workflow
+  provider: github
+  resource_pattern: workflow/deploy-prod*
+  actions:
+  - run
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: configuration
+  principal: sre_lead
+  source_ref: jira-3002
+  source_timestamp: '2026-03-20T10:30:00+00:00'
+  rule_text: Escalate manual runs of production deploy workflows for human review.
+  provenance_hash: c87ecc926787c75fcc985db7048d28b5e4c50da424507b87c438f4b459ded138
+- id: sql-block-unbounded-table-delete
+  provider: sql
+  resource_pattern: table/*
+  actions:
+  - delete
+  scope:
+    unbounded: true
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  principal: admin
+  source_ref: jira-5001
+  source_timestamp: '2026-04-01T09:00:00+00:00'
+  rule_text: Block unbounded DELETE statements against any table (a DELETE with no
+    WHERE clause).
+  provenance_hash: b2304cd54c4f67fddd275587f98b5406b5af5afa58428227c37fddcf61be69bb
+- id: sql-block-database-delete
+  provider: sql
+  resource_pattern: database/*
+  actions:
+  - delete
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  principal: admin
+  source_ref: jira-5002
+  source_timestamp: '2026-04-01T09:05:00+00:00'
+  rule_text: Block DROP DATABASE / DROP SCHEMA statements outright.
+  provenance_hash: 3498aef6f346c9f3ea59f8971a329fe362e6da153bf31d9cf9acf515061a8ca3
+- id: sql-escalate-table-ddl-drop-column
+  provider: sql
+  resource_pattern: table/*
+  actions:
+  - update
+  scope:
+    ddl: true
+    drop_column: true
+  time_window: null
+  effect: ESCALATE
+  constraint_class: configuration
+  principal: sre_lead
+  source_ref: jira-5003
+  source_timestamp: '2026-04-01T09:10:00+00:00'
+  rule_text: Escalate ALTER TABLE ... DROP COLUMN statements for human review before
+    they run.
+  provenance_hash: 79d35ee558eff46c3c80110dd492d066b1365030930885a4b5b6e91de839363f
+- id: mongodb-block-unbounded-collection-delete
+  provider: mongodb
+  resource_pattern: collection/*
+  actions:
+  - delete
+  scope:
+    unbounded: true
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  principal: admin
+  source_ref: jira-5004
+  source_timestamp: '2026-04-01T09:15:00+00:00'
+  rule_text: Block unbounded deleteMany/remove calls against any Mongo collection
+    (an empty filter matches everything).
+  provenance_hash: bfcd815f7a5d20cb3449cf469faa903c73e07a804f42def4749e8d1ba19cb7cb
+- id: pulumi-escalate-rds-delete-replace
+  provider: pulumi
+  resource_pattern: aws/rds/*
+  actions:
+  - delete
+  - replace
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: deletion
+  principal: admin
+  source_ref: plan-5005
+  source_timestamp: '2026-04-01T09:20:00+00:00'
+  rule_text: Escalate any Pulumi delete or replace of an RDS resource for human review
+    before applying.
+  provenance_hash: d36290c432cb1f37323361b5d19a34e00a5e6ef588f566b9f4ccad23f0d72b4b
+- id: migration-block-database-delete
+  provider: migration
+  resource_pattern: database/*
+  actions:
+  - delete
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  principal: admin
+  source_ref: jira-5006
+  source_timestamp: '2026-04-01T09:25:00+00:00'
+  rule_text: Block database-wiping migration commands (flyway clean, rails db:drop/db:reset,
+    prisma migrate reset) outright.
+  provenance_hash: ebddf9666f7df5ce6ccd0a4cd9b1de5ae67cbbe12477b2559701aa0bf83cda2e
+- id: helm-block-release-delete-prod-env
+  provider: helm
+  resource_pattern: release/*
+  actions:
+  - delete
+  scope:
+    env: prod
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  principal: admin
+  source_ref: jira-3005
+  source_timestamp: '2026-03-20T09:15:00+00:00'
+  rule_text: Block deleting Helm releases in any production environment (resolved
+    from the kube context), whatever the namespace; use the decommission runbook instead.
+  provenance_hash: 747653b3b34300a18e4773a0784706fcb0147fb10507e88ce93f2fb5cdcd4df8

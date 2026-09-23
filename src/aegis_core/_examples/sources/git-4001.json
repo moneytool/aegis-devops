@@ -1,0 +1,17 @@
+{
+  "provider": "git",
+  "resource_pattern": "ref/main",
+  "actions": [
+    "push"
+  ],
+  "scope": {
+    "force": true
+  },
+  "time_window": null,
+  "effect": "BLOCK",
+  "constraint_class": "configuration",
+  "principal": "sre_lead",
+  "source_ref": "git-4001",
+  "source_timestamp": "2026-03-20T10:00:00+00:00",
+  "rule_text": "Block force-pushing to main; history rewrites on the shared branch are never allowed."
+}

@@ -1,0 +1,17 @@
+{
+  "provider": "sql",
+  "resource_pattern": "table/*",
+  "actions": [
+    "delete"
+  ],
+  "scope": {
+    "unbounded": true
+  },
+  "time_window": null,
+  "effect": "BLOCK",
+  "constraint_class": "deletion",
+  "principal": "admin",
+  "source_ref": "jira-5001",
+  "source_timestamp": "2026-04-01T09:00:00+00:00",
+  "rule_text": "Block unbounded DELETE statements against any table (a DELETE with no WHERE clause)."
+}

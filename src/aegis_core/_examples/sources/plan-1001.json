@@ -1,0 +1,10 @@
+{
+  "provider": "terraform",
+  "effect": "ESCALATE",
+  "constraint_class": "configuration",
+  "principal": "sre_lead",
+  "source_ref": "plan-1001",
+  "source_timestamp": "2026-04-01T09:00:00+00:00",
+  "rule_text": "Escalate any terraform plan that touches more than 25 resources for human review.",
+  "max_intents": 25
+}

@@ -2,21 +2,29 @@
 
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
+import yaml
 
 from aegis_core.baselines.llm import (
+    AwarePromptBuilder,
     HeuristicLLMClient,
     LLMVerifier,
     RecordingClient,
     ReplayClient,
     parse_llm_response,
+    render_system_prompt,
+    render_user_turn,
 )
 from aegis_core.baselines.opa import OpaVerifier, render_rego, signed_bundle_constraints
 from aegis_core.intent import InfrastructureIntent
-from aegis_core.store import Constraint
+from aegis_core.store import Constraint, _constraint_from_dict
 
 NOW = datetime(2026, 1, 5, 12, 0, tzinfo=UTC)
+REPO_ROOT = Path(__file__).resolve().parent.parent
+RESULTS_DIR = REPO_ROOT / "results"
+FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "pre_t05_corpus"
 
 
 def make_constraint(**overrides) -> Constraint:
@@ -261,3 +269,131 @@ def test_opa_verifier_real_eval_if_available():
         resource="service/frontend", action="get", provider="kubernetes"
     )
     assert verifier.decide(unrelated, now=NOW).verdict == "ALLOW"
+
+
+# ---------------------------------------------------------------------------
+# AwarePromptBuilder (REVIEW-4 T2.1) and the external llm-naive/llm-aware
+# replay caches recorded by a sibling harness (agent-guardrail-bench@a98a8fa)
+# against this repo's pre-T0.5 corpus. See results/llm-external.md for the
+# full measured tables and cost estimate. These tests confirm this repo's
+# CURRENT prompt rendering still reproduces the prompts that cache was
+# recorded against -- i.e. results/llm-cache-{naive,aware}.jsonl replay
+# cleanly, and would immediately go stale if render_system_prompt or
+# AwarePromptBuilder's text ever drifts.
+# ---------------------------------------------------------------------------
+
+
+def test_aware_prompt_builder_appends_authority_after_naive_prompt():
+    constraints = [make_constraint()]
+    authority_map = {"platform_admin": {"scaling"}}
+    naive = render_system_prompt(constraints)
+    aware = AwarePromptBuilder(constraints, authority_map).render_system_prompt()
+    assert aware.startswith(naive)
+    assert "Authority rules" in aware
+    assert "platform_admin" in aware
+    assert "scaling" in aware
+
+
+def test_aware_prompt_builder_renders_sorted_principal_classes():
+    constraints = [make_constraint()]
+    authority_map = {"sre_lead": {"deletion", "scaling"}, "admin": {"access"}}
+    builder = AwarePromptBuilder(constraints, authority_map)
+    authority_yaml = yaml.safe_load(builder.render_authority_yaml())
+    assert authority_yaml == {
+        "principals": {"sre_lead": ["deletion", "scaling"], "admin": ["access"]}
+    }
+
+
+def _load_pre_t05_fixture():
+    with open(FIXTURES_DIR / "constraints.yaml") as f:
+        raw_constraints = yaml.safe_load(f)["constraints"]
+    with open(FIXTURES_DIR / "authority.yaml") as f:
+        authority_raw = yaml.safe_load(f)["principals"]
+    authority_map = {p: set(classes) for p, classes in authority_raw.items()}
+    intents = []
+    with open(FIXTURES_DIR / "intents_holdout.jsonl") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                intents.append(json.loads(line))
+    return raw_constraints, authority_map, intents
+
+
+def _load_external_cache(path: Path) -> dict[str, str]:
+    cache: dict[str, str] = {}
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            entry = json.loads(line)
+            cache[entry["key"]] = entry["response"]
+    return cache
+
+
+def _replay_hit_rate(system_prompt: str, intents: list[dict], cache: dict[str, str]) -> float:
+    client = ReplayClient.__new__(ReplayClient)  # avoid re-reading the file per call
+    client._cache = cache
+    client.cache_path = None
+    hits = 0
+    for rec in intents:
+        intent = InfrastructureIntent(
+            resource=rec["resource"],
+            action=rec["action"],
+            provider=rec["provider"],
+            params=rec.get("params") or {},
+            metadata=rec.get("metadata") or {},
+        )
+        now = datetime.fromisoformat(rec["now"])
+        user_turn = render_user_turn(intent, now)
+        try:
+            client.complete(system_prompt, user_turn)
+            hits += 1
+        except KeyError:
+            pass
+    return hits / len(intents)
+
+
+_EXTERNAL_CACHES_PRESENT = (RESULTS_DIR / "llm-cache-naive.jsonl").exists() and (
+    RESULTS_DIR / "llm-cache-aware.jsonl"
+).exists()
+
+
+@pytest.mark.skipif(
+    not _EXTERNAL_CACHES_PRESENT,
+    reason="results/llm-cache-{naive,aware}.jsonl not present (see results/llm-external.md)",
+)
+def test_llm_replay_naive_matches_external_cache():
+    raw_constraints, _authority_map, intents = _load_pre_t05_fixture()
+    holdout_ids = set(json.load(open(FIXTURES_DIR / "split.json"))["holdout"])
+    holdout_constraints = [
+        _constraint_from_dict(c) for c in raw_constraints if c["id"] in holdout_ids
+    ]
+    system_prompt = render_system_prompt(holdout_constraints)
+    cache = _load_external_cache(RESULTS_DIR / "llm-cache-naive.jsonl")
+    hit_rate = _replay_hit_rate(system_prompt, intents, cache)
+    assert hit_rate >= 0.95, (
+        f"only {hit_rate:.0%} of external llm-naive cache keys hit -- "
+        "render_system_prompt has drifted from what produced "
+        "results/llm-cache-naive.jsonl; see results/llm-external.md"
+    )
+
+
+@pytest.mark.skipif(
+    not _EXTERNAL_CACHES_PRESENT,
+    reason="results/llm-cache-{naive,aware}.jsonl not present (see results/llm-external.md)",
+)
+def test_llm_replay_aware_matches_external_cache():
+    raw_constraints, authority_map, intents = _load_pre_t05_fixture()
+    holdout_ids = set(json.load(open(FIXTURES_DIR / "split.json"))["holdout"])
+    holdout_constraints = [
+        _constraint_from_dict(c) for c in raw_constraints if c["id"] in holdout_ids
+    ]
+    system_prompt = AwarePromptBuilder(holdout_constraints, authority_map).render_system_prompt()
+    cache = _load_external_cache(RESULTS_DIR / "llm-cache-aware.jsonl")
+    hit_rate = _replay_hit_rate(system_prompt, intents, cache)
+    assert hit_rate >= 0.95, (
+        f"only {hit_rate:.0%} of external llm-aware cache keys hit -- "
+        "AwarePromptBuilder has drifted from what produced "
+        "results/llm-cache-aware.jsonl; see results/llm-external.md"
+    )

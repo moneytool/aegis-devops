@@ -1,0 +1,76 @@
+plan_constraints:
+- id: plan-max-25-resources
+  provider: terraform
+  effect: ESCALATE
+  constraint_class: configuration
+  principal: sre_lead
+  source_ref: plan-1001
+  source_timestamp: '2026-04-01T09:00:00+00:00'
+  rule_text: Escalate any terraform plan that touches more than 25 resources for human
+    review.
+  provenance_hash: 31660a4ae4fc93b4afb3e45637829282dfe77f777d0fff4cbabef37c08adb038
+  max_intents: 25
+  max_matching: null
+  requires_all: null
+  forbid_together: null
+  ratio: null
+- id: plan-no-db-deletes
+  provider: terraform
+  effect: BLOCK
+  constraint_class: deletion
+  principal: admin
+  source_ref: plan-1002
+  source_timestamp: '2026-04-02T09:00:00+00:00'
+  rule_text: Block any terraform plan that deletes or replaces an aws_db_instance.
+  provenance_hash: 72c17fbb6eaab0de412a42a0bdefa0db28985c5f6c1f197770124744d28cfe09
+  max_intents: null
+  max_matching:
+    actions:
+    - delete
+    - replace
+    resource_pattern: aws_db_instance.*
+    max: 0
+  requires_all: null
+  forbid_together: null
+  ratio: null
+- id: plan-no-delete-and-create-us-east-1
+  provider: terraform
+  effect: BLOCK
+  constraint_class: deletion
+  principal: admin
+  source_ref: plan-1003
+  source_timestamp: '2026-04-03T09:00:00+00:00'
+  rule_text: Block a terraform plan that both deletes resources in us-east-1 and creates
+    resources anywhere; split the change into separate plans for review.
+  provenance_hash: cbdaa3e708a9d43ed70c3fde4c0825dd1bd0797ad3bebddf0175d05a3a5cc469
+  max_intents: null
+  max_matching: null
+  requires_all: null
+  forbid_together:
+  - actions:
+    - delete
+    scope:
+      region: us-east-1
+  - actions:
+    - create
+  ratio: null
+- id: plan-k8s-delete-ratio
+  provider: kubernetes
+  effect: ESCALATE
+  constraint_class: deletion
+  principal: admin
+  source_ref: plan-1004
+  source_timestamp: '2026-04-04T09:00:00+00:00'
+  rule_text: Escalate a kubectl batch where more than 50% of the touched resources
+    are deletes.
+  provenance_hash: f40ffe666136e66ac2cda71601c5658705c70254ea8ac5730f9bdcc8d30be6b4
+  max_intents: null
+  max_matching: null
+  requires_all: null
+  forbid_together: null
+  ratio:
+    numerator:
+      actions:
+      - delete
+    denominator: {}
+    max: 0.5

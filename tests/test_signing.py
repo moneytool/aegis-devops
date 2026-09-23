@@ -162,7 +162,11 @@ def test_shipped_example_and_corpus_files_verify_under_the_example_key():
         "data/corpus/authority.yaml",
         "data/corpus/sources/PRINCIPALS.yaml",
         "data/corpus/sources/src-0003.json",
+        # data/sources-forged/: sources/ re-signed after jira-1001.json's
+        # rule_text was edited, so --sources has a real forged quarantine to
+        # demonstrate (REVIEW-4 T2.7) -- still one manifest, not per-file sigs.
+        "data/sources-forged/PRINCIPALS.yaml",
     ):
         assert verify_file(path, key), path
     assert not any(p.name.endswith(".json.sig") for p in Path("data").rglob("*.sig"))
-    assert len(list(Path("data").rglob("*.sig"))) <= 8
+    assert len(list(Path("data").rglob("*.sig"))) <= 9

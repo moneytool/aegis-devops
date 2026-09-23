@@ -1,0 +1,15 @@
+{
+  "provider": "migration",
+  "resource_pattern": "database/*",
+  "actions": [
+    "delete"
+  ],
+  "scope": {},
+  "time_window": null,
+  "effect": "BLOCK",
+  "constraint_class": "deletion",
+  "principal": "admin",
+  "source_ref": "jira-5006",
+  "source_timestamp": "2026-04-01T09:25:00+00:00",
+  "rule_text": "Block database-wiping migration commands (flyway clean, rails db:drop/db:reset, prisma migrate reset) outright."
+}

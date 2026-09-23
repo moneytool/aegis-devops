@@ -1,0 +1,15 @@
+{
+  "provider": "github",
+  "resource_pattern": "workflow/deploy-prod*",
+  "actions": [
+    "run"
+  ],
+  "scope": {},
+  "time_window": null,
+  "effect": "ESCALATE",
+  "constraint_class": "configuration",
+  "principal": "sre_lead",
+  "source_ref": "jira-3002",
+  "source_timestamp": "2026-03-20T10:30:00+00:00",
+  "rule_text": "Escalate manual runs of production deploy workflows for human review."
+}

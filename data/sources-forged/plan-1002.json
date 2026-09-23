@@ -1,0 +1,17 @@
+{
+  "provider": "terraform",
+  "effect": "BLOCK",
+  "constraint_class": "deletion",
+  "principal": "admin",
+  "source_ref": "plan-1002",
+  "source_timestamp": "2026-04-02T09:00:00+00:00",
+  "rule_text": "Block any terraform plan that deletes or replaces an aws_db_instance.",
+  "max_matching": {
+    "actions": [
+      "delete",
+      "replace"
+    ],
+    "resource_pattern": "aws_db_instance.*",
+    "max": 0
+  }
+}

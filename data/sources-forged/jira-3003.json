@@ -1,0 +1,17 @@
+{
+  "provider": "argocd",
+  "resource_pattern": "app/prod-*",
+  "actions": [
+    "sync"
+  ],
+  "scope": {
+    "prune": true
+  },
+  "time_window": null,
+  "effect": "ESCALATE",
+  "constraint_class": "configuration",
+  "principal": "sre_lead",
+  "source_ref": "jira-3003",
+  "source_timestamp": "2026-03-20T09:30:00+00:00",
+  "rule_text": "Escalate ArgoCD syncs of prod applications with --prune for human review."
+}

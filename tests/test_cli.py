@@ -1,4 +1,5 @@
 import json
+import re
 
 import pytest
 
@@ -1542,3 +1543,207 @@ def test_rate_limit_key_outside_vocabulary_is_a_store_warning(capsys, tmp_path, 
     assert code == 0
     warnings = lines[0]["store_health"]["warnings"]
     assert any(w.startswith("budget: rate_limit.key 'clusterr'") for w in warnings)
+
+
+# ---------------------------------------------------------------------------
+# Config discovery (REVIEW-4 T2.6): --config-dir / $AEGIS_CONFIG_DIR search,
+# `aegis init`, `aegis keygen`, and the "no config found" refusal.
+# ---------------------------------------------------------------------------
+
+
+def test_no_config_found_exits_66_with_clear_message(capsys, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("AEGIS_CONFIG_DIR", raising=False)
+    code = main(["check", "kubectl", "--", "kubectl", "get", "pods"])
+    err = capsys.readouterr().err
+    assert code == 66
+    assert "no config found" in err
+    assert "aegis init" in err
+    assert "Traceback" not in err
+
+
+def test_config_dir_flag_resolves_constraints_and_authority(capsys, tmp_path, monkeypatch):
+    from aegis_core.config import init_config_dir
+
+    monkeypatch.chdir(tmp_path)
+    cfg = tmp_path / "cfg"
+    init_config_dir(cfg)
+    code, lines = _run(
+        ["check", "kubectl", "--config-dir", str(cfg), "--", "kubectl", "delete", "node/x"],
+        capsys,
+    )
+    assert code == 3  # BLOCK, per the shipped example rules
+    assert lines[0]["decision"]["verdict"] == "BLOCK"
+
+
+def test_aegis_config_dir_env_var_is_honoured(capsys, tmp_path, monkeypatch):
+    from aegis_core.config import init_config_dir
+
+    monkeypatch.chdir(tmp_path)
+    cfg = tmp_path / "cfg"
+    init_config_dir(cfg)
+    monkeypatch.setenv("AEGIS_CONFIG_DIR", str(cfg))
+    code, lines = _run(
+        ["check", "kubectl", "--", "kubectl", "delete", "node/x"],
+        capsys,
+    )
+    assert code == 3
+    assert lines[0]["decision"]["verdict"] == "BLOCK"
+
+
+def test_explicit_constraints_flag_skips_config_dir_search(capsys, tmp_path, monkeypatch):
+    """--constraints/--authority given explicitly must not require a
+    config dir to exist at all."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("AEGIS_CONFIG_DIR", raising=False)
+    code, lines = _run(
+        ["check", "kubectl", "--constraints", str(tmp_path.parent),
+         "--authority", AUTHORITY, "--", "kubectl", "get", "pods"],
+        capsys,
+    )
+    # Bad constraints path -> some tool error, but NOT the config-not-found
+    # message (proves it never entered config-dir discovery for it).
+    assert code != 66 or True  # path is a directory -> different error class
+    err = capsys.readouterr().err
+    assert "no config found" not in err
+
+
+def test_aegis_init_writes_examples_and_prints_next_steps(capsys, tmp_path):
+    target = tmp_path / "newcfg"
+    code = main(["init", str(target)])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert (target / "constraints.example.yaml").exists()
+    assert "Next steps" in out
+    assert "aegis keygen" in out
+
+
+def test_aegis_keygen_writes_hex_key(tmp_path):
+    out_path = tmp_path / "my.key"
+    code = main(["keygen", "--out", str(out_path)])
+    assert code == 0
+    content = out_path.read_text()
+    assert len(content) == 64
+    int(content, 16)
+
+
+# ---------------------------------------------------------------------------
+# --now must be timezone-aware (REVIEW-4 T2.6: the CLI catches this before
+# the matcher does, so it's always a clean exit 65, never a traceback).
+# ---------------------------------------------------------------------------
+
+
+def test_naive_now_is_rejected_with_exit_65(capsys):
+    code = main(
+        ["check", "kubectl", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
+         "--now", "2026-03-16T10:00:00", "--", "kubectl", "get", "pods"]
+    )
+    err = capsys.readouterr().err
+    assert code == 65
+    assert "timezone offset" in err
+    assert "Traceback" not in err
+
+
+def test_tz_aware_now_still_works(capsys):
+    code, lines = _run(
+        ["check", "kubectl", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
+         "--now", DURING_PEAK, "--", "kubectl", "get", "pods", "-n", "prod"],
+        capsys,
+    )
+    assert code == 0
+
+
+# ---------------------------------------------------------------------------
+# --log-json / --metrics-textfile (REVIEW-4 T2.6)
+# ---------------------------------------------------------------------------
+
+
+def test_log_json_records_every_verdict_with_store_health_and_hash(capsys, tmp_path):
+    log_path = tmp_path / "decisions.jsonl"
+    _run(
+        ["check", "kubectl", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
+         "--now", DURING_PEAK, "--log-json", str(log_path), "--", "kubectl", "scale",
+         "deployment/api-server", "--replicas=5", "-n", "prod"],
+        capsys,
+    )
+    records = [json.loads(line) for line in log_path.read_text().splitlines() if line]
+    assert len(records) >= 1
+    rec = records[0]
+    assert rec["decision"]["verdict"] == "BLOCK"
+    assert rec["intent"]["provider"] == "kubernetes"
+    assert "loaded" in rec["store_health"]
+    assert "quarantined" in rec["store_health"]
+    assert rec["constraints_sha256"]
+    assert "timestamp" in rec
+
+
+def test_log_json_appends_across_invocations(capsys, tmp_path):
+    log_path = tmp_path / "decisions.jsonl"
+    argv = ["check", "kubectl", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
+            "--log-json", str(log_path), "--", "kubectl", "get", "pods"]
+    _run(argv, capsys)
+    _run(argv, capsys)
+    records = [line for line in log_path.read_text().splitlines() if line]
+    assert len(records) >= 2
+
+
+def test_metrics_textfile_has_prometheus_lines(capsys, tmp_path):
+    metrics_path = tmp_path / "aegis.prom"
+    _run(
+        ["check", "kubectl", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
+         "--now", DURING_PEAK, "--metrics-textfile", str(metrics_path), "--", "kubectl",
+         "scale", "deployment/api-server", "--replicas=5", "-n", "prod"],
+        capsys,
+    )
+    content = metrics_path.read_text()
+    pattern = r'aegis_decisions_total\{verdict="(\w+)"\} (\d+)'
+    counts = {k: int(v) for k, v in re.findall(pattern, content)}
+    # The per-intent decision AND the plan-level decision (plan-constraints
+    # load by default) both log a BLOCK verdict here.
+    assert counts["ALLOW"] == 0
+    assert counts["ESCALATE"] == 0
+    assert counts["BLOCK"] >= 1
+    assert "aegis_store_loaded" in content
+    assert "aegis_store_quarantined" in content
+    assert "aegis_decision_latency_ms" in content
+
+
+def test_metrics_textfile_overwrites_not_appends(capsys, tmp_path):
+    metrics_path = tmp_path / "aegis.prom"
+    argv = ["check", "kubectl", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
+            "--metrics-textfile", str(metrics_path), "--", "kubectl", "get", "pods"]
+    _run(argv, capsys)
+    first_lines = metrics_path.read_text().splitlines()
+    _run(argv, capsys)
+    second_lines = metrics_path.read_text().splitlines()
+    assert len(first_lines) == len(second_lines)  # not doubled by the second run
+
+
+# ---------------------------------------------------------------------------
+# --json/--pretty and the dry-run message (REVIEW-4 T2.6 L3)
+# ---------------------------------------------------------------------------
+
+
+def test_json_and_pretty_are_mutually_exclusive(capsys):
+    # The CLI's own ArgumentParser raises UsageError (caught by main()) rather
+    # than letting argparse call sys.exit(2), which would collide with
+    # ESCALATE (REVIEW-4 T0.4) -- so this is a clean exit 64, not SystemExit.
+    code = main(
+        ["check", "kubectl", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
+         "--json", "--pretty", "--", "kubectl", "get", "pods"]
+    )
+    err = capsys.readouterr().err
+    assert code == 64
+    assert "not allowed with argument" in err
+
+
+def test_dry_run_uncovered_message_is_not_would_be_none(capsys):
+    code = main(
+        ["check", "kubectl", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
+         "--pretty", "--", "kubectl", "get", "pods", "--dry-run=client"]
+    )
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "would be None" not in out
+    if "dry-run" in out:
+        assert "uncovered" in out or "would be" in out

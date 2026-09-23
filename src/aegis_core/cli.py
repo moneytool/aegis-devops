@@ -28,10 +28,23 @@ Usage:
     aegis check tofu      (same as terraform; OpenTofu plans use the same schema)
     aegis sign   [--key SOURCE] PATH...     (a directory gets one AEGIS-MANIFEST.sig)
     aegis verify [--key SOURCE] PATH...
+    aegis init   DIR                        (seed DIR with the packaged example policy files)
+    aegis keygen [--out FILE]                (write a real signing key)
 
-Every subcommand also takes ``--environments PATH`` (default
-data/environments.example.yaml if present) to annotate each intent's
-``metadata["env"]`` before evaluation -- see aegis_core.environments.
+Every subcommand also takes ``--config-dir PATH`` and, when ``--constraints``/
+``--authority``/``--environments``/``--plan-constraints`` are left unset,
+resolves them from it -- search order: ``--config-dir``,
+``$AEGIS_CONFIG_DIR``, ``$PWD/.aegis``, ``$PWD/data`` (only if it already has
+a ``constraints*.yaml``), ``~/.config/aegis``, ``/etc/aegis``; see
+aegis_core.config. Nothing found and no explicit path given is exit 66
+(``no config found ...; run 'aegis init <dir>'``).
+
+``--log-json PATH`` appends one JSON object per decision (every verdict,
+intent, decision, store_health, constraints_sha256, timestamp) -- separate
+from the ledger, which only ever records executed ALLOWs. ``--metrics-textfile
+PATH`` (over)writes Prometheus textfile-collector metrics for the invocation:
+``aegis_decisions_total{verdict=...}``, ``aegis_store_loaded``,
+``aegis_store_quarantined``, ``aegis_decision_latency_ms{quantile=...}``.
 
 **Signing.** Every policy file (constraints, authority, environments, plan
 constraints, sources and their PRINCIPALS.yaml) must verify under a keyed
@@ -69,10 +82,11 @@ import logging
 import os
 import sys
 from dataclasses import asdict
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import yaml
 
+from aegis_core import config as config_module
 from aegis_core import signing
 from aegis_core.authority import load_authority_map
 from aegis_core.environments import (
@@ -178,6 +192,11 @@ class DataError(Exception):
     """Bad input data or a store too degraded to decide with (exit 65)."""
 
 
+class ConfigNotFoundError(Exception):
+    """No config directory found and no explicit policy file paths given
+    (exit 66) -- see ``aegis_core.config`` and REVIEW-4 T2.6."""
+
+
 class _ArgumentParser(argparse.ArgumentParser):
     """argparse exits 2 on usage errors, which collides with ESCALATE; raise
     instead so ``main`` can map it to EX_USAGE (64)."""
@@ -226,21 +245,36 @@ def _add_key_options(subparser: argparse.ArgumentParser) -> None:
 
 
 def _add_common_options(subparser: argparse.ArgumentParser) -> None:
-    subparser.add_argument("--constraints", default=DEFAULT_CONSTRAINTS)
-    subparser.add_argument("--authority", default=DEFAULT_AUTHORITY)
-    default_environments = DEFAULT_ENVIRONMENTS if os.path.exists(DEFAULT_ENVIRONMENTS) else None
+    subparser.add_argument(
+        "--config-dir",
+        default=None,
+        help="directory of policy files (search order: --config-dir, "
+        f"${config_module.CONFIG_ENV_VAR}, $PWD/.aegis, $PWD/data (if it has constraints*.yaml), "
+        "~/.config/aegis, /etc/aegis); fills in any of --constraints/--authority/"
+        "--environments/--plan-constraints left unset (see 'aegis init')",
+    )
+    subparser.add_argument(
+        "--constraints",
+        default=None,
+        help="path to the constraint store (default: resolved from --config-dir)",
+    )
+    subparser.add_argument(
+        "--authority",
+        default=None,
+        help="path to the authority map (default: resolved from --config-dir)",
+    )
     subparser.add_argument(
         "--environments",
-        default=default_environments,
+        default=None,
         help="path to an environment identity map (data/environments.example.yaml shape); "
-        "omit to skip env annotation",
+        "default resolved from --config-dir; omit entirely (no config dir either) to skip "
+        "env annotation",
     )
-    default_plan = DEFAULT_PLAN_CONSTRAINTS if os.path.exists(DEFAULT_PLAN_CONSTRAINTS) else None
     subparser.add_argument(
         "--plan-constraints",
-        default=default_plan,
+        default=None,
         help="path to set-level plan constraints evaluated over the whole intent batch; "
-        "omit to skip",
+        "default resolved from --config-dir; omit entirely to skip",
     )
     subparser.add_argument(
         "--sources",
@@ -292,9 +326,29 @@ def _add_common_options(subparser: argparse.ArgumentParser) -> None:
         help="refuse to decide (exit 65) when quarantined/(loaded+quarantined) exceeds this "
         f"(default {DEFAULT_MAX_QUARANTINE_RATIO})",
     )
+    subparser.add_argument(
+        "--log-json",
+        default=None,
+        metavar="PATH",
+        help="append one JSON object per decision (every verdict, intent, decision, "
+        "store_health, constraints_sha256, timestamp) to this file, separate from the "
+        "ledger",
+    )
+    subparser.add_argument(
+        "--metrics-textfile",
+        default=None,
+        metavar="PATH",
+        help="write Prometheus textfile-collector metrics for this invocation "
+        "(aegis_decisions_total, aegis_store_loaded, aegis_store_quarantined, "
+        "aegis_decision_latency_ms); overwrites the file",
+    )
     output_group = subparser.add_mutually_exclusive_group()
-    output_group.add_argument("--json", action="store_true", default=True)
-    output_group.add_argument("--pretty", action="store_true", default=False)
+    output_group.add_argument(
+        "--json", action="store_true", default=False, help="JSON output (default)"
+    )
+    output_group.add_argument(
+        "--pretty", action="store_true", default=False, help="human-readable output"
+    )
 
 
 def _add_argv_target(check_sub: argparse._SubParsersAction, name: str, help_text: str) -> None:
@@ -372,6 +426,18 @@ def _build_parser() -> argparse.ArgumentParser:
         _add_key_options(sign_parser)
         sign_parser.add_argument("paths", nargs="+")
 
+    init_parser = subparsers.add_parser(
+        "init", help="Seed a config directory with the packaged example policy files"
+    )
+    init_parser.add_argument("dir", help="directory to create/populate (e.g. ~/.config/aegis)")
+
+    keygen_parser = subparsers.add_parser(
+        "keygen", help="Generate a real signing key (32 random bytes, hex-encoded, mode 0600)"
+    )
+    keygen_parser.add_argument(
+        "--out", default="aegis-signing.key", help="path to write the key to"
+    )
+
     return parser
 
 
@@ -379,9 +445,12 @@ def _parse_now(value: str | None) -> datetime | None:
     if value is None:
         return None
     try:
-        return datetime.fromisoformat(value)
+        now = datetime.fromisoformat(value)
     except ValueError as exc:
         raise DataError(f"--now {value!r} is not an ISO8601 timestamp: {exc}") from None
+    if now.tzinfo is None:
+        raise DataError("--now must include a timezone offset")
+    return now
 
 
 # Binaries whose argv legitimately carries a script string ("psql -c
@@ -433,6 +502,49 @@ def _resolve_key(args: argparse.Namespace, warnings: list[str]) -> tuple[bytes |
     raise DataError(NO_KEY_MESSAGE)
 
 
+def _resolve_config_paths(args: argparse.Namespace) -> None:
+    """Fills in any of ``--constraints``/``--authority``/``--environments``/
+    ``--plan-constraints`` the caller left unset (``None``) from
+    ``--config-dir`` (see ``aegis_core.config``). ``--environments`` and
+    ``--plan-constraints`` are allowed to stay ``None`` (those features are
+    just skipped); ``--constraints``/``--authority`` are not, and a search
+    that finds nothing for them is a hard ``ConfigNotFoundError`` (exit 66)
+    -- falling back to the historical ``data/*.example.yaml`` paths only
+    when neither a config dir nor an explicit path is available, so a repo
+    checkout with no ``.aegis``/env var still works."""
+    needs_any = any(
+        getattr(args, name) is None
+        for name in ("constraints", "authority", "environments", "plan_constraints")
+    )
+    if not needs_any:
+        return
+    search = config_module.search_config_dir(args.config_dir)
+    resolved = (
+        config_module.resolve_defaults(search.found)
+        if search.found is not None
+        else config_module.ResolvedConfig()
+    )
+    if args.constraints is None:
+        args.constraints = resolved.constraints
+    if args.authority is None:
+        args.authority = resolved.authority
+    if args.environments is None:
+        args.environments = resolved.environments
+    if args.plan_constraints is None:
+        args.plan_constraints = resolved.plan_constraints
+
+    if args.constraints is None and os.path.exists(DEFAULT_CONSTRAINTS):
+        args.constraints = DEFAULT_CONSTRAINTS
+    if args.authority is None and os.path.exists(DEFAULT_AUTHORITY):
+        args.authority = DEFAULT_AUTHORITY
+
+    if args.constraints is None or args.authority is None:
+        searched = ", ".join(str(p) for p in search.searched)
+        raise ConfigNotFoundError(
+            f"no config found (searched: {searched}); run 'aegis init <dir>'"
+        )
+
+
 def _default_sources(args: argparse.Namespace) -> str | None:
     """``--sources`` as given; ``''`` disables; ``None`` means the
     ``sources`` directory next to the constraints file, when it exists."""
@@ -460,7 +572,14 @@ class _Output:
         if self.quiet:
             return
         if self.pretty:
-            dry_run_suffix = f" (dry-run; would be {decision.would_be})" if decision.dry_run else ""
+            if decision.dry_run:
+                dry_run_suffix = (
+                    f" (dry-run; would be {decision.would_be})"
+                    if decision.would_be is not None
+                    else " (dry-run; uncovered)"
+                )
+            else:
+                dry_run_suffix = ""
             print(
                 f"{decision.verdict}: {intent.provider} {intent.action} {intent.resource}"
                 f"{dry_run_suffix}"
@@ -541,6 +660,58 @@ class _Output:
                 print(f"  quarantined: {entry['id']} ({entry['reason']})")
 
 
+class _StructuredLog:
+    """Collects one JSON record per decision for ``--log-json`` (every
+    verdict -- unlike the ledger, which only ever records executed ALLOWs)
+    and per-verdict counts / latencies for ``--metrics-textfile``."""
+
+    def __init__(self, store_health: StoreHealth, constraints_sha256: str):
+        self.store_health = store_health
+        self.constraints_sha256 = constraints_sha256
+        self.records: list[dict] = []
+        self.verdict_counts: dict[str, int] = {}
+        self.latencies_ms: list[float] = []
+
+    def record(self, *, intent: InfrastructureIntent | None, decision) -> None:
+        self.verdict_counts[decision.verdict] = self.verdict_counts.get(decision.verdict, 0) + 1
+        self.latencies_ms.append(decision.latency_ms)
+        self.records.append(
+            {
+                "timestamp": datetime.now(UTC).isoformat(),
+                "intent": intent.to_dict() if intent is not None else None,
+                "decision": asdict(decision),
+                "store_health": {
+                    "loaded": self.store_health.loaded,
+                    "quarantined": len(self.store_health.quarantined),
+                    "principals": self.store_health.principals,
+                },
+                "constraints_sha256": self.constraints_sha256,
+            }
+        )
+
+    def write_log(self, path: str) -> None:
+        with open(path, "a") as f:
+            for rec in self.records:
+                f.write(json.dumps(rec) + "\n")
+
+    def write_metrics(self, path: str) -> None:
+        lines = []
+        for verdict in ("ALLOW", "ESCALATE", "BLOCK"):
+            count = self.verdict_counts.get(verdict, 0)
+            lines.append(f'aegis_decisions_total{{verdict="{verdict}"}} {count}')
+        lines.append(f"aegis_store_loaded {self.store_health.loaded}")
+        lines.append(f"aegis_store_quarantined {len(self.store_health.quarantined)}")
+        if self.latencies_ms:
+            ordered = sorted(self.latencies_ms)
+            for quantile, label in ((0.5, "0.5"), (0.9, "0.9"), (0.99, "0.99")):
+                idx = min(len(ordered) - 1, int(quantile * len(ordered)))
+                lines.append(
+                    f'aegis_decision_latency_ms{{quantile="{label}"}} {ordered[idx]:.4f}'
+                )
+        with open(path, "w") as f:
+            f.write("\n".join(lines) + "\n")
+
+
 # --- evaluation --------------------------------------------------------------
 
 
@@ -604,6 +775,7 @@ def _open_ledger(
 
 
 def _evaluate(intents: list[InfrastructureIntent], args: argparse.Namespace) -> int:
+    _resolve_config_paths(args)
     now = _parse_now(args.now)
     pretty = bool(args.pretty)
 
@@ -672,12 +844,25 @@ def _evaluate(intents: list[InfrastructureIntent], args: argparse.Namespace) -> 
     )
 
     output = _Output(pretty=pretty, style=args.exit_style, store_health=health)
+    structured_log = (
+        _StructuredLog(health, store.constraints_sha256)
+        if (args.log_json or args.metrics_textfile)
+        else None
+    )
 
     if plan_store is not None:
         plan_decision = evaluate_plan(interceptor, plan_store, intents, now=now)
         for intent, decision in zip(intents, plan_decision.per_intent):
             output.decision(intent, decision)
+            if structured_log is not None:
+                structured_log.record(intent=intent, decision=decision)
         output.plan(plan_decision, plan_health=plan_store.health)
+        if structured_log is not None:
+            structured_log.record(intent=None, decision=plan_decision)
+            if args.log_json:
+                structured_log.write_log(args.log_json)
+            if args.metrics_textfile:
+                structured_log.write_metrics(args.metrics_textfile)
         reason_parts = list(plan_decision.citations)
         if not reason_parts:
             reason_parts = [n for n in plan_decision.notes if _is_fail_closed_note(n)]
@@ -690,10 +875,17 @@ def _evaluate(intents: list[InfrastructureIntent], args: argparse.Namespace) -> 
     for intent in intents:
         decision = interceptor.intercept(intent, now=now)
         output.decision(intent, decision)
+        if structured_log is not None:
+            structured_log.record(intent=intent, decision=decision)
         if _VERDICT_RANK[decision.verdict] > _VERDICT_RANK[worst]:
             worst = decision.verdict
         citations.extend(c for c in decision.citations if c not in citations)
         fail_closed_notes.extend(n for n in decision.notes if _is_fail_closed_note(n))
+    if structured_log is not None:
+        if args.log_json:
+            structured_log.write_log(args.log_json)
+        if args.metrics_textfile:
+            structured_log.write_metrics(args.metrics_textfile)
     output.finish(worst, citations or fail_closed_notes)
     return _EXIT_CODES[args.exit_style][worst]
 
@@ -730,12 +922,41 @@ def _run_signing(args: argparse.Namespace) -> int:
     return signing.run(args.command, key, args.paths)
 
 
+def _run_init(args: argparse.Namespace) -> int:
+    written = config_module.init_config_dir(args.dir)
+    if written:
+        print(f"aegis: wrote {len(written)} file(s) to {args.dir}")
+    else:
+        print(f"aegis: {args.dir} already has every example file; nothing written")
+    print("Next steps:")
+    print(f"  1. Generate a real signing key:  aegis keygen --out {args.dir}/aegis-signing.key")
+    print(
+        f"  2. Sign your policy files:       aegis sign --key file:{args.dir}/aegis-signing.key "
+        f"{args.dir}/*.yaml {args.dir}/sources"
+    )
+    print(
+        f"  3. Replace the *.example.yaml files in {args.dir} with your own constraints.yaml / "
+        "authority.yaml / ... (aegis prefers a real file over the .example one when both exist)"
+    )
+    return 0
+
+
+def _run_keygen(args: argparse.Namespace) -> int:
+    path = config_module.generate_signing_key(args.out)
+    print(f"aegis: wrote signing key to {path}")
+    return 0
+
+
 def _run(argv: list[str]) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
     if args.command in ("sign", "verify"):
         return _run_signing(args)
+    if args.command == "init":
+        return _run_init(args)
+    if args.command == "keygen":
+        return _run_keygen(args)
     if args.command != "check":
         raise UsageError("unknown command")
 
@@ -785,6 +1006,9 @@ def main(argv: list[str] | None = None) -> int:
     except UsageError as exc:
         print(f"aegis: error: {exc}", file=sys.stderr)
         return EX_USAGE
+    except ConfigNotFoundError as exc:
+        print(f"aegis: error: {exc}", file=sys.stderr)
+        return EX_NOINPUT
     except (FileNotFoundError, IsADirectoryError, PermissionError) as exc:
         target = exc.filename or exc
         print(f"aegis: error: cannot read {target}: {exc.strerror or exc}", file=sys.stderr)

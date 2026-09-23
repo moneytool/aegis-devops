@@ -1,0 +1,24 @@
+{
+  "provider": "terraform",
+  "effect": "BLOCK",
+  "constraint_class": "deletion",
+  "principal": "admin",
+  "source_ref": "plan-1003",
+  "source_timestamp": "2026-04-03T09:00:00+00:00",
+  "rule_text": "Block a terraform plan that both deletes resources in us-east-1 and creates resources anywhere; split the change into separate plans for review.",
+  "forbid_together": [
+    {
+      "actions": [
+        "delete"
+      ],
+      "scope": {
+        "region": "us-east-1"
+      }
+    },
+    {
+      "actions": [
+        "create"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+principals:
+  platform_admin:
+  - scaling
+  - deletion
+  - configuration
+  - deployment
+  - networking
+  - access
+  sre_lead:
+  - scaling
+  - deletion
+  - deployment
+  - networking
+  sre_oncall:
+  - scaling
+  - deployment
+  security_lead:
+  - access
+  - networking
+  - configuration
+  developer:
+  - configuration
+  contractor: []
+  ci_bot:
+  - deployment

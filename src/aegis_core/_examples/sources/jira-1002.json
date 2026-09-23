@@ -1,0 +1,16 @@
+{
+  "provider": "kubernetes",
+  "resource_pattern": "configmap/*",
+  "actions": [
+    "delete",
+    "update"
+  ],
+  "scope": {},
+  "time_window": null,
+  "effect": "ESCALATE",
+  "constraint_class": "configuration",
+  "principal": "developer",
+  "source_ref": "jira-1002",
+  "source_timestamp": "2026-03-01T08:00:00+00:00",
+  "rule_text": "Escalate configmap changes for review before they are applied."
+}

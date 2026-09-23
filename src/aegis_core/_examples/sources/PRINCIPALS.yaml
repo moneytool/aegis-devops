@@ -1,0 +1,31 @@
+# Transport-level attribution for the source snapshots in this directory
+# (REVIEW-4 T1.1): which principal each source_ref is attributed to by the
+# transport (repo owner, ticket author, Slack user), independently of the
+# self-asserted `principal` inside the payload. Signed like every other
+# policy file; loaded by aegis_core.provenance.FileSourceFetcher.
+principals:
+  git-4001: sre_lead
+  git-789abc: admin
+  git-abc123: admin
+  git-bcd234: admin
+  git-def456: sre_lead
+  jira-1001: sre_lead
+  jira-1002: developer
+  jira-2001: admin
+  jira-2002: admin
+  jira-3001: admin
+  jira-3002: sre_lead
+  jira-3003: sre_lead
+  jira-3004: admin
+  jira-3005: admin
+  jira-5001: admin
+  jira-5002: admin
+  jira-5003: sre_lead
+  jira-5004: admin
+  jira-5006: admin
+  plan-1001: sre_lead
+  plan-1002: admin
+  plan-1003: admin
+  plan-1004: admin
+  plan-5005: admin
+  slack-perma-1: admin

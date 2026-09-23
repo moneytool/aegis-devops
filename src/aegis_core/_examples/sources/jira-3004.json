@@ -1,0 +1,17 @@
+{
+  "provider": "kubernetes",
+  "resource_pattern": "*",
+  "actions": [
+    "delete"
+  ],
+  "scope": {
+    "namespace": "prod"
+  },
+  "time_window": null,
+  "effect": "BLOCK",
+  "constraint_class": "deletion",
+  "principal": "admin",
+  "source_ref": "jira-3004",
+  "source_timestamp": "2026-03-21T09:00:00+00:00",
+  "rule_text": "Block deleting any resource in the prod namespace (including deleting the namespace itself, which cascades to everything in it); only the runbook may delete in prod."
+}

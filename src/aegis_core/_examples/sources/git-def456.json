@@ -1,0 +1,16 @@
+{
+  "provider": "azure",
+  "resource_pattern": "aks/cluster/*",
+  "actions": [
+    "delete",
+    "scale"
+  ],
+  "scope": {},
+  "time_window": null,
+  "effect": "ESCALATE",
+  "constraint_class": "scaling",
+  "principal": "sre_lead",
+  "source_ref": "git-def456",
+  "source_timestamp": "2026-03-12T11:00:00+00:00",
+  "rule_text": "Escalate scaling or deleting AKS clusters for human review."
+}

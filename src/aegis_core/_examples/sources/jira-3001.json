@@ -1,0 +1,17 @@
+{
+  "provider": "helm",
+  "resource_pattern": "release/*",
+  "actions": [
+    "delete"
+  ],
+  "scope": {
+    "namespace": "prod"
+  },
+  "time_window": null,
+  "effect": "BLOCK",
+  "constraint_class": "deletion",
+  "principal": "admin",
+  "source_ref": "jira-3001",
+  "source_timestamp": "2026-03-20T09:00:00+00:00",
+  "rule_text": "Block deleting Helm releases in the prod namespace; use the decommission runbook instead."
+}

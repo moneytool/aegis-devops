@@ -1,0 +1,18 @@
+{
+  "provider": "terraform",
+  "resource_pattern": "aws_instance.*",
+  "actions": [
+    "delete",
+    "replace"
+  ],
+  "scope": {
+    "region": "us-east-1"
+  },
+  "time_window": null,
+  "effect": "ESCALATE",
+  "constraint_class": "deletion",
+  "principal": "admin",
+  "source_ref": "slack-perma-1",
+  "source_timestamp": "2026-02-10T18:30:00+00:00",
+  "rule_text": "Escalate any destructive terraform change to prod EC2 instances in us-east-1 for human review."
+}

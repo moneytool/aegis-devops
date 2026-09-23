@@ -1,0 +1,15 @@
+{
+  "provider": "kubernetes",
+  "resource_pattern": "node/*",
+  "actions": [
+    "delete"
+  ],
+  "scope": {},
+  "time_window": null,
+  "effect": "BLOCK",
+  "constraint_class": "deletion",
+  "principal": "admin",
+  "source_ref": "git-abc123",
+  "source_timestamp": "2026-02-01T12:00:00+00:00",
+  "rule_text": "Never delete cluster nodes directly; drain and cordon through the runbook instead."
+}

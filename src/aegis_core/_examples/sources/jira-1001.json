@@ -1,0 +1,28 @@
+{
+  "provider": "kubernetes",
+  "resource_pattern": "deployment/*",
+  "actions": [
+    "scale"
+  ],
+  "scope": {
+    "namespace": "prod"
+  },
+  "time_window": {
+    "days": [
+      "Mon",
+      "Tue",
+      "Wed",
+      "Thu",
+      "Fri"
+    ],
+    "start": "09:00",
+    "end": "17:00",
+    "tz": "America/New_York"
+  },
+  "effect": "BLOCK",
+  "constraint_class": "scaling",
+  "principal": "sre_lead",
+  "source_ref": "jira-1001",
+  "source_timestamp": "2026-01-15T09:00:00+00:00",
+  "rule_text": "Do not scale deployments in prod during business hours (09:00-17:00 ET, weekdays)."
+}

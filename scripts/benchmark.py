@@ -56,9 +56,9 @@ from aegis_core.authority import load_authority_map
 from aegis_core.baselines.base import AegisVerifier, Verifier
 from aegis_core.baselines.llm import (
     AnthropicClient,
+    AwarePromptBuilder,
     HeuristicLLMClient,
     LLMVerifier,
-    NullClient,
     RecordingClient,
     ReplayClient,
 )
@@ -160,6 +160,41 @@ def oracle_ground_truth(corpus: Path, intents: list[dict]) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
+def _variant_cache_path(base: Path, variant: str) -> Path:
+    """``results/llm-cache.jsonl`` -> ``results/llm-cache-naive.jsonl`` /
+    ``results/llm-cache-aware.jsonl``, so a single ``--llm-cache`` flag
+    still gives the naive and provenance-aware prompts separate caches
+    (they hash to different keys anyway, since the system prompt differs,
+    but separate files keep the two runs' costs and record counts easy to
+    read independently)."""
+    if base.stem.endswith(f"-{variant}"):
+        return base
+    return base.with_name(f"{base.stem}-{variant}{base.suffix}")
+
+
+def _build_llm_verifier(
+    *,
+    constraints: list[Constraint],
+    cache_path: Path,
+    name: str,
+    system_prompt: str | None,
+) -> tuple[Verifier | None, str | None, bool]:
+    """Shared construction for the real-API ``llm-naive``/``llm-aware``
+    rows: skipped (not a misleading stub row) when no API key is set."""
+    import os
+
+    has_key = bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
+    if not has_key:
+        return None, "skipped: set ANTHROPIC_API_KEY", False
+    try:
+        real_client = AnthropicClient()
+    except RuntimeError as exc:
+        return None, f"skipped: set ANTHROPIC_API_KEY ({exc})", False
+    client = RecordingClient(real_client, cache_path)
+    verifier = LLMVerifier(client, constraints, name=name, system_prompt=system_prompt)
+    return verifier, None, False
+
+
 def build_verifier(
     name: str,
     *,
@@ -168,6 +203,7 @@ def build_verifier(
     baseline_constraints: list[Constraint],
     labels: dict[str, dict],
     llm_cache_path: Path,
+    authority_map: dict[str, set[str]] | None = None,
 ) -> tuple[Verifier | None, str | None, bool]:
     """Returns (verifier, skip_reason, stub). verifier is None iff
     skip_reason is set."""
@@ -185,27 +221,44 @@ def build_verifier(
         verifier = LLMVerifier(client, baseline_constraints, name="llm-heuristic")
         return verifier, None, False
 
-    if name == "llm":
-        import os
-
-        has_key = bool(
-            os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")
+    # "llm" is kept as an alias for "llm-naive" (its historical name).
+    if name in ("llm", "llm-naive"):
+        cache_path = _variant_cache_path(llm_cache_path, "naive")
+        return _build_llm_verifier(
+            constraints=baseline_constraints,
+            cache_path=cache_path,
+            name="llm-naive",
+            system_prompt=None,
         )
-        if not has_key:
-            verifier = LLMVerifier(NullClient(), baseline_constraints, name="llm")
-            return verifier, None, True
-        try:
-            real_client = AnthropicClient()
-        except RuntimeError:
-            verifier = LLMVerifier(NullClient(), baseline_constraints, name="llm")
-            return verifier, None, True
-        client = RecordingClient(real_client, llm_cache_path)
-        verifier = LLMVerifier(client, baseline_constraints, name="llm")
+
+    if name == "llm-aware":
+        if authority_map is None:
+            raise ValueError("llm-aware requires an authority_map")
+        cache_path = _variant_cache_path(llm_cache_path, "aware")
+        prompt = AwarePromptBuilder(baseline_constraints, authority_map).render_system_prompt()
+        return _build_llm_verifier(
+            constraints=baseline_constraints,
+            cache_path=cache_path,
+            name="llm-aware",
+            system_prompt=prompt,
+        )
+
+    # "llm-replay" is kept as an alias for "llm-replay-naive".
+    if name in ("llm-replay", "llm-replay-naive"):
+        cache_path = _variant_cache_path(llm_cache_path, "naive")
+        client = ReplayClient(cache_path)
+        verifier = LLMVerifier(client, baseline_constraints, name="llm-replay-naive")
         return verifier, None, False
 
-    if name == "llm-replay":
-        client = ReplayClient(llm_cache_path)
-        verifier = LLMVerifier(client, baseline_constraints, name="llm-replay")
+    if name == "llm-replay-aware":
+        if authority_map is None:
+            raise ValueError("llm-replay-aware requires an authority_map")
+        cache_path = _variant_cache_path(llm_cache_path, "aware")
+        prompt = AwarePromptBuilder(baseline_constraints, authority_map).render_system_prompt()
+        client = ReplayClient(cache_path)
+        verifier = LLMVerifier(
+            client, baseline_constraints, name="llm-replay-aware", system_prompt=prompt
+        )
         return verifier, None, False
 
     if name in ("opa", "opa-signed"):
@@ -364,6 +417,7 @@ def main() -> int:
             baseline_constraints=baseline_constraints,
             labels=labels,
             llm_cache_path=args.llm_cache,
+            authority_map=authority_map,
         )
         if verifier is None:
             print(f"[{name}] SKIPPED: {skip_reason}")
