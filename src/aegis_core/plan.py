@@ -44,6 +44,10 @@ from aegis_core.store import (
 
 logger = logging.getLogger(__name__)
 
+# REVIEW-4 T2.3: same rationale as aegis_core.store -- prefer the
+# C-accelerated loader when libyaml is available.
+_YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
 _ENFORCING_EFFECTS = frozenset({"BLOCK", "ESCALATE"})
 _PREDICATE_KEYS = ("max_intents", "max_matching", "requires_all", "forbid_together", "ratio")
 _REQUIRED_KEYS = (
@@ -389,7 +393,7 @@ class PlanConstraintStore:
                 store.warnings.append(w)
         store.constraints_sha256 = _sha256_file(path)
         with open(path) as f:
-            payload = yaml.safe_load(f) or {}
+            payload = yaml.load(f, Loader=_YAML_LOADER) or {}
         if not isinstance(payload, dict):
             raise ValueError(
                 f"{path}: plan constraints file must be a mapping with a 'plan_constraints' key"

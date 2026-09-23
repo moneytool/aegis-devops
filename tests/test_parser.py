@@ -636,7 +636,9 @@ def test_from_gcloud_compute_instances_start_with_zone():
     assert intent.provider == "gcp"
     assert intent.resource == "compute/instance/web-1"
     assert intent.action == "start"
-    assert intent.metadata == {"zone": "us-central1-a", "region": "us-central1-a"}
+    # REVIEW-4 T2.5: region is derived from the zone (strip the trailing
+    # "-<letter>"), not the raw zone string.
+    assert intent.metadata == {"zone": "us-central1-a", "region": "us-central1"}
 
 
 def test_from_gcloud_container_clusters_resize_maps_to_scale():
@@ -2379,3 +2381,109 @@ def test_every_plan_intent_carries_the_plan_sha256():
     tofu = {**plan, "opentofu": True}
     assert {i.metadata["plan_sha256"] for i in from_terraform_plan(tofu)} == {plan_digest(tofu)}
     assert plan_digest(tofu) != plan_digest(plan)
+
+
+# --------------------------------------------------------------------------
+# REVIEW-4 T2.5: gcloud --zone -> region derivation; helm --set family.
+# --------------------------------------------------------------------------
+
+
+def test_from_gcloud_zone_derives_region_by_stripping_the_zone_letter():
+    intent = from_gcloud(
+        ["gcloud", "compute", "instances", "start", "web-1", "--zone", "us-east1-b"]
+    )
+    assert intent.metadata["zone"] == "us-east1-b"
+    assert intent.metadata["region"] == "us-east1"
+
+
+def test_from_gcloud_explicit_region_wins_over_zone_derived_region_either_order():
+    # --region after --zone.
+    a = from_gcloud(
+        ["gcloud", "compute", "instances", "start", "web-1",
+         "--zone", "us-east1-b", "--region", "us-west1"]
+    )
+    assert a.metadata == {"zone": "us-east1-b", "region": "us-west1"}
+    # --region before --zone -- same result regardless of argv order.
+    b = from_gcloud(
+        ["gcloud", "compute", "instances", "start", "web-1",
+         "--region", "us-west1", "--zone", "us-east1-b"]
+    )
+    assert b.metadata == {"zone": "us-east1-b", "region": "us-west1"}
+
+
+def test_from_gcloud_region_without_zone_is_unaffected():
+    intent = from_gcloud(
+        ["gcloud", "sql", "instances", "create", "prod-db", "--region", "us-central1"]
+    )
+    assert intent.metadata == {"region": "us-central1"}
+
+
+def test_from_helm_set_splits_comma_separated_pairs():
+    intent = from_helm(
+        ["helm", "install", "api", "./chart", "--set", "a=1,b=2"]
+    )
+    assert intent.params["set"] == {"a": 1, "b": 2}
+
+
+def test_from_helm_set_keeps_bracketed_and_quoted_commas_intact():
+    intent = from_helm(
+        ["helm", "install", "api", "./chart", "--set", 'list={a,b,c},s="x,y",c=3']
+    )
+    assert intent.params["set"] == {"list": "{a,b,c}", "s": '"x,y"', "c": 3}
+
+
+def test_from_helm_set_string_does_not_coerce_values():
+    intent = from_helm(
+        ["helm", "install", "api", "./chart", "--set-string", "replicaCount=0,flag=true"]
+    )
+    assert intent.params["set"] == {"replicaCount": "0", "flag": "true"}
+
+
+def test_from_helm_set_and_set_string_share_the_same_set_dict():
+    intent = from_helm(
+        ["helm", "install", "api", "./chart",
+         "--set", "a=1", "--set-string", "b=2"]
+    )
+    assert intent.params["set"] == {"a": 1, "b": "2"}
+
+
+def test_from_helm_set_file_and_set_json_are_recorded_raw():
+    intent = from_helm(
+        ["helm", "install", "api", "./chart",
+         "--set-file", "cert=./cert.pem", "--set-json", 'labels={"team":"x"}']
+    )
+    assert intent.params["set_file"] == ["cert=./cert.pem"]
+    assert intent.params["set_json"] == ['labels={"team":"x"}']
+    assert "set" not in intent.params
+
+
+def test_from_helm_nested_dotted_set_key_is_kept_as_a_single_string_key():
+    intent = from_helm(
+        ["helm", "upgrade", "api", "./chart", "--set", "image.tag=v2,replicaCount=0"]
+    )
+    assert intent.params["set"] == {"image.tag": "v2", "replicaCount": 0}
+
+
+def test_helm_set_replica_count_zero_expressible_as_a_scope_rule():
+    """REVIEW-4 T2.5 rule #5: 'block helm --set replicaCount=0 in prod' must
+    be expressible as a dotted scope key and must fire whether or not other
+    --set flags are present."""
+    from aegis_core.store import scope_matches
+
+    scope = {"set.replicaCount": 0}
+
+    combined = from_helm(
+        ["helm", "upgrade", "api", "./chart", "--set", "image.tag=v2,replicaCount=0"]
+    )
+    assert scope_matches(scope, combined.metadata, combined.params)
+
+    separate = from_helm(
+        ["helm", "upgrade", "api", "./chart",
+         "--set", "replicaCount=0", "--set", "other=1"]
+    )
+    assert scope_matches(scope, separate.metadata, separate.params)
+
+    not_zero = from_helm(
+        ["helm", "upgrade", "api", "./chart", "--set", "replicaCount=3"]
+    )
+    assert not scope_matches(scope, not_zero.metadata, not_zero.params)

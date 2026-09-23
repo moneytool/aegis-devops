@@ -59,8 +59,9 @@ import fnmatch
 import hashlib
 import logging
 import re
+from collections import OrderedDict
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -79,14 +80,23 @@ from aegis_core.signing import check_signature
 
 logger = logging.getLogger(__name__)
 
+# REVIEW-4 T2.3: the C-accelerated loader is 6x faster at 10k constraints;
+# fall back to the pure-Python SafeLoader when libyaml isn't available.
+_YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
 _WEEKDAY_ABBR = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 VALID_EFFECTS = frozenset({"BLOCK", "ESCALATE"})
 _HHMM = re.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+_END_OF_DAY = "24:00"  # REVIEW-4 T2.4: the only valid end-of-window spelling of midnight
 _RATE_PER = re.compile(r"^[1-9][0-9]*[mhd]$")
 _REQUIRED_KEYS = (
     "id", "provider", "resource_pattern", "actions", "effect", "constraint_class",
     "principal", "source_ref", "source_timestamp", "rule_text", "provenance_hash",
 )
+# REVIEW-4 T2.3: "*" in a constraint's actions means "any action" -- it is
+# otherwise an ordinary string (no special validation, no effect on the
+# provenance hash, which already hashes the actions set as given).
+ANY_ACTION = "*"
 
 
 @dataclass
@@ -245,7 +255,21 @@ def _constraint_to_dict(c: Constraint) -> dict[str, Any]:
     return data
 
 
-def _validate_time_window(window: Any) -> str | None:
+def _valid_edge(edge: str, value: str) -> bool:
+    """``start``/``end`` are ``HH:MM``; ``end`` alone may also be ``24:00``
+    (REVIEW-4 T2.4) -- the only way to say "through midnight" now that
+    ``end`` is exclusive at minute granularity."""
+    if _HHMM.match(value):
+        return True
+    return edge == "end" and value == _END_OF_DAY
+
+
+def _validate_time_window(window: Any, default_tz: str | None = None) -> str | None:
+    """Shape-checks one ``time_window`` mapping.
+
+    ``default_tz`` is the store-level fallback (REVIEW-4 T2.4): a window
+    with no ``tz`` of its own is valid only when the store carries one.
+    """
     if window is None:
         return None
     if not isinstance(window, dict):
@@ -256,7 +280,7 @@ def _validate_time_window(window: Any) -> str | None:
             return "days must be Mon..Sun"
     for edge in ("start", "end"):
         value = window.get(edge)
-        if value is not None and not (isinstance(value, str) and _HHMM.match(value)):
+        if value is not None and not (isinstance(value, str) and _valid_edge(edge, value)):
             return f"{edge} must be HH:MM (quote it in YAML)"
     if (window.get("start") is None) != (window.get("end") is None):
         return "start and end must be given together"
@@ -268,6 +292,22 @@ def _validate_time_window(window: Any) -> str | None:
             ZoneInfo(tz)
         except (ZoneInfoNotFoundError, ValueError, OSError):
             return f"unknown tz {tz!r}"
+    elif default_tz is None:
+        return "time_window.tz missing and no default_tz"
+    return None
+
+
+def _validate_default_tz(default_tz: Any) -> str | None:
+    """Shape-checks the store-level ``default_tz`` key. Returns a short
+    reason (no prefix) when invalid, else ``None``."""
+    if default_tz is None:
+        return None
+    if not isinstance(default_tz, str):
+        return "default_tz must be a string"
+    try:
+        ZoneInfo(default_tz)
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        return f"unknown default_tz {default_tz!r}"
     return None
 
 
@@ -290,9 +330,12 @@ def _validate_rate_limit(rate_limit: Any) -> str | None:
     return None
 
 
-def validate_constraint_dict(data: Any) -> str | None:
+def validate_constraint_dict(data: Any, default_tz: str | None = None) -> str | None:
     """Shape-checks one raw constraint entry. Returns ``None`` when it is
-    well-formed, else a short reason (without the ``"invalid: "`` prefix)."""
+    well-formed, else a short reason (without the ``"invalid: "`` prefix).
+
+    ``default_tz`` is the store-level fallback used to validate a
+    ``time_window`` with no ``tz`` of its own (REVIEW-4 T2.4)."""
     if not isinstance(data, dict):
         return "entry must be a mapping"
     for key in _REQUIRED_KEYS:
@@ -313,7 +356,7 @@ def validate_constraint_dict(data: Any) -> str | None:
         return "actions must be a non-empty list of strings"
     if data.get("scope") is not None and not isinstance(data["scope"], dict):
         return "scope must be a mapping"
-    reason = _validate_time_window(data.get("time_window"))
+    reason = _validate_time_window(data.get("time_window"), default_tz)
     if reason:
         return reason
     return _validate_rate_limit(data.get("rate_limit"))
@@ -423,15 +466,41 @@ def _scope_matches(scope: dict[str, Any], intent: InfrastructureIntent) -> bool:
     return scope_matches(scope, intent.metadata, intent.params)
 
 
-def _time_window_matches(window: dict[str, Any], now: datetime) -> bool:
+def _require_tz_aware(now: datetime) -> None:
+    """REVIEW-4 T2.4: a naive ``now`` used to silently be treated as UTC,
+    which quietly miscomputed every time-windowed decision for a caller
+    who forgot ``tzinfo``. Fail loudly instead."""
     if now.tzinfo is None:
-        now = now.replace(tzinfo=UTC)
+        raise ValueError("now must be timezone-aware")
 
-    tz_name = window.get("tz")
-    if tz_name:
-        local = now.astimezone(ZoneInfo(tz_name))
-    else:
-        local = now
+
+def _minutes_since_midnight(value: str) -> int:
+    if value == _END_OF_DAY:
+        return 24 * 60
+    hh, mm = value.split(":")
+    return int(hh) * 60 + int(mm)
+
+
+def _time_window_matches(
+    window: dict[str, Any], now: datetime, default_tz: str | None = None
+) -> bool:
+    """Whether ``now`` falls inside ``window``.
+
+    * ``tz`` (or the store's ``default_tz``) localises ``now`` before any
+      comparison; both are validated at load time, so one of them is
+      always present for a constraint that reaches this function.
+    * ``days`` excludes by the *local* weekday.
+    * ``start``/``end`` support wrap-around (``start > end``, e.g.
+      ``22:00``-``06:00``) -- match when ``t >= start or t < end`` --  and
+      ``end`` is exclusive at minute granularity: ``09:00``-``17:00`` means
+      ``[09:00, 17:00)``. ``24:00`` is accepted as ``end`` to mean
+      "through midnight". Seconds on ``now`` are truncated before the
+      comparison.
+    """
+    _require_tz_aware(now)
+
+    tz_name = window.get("tz") or default_tz
+    local = now.astimezone(ZoneInfo(tz_name)) if tz_name else now
 
     days = window.get("days")
     if days and _WEEKDAY_ABBR[local.weekday()] not in days:
@@ -439,11 +508,17 @@ def _time_window_matches(window: dict[str, Any], now: datetime) -> bool:
 
     start, end = window.get("start"), window.get("end")
     if start and end:
-        current = local.time()
-        start_t = datetime.strptime(start, "%H:%M").time()
-        end_t = datetime.strptime(end, "%H:%M").time()
-        if not (start_t <= current <= end_t):
-            return False
+        current_min = local.hour * 60 + local.minute
+        start_min = _minutes_since_midnight(start)
+        end_min = _minutes_since_midnight(end)
+        if start_min <= end_min:
+            if not (start_min <= current_min < end_min):
+                return False
+        else:
+            # Wrap-around window (e.g. 22:00-06:00): inside if at/after
+            # start OR before end.
+            if not (current_min >= start_min or current_min < end_min):
+                return False
 
     return True
 
@@ -455,23 +530,27 @@ def resource_matches(pattern: str, intent: InfrastructureIntent) -> bool:
     return any(fnmatch.fnmatch(alias, pattern) for alias in intent.resource_aliases())
 
 
-def _matches_except_scope(c: Constraint, intent: InfrastructureIntent, now: datetime) -> bool:
+def _matches_except_scope(
+    c: Constraint, intent: InfrastructureIntent, now: datetime, default_tz: str | None = None
+) -> bool:
     if c.provider != intent.provider:
         return False
     if not resource_matches(c.resource_pattern, intent):
         return False
-    if intent.action not in c.actions:
+    if intent.action not in c.actions and ANY_ACTION not in c.actions:
         return False
-    if c.time_window and not _time_window_matches(c.time_window, now):
+    if c.time_window and not _time_window_matches(c.time_window, now, default_tz):
         return False
     return True
 
 
-def _constraint_matches(c: Constraint, intent: InfrastructureIntent, now: datetime) -> bool:
+def _constraint_matches(
+    c: Constraint, intent: InfrastructureIntent, now: datetime, default_tz: str | None = None
+) -> bool:
     """Whether ``c``'s (provider, resource_pattern, actions, scope,
     time_window) apply to ``intent`` at ``now``. Shared by the live and the
     quarantined match so both use exactly the same semantics."""
-    return _matches_except_scope(c, intent, now) and _scope_matches(c.scope, intent)
+    return _matches_except_scope(c, intent, now, default_tz) and _scope_matches(c.scope, intent)
 
 
 def env_unresolved(scope: dict[str, Any], intent: InfrastructureIntent) -> bool:
@@ -514,11 +593,84 @@ _SOURCE_FAILURE_MESSAGES = {
 }
 
 
+# REVIEW-4 T2.3: process-wide LRU for ConstraintStore.load_cached, keyed by
+# (path, mtime_ns, size). Module-level (not per-instance) so unrelated
+# callers in the same process share the benefit.
+_LOAD_CACHE_SIZE = 4
+_LOAD_CACHE: "OrderedDict[tuple[str, int, int], ConstraintStore]" = OrderedDict()
+
+
+class _IndexedConstraints(dict):
+    """``dict[str, Constraint]`` that keeps a ``(provider, action)`` index
+    in sync with *itself* on every mutation (REVIEW-4 T2.3) -- assignment,
+    deletion, ``pop``, ``update`` -- so ``get_matching_constraints`` stays
+    O(k) regardless of whether entries arrive through
+    :meth:`ConstraintStore.add_constraint`, :meth:`ConstraintStore.load`,
+    or a test/attack helper writing ``store.constraints[id] = c`` directly.
+    ``constraints`` remains the source of truth; this index is a derived,
+    always-consistent view of it, never edited on its own."""
+
+    def __init__(self, index: dict[tuple[str, str], list[Constraint]]):
+        super().__init__()
+        self._index = index
+
+    def _index_add(self, constraint: Constraint) -> None:
+        for action in constraint.actions:
+            self._index.setdefault((constraint.provider, action), []).append(constraint)
+
+    def _index_remove(self, constraint: Constraint) -> None:
+        for action in constraint.actions:
+            bucket = self._index.get((constraint.provider, action))
+            if not bucket:
+                continue
+            for i, existing in enumerate(bucket):
+                if existing is constraint:
+                    del bucket[i]
+                    break
+
+    def __setitem__(self, key: str, value: Constraint) -> None:
+        old = self.get(key)
+        if old is not None:
+            self._index_remove(old)
+        super().__setitem__(key, value)
+        self._index_add(value)
+
+    def __delitem__(self, key: str) -> None:
+        old = self.get(key)
+        super().__delitem__(key)
+        if old is not None:
+            self._index_remove(old)
+
+    def pop(self, key, *args):  # type: ignore[override]
+        old = self.get(key)
+        result = super().pop(key, *args)
+        if old is not None:
+            self._index_remove(old)
+        return result
+
+    def clear(self) -> None:
+        super().clear()
+        self._index.clear()
+
+    def update(self, *args, **kwargs) -> None:  # type: ignore[override]
+        other = dict(*args, **kwargs)
+        for k, v in other.items():
+            self[k] = v
+
+
 class ConstraintStore:
     """A secure, integrity-verified store for operational constraints."""
 
-    def __init__(self, authority_map: dict[str, set[str]] | None = None):
-        self.constraints: dict[str, Constraint] = {}
+    def __init__(
+        self,
+        authority_map: dict[str, set[str]] | None = None,
+        default_tz: str | None = None,
+    ):
+        # REVIEW-4 T2.3: (provider, action) -> constraints whose actions
+        # contain that action (or ANY_ACTION), kept live by `constraints`
+        # itself -- see _IndexedConstraints.
+        self._index: dict[tuple[str, str], list[Constraint]] = {}
+        self.constraints: dict[str, Constraint] = _IndexedConstraints(self._index)
         # Who may assert which constraint_class. Default: empty (deny all).
         self.authority_map: dict[str, set[str]] = authority_map or {}
         # Constraints that failed integrity/source verification on load, as
@@ -529,6 +681,11 @@ class ConstraintStore:
         self.quarantined_constraints: list[Constraint] = []
         self.constraints_sha256: str = ""
         self.warnings: list[str] = []
+        # REVIEW-4 T2.4: store-level fallback for a time_window with no tz
+        # of its own. Not part of any constraint's provenance hash (it's a
+        # store-level setting, not a constraint field) -- see the YAML
+        # loader/saver docstrings.
+        self.default_tz: str | None = default_tz
 
     @property
     def health(self) -> StoreHealth:
@@ -569,18 +726,31 @@ class ConstraintStore:
     def get_matching_constraints(
         self, intent: InfrastructureIntent, now: datetime
     ) -> list[Constraint]:
-        """Returns every constraint whose pattern applies to this intent."""
-        return [c for c in self.constraints.values() if _constraint_matches(c, intent, now)]
+        """Returns every constraint whose pattern applies to this intent.
+
+        REVIEW-4 T2.3: only the (provider, action) and (provider, "*")
+        buckets of the index are scanned -- O(k) in the number of
+        constraints that could plausibly match, not O(n) in the whole
+        store -- rather than every loaded constraint."""
+        _require_tz_aware(now)
+        candidates = self._index.get((intent.provider, intent.action), [])
+        wildcard = self._index.get((intent.provider, ANY_ACTION), [])
+        if wildcard:
+            seen = {id(c) for c in candidates}
+            candidates = candidates + [c for c in wildcard if id(c) not in seen]
+        return [c for c in candidates if _constraint_matches(c, intent, now, self.default_tz)]
 
     def get_env_unresolved(self, intent: InfrastructureIntent, now: datetime) -> list[Constraint]:
         """Every loaded constraint that would apply to this intent except
         that it scopes on ``env`` and the intent has no resolved ``env``
         (see :func:`env_unresolved`). The interceptor turns each into an
         ESCALATE with an ``env-unresolved: <id>`` note."""
+        _require_tz_aware(now)
         return [
             c
             for c in self.constraints.values()
-            if _matches_except_scope(c, intent, now) and env_unresolved(c.scope, intent)
+            if _matches_except_scope(c, intent, now, self.default_tz)
+            and env_unresolved(c.scope, intent)
         ]
 
     def get_matching_quarantined(
@@ -589,15 +759,21 @@ class ConstraintStore:
         """Returns every *quarantined* constraint whose (current, possibly
         tampered) fields apply to this intent, paired with its quarantine
         reason. The interceptor escalates on these; see module docstring."""
+        _require_tz_aware(now)
         reasons = {q["id"]: q["reason"] for q in self.quarantined}
         return [
             (c, reasons.get(c.id, "quarantined"))
             for c in self.quarantined_constraints
-            if _constraint_matches(c, intent, now)
+            if _constraint_matches(c, intent, now, self.default_tz)
         ]
 
     def save(self, path: str | Path) -> None:
-        payload = {"constraints": [_constraint_to_dict(c) for c in self.constraints.values()]}
+        payload: dict[str, Any] = {}
+        # Written only when set, so save()/load() round-trip existing (v1)
+        # constraint files byte-for-byte unchanged (REVIEW-4 T2.4).
+        if self.default_tz is not None:
+            payload["default_tz"] = self.default_tz
+        payload["constraints"] = [_constraint_to_dict(c) for c in self.constraints.values()]
         with open(path, "w") as f:
             yaml.safe_dump(payload, f, sort_keys=False)
 
@@ -646,16 +822,21 @@ class ConstraintStore:
         store._absorb_warnings(authority_map)
         store.constraints_sha256 = _sha256_file(path)
         with open(path) as f:
-            payload = yaml.safe_load(f) or {}
+            payload = yaml.load(f, Loader=_YAML_LOADER) or {}
         if not isinstance(payload, dict):
             raise ValueError(f"{path}: constraints file must be a mapping with a 'constraints' key")
+        default_tz = payload.get("default_tz")
+        tz_reason = _validate_default_tz(default_tz)
+        if tz_reason:
+            raise ValueError(f"{path}: {tz_reason}")
+        store.default_tz = default_tz
         entries = payload.get("constraints") or []
         if not isinstance(entries, list):
             raise ValueError(f"{path}: 'constraints' must be a list")
         caching_fetcher = CachingSourceFetcher(source_fetcher) if source_fetcher else None
         seen: set[str] = set()
         for entry in entries:
-            reason = validate_constraint_dict(entry)
+            reason = validate_constraint_dict(entry, default_tz)
             if reason is None and entry["id"] in seen:
                 reason = "duplicate id"
             if reason is not None:
@@ -673,6 +854,39 @@ class ConstraintStore:
                     continue
             store.constraints[constraint.id] = constraint
         store._absorb_warnings(source_fetcher)
+        return store
+
+    @classmethod
+    def load_cached(
+        cls,
+        path: str | Path,
+        authority_map: dict[str, set[str]] | None = None,
+        *,
+        source_fetcher: SourceFetcher | None = None,
+        key: bytes | None = None,
+        insecure: bool = False,
+    ) -> "ConstraintStore":
+        """``load()``, memoised by ``(path, mtime_ns, size)`` in a
+        process-wide LRU of size 4 (REVIEW-4 T2.3). A second call for the
+        same untouched file returns the *same* ``ConstraintStore`` object
+        instead of re-parsing and re-verifying it; touching the file (a
+        new mtime or size) misses the cache and reloads. Callers that pass
+        a different ``authority_map``/``source_fetcher``/``key`` for the
+        same path still hit the cache keyed only on the file identity --
+        that tradeoff is the caller's to make (see module docstring)."""
+        p = Path(path)
+        stat = p.stat()
+        cache_key = (str(p), stat.st_mtime_ns, stat.st_size)
+        cached = _LOAD_CACHE.get(cache_key)
+        if cached is not None:
+            _LOAD_CACHE.move_to_end(cache_key)
+            return cached
+        store = cls.load(
+            path, authority_map, source_fetcher=source_fetcher, key=key, insecure=insecure
+        )
+        _LOAD_CACHE[cache_key] = store
+        if len(_LOAD_CACHE) > _LOAD_CACHE_SIZE:
+            _LOAD_CACHE.popitem(last=False)
         return store
 
     def verify_sources(self, fetcher: SourceFetcher) -> list[dict]:

@@ -1456,11 +1456,25 @@ _GCS_LEGACY_VERB_MAP = {"rm": "delete", "rb": "delete", "cp": "put"}
 # gcloud global booleans: never swallow the group/verb token after them.
 _GCLOUD_BOOL_FLAGS = {"log-http", "no-user-output-enabled", "user-output-enabled"}
 
+# gcloud zone -> region: a zone is "<region>-<letter>" (e.g. "us-east1-b" ->
+# "us-east1"); strip the trailing "-<letter>" component (REVIEW-4 T2.5).
+_ZONE_SUFFIX = re.compile(r"-[a-z]$")
+
+
+def _region_from_zone(zone: str) -> str:
+    return _ZONE_SUFFIX.sub("", zone)
+
 
 def _parse_gcloud_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     metadata: dict[str, Any] = {}
     params: dict[str, Any] = {}
     positional: list[str] = []
+    # --zone derives metadata["region"] unless --region is given explicitly
+    # -- explicit wins regardless of which flag comes first on the argv
+    # (REVIEW-4 T2.5), so both are tracked separately and reconciled once
+    # the whole argv has been walked.
+    explicit_region: str | None = None
+    zone_derived_region: str | None = None
 
     i = 0
     n = len(tokens)
@@ -1472,13 +1486,13 @@ def _parse_gcloud_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, A
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
-                metadata["region"] = val
+                explicit_region = val
             elif key == "zone":
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
                 metadata["zone"] = val
-                metadata["region"] = val
+                zone_derived_region = _region_from_zone(val)
             elif key == "project":
                 if val is None:
                     i += 1
@@ -1503,6 +1517,11 @@ def _parse_gcloud_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, A
         else:
             positional.append(tok)
         i += 1
+
+    if explicit_region is not None:
+        metadata["region"] = explicit_region
+    elif zone_derived_region is not None:
+        metadata["region"] = zone_derived_region
 
     return metadata, params, positional
 
@@ -1629,6 +1648,43 @@ _HELM_GLOBAL_BOOL_FLAGS = {"debug", "kube-insecure-skip-tls-verify"}
 _HELM_DISCARD_VALUE_FLAGS = _HELM_GLOBAL_VALUE_FLAGS - {"n", "namespace", "kube-context"}
 
 
+def _split_helm_set_pairs(value: str) -> list[str]:
+    """Splits a ``--set``/``--set-string`` value on top-level commas --
+    i.e. commas outside ``[...]``/``{...}`` and quotes -- the same rule
+    Helm itself uses, so ``--set a=1,b=2`` yields two pairs while
+    ``--set list={a,b,c}`` or ``--set s="a,b"`` keep their bracketed/quoted
+    comma intact (REVIEW-4 T2.5). A backslash escapes the next character
+    (Helm's own ``\\,`` escape) so it is never treated as a delimiter."""
+    pairs: list[str] = []
+    depth = 0
+    quote: str | None = None
+    start = 0
+    i = 0
+    n = len(value)
+    while i < n:
+        ch = value[i]
+        if ch == "\\" and i + 1 < n:
+            i += 2
+            continue
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+        elif ch in "[{":
+            depth += 1
+        elif ch in "]}":
+            depth = max(0, depth - 1)
+        elif ch == "," and depth == 0:
+            pairs.append(value[start:i])
+            start = i + 1
+            i += 1
+            continue
+        i += 1
+    pairs.append(value[start:])
+    return pairs
+
+
 def _parse_helm_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     metadata: dict[str, Any] = {}
     params: dict[str, Any] = {}
@@ -1672,12 +1728,28 @@ def _parse_helm_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, Any
                     i += 1
                     val = _value_at(tokens, i, tok)
                 params.setdefault("values_files", []).append(val)
-            elif key == "set":
+            elif key in ("set", "set-string"):
+                # REVIEW-4 T2.5: comma-separated `k=v` pairs (Helm's own
+                # splitting rule, see _split_helm_set_pairs); nested keys
+                # like `image.tag=v2` are kept as the dotted string key --
+                # the store's dotted-path scope matching handles them.
+                # `--set-string` values are never coerced.
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
-                k, _sep, v = val.partition("=")
-                params.setdefault("set", {})[k] = _coerce(v)
+                target = params.setdefault("set", {})
+                for pair in _split_helm_set_pairs(val):
+                    k, _sep, v = pair.partition("=")
+                    if not k:
+                        continue
+                    target[k] = v if key == "set-string" else _coerce(v)
+            elif key in ("set-file", "set-json"):
+                # Recorded raw (not parsed) -- see module docs.
+                if val is None:
+                    i += 1
+                    val = _value_at(tokens, i, tok)
+                dest = "set_file" if key == "set-file" else "set_json"
+                params.setdefault(dest, []).append(val)
             elif key in _HELM_BOOL_FLAGS:
                 params[key.replace("-", "_")] = _bool_param(val)
             elif val is not None:

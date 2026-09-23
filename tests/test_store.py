@@ -737,3 +737,285 @@ def test_scope_key_absent_from_both_never_matches_and_nested_values_dont_equal_s
     assert not _matches({"env": "prod"}, metadata={}, params={})
     assert not _matches({"set": "x"}, params={"set": {"x": 1}})
     assert not _matches({"env": None}, metadata={"env": "prod"})
+
+
+# --------------------------------------------------------------------------
+# REVIEW-4 T2.4: time-window semantics.
+# --------------------------------------------------------------------------
+
+
+def _tz_window_store(**window):
+    from datetime import UTC, datetime  # noqa: F401 (re-exported for callers)
+
+    store = ConstraintStore()
+    store.constraints["r"] = make_constraint(
+        id="r", resource_pattern="*", actions={"delete"}, time_window=window,
+    )
+    return store
+
+
+def _tz_window_matches(now, **window) -> bool:
+    store = _tz_window_store(**window)
+    return bool(store.get_matching_constraints(_intent(), now))
+
+
+def test_overnight_window_wraps_around_midnight():
+    from datetime import UTC, datetime
+
+    window = {"start": "22:00", "end": "06:00", "tz": "UTC"}
+    assert _tz_window_matches(datetime(2026, 1, 5, 23, 0, tzinfo=UTC), **window)  # 23:00
+    assert _tz_window_matches(datetime(2026, 1, 5, 3, 0, tzinfo=UTC), **window)  # 03:00
+    assert not _tz_window_matches(datetime(2026, 1, 5, 12, 0, tzinfo=UTC), **window)  # noon
+
+
+def test_end_is_exclusive_at_minute_granularity():
+    from datetime import UTC, datetime
+
+    window = {"start": "09:00", "end": "17:00", "tz": "UTC"}
+    assert not _tz_window_matches(datetime(2026, 1, 5, 17, 0, tzinfo=UTC), **window)
+    assert _tz_window_matches(datetime(2026, 1, 5, 16, 59, tzinfo=UTC), **window)
+    assert _tz_window_matches(datetime(2026, 1, 5, 9, 0, tzinfo=UTC), **window)
+
+
+def test_24_00_end_means_through_midnight():
+    from datetime import UTC, datetime
+
+    window = {"start": "18:00", "end": "24:00", "tz": "UTC"}
+    assert _tz_window_matches(datetime(2026, 1, 5, 23, 59, tzinfo=UTC), **window)
+    assert _tz_window_matches(datetime(2026, 1, 5, 18, 0, tzinfo=UTC), **window)
+    assert not _tz_window_matches(datetime(2026, 1, 5, 0, 0, tzinfo=UTC), **window)
+    assert not _tz_window_matches(datetime(2026, 1, 5, 17, 59, tzinfo=UTC), **window)
+
+
+def test_24_00_is_accepted_only_for_end_not_start(tmp_path):
+    entry = _valid_entry(time_window={"start": "24:00", "end": "23:00", "tz": "UTC"})
+    store = _load_entries(tmp_path, entry)
+    assert store.quarantined == [
+        {"id": "ok", "reason": "invalid: start must be HH:MM (quote it in YAML)"}
+    ]
+
+
+def test_days_exclusion_still_applies_within_a_wraparound_window():
+    from datetime import UTC, datetime
+
+    window = {"days": ["Mon"], "start": "22:00", "end": "06:00", "tz": "UTC"}
+    # Monday 23:00 -- inside the window and a covered day.
+    assert _tz_window_matches(datetime(2026, 1, 5, 23, 0, tzinfo=UTC), **window)
+    # Tuesday 23:00 -- inside the clock window but the wrong weekday.
+    assert not _tz_window_matches(datetime(2026, 1, 6, 23, 0, tzinfo=UTC), **window)
+
+
+def test_tz_missing_uses_store_default_tz(tmp_path):
+    import yaml
+
+    c = make_constraint(id="ok", time_window={"start": "09:00", "end": "17:00"})
+    path = tmp_path / "constraints.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {"default_tz": "America/Chicago", "constraints": [_constraint_entry(c)]},
+            sort_keys=False,
+        )
+    )
+    store = ConstraintStore.load(path, authority_map=AUTHORITY, insecure=True)
+    assert store.quarantined == []
+    assert store.default_tz == "America/Chicago"
+    intent = _intent(resource="node/w1", action="scale", provider="kubernetes")
+    from datetime import UTC, datetime
+
+    # 16:00 UTC is 10:00 America/Chicago in January (UTC-6) -- inside the window.
+    assert store.get_matching_constraints(intent, datetime(2026, 1, 5, 16, 0, tzinfo=UTC))
+    # 09:00 UTC is 03:00 America/Chicago -- outside the window.
+    assert not store.get_matching_constraints(intent, datetime(2026, 1, 5, 9, 0, tzinfo=UTC))
+
+
+def test_tz_missing_and_no_default_tz_is_quarantined(tmp_path):
+    entry = _valid_entry(time_window={"start": "09:00", "end": "17:00"})
+    store = _load_entries(tmp_path, entry)
+    assert store.quarantined == [
+        {"id": "ok", "reason": "invalid: time_window.tz missing and no default_tz"}
+    ]
+
+
+def test_invalid_default_tz_raises_at_load(tmp_path):
+    import yaml
+
+    path = tmp_path / "constraints.yaml"
+    path.write_text(yaml.safe_dump({"default_tz": "Mars/Olympus", "constraints": []}))
+    with pytest.raises(ValueError, match="unknown default_tz"):
+        ConstraintStore.load(path, insecure=True)
+
+
+def test_default_tz_round_trips_and_does_not_change_constraint_hashes(tmp_path):
+    store = ConstraintStore(default_tz="America/Chicago")
+    constraint = make_constraint(
+        id="ok", time_window={"days": ["Mon"], "start": "09:00", "end": "17:00"},
+    )
+    store.constraints[constraint.id] = constraint
+    path = tmp_path / "constraints.yaml"
+    store.save(path)
+
+    reloaded = ConstraintStore.load(path, insecure=True)
+    assert reloaded.default_tz == "America/Chicago"
+    assert reloaded.quarantined == []
+    assert reloaded.constraints["ok"].provenance_hash == constraint.provenance_hash
+
+    # A store with no default_tz never writes the key, so a plain (v1)
+    # constraints file with a tz-carrying window round-trips unchanged.
+    plain = ConstraintStore()
+    plain.constraints["ok2"] = make_constraint(
+        id="ok2", time_window={"start": "09:00", "end": "17:00", "tz": "UTC"},
+    )
+    plain_path = tmp_path / "plain.yaml"
+    plain.save(plain_path)
+    assert "default_tz" not in plain_path.read_text()
+
+
+def test_naive_now_raises_in_every_matcher():
+    from datetime import datetime
+
+    store = _tz_window_store(start="09:00", end="17:00", tz="UTC")
+    naive = datetime(2026, 1, 5, 10, 0)
+    with pytest.raises(ValueError, match="now must be timezone-aware"):
+        store.get_matching_constraints(_intent(), naive)
+    with pytest.raises(ValueError, match="now must be timezone-aware"):
+        store.get_env_unresolved(_intent(), naive)
+    with pytest.raises(ValueError, match="now must be timezone-aware"):
+        store.get_matching_quarantined(_intent(), naive)
+
+
+def test_dst_spring_forward_is_handled_correctly():
+    """2026-03-08 is the US spring-forward day (America/Chicago skips
+    02:00-03:00, jumping from CST/UTC-6 to CDT/UTC-5)."""
+    from datetime import UTC, datetime
+
+    window = {"start": "01:00", "end": "04:00", "tz": "America/Chicago"}
+    # 08:30 UTC = 03:30 CDT (after the spring-forward) -- inside the window.
+    assert _tz_window_matches(datetime(2026, 3, 8, 8, 30, tzinfo=UTC), **window)
+    # 07:30 UTC = 01:30 CST (before the jump) -- also inside the window.
+    assert _tz_window_matches(datetime(2026, 3, 8, 7, 30, tzinfo=UTC), **window)
+    # 10:00 UTC = 05:00 CDT -- outside the window.
+    assert not _tz_window_matches(datetime(2026, 3, 8, 10, 0, tzinfo=UTC), **window)
+
+
+# --------------------------------------------------------------------------
+# REVIEW-4 T2.3: (provider, action) index, "*" actions, and load_cached.
+# --------------------------------------------------------------------------
+
+
+def test_any_action_wildcard_matches_every_action(tmp_path):
+    import yaml
+
+    c = make_constraint(id="ok", resource_pattern="node/*", actions={"*"})
+    path = tmp_path / "constraints.yaml"
+    path.write_text(yaml.safe_dump({"constraints": [_constraint_entry(c)]}, sort_keys=False))
+    store = ConstraintStore.load(path, authority_map=AUTHORITY, insecure=True)
+    assert store.quarantined == []
+    from datetime import UTC, datetime
+
+    now = datetime(2026, 1, 5, 12, 0, tzinfo=UTC)
+    assert store.get_matching_constraints(
+        _intent(resource="node/w1", action="delete", provider="kubernetes"), now
+    )
+    assert store.get_matching_constraints(
+        _intent(resource="node/w1", action="scale", provider="kubernetes"), now
+    )
+
+
+def test_get_matching_constraints_finds_direct_dict_assignments_and_overwrites():
+    """The index is a derived view of `constraints`, kept in sync even when
+    callers write `store.constraints[id] = c` directly (as tests and
+    `adversarial.poison_store` do) instead of going through
+    `add_constraint`/`load` (REVIEW-4 T2.3)."""
+    from datetime import UTC, datetime
+
+    store = ConstraintStore()
+    now = datetime(2026, 1, 5, 12, 0, tzinfo=UTC)
+    intent = _intent(resource="node/w1", action="delete", provider="kubernetes")
+
+    c1 = make_constraint(id="r", resource_pattern="node/*", actions={"scale"})
+    store.constraints["r"] = c1
+    assert store.get_matching_constraints(intent, now) == []
+
+    # Overwriting the same id with a constraint that now covers the action
+    # must show up immediately.
+    c2 = make_constraint(id="r", resource_pattern="node/*", actions={"delete"})
+    store.constraints["r"] = c2
+    assert store.get_matching_constraints(intent, now) == [c2]
+
+    del store.constraints["r"]
+    assert store.get_matching_constraints(intent, now) == []
+
+
+def test_matching_10k_constraints_against_500_intents_is_fast(tmp_path):
+    """REVIEW-4 T2.3: matching should be O(k) in the constraints that could
+    plausibly apply, not O(n) in the whole store -- generous bound, the
+    point is the scaling, not a tight latency number."""
+    import time as _time
+    from datetime import UTC, datetime
+
+    import yaml
+
+    from aegis_core.intent import InfrastructureIntent
+
+    providers = ["kubernetes", "terraform", "helm", "aws", "gcp"]
+    actions = [f"action-{j}" for j in range(20)]
+    entries = []
+    for i in range(10_000):
+        provider = providers[i % len(providers)]
+        action = actions[i % len(actions)]
+        c = make_constraint(
+            id=f"c-{i}",
+            provider=provider,
+            resource_pattern=f"kind{i % 50}/*",
+            actions={action},
+            time_window=None,
+        )
+        entries.append(_constraint_entry(c))
+    path = tmp_path / "constraints.yaml"
+    path.write_text(yaml.safe_dump({"constraints": entries}, sort_keys=False))
+    store = ConstraintStore.load(path, authority_map=AUTHORITY, insecure=True)
+    assert store.quarantined == []
+    assert len(store.constraints) == 10_000
+
+    now = datetime(2026, 1, 5, 12, 0, tzinfo=UTC)
+    intents = [
+        InfrastructureIntent(
+            resource=f"kind{i % 50}/x", action=actions[i % len(actions)],
+            provider=providers[i % len(providers)],
+        )
+        for i in range(500)
+    ]
+    start = _time.perf_counter()
+    for intent in intents:
+        store.get_matching_constraints(intent, now)
+    elapsed = _time.perf_counter() - start
+    assert elapsed < 0.5, f"500 intents against 10k constraints took {elapsed:.3f}s"
+
+
+def _constraint_entry(c: Constraint) -> dict:
+    from aegis_core.store import _constraint_to_dict
+
+    return _constraint_to_dict(c)
+
+
+def test_load_cached_returns_the_same_object_until_the_file_changes(tmp_path):
+    import time as _time
+
+    from aegis_core.store import ConstraintStore as CS
+
+    path = tmp_path / "constraints.yaml"
+    store = ConstraintStore()
+    store.constraints["ok"] = make_constraint(id="ok")
+    store.save(path)
+
+    first = CS.load_cached(path, insecure=True)
+    second = CS.load_cached(path, insecure=True)
+    assert first is second
+
+    # Touching the file (new mtime/size) must miss the cache.
+    _time.sleep(0.01)
+    store.constraints["ok2"] = make_constraint(id="ok2", resource_pattern="pod/*")
+    store.save(path)
+    third = CS.load_cached(path, insecure=True)
+    assert third is not first
+    assert "ok2" in third.constraints
