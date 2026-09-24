@@ -3,15 +3,6 @@
 **Provenance-backed, authority-aware guardrails that stop context poisoning and agentic drift
 before an AI agent's `kubectl` or `terraform` action reaches your infrastructure.**
 
-> **Alpha — not production ready.** The decision engine and its tests are
-> solid, but the trust roots around it are still stand-ins: sources are
-> verified against files on disk rather than real Git/Slack/Jira connectors,
-> signing uses a shared secret rather than per-principal keys, and a
-> `principal` is a signed name rather than an identity bound to a commit
-> signature or SSO group. Resource matching is case-sensitive on names. Read
-> [PLAN.md §8](PLAN.md) for the full list of open gaps before putting this in
-> front of anything you care about.
-
 **Keywords:** AI agent security · AgentOps · prompt injection · context poisoning · policy
 enforcement · policy-as-code · Kubernetes · Terraform · OPA · SRE · LLM guardrails ·
 provenance · infrastructure-as-code
@@ -164,16 +155,18 @@ derives **unstructured human constraints** (from Slack, Jira, Git) and applies
 
 The engine (constraint store, interceptor, environment mapping, dry-run handling, rate limits,
 plan-level constraints, and parsers for every tool in "Supported tools") is complete, and
-v0.1.0 is on PyPI. Real LLM baselines have now been run: Claude Sonnet 5 through the API
-(cached in `results/llm-external.md`), Haiku through the Claude Code CLI, and a local
-`mistral:latest`; a Codex CLI row is pending a quota reset.
+v0.1.0 is on PyPI as an **alpha**. Real LLM baselines have been run: Claude Sonnet 5 through
+the API (cached in `results/llm-external.md`), Haiku through the Claude Code CLI, `gpt-6-astra`
+through the Codex CLI, and a local `mistral:latest`.
 
 What is *not* done is the part the threat model leans on hardest. See `PLAN.md §8`, but in
 short: sources are verified against files on disk rather than real Git/Slack/Jira connectors,
 signing uses a shared secret rather than per-principal public keys, and a `principal` is a
 signed name rather than an identity bound to a commit signature or an SSO group. Until those
 land, Aegis demonstrates that the *decision procedure* is sound; it does not yet prove the
-identities feeding it are.
+identities feeding it are. Resource matching is also case-sensitive on names. It is not
+production-ready: read `PLAN.md §8` for the full list of open gaps before putting it in front
+of anything you care about.
 
 ## Documentation
 

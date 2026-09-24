@@ -44,7 +44,7 @@ First release. Published to PyPI as `aegis-devops`.
   control over that verdict. The old behaviour is available as `--on-untrusted-match escalate`.
 
 ### Known limitations
-See the alpha warning in the README and `PLAN.md` §8. In short: the source fetcher reads files
+See "Project status" in the README and `PLAN.md` §8. In short: the source fetcher reads files
 rather than real connectors, signing uses a shared secret, and a principal is a signed name
 rather than a bound identity.
 

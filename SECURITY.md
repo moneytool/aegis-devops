@@ -34,7 +34,7 @@ makes it decide **wrongly** is in scope, in rough order of severity:
 ## What does not count
 
 These are documented limitations, not vulnerabilities. They are listed in `PLAN.md` §8 and
-named in the README's alpha warning:
+named in the README's "Project status" section:
 
 - The source fetcher reads files on disk rather than connecting to Git, Slack or Jira. Anyone
   who can write to the sources directory can author policy.
