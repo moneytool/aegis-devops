@@ -16,16 +16,30 @@ Decision pipeline, per matching constraint, in order:
   4. Effect     — BLOCK outranks ESCALATE outranks ALLOW among whatever
      constraints survived steps 1-3.
 
-Constraints that fail step 1 or 2 are discarded, not honoured — but they
-are not silently dropped either. **Fail closed on integrity failure:** a
-matching constraint that was quarantined at load (``tampered`` /
-``forged``, kept in ``store.quarantined_constraints``) or discarded at
-decision time (``tampered`` / ``unauthorized``) whose ``effect`` was BLOCK
-or ESCALATE contributes ESCALATE to the verdict, with
-``discarded[].reason`` naming the failure and a note
-``"fail-closed: <id> (<reason>)"``. Such a constraint can never contribute
-BLOCK: a rule nobody can vouch for is grounds for a human look, not for
-an automatic denial — and never grounds for an automatic allow.
+Constraints that fail step 1 or 2 get **no vote** — but they are never
+silently dropped. Every one is listed in ``discarded[]`` with its reason,
+counted in ``StoreHealth.quarantined``, logged to stderr at load, and (if
+too many fail at once) enough to make the store refuse to decide at all
+via ``--max-quarantine-ratio``. Visibility, not obedience, is what makes
+a poisoned constraint safe.
+
+``on_untrusted_match`` decides what an untrustworthy *match* does to the
+verdict:
+
+* ``"discard"`` (default) — it contributes nothing. This is the only
+  setting under which an attacker who can write constraints cannot steer
+  a decision: if a poisoned rule could force ESCALATE, then writing one
+  is a denial-of-service on the guardrail, which is how guardrails get
+  switched off. Measured: with ``"escalate"`` Aegis scores the same
+  poison-susceptibility (1.000) and over-block rate (0.600) as a verifier
+  with no trust model at all; with ``"discard"`` both are 0.000.
+* ``"escalate"`` — a match that was quarantined at load (``tampered`` /
+  ``forged``, kept in ``store.quarantined_constraints``) or discarded at
+  decision time (``tampered`` / ``unauthorized``) whose ``effect`` was
+  BLOCK or ESCALATE contributes ESCALATE, with a note
+  ``"fail-closed: <id> (<reason>)"``. Such a constraint can never
+  contribute BLOCK. Choose this when an edited rule should stop the line
+  and you accept that anyone who can write a rule can stop the line.
 
 With ``fail_closed=True`` an *uncovered* intent (no constraint matched
 at all) also becomes ESCALATE (note ``"fail-closed: uncovered"``) instead
@@ -56,8 +70,10 @@ from aegis_core.intent import InfrastructureIntent
 from aegis_core.ledger import DecisionLedger, parse_window
 from aegis_core.store import Constraint, ConstraintStore
 
-# Effects that make a quarantined/discarded constraint fail closed.
+# Effects that a quarantined/discarded constraint would have carried, had it
+# been trustworthy. Only relevant under on_untrusted_match="escalate".
 _ENFORCING_EFFECTS = frozenset({"BLOCK", "ESCALATE"})
+_ON_UNTRUSTED_MATCH = frozenset({"discard", "escalate"})
 
 
 @dataclass
@@ -92,10 +108,17 @@ class AegisInterceptor:
         ledger: DecisionLedger | None = None,
         *,
         fail_closed: bool = False,
+        on_untrusted_match: str = "discard",
     ):
+        if on_untrusted_match not in _ON_UNTRUSTED_MATCH:
+            raise ValueError(
+                f"on_untrusted_match must be one of {sorted(_ON_UNTRUSTED_MATCH)}, "
+                f"got {on_untrusted_match!r}"
+            )
         self.store = store
         self.ledger = ledger
         self.fail_closed = fail_closed
+        self.on_untrusted_match = on_untrusted_match
 
     def intercept(self, intent: InfrastructureIntent, now: datetime | None = None) -> Decision:
         """Evaluates an intent and returns a Decision.
@@ -155,7 +178,7 @@ class AegisInterceptor:
             notes.append("unknown-target")
         for c, reason in quarantined_matches:
             discarded.append({"id": c.id, "reason": reason})
-            if c.effect in _ENFORCING_EFFECTS:
+            if c.effect in _ENFORCING_EFFECTS and self.on_untrusted_match == "escalate":
                 fail_closed = True
                 notes.append(f"fail-closed: {c.id} ({reason})")
         for c in matches:
@@ -177,7 +200,7 @@ class AegisInterceptor:
                 reason = "unauthorized"
             if reason is not None:
                 discarded.append({"id": c.id, "reason": reason})
-                if c.effect in _ENFORCING_EFFECTS:
+                if c.effect in _ENFORCING_EFFECTS and self.on_untrusted_match == "escalate":
                     fail_closed = True
                     notes.append(f"fail-closed: {c.id} ({reason})")
                 continue

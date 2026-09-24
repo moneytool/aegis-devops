@@ -199,16 +199,23 @@ def test_every_attack_runs_against_the_example_store(example_store):
 
 
 # --------------------------------------------------------------------------
-# Tampered attacks: interceptor discards with reason "tampered" and FAILS
-# CLOSED (REVIEW-4 T0.3): a tampered BLOCK/ESCALATE rule yields ESCALATE,
-# never ALLOW (the pre-REVIEW-4 behaviour) and never BLOCK.
+# Tampered attacks: interceptor discards with reason "tampered". By default
+# (on_untrusted_match="discard") a tampered BLOCK/ESCALATE rule gets no vote
+# at all -- the verdict is exactly what it would be with the poisoned rule
+# absent (here, ALLOW, since nothing else matches SCALE_INTENT). This is
+# what keeps an attacker who can write a poisoned constraint from steering
+# the decision (measured: "escalate" scores the same poison-susceptibility,
+# 1.000, and over-block rate, 0.600, as a verifier with no trust model at
+# all; "discard" scores 0.000/0.000). The old fail-closed-to-ESCALATE
+# behaviour (REVIEW-4 T0.3) is still available, opt-in, via
+# on_untrusted_match="escalate".
 # --------------------------------------------------------------------------
 
 TAMPERED_ATTACKS = [a for a in attacks() if a.category == "tampered"]
 
 
 @pytest.mark.parametrize("attack", TAMPERED_ATTACKS, ids=lambda a: a.name)
-def test_tampered_attacks_are_discarded_and_intent_escalated(attack):
+def test_tampered_attacks_are_discarded_and_get_no_vote_by_default(attack):
     store = ConstraintStore(authority_map=dict(AUTHORITY))
     base = make_constraint()
     poisoned = apply(attack, base, rng=random.Random(0))
@@ -220,19 +227,38 @@ def test_tampered_attacks_are_discarded_and_intent_escalated(attack):
 
     assert poisoned.id not in decision.citations
     assert {"id": poisoned.id, "reason": "tampered"} in decision.discarded
+    assert decision.verdict == "ALLOW"
+    assert not any(n.startswith("fail-closed:") for n in decision.notes)
+
+
+@pytest.mark.parametrize("attack", TAMPERED_ATTACKS, ids=lambda a: a.name)
+def test_tampered_attacks_escalate_under_on_untrusted_match_escalate(attack):
+    store = ConstraintStore(authority_map=dict(AUTHORITY))
+    base = make_constraint()
+    poisoned = apply(attack, base, rng=random.Random(0))
+    assert poisoned is not None
+    store.constraints[poisoned.id] = poisoned
+
+    interceptor = AegisInterceptor(store, on_untrusted_match="escalate")
+    decision = interceptor.intercept(SCALE_INTENT, now=NOW)
+
+    assert poisoned.id not in decision.citations
+    assert {"id": poisoned.id, "reason": "tampered"} in decision.discarded
     assert decision.verdict == "ESCALATE"
+    assert decision.verdict != "BLOCK"
     assert f"fail-closed: {poisoned.id} (tampered)" in decision.notes
 
 
 # --------------------------------------------------------------------------
-# Unauthorized attacks: interceptor discards with reason "unauthorized".
+# Unauthorized attacks: interceptor discards with reason "unauthorized",
+# and gets no vote by default for the same reason as tampered attacks above.
 # --------------------------------------------------------------------------
 
 UNAUTHORIZED_ATTACKS = [a for a in attacks() if a.category == "unauthorized"]
 
 
 @pytest.mark.parametrize("attack", UNAUTHORIZED_ATTACKS, ids=lambda a: a.name)
-def test_unauthorized_attacks_are_discarded_and_intent_escalated(attack):
+def test_unauthorized_attacks_are_discarded_and_get_no_vote_by_default(attack):
     store = ConstraintStore(authority_map=dict(AUTHORITY))
     base = make_constraint()
 
@@ -251,7 +277,31 @@ def test_unauthorized_attacks_are_discarded_and_intent_escalated(attack):
 
     assert poisoned.id not in decision.citations
     assert {"id": poisoned.id, "reason": "unauthorized"} in decision.discarded
+    assert decision.verdict == "ALLOW"
+    assert not any(n.startswith("fail-closed:") for n in decision.notes)
+
+
+@pytest.mark.parametrize("attack", UNAUTHORIZED_ATTACKS, ids=lambda a: a.name)
+def test_unauthorized_attacks_escalate_under_on_untrusted_match_escalate(attack):
+    store = ConstraintStore(authority_map=dict(AUTHORITY))
+    base = make_constraint()
+
+    if attack.name == "unauth-revoked":
+        store.add_constraint(base)
+        store.authority_map = {"admin": {"scaling", "deletion", "configuration"}}
+        poisoned = base
+    else:
+        poisoned = apply(attack, base, rng=random.Random(0))
+        assert poisoned is not None
+        store.constraints[poisoned.id] = poisoned
+
+    interceptor = AegisInterceptor(store, on_untrusted_match="escalate")
+    decision = interceptor.intercept(SCALE_INTENT, now=NOW)
+
+    assert poisoned.id not in decision.citations
+    assert {"id": poisoned.id, "reason": "unauthorized"} in decision.discarded
     assert decision.verdict == "ESCALATE"
+    assert decision.verdict != "BLOCK"
     assert f"fail-closed: {poisoned.id} (unauthorized)" in decision.notes
 
 
@@ -640,11 +690,22 @@ def test_c2_forged_trusted_constraint_is_refused_when_a_key_is_supplied(tmp_path
     assert reloaded.quarantined == [{"id": forged.id, "reason": "principal-mismatch"}]
     assert reloaded.warnings and all("unsigned" not in w for w in reloaded.warnings)
 
-    # 4. The quarantined rule still fails closed for the action it covers.
-    interceptor = AegisInterceptor(reloaded)
-    decision = interceptor.intercept(_intent_from_constraint(forged), now=NOW)
-    assert decision.verdict == "ESCALATE"
+    # 4. The quarantined rule is visible either way (discarded[] + the
+    #    load-time warning above), but by default it gets no vote at all --
+    #    the action for which it was the only match is simply ALLOWed.
+    #    Fail-closed handling of a quarantined match is still available,
+    #    opt-in, via on_untrusted_match="escalate".
+    intent = _intent_from_constraint(forged)
+    decision = AegisInterceptor(reloaded).intercept(intent, now=NOW)
+    assert decision.verdict == "ALLOW"
     assert {"id": forged.id, "reason": "principal-mismatch"} in decision.discarded
+
+    escalating = AegisInterceptor(reloaded, on_untrusted_match="escalate").intercept(
+        intent, now=NOW
+    )
+    assert escalating.verdict == "ESCALATE"
+    assert escalating.verdict != "BLOCK"
+    assert {"id": forged.id, "reason": "principal-mismatch"} in escalating.discarded
 
 
 # --------------------------------------------------------------------------

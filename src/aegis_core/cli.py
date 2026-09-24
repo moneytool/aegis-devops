@@ -312,6 +312,17 @@ def _add_common_options(subparser: argparse.ArgumentParser) -> None:
         help="ESCALATE (instead of ALLOW) any intent that no constraint covers",
     )
     subparser.add_argument(
+        "--on-untrusted-match",
+        choices=("discard", "escalate"),
+        default="discard",
+        help="what a matching but untrustworthy constraint (tampered, forged or "
+        "unauthorized) does to the verdict: 'discard' (default) gives it no vote, "
+        "so whoever poisoned it cannot steer the decision; 'escalate' makes it "
+        "force ESCALATE, which stops the line but lets anyone who can write a "
+        "rule stop the line. Either way it is reported in discarded[] and "
+        "store_health",
+    )
+    subparser.add_argument(
         "--resolve-current-context",
         action="store_true",
         default=False,
@@ -821,7 +832,12 @@ def _evaluate(intents: list[InfrastructureIntent], args: argparse.Namespace) -> 
         )
 
     ledger = _open_ledger(args.ledger, store, now) if args.ledger else None
-    interceptor = AegisInterceptor(store, ledger=ledger, fail_closed=args.fail_closed)
+    interceptor = AegisInterceptor(
+        store,
+        ledger=ledger,
+        fail_closed=args.fail_closed,
+        on_untrusted_match=args.on_untrusted_match,
+    )
     env_map = (
         _load_or_data_error(
             lambda: load_environment_map(args.environments, **load),

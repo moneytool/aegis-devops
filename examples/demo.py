@@ -3,7 +3,7 @@ authority map, then runs intents through the interceptor -- kubectl and
 terraform ones allowed/blocked/escalated, plus one gated action per
 additional supported cloud CLI (aws, az, gcloud) and GitOps tool
 (helm, argocd, flux, git, gh), a namespace-deletion cascade, and a
-tampered rule failing closed. Prints the store's health up front, exactly
+tampered rule shown under both untrusted-match policies. Prints the store's health up front, exactly
 as the CLI's ``store_health`` output does.
 
 Run with:
@@ -201,10 +201,11 @@ def main() -> None:
         cascade_decision,
     )
 
-    # 15. ESCALATE -- a rule quarantined at load (its provenance hash no longer
-    # matches: someone edited it on disk) is not forgotten. It is still
-    # matched, and because it was a BLOCK rule the decision fails closed to
-    # ESCALATE instead of silently ALLOWing as if the rule never existed.
+    # 15. A rule quarantined at load (its provenance hash no longer matches:
+    # someone edited it on disk) gets no vote. Whoever edited it cannot steer
+    # this decision in either direction -- but the rule is not forgotten
+    # either: it is named in discarded[] and in the store's health, which is
+    # what a human or a dashboard acts on.
     tampered_store = ConstraintStore.load(
         "data/constraints.example.yaml", authority_map=authority_map
     )
@@ -214,12 +215,30 @@ def main() -> None:
     tampered_store.quarantined_constraints.append(node_rule)
     print()
     print_store_health(tampered_store)
-    node_intent = from_kubectl(["kubectl", "delete", "node/worker-1"])
+    # --context kind-local resolves the environment, so the only thing left to
+    # decide this intent is the tampered rule itself.
+    node_intent = from_kubectl(
+        ["kubectl", "delete", "node/worker-1", "--context", "kind-local"]
+    )
+    env_map.annotate(node_intent)
     node_decision = AegisInterceptor(tampered_store).intercept(node_intent)
     print_decision(
-        "Delete a node when the no-delete-nodes rule was tampered with (fails closed)",
+        "Delete a node when the no-delete-nodes rule was tampered with "
+        "(discarded: it gets no vote)",
         node_intent,
         node_decision,
+    )
+
+    # 16. The same intent under on_untrusted_match="escalate", for operators who
+    # want an edited rule to stop the line. The trade-off: anyone who can write
+    # a rule can then stop the line, which is why it is not the default.
+    strict_decision = AegisInterceptor(
+        tampered_store, on_untrusted_match="escalate"
+    ).intercept(node_intent)
+    print_decision(
+        "The same action with on_untrusted_match='escalate' (opt-in)",
+        node_intent,
+        strict_decision,
     )
 
 

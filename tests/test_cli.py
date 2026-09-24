@@ -655,7 +655,7 @@ def test_no_plan_constraints_flag_disables_summary(capsys):
     assert plan is None
 
 
-def test_sources_flag_quarantines_forged_constraints(capsys, tmp_path):
+def test_sources_flag_quarantines_forged_constraints_with_no_vote_by_default(capsys, tmp_path):
     import shutil
 
     src_dir = tmp_path / "sources"
@@ -667,10 +667,41 @@ def test_sources_flag_quarantines_forged_constraints(capsys, tmp_path):
          "--", "kubectl", "scale", "deployment/api-server", "--replicas=10", "-n", "prod"],
         capsys,
     )
-    # REVIEW-4 T0.3: the forged BLOCK rule is not honoured (no BLOCK, not
-    # cited) but it fails closed -- the matching intent is ESCALATED, not
-    # silently ALLOWed as it was before.
-    assert code == 2, "forged constraint must fail closed, not open"
+    # The forged BLOCK rule is not honoured (no BLOCK, not cited) and by
+    # default gets no vote at all: the matching intent is ALLOWed exactly
+    # as if the forged rule had never existed. It's still fully visible in
+    # discarded[] and store_health.quarantined either way.
+    assert code == 0
+    assert lines[0]["decision"]["verdict"] == "ALLOW"
+    assert lines[0]["decision"]["citations"] == []
+    assert {"id": "no-scale-prod-peak", "reason": "forged"} in lines[0]["decision"]["discarded"]
+    assert not any(
+        n.startswith("fail-closed:") for n in lines[0]["decision"]["notes"]
+    )
+    assert {"id": "no-scale-prod-peak", "reason": "forged"} in plan["quarantined_at_load"]
+    assert {"id": "no-scale-prod-peak", "reason": "forged"} in plan["store_health"]["quarantined"]
+    assert lines[0]["store_health"]["loaded"] == 20
+
+
+def test_sources_flag_forged_constraint_escalates_under_on_untrusted_match_escalate(
+    capsys, tmp_path
+):
+    import shutil
+
+    src_dir = tmp_path / "sources"
+    shutil.copytree("data/sources", src_dir)
+    (src_dir / "jira-1001.json").unlink()  # the no-scale-prod-peak source vanishes
+    code, lines, plan = _run_with_plan(
+        ["check", "kubectl", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
+         "--sources", str(src_dir), "--now", "2026-09-22T14:00:00+00:00",
+         "--on-untrusted-match", "escalate",
+         "--", "kubectl", "scale", "deployment/api-server", "--replicas=10", "-n", "prod"],
+        capsys,
+    )
+    # REVIEW-4 T0.3's original fail-closed behaviour, opt-in: the forged
+    # BLOCK rule still isn't honoured (no BLOCK, not cited) but it fails
+    # closed to ESCALATE instead of getting no vote.
+    assert code == 2, "forged constraint must fail closed under --on-untrusted-match escalate"
     assert lines[0]["decision"]["verdict"] == "ESCALATE"
     assert lines[0]["decision"]["citations"] == []
     assert {"id": "no-scale-prod-peak", "reason": "forged"} in lines[0]["decision"]["discarded"]
@@ -857,9 +888,40 @@ def test_pretty_output_ends_with_store_line(capsys):
     assert out.strip().splitlines()[-1] == "STORE: loaded=21 quarantined=0 principals=3"
 
 
-def test_single_bit_flip_escalates_and_reports_quarantine(capsys, tmp_path):
+def test_single_bit_flip_allows_by_default_but_reports_quarantine(capsys, tmp_path):
+    path = _bit_flip(tmp_path, "no-delete-nodes")
+    # --context kind-local resolves env to "dev" so the unrelated
+    # no-delete-in-prod-env rule's env-unresolved fail-closed clause (which
+    # this change does not touch) doesn't also fire here, and
+    # --plan-constraints "" disables the unrelated plan-level delete-ratio
+    # rule, leaving no-delete-nodes as the only thing that would otherwise
+    # cover this intent.
+    code = main(["check", "kubectl", "--constraints", path, "--authority", AUTHORITY,
+                 "--plan-constraints", "",
+                 "--", "kubectl", "delete", "node/x", "--context", "kind-local"])
+    captured = capsys.readouterr()
+    err = captured.err
+    lines = [json.loads(line) for line in captured.out.splitlines() if "intent" in line]
+    # By default the tampered rule gets no vote: the action it was the only
+    # match for is ALLOWed, exactly as if the rule had never existed -- but
+    # the quarantine is still fully visible in discarded[]/store_health and
+    # logged to stderr at load.
+    assert code == 0
+    decision = lines[0]["decision"]
+    assert decision["verdict"] == "ALLOW"
+    assert decision["citations"] == []
+    assert decision["discarded"] == [{"id": "no-delete-nodes", "reason": "tampered"}]
+    assert decision["notes"] == []
+    health = lines[0]["store_health"]
+    assert health["quarantined"] == [{"id": "no-delete-nodes", "reason": "tampered"}]
+    assert health["loaded"] == 20
+    assert "aegis: WARNING Quarantined constraint no-delete-nodes" in err
+
+
+def test_single_bit_flip_escalates_under_on_untrusted_match_escalate(capsys, tmp_path):
     path = _bit_flip(tmp_path, "no-delete-nodes")
     code = main(["check", "kubectl", "--constraints", path, "--authority", AUTHORITY,
+                 "--on-untrusted-match", "escalate",
                  "--", "kubectl", "delete", "node/x"])
     captured = capsys.readouterr()
     err = captured.err
@@ -876,10 +938,27 @@ def test_single_bit_flip_escalates_and_reports_quarantine(capsys, tmp_path):
     assert "aegis: WARNING Quarantined constraint no-delete-nodes" in err
 
 
-def test_single_bit_flip_pretty_lists_quarantined_ids(capsys, tmp_path):
+def test_single_bit_flip_pretty_lists_quarantined_ids_but_allows_by_default(capsys, tmp_path):
     path = _bit_flip(tmp_path, "no-delete-nodes")
     code = main(
         ["check", "kubectl", "--constraints", path, "--authority", AUTHORITY, "--pretty",
+         "--plan-constraints", "",
+         "--", "kubectl", "delete", "node/x", "--context", "kind-local"]
+    )
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "STORE: loaded=20 quarantined=1 principals=3" in out
+    assert "  quarantined: no-delete-nodes (tampered)" in out
+    assert "note: fail-closed:" not in out
+
+
+def test_single_bit_flip_pretty_lists_quarantined_ids_and_escalates_under_escalate(
+    capsys, tmp_path
+):
+    path = _bit_flip(tmp_path, "no-delete-nodes")
+    code = main(
+        ["check", "kubectl", "--constraints", path, "--authority", AUTHORITY, "--pretty",
+         "--on-untrusted-match", "escalate",
          "--", "kubectl", "delete", "node/x"]
     )
     out = capsys.readouterr().out
@@ -1181,9 +1260,14 @@ def test_exit_style_claude_hook_allow_prints_nothing(capsys):
 
 
 def test_exit_style_claude_hook_fail_closed_reason_names_the_quarantined_rule(capsys, tmp_path):
+    """Under the default (discard) the tampered rule has no reason to give
+    -- it gets no vote, so the claude-hook style needs
+    --on-untrusted-match escalate to still have a fail-closed reason to
+    report for the quarantined rule itself."""
     path = _bit_flip(tmp_path, "no-delete-nodes")
     code = main(["check", "kubectl", "--constraints", path, "--authority", AUTHORITY,
                  "--plan-constraints", "", "--exit-style", "claude-hook",
+                 "--on-untrusted-match", "escalate",
                  "--", "kubectl", "delete", "node/x", "--context", "kind-local"])
     out = capsys.readouterr().out
     assert code == 2
@@ -1194,12 +1278,26 @@ def test_exit_style_claude_hook_fail_closed_reason_names_the_quarantined_rule(ca
     # With no context the env-scoped rule is unresolved too, and the reason says so.
     code = main(["check", "kubectl", "--constraints", path, "--authority", AUTHORITY,
                  "--plan-constraints", "", "--exit-style", "claude-hook",
+                 "--on-untrusted-match", "escalate",
                  "--", "kubectl", "delete", "node/x"])
     out = capsys.readouterr().out
     assert code == 2
     assert json.loads(out)["reason"] == (
         "ESCALATE: env-unresolved: no-delete-in-prod-env, fail-closed: no-delete-nodes (tampered)"
     )
+
+
+def test_exit_style_claude_hook_allows_a_bit_flipped_rule_by_default(capsys, tmp_path):
+    """Same rule, same argv, but the default (discard): the tampered rule
+    gets no vote, so nothing else covers 'delete node/x' and the claude-hook
+    style prints nothing at all."""
+    path = _bit_flip(tmp_path, "no-delete-nodes")
+    code = main(["check", "kubectl", "--constraints", path, "--authority", AUTHORITY,
+                 "--plan-constraints", "", "--exit-style", "claude-hook",
+                 "--", "kubectl", "delete", "node/x", "--context", "kind-local"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert out == ""
 
 
 def test_exit_style_ci_is_0_or_1(capsys):
