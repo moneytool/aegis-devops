@@ -34,13 +34,14 @@ Helm/ArgoCD/Flux, Git/GitHub, SQL/migrations, and Pulumi — through one shared 
 ## Quick start
 
 ```bash
-python -m venv venv
-venv/bin/python -m pip install -e ".[dev]"
-venv/bin/python examples/demo.py
+pip install aegis-devops
+aegis init ./.aegis
 ```
 
-`examples/demo.py` runs 15 intents across every supported tool through the interceptor and
-prints each decision, starting with the store's health. To check one command yourself:
+`aegis init` writes the example policy files (constraints, authority map, environment map,
+plan constraints, signed sources) into a directory. Putting them in `./.aegis` means the CLI
+finds them with no flags and no environment variable — see "Configuration" for the full search
+order. Then check a command:
 
 ```bash
 aegis check kubectl --now 2026-03-16T10:00:00-05:00 --pretty -- \
@@ -50,18 +51,36 @@ aegis check kubectl --now 2026-03-16T10:00:00-05:00 --pretty -- \
 ```
 BLOCK: kubernetes scale deployment/api-server
   citations: no-scale-prod-peak
-  covered: True  latency_ms: 0.14
+  covered: True  latency_ms: 0.20
 PLAN BLOCK: 1 intent(s)
-WARNING: using example signing key
 STORE: loaded=21 quarantined=0 principals=3
+  warning: using example signing key
 ```
 
-The `WARNING` line is real: the shipped policy files are signed with a public demo key that
-lives next to them, so the CLI can verify them out of the box but tells you it did so with a
-key everyone has. See "Signing" below for using your own. To check a whole shell command
-string rather than one argv (what an agent framework actually hands you), use
-`aegis check command -- "kubectl get pods; sudo kubectl delete node/w1"` — see "Compound
-commands".
+The `warning` is real and deliberate: the shipped policy files are signed with a public demo
+key that ships beside them, so the CLI verifies them out of the box while telling you it used
+a key everyone has. `aegis init` prints the two commands that replace it with your own — see
+"Signing". The example rules are a demo, not a starting policy; replace
+`constraints.example.yaml` with your own `constraints.yaml` (a real file wins over the
+`.example` one when both exist).
+
+To check a whole shell command string rather than one argv — which is what an agent framework
+actually hands you — use `aegis check command -- "kubectl get pods; sudo kubectl delete node/w1"`;
+see "Compound commands".
+
+### From a clone
+
+```bash
+python -m venv venv
+venv/bin/python -m pip install -e ".[dev]"
+venv/bin/python examples/demo.py
+```
+
+`examples/demo.py` runs 15 intents across every supported tool through the interceptor and
+prints each decision, starting with the store's health. A clone already has `data/`, so the CLI
+finds its policy files without `aegis init`.
+
+### Argv forms
 
 Global options in front of the verb (`kubectl -n prod delete …`, `git -C /repo push …`,
 `helm --kube-context prod uninstall …`), glued short flags (`-nprod`), label selectors
