@@ -1,71 +1,70 @@
-<svg viewBox="0 0 1000 500" xmlns="http://www.w3.org/2000/svg" font-family="Helvetica, Arial, sans-serif">
-  <rect width="1000" height="500" fill="#ffffff"/>
-  <text x="500.0" y="28" text-anchor="middle" font-size="18" font-weight="700" fill="#1a202c">Benchmark — Aegis vs. Baselines</text>
-  <text x="500.0" y="48" text-anchor="middle" font-size="11.5" fill="#718096">results/benchmark.md — split "holdout", oracle: reference, n=120 intents, n_distinct=323 (of 500 constraints)</text>
-  <line x1="130" y1="380" x2="960" y2="380" stroke="#2d3748" stroke-width="1.5"/>
-  <line x1="130" y1="100" x2="130" y2="380" stroke="#2d3748" stroke-width="1.5"/>
-  <text x="120" y="384.0" text-anchor="end" font-size="10.5" fill="#4a5568">0%</text>
-  <text x="120" y="314.0" text-anchor="end" font-size="10.5" fill="#4a5568">25%</text>
-  <line x1="130" y1="310.0" x2="960" y2="310.0" stroke="#e2e8f0" stroke-width="1"/>
-  <text x="120" y="244.0" text-anchor="end" font-size="10.5" fill="#4a5568">50%</text>
-  <line x1="130" y1="240.0" x2="960" y2="240.0" stroke="#e2e8f0" stroke-width="1"/>
-  <text x="120" y="174.0" text-anchor="end" font-size="10.5" fill="#4a5568">75%</text>
-  <line x1="130" y1="170.0" x2="960" y2="170.0" stroke="#e2e8f0" stroke-width="1"/>
-  <text x="120" y="104.0" text-anchor="end" font-size="10.5" fill="#4a5568">100%</text>
-  <line x1="130" y1="100.0" x2="960" y2="100.0" stroke="#e2e8f0" stroke-width="1"/>
-
-  <!-- group 1: over-block rate -->
-  <text x="258.33333333333337" y="402" text-anchor="middle" font-size="12" font-weight="700" fill="#2d3748">over-block rate</text>
-  <!-- aegis: 0.500 -->
-  <rect x="130.0" y="240.0" width="59.7" height="140.0" fill="#3182ce"/>
-  <text x="159.8" y="234.0" text-anchor="middle" font-size="10" font-weight="700" fill="#3182ce">0.500</text>
-  <!-- llm-heuristic: 0.500 -->
-  <rect x="195.7" y="240.0" width="59.7" height="140.0" fill="#dd6b20"/>
-  <text x="225.5" y="234.0" text-anchor="middle" font-size="10" font-weight="700" fill="#dd6b20">0.500</text>
-  <!-- opa: 0.500 -->
-  <rect x="261.3" y="240.0" width="59.7" height="140.0" fill="#805ad5"/>
-  <text x="291.2" y="234.0" text-anchor="middle" font-size="10" font-weight="700" fill="#805ad5">0.500</text>
-  <!-- opa-signed: 0.250 -->
-  <rect x="327.0" y="310.0" width="59.7" height="70.0" fill="#38a169"/>
-  <text x="356.8" y="304.0" text-anchor="middle" font-size="10" font-weight="700" fill="#38a169">0.250</text>
-
-  <!-- group 2: ps_unauthorized -->
-  <text x="545.0" y="402" text-anchor="middle" font-size="12" font-weight="700" fill="#2d3748">ps_unauthorized</text>
-  <!-- aegis: 0.000 -->
-  <rect x="416.7" y="380.0" width="59.7" height="2.0" fill="#3182ce"/>
-  <text x="446.5" y="374.0" text-anchor="middle" font-size="10" font-weight="700" fill="#3182ce">0.000</text>
-  <!-- llm-heuristic: 0.400 -->
-  <rect x="482.3" y="268.0" width="59.7" height="112.0" fill="#dd6b20"/>
-  <text x="512.2" y="262.0" text-anchor="middle" font-size="10" font-weight="700" fill="#dd6b20">0.400</text>
-  <!-- opa: 0.100 -->
-  <rect x="548.0" y="352.0" width="59.7" height="28.0" fill="#805ad5"/>
-  <text x="577.8" y="346.0" text-anchor="middle" font-size="10" font-weight="700" fill="#805ad5">0.100</text>
-  <!-- opa-signed: 0.100 -->
-  <rect x="613.7" y="352.0" width="59.7" height="28.0" fill="#38a169"/>
-  <text x="643.5" y="346.0" text-anchor="middle" font-size="10" font-weight="700" fill="#38a169">0.100</text>
-
-  <!-- group 3: ps_tampered -->
-  <text x="831.6666666666667" y="402" text-anchor="middle" font-size="12" font-weight="700" fill="#2d3748">ps_tampered</text>
-  <!-- aegis: 0.000 -->
-  <rect x="703.3" y="380.0" width="59.7" height="2.0" fill="#3182ce"/>
-  <text x="733.2" y="374.0" text-anchor="middle" font-size="10" font-weight="700" fill="#3182ce">0.000</text>
-  <!-- llm-heuristic: 0.833 -->
-  <rect x="769.0" y="146.7" width="59.7" height="233.3" fill="#dd6b20"/>
-  <text x="798.8" y="140.7" text-anchor="middle" font-size="10" font-weight="700" fill="#dd6b20">0.833</text>
-  <!-- opa: 0.750 -->
-  <rect x="834.7" y="170.0" width="59.7" height="210.0" fill="#805ad5"/>
-  <text x="864.5" y="164.0" text-anchor="middle" font-size="10" font-weight="700" fill="#805ad5">0.750</text>
-  <!-- opa-signed: 0.000 -->
-  <rect x="900.3" y="380.0" width="59.7" height="2.0" fill="#38a169"/>
-  <text x="930.2" y="374.0" text-anchor="middle" font-size="10" font-weight="700" fill="#38a169">0.000</text>
-  <rect x="130" y="430" width="14" height="14" fill="#3182ce"/>
-  <text x="150" y="441" font-size="11.5" fill="#2d3748">aegis</text>
-  <rect x="219" y="430" width="14" height="14" fill="#dd6b20"/>
-  <text x="239" y="441" font-size="11.5" fill="#2d3748">llm-heuristic</text>
-  <rect x="380" y="430" width="14" height="14" fill="#805ad5"/>
-  <text x="400" y="441" font-size="11.5" fill="#2d3748">opa</text>
-  <rect x="451" y="430" width="14" height="14" fill="#38a169"/>
-  <text x="471" y="441" font-size="11.5" fill="#2d3748">opa-signed</text>
-  <text x="130" y="470" font-size="11" fill="#718096">ps_unauthorized / ps_tampered = fraction of poison candidates of that kind the</text>
-  <text x="130" y="486" font-size="11" fill="#718096">verifier BLOCKed without an authority/provenance concept (obeyed the poison). Lower is better on every bar.</text>
+<svg viewBox="0 0 1000 520" xmlns="http://www.w3.org/2000/svg" font-family="Helvetica, Arial, sans-serif" role="img">
+<title>Aegis benchmark: over-block, poison-susceptibility, and unauthorized rules acted on</title>
+<rect width="1000" height="520" fill="#ffffff"/>
+<text x="500.0" y="30" text-anchor="middle" font-size="18" font-weight="700" fill="#1a202c">Benchmark — Aegis vs. baselines (lower is better)</text>
+<text x="500.0" y="50" text-anchor="middle" font-size="11.5" fill="#718096">holdout split, oracle: reference, n=120 intents, n_distinct=323 of 500 constraints</text>
+<line x1="150" y1="400" x2="960" y2="400" stroke="#2d3748" stroke-width="1.5"/>
+<line x1="150" y1="110" x2="150" y2="400" stroke="#2d3748" stroke-width="1.5"/>
+<text x="140" y="404.0" text-anchor="end" font-size="10.5" fill="#4a5568">0%</text>
+<text x="140" y="331.5" text-anchor="end" font-size="10.5" fill="#4a5568">25%</text>
+<line x1="150" y1="327.5" x2="960" y2="327.5" stroke="#e2e8f0" stroke-width="1"/>
+<text x="140" y="259.0" text-anchor="end" font-size="10.5" fill="#4a5568">50%</text>
+<line x1="150" y1="255.0" x2="960" y2="255.0" stroke="#e2e8f0" stroke-width="1"/>
+<text x="140" y="186.5" text-anchor="end" font-size="10.5" fill="#4a5568">75%</text>
+<line x1="150" y1="182.5" x2="960" y2="182.5" stroke="#e2e8f0" stroke-width="1"/>
+<text x="140" y="114.0" text-anchor="end" font-size="10.5" fill="#4a5568">100%</text>
+<line x1="150" y1="110.0" x2="960" y2="110.0" stroke="#e2e8f0" stroke-width="1"/>
+<text x="285.0" y="426" text-anchor="middle" font-size="12.5" font-weight="700" fill="#2d3748">over-block rate</text>
+<rect x="179.7" y="398" width="30.2" height="2" fill="#2f855a"/>
+<text x="194.8" y="394.0" text-anchor="middle" font-size="9.5" fill="#2d3748">0.00</text>
+<rect x="214.8" y="356.5" width="30.2" height="43.5" fill="#3182ce"/>
+<text x="229.9" y="350.5" text-anchor="middle" font-size="9.5" fill="#2d3748">0.15</text>
+<rect x="249.9" y="356.5" width="30.2" height="43.5" fill="#63b3ed"/>
+<text x="265.0" y="350.5" text-anchor="middle" font-size="9.5" fill="#2d3748">0.15</text>
+<rect x="285.0" y="327.5" width="30.2" height="72.5" fill="#d69e2e"/>
+<text x="300.1" y="321.5" text-anchor="middle" font-size="9.5" fill="#2d3748">0.25</text>
+<rect x="320.1" y="255.0" width="30.2" height="145.0" fill="#dd6b20"/>
+<text x="335.2" y="249.0" text-anchor="middle" font-size="9.5" fill="#2d3748">0.50</text>
+<rect x="355.2" y="110.0" width="30.2" height="290.0" fill="#c53030"/>
+<text x="370.3" y="104.0" text-anchor="middle" font-size="9.5" fill="#2d3748">1.00</text>
+<text x="555.0" y="426" text-anchor="middle" font-size="12.5" font-weight="700" fill="#2d3748">poison-susceptibility</text>
+<rect x="449.7" y="398" width="30.2" height="2" fill="#2f855a"/>
+<text x="464.8" y="394.0" text-anchor="middle" font-size="9.5" fill="#2d3748">0.00</text>
+<rect x="484.8" y="313.0" width="30.2" height="87.0" fill="#3182ce"/>
+<text x="499.9" y="307.0" text-anchor="middle" font-size="9.5" fill="#2d3748">0.30</text>
+<rect x="519.9" y="313.0" width="30.2" height="87.0" fill="#63b3ed"/>
+<text x="535.0" y="307.0" text-anchor="middle" font-size="9.5" fill="#2d3748">0.30</text>
+<rect x="555.0" y="255.0" width="30.2" height="145.0" fill="#d69e2e"/>
+<text x="570.1" y="249.0" text-anchor="middle" font-size="9.5" fill="#2d3748">0.50</text>
+<rect x="590.1" y="110.0" width="30.2" height="290.0" fill="#dd6b20"/>
+<text x="605.2" y="104.0" text-anchor="middle" font-size="9.5" fill="#2d3748">1.00</text>
+<rect x="625.2" y="110.0" width="30.2" height="290.0" fill="#c53030"/>
+<text x="640.3" y="104.0" text-anchor="middle" font-size="9.5" fill="#2d3748">1.00</text>
+<text x="825.0" y="426" text-anchor="middle" font-size="12.5" font-weight="700" fill="#2d3748">acted on an unauthorized rule</text>
+<rect x="719.7" y="398" width="30.2" height="2" fill="#2f855a"/>
+<text x="734.8" y="394.0" text-anchor="middle" font-size="9.5" fill="#2d3748">0.00</text>
+<rect x="754.8" y="342.0" width="30.2" height="58.0" fill="#3182ce"/>
+<text x="769.9" y="336.0" text-anchor="middle" font-size="9.5" fill="#2d3748">0.20</text>
+<rect x="789.9" y="342.0" width="30.2" height="58.0" fill="#63b3ed"/>
+<text x="805.0" y="336.0" text-anchor="middle" font-size="9.5" fill="#2d3748">0.20</text>
+<rect x="825.0" y="110.0" width="30.2" height="290.0" fill="#d69e2e"/>
+<text x="840.1" y="104.0" text-anchor="middle" font-size="9.5" fill="#2d3748">1.00</text>
+<rect x="860.1" y="110.0" width="30.2" height="290.0" fill="#dd6b20"/>
+<text x="875.2" y="104.0" text-anchor="middle" font-size="9.5" fill="#2d3748">1.00</text>
+<rect x="895.2" y="110.0" width="30.2" height="290.0" fill="#c53030"/>
+<text x="910.3" y="104.0" text-anchor="middle" font-size="9.5" fill="#2d3748">1.00</text>
+<rect x="150" y="449" width="11" height="11" fill="#2f855a"/>
+<text x="166" y="458" font-size="11" fill="#4a5568">aegis</text>
+<rect x="203.0" y="449" width="11" height="11" fill="#3182ce"/>
+<text x="219.0" y="458" font-size="11" fill="#4a5568">codex (gpt-6-astra)</text>
+<rect x="342.8" y="449" width="11" height="11" fill="#63b3ed"/>
+<text x="358.8" y="458" font-size="11" fill="#4a5568">claude-cli (haiku)</text>
+<rect x="476.40000000000003" y="449" width="11" height="11" fill="#d69e2e"/>
+<text x="492.40000000000003" y="458" font-size="11" fill="#4a5568">opa-signed</text>
+<rect x="560.4000000000001" y="449" width="11" height="11" fill="#dd6b20"/>
+<text x="576.4000000000001" y="458" font-size="11" fill="#4a5568">opa</text>
+<rect x="601.0000000000001" y="449" width="11" height="11" fill="#c53030"/>
+<text x="617.0000000000001" y="458" font-size="11" fill="#4a5568">ollama (mistral 7B)</text>
+<text x="150" y="484" font-size="10.5" fill="#718096">Rightmost group = ps_unauth + pe_unauth: the share of unauthorized-principal rules that moved a verdict at all.</text>
+<text x="150" y="500" font-size="10.5" fill="#718096">codex and claude-cli are agent harnesses scored on a 100-constraint subset, not raw completions.</text>
 </svg>
