@@ -1,0 +1,32 @@
+cff-version: 1.2.0
+message: "If you use this software or its corpus, please cite it."
+title: "Aegis: provenance-backed, authority-aware policy verification for AI agent infrastructure actions"
+abstract: >-
+  Aegis verifies the operational constraints an AI agent's guardrail enforces before they drive
+  a decision. Each constraint carries an integrity hash bound to a cited source and an
+  authority claim naming which principal may assert that class of rule; both are checked at
+  decision time, and a constraint failing either gets no vote. The repository includes a
+  labelled corpus, an independent reference oracle, an adversarial suite, and a benchmark
+  against OPA and LLM self-checks.
+type: software
+license: Apache-2.0
+version: 0.1.0
+date-released: "2026-09-23"
+repository-code: "https://github.com/moneytool/aegis-devops"
+url: "https://pypi.org/project/aegis-devops/"
+keywords:
+  - AI agents
+  - policy enforcement
+  - provenance
+  - authority
+  - prompt injection
+  - context poisoning
+  - Kubernetes
+  - Terraform
+  - site reliability engineering
+authors:
+  # TODO: replace with your full name, affiliation and ORCID before citing.
+  - family-names: "TODO-SURNAME"
+    given-names: "TODO-GIVEN-NAME"
+    affiliation: "TODO-AFFILIATION"
+    orcid: "https://orcid.org/TODO-ORCID"

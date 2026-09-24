@@ -937,6 +937,9 @@ vhs docs/demo.tape                # regenerate docs/demo.gif
 ```
 
 Adding a new parser or tool: see [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md).
+Reporting a bypass: see [`SECURITY.md`](SECURITY.md) — parser evasion is the largest
+attack surface and the most useful thing to report. Release history is in
+[`CHANGELOG.md`](CHANGELOG.md).
 
 ## License
 
