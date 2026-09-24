@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    # Semver tags only. A bare "v*" would also match a moving tag (e.g. a `v1`
+    # used to pin an action), and re-pointing that tag would republish whatever
+    # version happened to be in the tree.
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      # creating the GitHub Release needs write
+      contents: write
+      # Trusted publishing (OIDC): no API token is stored anywhere.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify tag points to main history
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "::error::${GITHUB_REF_NAME} points to ${GITHUB_SHA}, which is not on main"
+            exit 1
+          fi
+
+      - name: Verify tag matches package version
+        run: |
+          set -euo pipefail
+          version="$(python3 - <<'PY'
+          from pathlib import Path
+          import re
+          text = Path("src/aegis_core/__init__.py").read_text(encoding="utf-8")
+          match = re.search(r'__version__ = "(\d+\.\d+\.\d+)"', text)
+          if match is None:
+              raise SystemExit("missing __version__")
+          print(match.group(1))
+          PY
+          )"
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match package version v${version}"
+            exit 1
+          fi
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Run the suite before publishing
+        # A policy verifier that ships broken is worse than one that ships late.
+        run: uv run --with pytest --with pytest-benchmark --with pyyaml python -m pytest -q
+
+      - run: uv build
+
+      - name: Publish to PyPI
+        run: uv publish --trusted-publishing always
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "release ${GITHUB_REF_NAME} already exists"
+            exit 0
+          fi
+          gh release create "${GITHUB_REF_NAME}" \
+            --latest \
+            --title "aegis-devops ${GITHUB_REF_NAME#v}" \
+            --generate-notes \
+            --notes-start-tag "$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || echo "${GITHUB_REF_NAME}")" \
+            --notes "$(printf '\x60\x60\x60bash\npip install aegis-devops\n\x60\x60\x60\n\n**Alpha.** See the README for the known gaps before relying on this.\n')"

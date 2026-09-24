@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "aegis-devops"
 license = "Apache-2.0"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Provenance-backed, authority-aware policy verifier for agentic DevOps actions."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -54,6 +54,9 @@ dev = [
 llm = [
     "anthropic",
 ]
+
+[tool.setuptools.dynamic]
+version = {attr = "aegis_core.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["src"]

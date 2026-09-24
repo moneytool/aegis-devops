@@ -3,6 +3,15 @@
 **Provenance-backed, authority-aware guardrails that stop context poisoning and agentic drift
 before an AI agent's `kubectl` or `terraform` action reaches your infrastructure.**
 
+> **Alpha — not production ready.** The decision engine and its tests are
+> solid, but the trust roots around it are still stand-ins: sources are
+> verified against files on disk rather than real Git/Slack/Jira connectors,
+> signing uses a shared secret rather than per-principal keys, and a
+> `principal` is a signed name rather than an identity bound to a commit
+> signature or SSO group. Resource matching is case-sensitive on names. Read
+> [PLAN.md §8](PLAN.md) for the full list of open gaps before putting this in
+> front of anything you care about.
+
 **Keywords:** AI agent security · AgentOps · prompt injection · context poisoning · policy
 enforcement · policy-as-code · Kubernetes · Terraform · OPA · SRE · LLM guardrails ·
 provenance · infrastructure-as-code
@@ -736,6 +745,113 @@ constraints from an authorized principal, and only independent integrity + autho
 assert this repo's current prompt rendering still reproduces those cached prompts byte-for-byte
 (100% hit rate) so the caches stay usable as a regression check even while the corpus is
 regenerated.
+
+### Agent-harness and local-model baselines: `codex`, `ollama`, and `claude-cli`
+
+Three more rows use the SAME naive prompt `llm-naive` uses
+(`aegis_core.baselines.llm.render_system_prompt`), via three more `LLMClient` implementations in
+`aegis_core/baselines/external.py`, but over a smaller constraint set: `llm-naive`/`llm-aware`
+feed the *entire* 500-constraint corpus (~69,000 tokens — see the cost estimate above), which is
+infeasible for a local model's context window and prohibitively slow/expensive to probe
+repeatedly against an agent harness. `codex`, `ollama`, and `claude-cli` instead load the
+**holdout constraint split** — `data/corpus/split.json["holdout"]`, 100 constraints, distinct
+from `split.json["intents"]["holdout"]` — which renders to roughly 14,000 characters-per-4 of
+naive estimate, but see the token-count surprise below. This is also the same subset the pinned
+`claude-sonnet-5` rows in [`results/llm-external.md`](results/llm-external.md) were measured
+against, so these rows stay comparable to that table. The subset is threaded through explicitly
+(`scripts/benchmark.py`'s `load_holdout_constraint_subset`), never a silent default.
+
+**`codex`** shells out to `codex exec` — **an agent harness wrapped around a model**, not a raw
+completion endpoint, even invoked read-only for one turn (it can plan and use tools before
+answering). That distinction matters enough that the `notes` column says "agent harness (codex
+exec)", not "model", for this row. Invocation:
+`codex exec --ignore-user-config --skip-git-repo-check --ephemeral -s read-only --output-last-message <file> - < prompt.txt`
+(`--ignore-user-config` stops a user's own `~/.codex/AGENTS.md`/config from leaking into the run;
+`--output-last-message` gets a clean final answer instead of parsing the human-formatted stdout,
+which echoes the prompt, an optional `warning:` line, and the answer duplicated after `tokens
+used` — `CodexCliClient` falls back to robust last-matching-line stdout parsing if that file is
+ever missing). **Model selection:** `scripts/probe_codex_models.py` (`probe_codex_models()` in
+`external.py`) tries `gpt-5.1-codex-mini`, `gpt-5-mini`, `o4-mini`, `gpt-5.1-codex` under a hard
+60s timeout each — an unsupported `-m` value doesn't fail fast, it prints an immediate `ERROR: ...
+not supported` line and then *hangs* rather than exiting, so every candidate must be probed under
+a timeout, never called bare. On this account (ChatGPT-plan auth) every named candidate returned
+`400 ... not supported when using Codex with a ChatGPT account` immediately; the row below was run
+with no `-m` at all, i.e. the account's own configured default, which the CLI's banner reports as
+**`gpt-6-astra`** (`CodexCliClient.resolved_model`, parsed from that banner, records this even when
+`model=None`). Measured cost: ~6s and ~2,000 tokens per call.
+
+**`ollama`** talks to a local Ollama server's HTTP API (`POST /api/generate`, `mistral:latest`,
+`temperature=0, seed=0` for reproducibility) instead of the CLI, so it's structured JSON in and
+out with no stdout parsing at all. **The 100-constraint holdout prompt does not fit in 16,384
+tokens of context** — the ~14k-character-per-4 estimate undercounts badly for this tokenizer:
+the real prompt is **~23,700 tokens**, not ~14,000. At `num_ctx=16384` Ollama silently truncates
+(confirmed here: `prompt_eval_count` came back exactly `16384`, the cap, and the model's answer
+degraded into unrelated advice about writing a new Gatekeeper policy) — there is no error, no
+warning, just a truncated context and a bad answer. The row below uses `num_ctx=32768`, verified
+by comparing a short-prompt call (`prompt_eval_count` well under the cap) against the full-prompt
+call (`prompt_eval_count` ≈ 23,700, comfortably under 32,768).
+
+**Honest finding, not massaged:** even with the full, untruncated context, `mistral:latest` (a
+local 7B model) is unreliable at following the requested format. Its 120 holdout responses
+included the expected `ALLOW`/`BLOCK`/`ESCALATE` tokens, occasional `BLOCK\ncitations: <real ids>`,
+but also **`BLOCK\ncitations: id1, id12`** — it echoed the system prompt's own *example* citation
+placeholders (`citations: id1, id2`) instead of real constraint IDs. `tests/test_baselines.py`
+does not try to rescue this with a smarter parser; `parse_llm_response` is left exactly as it was
+for `llm-naive`, and the resulting metrics report what a 7B model handed this much context
+actually does, unmodified.
+
+**`claude-cli`** is the third row on the same footing: it shells out to `claude -p` (the Claude
+Code CLI) — **an agent harness wrapped around a model**, just like `codex`, even with
+`--allowedTools ""` denying it any tool use for the single turn — over the same 100-constraint
+holdout subset. Invocation:
+`claude -p --model haiku --output-format json --no-session-persistence --allowedTools "" < prompt.txt`.
+`--output-format json` returns one JSON object on stdout; `ClaudeCliClient` reads the verdict from
+its `result` field (fed straight into the same `parse_llm_response` every other row uses) and
+token counts defensively from `modelUsage` (a dict keyed by model name, e.g.
+`{"claude-haiku-4-5-20251001": {"inputTokens": ..., "outputTokens": ...}}` — shape not pinned by
+any spec we control, so `ClaudeCliClient` sums whatever `*Tokens` fields it finds rather than
+assuming exact keys). The row's `notes` column reads `agent harness (claude -p), model=haiku,
+100-constraint holdout subset`, matching the `codex` row's honesty about what's actually being
+measured. Default model is `haiku` (the cheapest alias); override with `--claude-cli-model`.
+
+`claude -p` can fail in a way `codex`/`ollama` don't: **an expired OAuth session** — the CLI
+returns exit code 0 with `is_error: true` and a `result` string containing `401` /
+`OAuth access token has expired. Re-authenticate to continue.`, after ~180s of its own internal
+retries. `ClaudeCliClient` detects this specific shape and raises `ClaudeCliAuthError` (a
+`RuntimeError` subclass) immediately with the fix (`run 'claude login'`) rather than treating it
+as a verdict or a transient failure; `RetryingClient` special-cases `ClaudeCliAuthError` to never
+retry it — retrying would just re-run the CLI's own three-minute failure for the same guaranteed
+outcome. `scripts/benchmark.py` runs one cheap preflight call before wiring up the real `claude-cli`
+row specifically to catch this case up front and skip cleanly with
+`skipped: claude CLI is not authenticated: run 'claude login'`, instead of failing 100 times (once
+per holdout intent) over the full 23.7k-token prompt.
+
+Reproduce (real calls; requires `codex` on `PATH`, `ollama serve` running with `mistral:latest`
+pulled, and `claude` on `PATH` and logged in via `claude login`):
+
+```bash
+venv/bin/python scripts/benchmark.py --split holdout \
+    --verifiers aegis,codex,ollama,claude-cli \
+    --codex-cache results/codex-cache.jsonl --ollama-cache results/ollama-cache.jsonl \
+    --claude-cli-cache results/claude-cli-cache.jsonl \
+    --out results/
+```
+
+Replay from the cache recorded by the run above, fully offline:
+
+```bash
+venv/bin/python scripts/benchmark.py --split holdout \
+    --verifiers aegis,codex-replay,ollama-replay,claude-cli-replay \
+    --codex-cache results/codex-cache.jsonl --ollama-cache results/ollama-cache.jsonl \
+    --claude-cli-cache results/claude-cli-cache.jsonl \
+    --out results/
+```
+
+All three rows are skipped cleanly (`skipped: codex not on PATH` / `skipped: ollama server not
+reachable` / `skipped: claude not on PATH` or `skipped: claude CLI is not authenticated: run
+'claude login'`), exactly like the `opa` row, when the binary/server isn't available or not
+authenticated; the `-replay` variants are skipped with a note when their cache file doesn't exist
+yet.
 
 The `opa` binary is installed separately — it isn't a Python dependency.
 

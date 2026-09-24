@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.11", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Run tests
+        # The suite chdirs to the repo root itself (tests/conftest.py), so it
+        # passes from any working directory.
+        run: uv run --python ${{ matrix.python }} --with pytest --with pytest-benchmark --with pyyaml python -m pytest -q
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv run --with ruff ruff check src tests scripts examples
+
+  signatures:
+    # The shipped policy files are signed; an unsigned or edited one that slips
+    # into main would make every quick-start command fail for a new user.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv run --with pyyaml python -m aegis_core.signing verify --key file:data/example-signing.key data/constraints.example.yaml data/authority.example.yaml data/environments.example.yaml data/plan_constraints.example.yaml data/sources data/corpus
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build
