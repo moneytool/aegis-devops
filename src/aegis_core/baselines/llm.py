@@ -251,24 +251,39 @@ class _CacheEntry:
     response: str
 
 
-def _cache_key(system: str, user: str) -> str:
-    blob = (system + "\x00" + user).encode("utf-8")
-    return hashlib.sha256(blob).hexdigest()
+def _cache_key(system: str, user: str, model: str | None = None) -> str:
+    """Hashes (system, user) into a cache key. ``model`` is folded in when
+    given so that two clients sharing one cache file (e.g. probing several
+    Codex models against the same prompts) never collide on the same key —
+    existing callers that omit it keep the original hash unchanged, so
+    caches recorded before this parameter existed (``results/llm-cache-
+    {naive,aware}.jsonl``) still replay."""
+    blob = system + "\x00" + user
+    if model:
+        blob = model + "\x00" + blob
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
 class RecordingClient:
     """Wraps a real ``LLMClient`` and appends every (system, user) ->
     response pair to a JSONL cache, so a later ``ReplayClient`` run is
-    reproducible and offline."""
+    reproducible and offline.
 
-    def __init__(self, inner: LLMClient, cache_path: str | Path):
+    ``model``, when given, is folded into the cache key (see
+    ``_cache_key``) — pass the resolved model name for clients (like
+    ``CodexCliClient``/``OllamaClient``) that might be re-pointed at a
+    different model against the same cache file.
+    """
+
+    def __init__(self, inner: LLMClient, cache_path: str | Path, model: str | None = None):
         self.inner = inner
         self.cache_path = Path(cache_path)
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+        self.model = model
 
     def complete(self, system: str, user: str) -> str:
         response = self.inner.complete(system, user)
-        entry = _CacheEntry(key=_cache_key(system, user), response=response)
+        entry = _CacheEntry(key=_cache_key(system, user, self.model), response=response)
         with open(self.cache_path, "a") as f:
             f.write(json.dumps({"key": entry.key, "response": entry.response}) + "\n")
         return response
@@ -276,10 +291,12 @@ class RecordingClient:
 
 class ReplayClient:
     """Reads a JSONL cache produced by ``RecordingClient`` and replays
-    responses by (system, user) hash, with no network calls at all."""
+    responses by (system, user[, model]) hash, with no network calls at
+    all. Pass the same ``model`` the recording run used, or lookups miss."""
 
-    def __init__(self, cache_path: str | Path):
+    def __init__(self, cache_path: str | Path, model: str | None = None):
         self.cache_path = Path(cache_path)
+        self.model = model
         self._cache: dict[str, str] = {}
         if self.cache_path.exists():
             with open(self.cache_path) as f:
@@ -291,7 +308,7 @@ class ReplayClient:
                     self._cache[entry["key"]] = entry["response"]
 
     def complete(self, system: str, user: str) -> str:
-        key = _cache_key(system, user)
+        key = _cache_key(system, user, getattr(self, "model", None))
         if key not in self._cache:
             raise KeyError(
                 f"No cached response for key {key}. Record one first with RecordingClient."

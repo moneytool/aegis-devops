@@ -1,12 +1,24 @@
 """Tests for the baseline verifiers (PLAN.md §4 Week 7-8)."""
 
 import json
+import subprocess
+import urllib.error
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 import yaml
 
+from aegis_core.baselines.external import (
+    ClaudeCliAuthError,
+    ClaudeCliClient,
+    CodexCliClient,
+    OllamaClient,
+    RetryingClient,
+    _last_verdict_line,
+    _sum_token_usage,
+    probe_codex_models,
+)
 from aegis_core.baselines.llm import (
     AwarePromptBuilder,
     HeuristicLLMClient,
@@ -397,3 +409,425 @@ def test_llm_replay_aware_matches_external_cache():
         "AwarePromptBuilder has drifted from what produced "
         "results/llm-cache-aware.jsonl; see results/llm-external.md"
     )
+
+
+# ---------------------------------------------------------------------------
+# CodexCliClient (aegis_core.baselines.external) -- mocked subprocess only,
+# no test here ever invokes a real `codex` binary.
+# ---------------------------------------------------------------------------
+
+
+def test_last_verdict_line_ignores_echoed_prompt_and_takes_the_last_match():
+    # The system prompt itself contains the words ALLOW/BLOCK/ESCALATE
+    # (it's instructing the model to use them), so a first-match search
+    # over the full echoed stdout would find the wrong occurrence. The
+    # real answer, per PLAN, is duplicated: once right after `codex`, once
+    # again after `tokens used` / a token count.
+    stdout = (
+        "user\n"
+        "Respond with exactly one line containing only one of: ALLOW, BLOCK, "
+        "ESCALATE.\n\n"
+        "warning: Code Mode is unavailable because failed to spawn code-mode "
+        "host.\n"
+        "codex\n"
+        "BLOCK\n"
+        "tokens used\n"
+        "1,234\n"
+        "BLOCK\n"
+    )
+    assert _last_verdict_line(stdout) == "BLOCK"
+
+
+def test_last_verdict_line_returns_full_text_when_unparseable():
+    assert _last_verdict_line("I cannot determine this.") == "I cannot determine this."
+
+
+def _fake_run_writing_last_message(last_message: str, stdout: str, returncode: int = 0):
+    def fake_run(args, input, capture_output, timeout):
+        idx = args.index("--output-last-message")
+        Path(args[idx + 1]).write_text(last_message)
+        return subprocess.CompletedProcess(args, returncode, stdout=stdout.encode(), stderr=b"")
+
+    return fake_run
+
+
+def test_codex_client_prefers_output_last_message_file(monkeypatch):
+    monkeypatch.setattr("aegis_core.baselines.external.shutil.which", lambda _: "/usr/bin/codex")
+    stdout = (
+        "OpenAI Codex v0.155.0-alpha.9.2\n--------\nmodel: gpt-6-astra\n--------\n"
+        "user\n...\n"
+        "codex\nALLOW\ntokens used\n2,033\nALLOW\n"
+    )
+    monkeypatch.setattr(
+        "aegis_core.baselines.external.subprocess.run",
+        _fake_run_writing_last_message("ALLOW\n", stdout),
+    )
+    client = CodexCliClient()
+    result = client.complete("system prompt", "user turn")
+    assert result == "ALLOW"
+    assert client.resolved_model == "gpt-6-astra"
+    assert client.last_tokens_used == 2033
+
+
+def test_codex_client_falls_back_to_stdout_when_last_message_file_missing(monkeypatch):
+    monkeypatch.setattr("aegis_core.baselines.external.shutil.which", lambda _: "/usr/bin/codex")
+    stdout = (
+        "OpenAI Codex v0.155.0-alpha.9.2\n--------\nmodel: gpt-6-astra\n--------\n"
+        "user\nRespond with exactly one of: ALLOW, BLOCK, ESCALATE.\n\n"
+        "warning: Code Mode is unavailable.\n"
+        "codex\nESCALATE\ntokens used\n1,500\nESCALATE\n"
+    )
+
+    def fake_run(args, input, capture_output, timeout):
+        # Deliberately never write to the --output-last-message path.
+        return subprocess.CompletedProcess(args, 0, stdout=stdout.encode(), stderr=b"")
+
+    monkeypatch.setattr("aegis_core.baselines.external.subprocess.run", fake_run)
+    client = CodexCliClient()
+    result = client.complete("system prompt", "user turn")
+    assert result == "ESCALATE"
+    assert client.resolved_model == "gpt-6-astra"
+    assert client.last_tokens_used == 1500
+
+
+def test_codex_client_raises_on_timeout(monkeypatch):
+    monkeypatch.setattr("aegis_core.baselines.external.shutil.which", lambda _: "/usr/bin/codex")
+
+    def fake_run(args, input, capture_output, timeout):
+        raise subprocess.TimeoutExpired(cmd=args, timeout=timeout)
+
+    monkeypatch.setattr("aegis_core.baselines.external.subprocess.run", fake_run)
+    client = CodexCliClient(timeout_s=1)
+    with pytest.raises(RuntimeError, match="timed out"):
+        client.complete("system prompt", "user turn")
+
+
+def test_codex_client_raises_when_binary_missing(monkeypatch):
+    monkeypatch.setattr("aegis_core.baselines.external.shutil.which", lambda _: None)
+    client = CodexCliClient()
+    assert client.available is False
+    with pytest.raises(RuntimeError, match="PATH"):
+        client.complete("system prompt", "user turn")
+
+
+def test_probe_codex_models_returns_first_working_candidate(monkeypatch):
+    tried: list[str | None] = []
+
+    def fake_run_once(self, prompt):
+        tried.append(self.model)
+        if self.model == "o4-mini":
+            return "ALLOW"
+        raise RuntimeError(f"'{self.model}' model is not supported")
+
+    monkeypatch.setattr(CodexCliClient, "_run_once", fake_run_once)
+    resolved = probe_codex_models(
+        candidates=("gpt-5.1-codex-mini", "gpt-5-mini", "o4-mini", "gpt-5.1-codex", None),
+        timeout_s=1,
+    )
+    assert resolved == "o4-mini"
+    assert tried == ["gpt-5.1-codex-mini", "gpt-5-mini", "o4-mini"]
+
+
+def test_probe_codex_models_returns_none_when_every_candidate_fails(monkeypatch):
+    def fake_run_once(self, prompt):
+        raise RuntimeError("not supported")
+
+    monkeypatch.setattr(CodexCliClient, "_run_once", fake_run_once)
+    resolved = probe_codex_models(candidates=("candidate-a", "candidate-b"), timeout_s=1)
+    assert resolved is None
+
+
+# ---------------------------------------------------------------------------
+# OllamaClient -- mocked urllib only, no test here talks to a real server.
+# ---------------------------------------------------------------------------
+
+
+class _FakeHttpResponse:
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+    def read(self):
+        return self._body
+
+
+def test_ollama_client_parses_json_response_and_records_token_counts(monkeypatch):
+    body = json.dumps(
+        {
+            "model": "mistral:latest",
+            "response": "ALLOW",
+            "done": True,
+            "prompt_eval_count": 13842,
+            "eval_count": 3,
+        }
+    ).encode("utf-8")
+
+    def fake_urlopen(req, timeout=None):
+        return _FakeHttpResponse(body)
+
+    monkeypatch.setattr("aegis_core.baselines.external.urllib.request.urlopen", fake_urlopen)
+    client = OllamaClient()
+    result = client.complete("system prompt", "user turn")
+    assert result == "ALLOW"
+    assert client.last_prompt_tokens == 13842
+    assert client.last_eval_tokens == 3
+
+
+def test_ollama_client_raises_when_server_unreachable(monkeypatch):
+    def fake_urlopen(req, timeout=None):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr("aegis_core.baselines.external.urllib.request.urlopen", fake_urlopen)
+    client = OllamaClient()
+    with pytest.raises(RuntimeError, match="could not reach"):
+        client.complete("system prompt", "user turn")
+    assert client.available is False
+
+
+# ---------------------------------------------------------------------------
+# ClaudeCliClient (aegis_core.baselines.external) -- mocked subprocess only,
+# no test here ever invokes a real `claude` binary.
+# ---------------------------------------------------------------------------
+
+
+def _fake_claude_run(envelope: dict, returncode: int = 0):
+    def fake_run(args, input, capture_output, timeout):
+        return subprocess.CompletedProcess(
+            args, returncode, stdout=json.dumps(envelope).encode("utf-8"), stderr=b""
+        )
+
+    return fake_run
+
+
+def test_claude_cli_client_parses_json_envelope_and_records_usage(monkeypatch):
+    monkeypatch.setattr("aegis_core.baselines.external.shutil.which", lambda _: "/usr/bin/claude")
+    envelope = {
+        "result": "BLOCK\ncitations: c-1",
+        "is_error": False,
+        "duration_ms": 4321,
+        "duration_api_ms": 4000,
+        "num_turns": 1,
+        "modelUsage": {
+            "claude-haiku-4-5-20251001": {
+                "inputTokens": 23700,
+                "outputTokens": 12,
+                "cacheReadInputTokens": 0,
+            }
+        },
+        "session_id": "abc-123",
+        "stop_reason": "end_turn",
+        "subtype": "success",
+        "permission_denials": [],
+    }
+    monkeypatch.setattr(
+        "aegis_core.baselines.external.subprocess.run", _fake_claude_run(envelope)
+    )
+    client = ClaudeCliClient(model="haiku")
+    result = client.complete("system prompt", "user turn")
+    assert result == "BLOCK\ncitations: c-1"
+    assert client.last_tokens_used == 23712
+    assert client.last_session_id == "abc-123"
+    assert client.last_num_turns == 1
+
+
+def test_claude_cli_client_raises_clear_auth_error_on_expired_oauth(monkeypatch):
+    monkeypatch.setattr("aegis_core.baselines.external.shutil.which", lambda _: "/usr/bin/claude")
+    envelope = {
+        "result": (
+            "API Error: 401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\","
+            "\"message\":\"OAuth access token has expired. Re-authenticate to continue.\"}}"
+        ),
+        "is_error": True,
+        "duration_ms": 182000,
+        "num_turns": 0,
+        "modelUsage": {},
+        "session_id": "abc-123",
+        "stop_reason": None,
+        "subtype": "error_during_execution",
+        "permission_denials": [],
+    }
+    monkeypatch.setattr(
+        "aegis_core.baselines.external.subprocess.run", _fake_claude_run(envelope)
+    )
+    client = ClaudeCliClient(model="haiku")
+    with pytest.raises(ClaudeCliAuthError, match="claude login"):
+        client.complete("system prompt", "user turn")
+
+
+def test_claude_cli_client_raises_when_binary_missing(monkeypatch):
+    monkeypatch.setattr("aegis_core.baselines.external.shutil.which", lambda _: None)
+    client = ClaudeCliClient()
+    assert client.available is False
+    with pytest.raises(RuntimeError, match="PATH"):
+        client.complete("system prompt", "user turn")
+
+
+def test_claude_cli_client_raises_on_timeout(monkeypatch):
+    monkeypatch.setattr("aegis_core.baselines.external.shutil.which", lambda _: "/usr/bin/claude")
+
+    def fake_run(args, input, capture_output, timeout):
+        raise subprocess.TimeoutExpired(cmd=args, timeout=timeout)
+
+    monkeypatch.setattr("aegis_core.baselines.external.subprocess.run", fake_run)
+    client = ClaudeCliClient(timeout_s=1)
+    with pytest.raises(RuntimeError, match="timed out"):
+        client.complete("system prompt", "user turn")
+
+
+def test_claude_cli_client_non_json_stdout_raises_runtime_error(monkeypatch):
+    monkeypatch.setattr("aegis_core.baselines.external.shutil.which", lambda _: "/usr/bin/claude")
+
+    def fake_run(args, input, capture_output, timeout):
+        return subprocess.CompletedProcess(args, 1, stdout=b"not json", stderr=b"some stderr")
+
+    monkeypatch.setattr("aegis_core.baselines.external.subprocess.run", fake_run)
+    client = ClaudeCliClient()
+    with pytest.raises(RuntimeError, match="non-JSON"):
+        client.complete("system prompt", "user turn")
+
+
+def test_sum_token_usage_handles_normal_shape():
+    usage = {
+        "claude-haiku-4-5-20251001": {"inputTokens": 100, "outputTokens": 20},
+        "claude-sonnet-5": {"inputTokens": 5, "outputTokens": 1},
+    }
+    assert _sum_token_usage(usage) == 126
+
+
+def test_sum_token_usage_handles_absent_and_unexpected_shapes():
+    assert _sum_token_usage(None) is None
+    assert _sum_token_usage({}) is None
+    assert _sum_token_usage("not a dict") is None
+    assert _sum_token_usage({"model": "not a dict either"}) is None
+    assert _sum_token_usage({"model": {"tokensUsed": "a lot"}}) is None  # non-numeric ignored
+    assert _sum_token_usage({"model": {"inputTokens": 5, "extra": "ignored"}}) == 5
+
+
+def test_retrying_client_does_not_retry_claude_cli_auth_error(monkeypatch):
+    monkeypatch.setattr("aegis_core.baselines.external.shutil.which", lambda _: "/usr/bin/claude")
+    calls = {"n": 0}
+
+    def fake_run(args, input, capture_output, timeout):
+        calls["n"] += 1
+        envelope = {
+            "result": "401 OAuth access token has expired. Re-authenticate to continue.",
+            "is_error": True,
+        }
+        return subprocess.CompletedProcess(
+            args, 0, stdout=json.dumps(envelope).encode("utf-8"), stderr=b""
+        )
+
+    monkeypatch.setattr("aegis_core.baselines.external.subprocess.run", fake_run)
+    inner = ClaudeCliClient(model="haiku")
+    wrapped = RetryingClient(inner, retries=2)
+    with pytest.raises(ClaudeCliAuthError, match="claude login"):
+        wrapped.complete("system prompt", "user turn")
+    # No retry: exactly one subprocess invocation, not up to three.
+    assert calls["n"] == 1
+
+
+def test_claude_cli_cache_key_includes_model(tmp_path):
+    cache_path = tmp_path / "claude-cli-cache.jsonl"
+    RecordingClient(_SucceedsClient("ALLOW"), cache_path, model="haiku").complete(
+        "same system prompt", "same user turn"
+    )
+    RecordingClient(_SucceedsClient("BLOCK"), cache_path, model="sonnet").complete(
+        "same system prompt", "same user turn"
+    )
+    lines = cache_path.read_text().strip().splitlines()
+    keys = {json.loads(line)["key"] for line in lines}
+    assert len(keys) == 2
+
+    assert (
+        ReplayClient(cache_path, model="haiku").complete("same system prompt", "same user turn")
+        == "ALLOW"
+    )
+    assert (
+        ReplayClient(cache_path, model="sonnet").complete("same system prompt", "same user turn")
+        == "BLOCK"
+    )
+
+
+# ---------------------------------------------------------------------------
+# RetryingClient -- retry-once-then-unparseable wrapping used by
+# scripts/benchmark.py around CodexCliClient/OllamaClient.
+# ---------------------------------------------------------------------------
+
+
+class _AlwaysFailsClient:
+    def __init__(self):
+        self.calls = 0
+
+    def complete(self, system, user):
+        self.calls += 1
+        raise RuntimeError("boom")
+
+
+class _SucceedsClient:
+    def __init__(self, response: str):
+        self.response = response
+        self.calls = 0
+
+    def complete(self, system, user):
+        self.calls += 1
+        return self.response
+
+
+def test_retrying_client_degrades_to_empty_string_after_one_retry():
+    inner = _AlwaysFailsClient()
+    wrapped = RetryingClient(inner, retries=1)
+    result = wrapped.complete("system", "user")
+    assert result == ""
+    assert inner.calls == 2  # original attempt + one retry
+    # An empty response is exactly what parse_llm_response treats as
+    # ESCALATE + "unparseable" -- the semantics PLAN wants for a
+    # persistently failing call rather than crashing the benchmark loop.
+    verdict, citations, discarded = parse_llm_response(result)
+    assert verdict == "ESCALATE"
+    assert discarded == [{"id": "-", "reason": "unparseable"}]
+
+
+def test_retrying_client_returns_first_success_without_retrying():
+    inner = _SucceedsClient("ALLOW")
+    wrapped = RetryingClient(inner)
+    assert wrapped.complete("system", "user") == "ALLOW"
+    assert inner.calls == 1
+
+
+# ---------------------------------------------------------------------------
+# Cache key includes the model name (RecordingClient/ReplayClient), so
+# codex/ollama runs recorded against different models into the same cache
+# file never collide.
+# ---------------------------------------------------------------------------
+
+
+def test_cache_key_includes_model_name_and_avoids_collisions(tmp_path):
+    cache_path = tmp_path / "shared-cache.jsonl"
+
+    RecordingClient(_SucceedsClient("ALLOW"), cache_path, model="model-a").complete(
+        "same system prompt", "same user turn"
+    )
+    RecordingClient(_SucceedsClient("BLOCK"), cache_path, model="model-b").complete(
+        "same system prompt", "same user turn"
+    )
+
+    lines = cache_path.read_text().strip().splitlines()
+    assert len(lines) == 2
+    keys = {json.loads(line)["key"] for line in lines}
+    assert len(keys) == 2  # distinct keys despite identical (system, user)
+
+    replay_a = ReplayClient(cache_path, model="model-a")
+    replay_b = ReplayClient(cache_path, model="model-b")
+    assert replay_a.complete("same system prompt", "same user turn") == "ALLOW"
+    assert replay_b.complete("same system prompt", "same user turn") == "BLOCK"
+
+    # A replay client with no model set (the pre-existing llm-naive/aware
+    # behaviour) must not accidentally match a model-tagged entry.
+    replay_untagged = ReplayClient(cache_path)
+    with pytest.raises(KeyError):
+        replay_untagged.complete("same system prompt", "same user turn")

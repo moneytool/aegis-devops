@@ -8,7 +8,7 @@ latency for each.
 
     venv/bin/python scripts/benchmark.py \\
         [--corpus data/corpus] [--split holdout|dev|all] \\
-        [--verifiers aegis,llm-heuristic,opa,opa-signed,llm,aegis-nosources] \\
+        [--verifiers aegis,llm-heuristic,opa,opa-signed,llm,aegis-nosources,codex,ollama,claude-cli]
         [--llm-cache results/llm-cache.jsonl] [--out results/]
 
 Ground truth
@@ -54,6 +54,13 @@ import yaml
 
 from aegis_core.authority import load_authority_map
 from aegis_core.baselines.base import AegisVerifier, Verifier
+from aegis_core.baselines.external import (
+    ClaudeCliAuthError,
+    ClaudeCliClient,
+    CodexCliClient,
+    OllamaClient,
+    RetryingClient,
+)
 from aegis_core.baselines.llm import (
     AnthropicClient,
     AwarePromptBuilder,
@@ -172,6 +179,26 @@ def _variant_cache_path(base: Path, variant: str) -> Path:
     return base.with_name(f"{base.stem}-{variant}{base.suffix}")
 
 
+def load_holdout_constraint_subset(
+    corpus: Path, baseline_constraints: list[Constraint]
+) -> list[Constraint]:
+    """The 100-constraint **holdout constraint split**
+    (``data/corpus/split.json["holdout"]``, distinct from
+    ``split.json["intents"]["holdout"]``) -- an explicit, documented
+    parameter for the ``codex``/``ollama`` verifiers, never a silent
+    default. The full 500-constraint corpus renders to ~69k prompt
+    tokens, which is infeasible for a local model's context window and
+    slow/expensive to probe against an agent harness; this 100-constraint
+    subset (~14k tokens) is also what the pinned Claude rows in
+    ``results/llm-external.md`` were measured against, so these rows stay
+    comparable to that table. See ``aegis_core.baselines.external`` for
+    the full rationale."""
+    with open(corpus / "split.json") as f:
+        split_data = json.load(f)
+    holdout_ids = set(split_data["holdout"])
+    return [c for c in baseline_constraints if c.id in holdout_ids]
+
+
 def _build_llm_verifier(
     *,
     constraints: list[Constraint],
@@ -204,6 +231,12 @@ def build_verifier(
     labels: dict[str, dict],
     llm_cache_path: Path,
     authority_map: dict[str, set[str]] | None = None,
+    holdout_constraints: list[Constraint] | None = None,
+    codex_model: str | None = None,
+    codex_cache_path: Path | None = None,
+    ollama_cache_path: Path | None = None,
+    claude_cli_model: str | None = None,
+    claude_cli_cache_path: Path | None = None,
 ) -> tuple[Verifier | None, str | None, bool]:
     """Returns (verifier, skip_reason, stub). verifier is None iff
     skip_reason is set."""
@@ -259,6 +292,92 @@ def build_verifier(
         verifier = LLMVerifier(
             client, baseline_constraints, name="llm-replay-aware", system_prompt=prompt
         )
+        return verifier, None, False
+
+    if name in ("codex", "codex-replay"):
+        if holdout_constraints is None:
+            raise ValueError(f"{name} requires holdout_constraints")
+        cache_path = codex_cache_path or REPO_ROOT / "results" / "codex-cache.jsonl"
+        n_c = len(holdout_constraints)
+        if name == "codex-replay":
+            if not cache_path.exists():
+                return None, f"skipped: no cache at {cache_path}; run `codex` first", False
+            client = ReplayClient(cache_path, model=codex_model)
+            verifier = LLMVerifier(client, holdout_constraints, name=name)
+            verifier.note = (
+                f"replayed from {cache_path.name}, agent harness (codex exec), "
+                f"model={codex_model or 'gpt-6-astra (account default)'}, "
+                f"{n_c}-constraint holdout subset"
+            )
+            return verifier, None, False
+        codex_client = CodexCliClient(model=codex_model)
+        if not codex_client.available:
+            return None, "skipped: codex not on PATH", False
+        client = RecordingClient(RetryingClient(codex_client), cache_path, model=codex_model)
+        verifier = LLMVerifier(client, holdout_constraints, name=name)
+        verifier.note = (
+            f"agent harness (codex exec), model={codex_model or 'gpt-6-astra (account default)'}, "
+            f"{n_c}-constraint holdout subset"
+        )
+        return verifier, None, False
+
+    if name in ("ollama", "ollama-replay"):
+        if holdout_constraints is None:
+            raise ValueError(f"{name} requires holdout_constraints")
+        cache_path = ollama_cache_path or REPO_ROOT / "results" / "ollama-cache.jsonl"
+        n_c = len(holdout_constraints)
+        model = "mistral:latest"
+        note = (
+            f"local, {model}, num_ctx=32768, temp=0 seed=0, {n_c}-constraint holdout subset"
+        )
+        if name == "ollama-replay":
+            if not cache_path.exists():
+                return None, f"skipped: no cache at {cache_path}; run `ollama` first", False
+            client = ReplayClient(cache_path, model=model)
+            verifier = LLMVerifier(client, holdout_constraints, name=name)
+            verifier.note = "replayed from " + cache_path.name + ", " + note
+            return verifier, None, False
+        ollama_client = OllamaClient(model=model)
+        if not ollama_client.available:
+            return None, "skipped: ollama server not reachable", False
+        client = RecordingClient(RetryingClient(ollama_client), cache_path, model=model)
+        verifier = LLMVerifier(client, holdout_constraints, name=name)
+        verifier.note = note
+        return verifier, None, False
+
+    if name in ("claude-cli", "claude-cli-replay"):
+        if holdout_constraints is None:
+            raise ValueError(f"{name} requires holdout_constraints")
+        cache_path = claude_cli_cache_path or REPO_ROOT / "results" / "claude-cli-cache.jsonl"
+        model = claude_cli_model or "haiku"
+        n_c = len(holdout_constraints)
+        note = f"agent harness (claude -p), model={model}, {n_c}-constraint holdout subset"
+        if name == "claude-cli-replay":
+            if not cache_path.exists():
+                return None, f"skipped: no cache at {cache_path}; run `claude-cli` first", False
+            client = ReplayClient(cache_path, model=model)
+            verifier = LLMVerifier(client, holdout_constraints, name=name)
+            verifier.note = "replayed from " + cache_path.name + ", " + note
+            return verifier, None, False
+        claude_client = ClaudeCliClient(model=model)
+        if not claude_client.available:
+            return None, "skipped: claude not on PATH", False
+        # A cheap (in prompt size, not necessarily in wall time -- an
+        # expired OAuth session takes the CLI ~180s to surface) preflight
+        # call, so an unauthenticated run is skipped cleanly with a clear
+        # instruction instead of failing 100 times, once per holdout
+        # intent, over the real 23.7k-token prompt.
+        try:
+            claude_client.complete(
+                "You are a smoke test.", "Reply with exactly one word: ALLOW"
+            )
+        except ClaudeCliAuthError as exc:
+            return None, f"skipped: {exc}", False
+        except RuntimeError as exc:
+            return None, f"skipped: claude -p preflight failed ({exc})", False
+        client = RecordingClient(RetryingClient(claude_client), cache_path, model=model)
+        verifier = LLMVerifier(client, holdout_constraints, name=name)
+        verifier.note = note
         return verifier, None, False
 
     if name in ("opa", "opa-signed"):
@@ -321,6 +440,8 @@ def render_markdown(results: dict[str, Any]) -> str:
         notes = []
         if row.get("stub"):
             notes.append("stub")
+        if row.get("note"):
+            notes.append(row["note"])
         note = ", ".join(notes) if notes else ""
         lines.append(
             f"| {name} | {m['n']} | {n_distinct_str} | {m['precision']:.3f} | "
@@ -349,6 +470,19 @@ def main() -> int:
                         help="required with --split all: the numbers are not held out")
     parser.add_argument("--verifiers", default="aegis,llm-heuristic,opa,opa-signed")
     parser.add_argument("--llm-cache", type=Path, default=REPO_ROOT / "results" / "llm-cache.jsonl")
+    parser.add_argument("--codex-model", default=None,
+                        help="Codex model to pass as -m (default: none, i.e. whatever "
+                             "`codex exec` resolves to for this account -- see "
+                             "scripts/probe_codex_models.py)")
+    parser.add_argument("--codex-cache", type=Path,
+                        default=REPO_ROOT / "results" / "codex-cache.jsonl")
+    parser.add_argument("--ollama-cache", type=Path,
+                        default=REPO_ROOT / "results" / "ollama-cache.jsonl")
+    parser.add_argument("--claude-cli-model", default="haiku",
+                        help="Claude Code CLI model alias to pass as --model (default: haiku, "
+                             "the cheapest alias)")
+    parser.add_argument("--claude-cli-cache", type=Path,
+                        default=REPO_ROOT / "results" / "claude-cli-cache.jsonl")
     parser.add_argument("--out", type=Path, default=REPO_ROOT / "results")
     args = parser.parse_args()
 
@@ -377,6 +511,9 @@ def main() -> int:
     )
     # Baselines: every constraint, no quarantine, full corpus.
     baseline_constraints = load_all_constraints_unquarantined(corpus / "constraints.yaml")
+    # codex/ollama: the 100-constraint holdout split, not the full corpus
+    # (see load_holdout_constraint_subset's docstring).
+    holdout_constraints = load_holdout_constraint_subset(corpus, baseline_constraints)
 
     intents = select_intents(load_intents(corpus / "intents.jsonl"), split_data, args.split)
     truth = oracle_ground_truth(corpus, intents)
@@ -418,6 +555,12 @@ def main() -> int:
             labels=labels,
             llm_cache_path=args.llm_cache,
             authority_map=authority_map,
+            holdout_constraints=holdout_constraints,
+            codex_model=args.codex_model,
+            codex_cache_path=args.codex_cache,
+            ollama_cache_path=args.ollama_cache,
+            claude_cli_model=args.claude_cli_model,
+            claude_cli_cache_path=args.claude_cli_cache,
         )
         if verifier is None:
             print(f"[{name}] SKIPPED: {skip_reason}")
@@ -438,6 +581,7 @@ def main() -> int:
             "wall_ms": wall_ms,
             "n_constraints_fed": len(getattr(verifier, "constraints", baseline_constraints)),
             "metrics": metrics,
+            "note": getattr(verifier, "note", None),
         }
         print(
             f"[{name}] n={metrics['n']} p={metrics['precision']:.3f} r={metrics['recall']:.3f} "
