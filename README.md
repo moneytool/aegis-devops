@@ -618,7 +618,7 @@ at decision time — see `--sources` above and "Open gaps" in `PLAN.md`.
 
 ![Benchmark results](docs/benchmark.svg)
 
-`scripts/benchmark.py` runs Aegis and three baselines over the labeled 500-constraint corpus in
+`scripts/benchmark.py` runs Aegis and several baselines over the labeled 500-constraint corpus in
 `data/corpus/` (built by `scripts/build_corpus.py`) and reports precision/recall/F1, over-block
 rate, coverage, per-kind poison-susceptibility, and latency for each:
 
@@ -669,26 +669,42 @@ attacks that bundle signing already covers, which is why the `opa-signed` → `a
 `ps_unauth`/`pe_unauth` is the number that matters. `strict precision` counts a positive only on
 an exact verdict match.
 
-| verifier | n | n_distinct | precision | recall | F1 | over-block | PS | ps_unauth | ps_tampered | ps_forged | pe_unauth | pe_tampered | pe_forged | coverage |
-| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| aegis | 120 | 196 | 0.711 | 1.000 | 0.831 | 0.464 | 1.000 | 0.000 | 0.000 | 0.000 | 1.000 | 1.000 | 1.000 | 0.750 |
-| llm-heuristic | 120 | 196 | 0.711 | 1.000 | 0.831 | 0.464 | 1.000 | 0.500 | 0.846 | 0.857 | 0.500 | 0.154 | 0.143 | 0.750 |
-| opa | 120 | 196 | 0.711 | 1.000 | 0.831 | 0.464 | 1.000 | 0.500 | 0.846 | 0.857 | 0.500 | 0.154 | 0.143 | 0.750 |
-| opa-signed | 120 | 196 | 0.842 | 1.000 | 0.914 | 0.214 | 0.462 | 0.500 | 0.000 | 0.571 | 0.500 | 0.077 | 0.143 | 0.750 |
+| verifier | n | precision | recall | F1 | over-block | PS | ps_unauth | ps_tamp | ps_forged | pe_unauth | pe_tamp | pe_forged |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **aegis** | 120 | **1.000** | 1.000 | **1.000** | **0.000** | **0.000** | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| opa-signed | 120 | 0.800 | 1.000 | 0.889 | 0.250 | 0.500 | 0.100 | 0.000 | 0.375 | 0.900 | 0.083 | 0.125 |
+| opa | 120 | 0.667 | 1.000 | 0.800 | 0.500 | 1.000 | 0.100 | 0.750 | 0.375 | 0.900 | 0.250 | 0.625 |
+| llm-heuristic | 120 | 0.667 | 1.000 | 0.800 | 0.500 | 1.000 | 0.400 | 0.833 | 0.750 | 0.600 | 0.167 | 0.250 |
+| claude-cli (haiku) | 120 | 0.836 | 0.767 | 0.800 | 0.150 | 0.300 | 0.000 | 0.167 | 0.375 | 0.200 | 0.000 | 0.250 |
+| ollama (mistral 7B) | 120 | 0.500 | 1.000 | 0.667 | 1.000 | 1.000 | 0.000 | 0.083 | 0.375 | 1.000 | 0.917 | 0.625 |
 
-(`split: holdout`, `oracle: reference`; full table with latency in `results/benchmark.md`.)
-Every row has recall 1.0 because the corpus's poisoned rules are *additional* rules — a verifier
-that honours everything never misses a Trusted one; the cost shows up as over-block and `ps_*`.
-Read the Aegis row carefully: its binary precision / over-block are the *same* as the naive
-LLM's, because the interceptor fails closed (REVIEW-4 T0.3) — a quarantined or discarded
-BLOCK/ESCALATE rule contributes **ESCALATE** rather than being dropped — so every poison
-candidate is escalated to a human. The oracle's label semantics say those intents are `ALLOW`,
-so against the oracle that is an over-block, and it is reported as one. What separates Aegis is
-`ps_*` = 0 across every attack kind (it never *obeys* a poisoned rule; `pe_*` = 1.0 says it flags
-all of them), versus `ps_unauth` = 0.5 for both `opa` and `opa-signed` — bundle signing removes
-`tampered` but leaves the unauthorized author's rule in force. Whether "escalate everything
-poisoned" is the right trade-off versus "drop it silently" is a product decision, and the two
-columns let a reader make it.
+(`split: holdout`, `oracle: reference`, `n_distinct=323`; 30 poison candidates — 10 unauthorized,
+12 tampered, 8 forged. Full table with latency, coverage and strict precision in
+`results/benchmark.md`. A `codex` row is pending: its run hit the ChatGPT-account quota at
+90/120 and is excluded until it completes.)
+
+**How to read this.** Every row has recall 1.0 except `claude-cli` because the corpus's poisoned
+rules are *additional* rules — a verifier that honours everything never misses a Trusted one, so
+the damage shows up as over-block and `ps_*`, not as missed blocks. `ps_*` counts BLOCK verdicts
+on a poison candidate (the verifier **obeyed** the poisoned rule); `pe_*` counts ESCALATE
+verdicts (it acted on it, but sent it to a human). **`ps + pe` is the fraction a poisoned author
+could move at all**, and that is the number the design is about:
+
+- On the `unauthorized` kind — the realistic pre-ingest attacker — `opa` and `opa-signed` both
+  score `ps + pe = 1.000`: *every* unauthorized rule steered a verdict. Signing the bundle does
+  not help, because signing proves the bundle wasn't altered, not that its author was allowed to
+  write the rule. Aegis scores **0.000**: an unauthorized rule has no channel to the decision.
+- On `tampered`/`forged`, `opa-signed` improves (0.000 on tampered) exactly as expected — that is
+  what bundle signing is for — while still leaving `forged` at 0.375, since a self-consistent
+  hash says nothing about whether the cited source backs it.
+- Aegis's 0.000 over-block is a consequence of the same choice: because a poisoned rule is
+  discarded rather than escalated, the attacker cannot force a stall either (see
+  [`--on-untrusted-match`](#store-health)). Under `escalate` those same 30 candidates all become
+  ESCALATEs and the over-block rate rises to match the baselines — the earlier default, kept for
+  the record in `results/benchmark-failclosed.md`.
+
+The two model rows are **agent harnesses**, not raw completions, and are scored on a
+100-constraint subset — see the subsection below before comparing them with anything.
 
 ### Real LLM baselines: `llm-naive` and `llm-aware`
 
@@ -875,10 +891,17 @@ constraints by hand: `venv/bin/python scripts/reference_oracle.py --corpus data/
 ## Project status / roadmap
 
 The engine (constraint store, interceptor, environment mapping, dry-run handling, rate limits,
-plan-level constraints, and parsers for every tool in "Supported tools") is complete. See
-`PLAN.md` for the full roadmap, backlog, and `§8` for an honest list of open gaps (the real-LLM
-baseline hasn't been run, there are no real Git/Slack/Jira connectors, the signing key is a
-shared secret rather than a public-key signature, and a few others).
+plan-level constraints, and parsers for every tool in "Supported tools") is complete, and
+v0.1.0 is on PyPI. Real LLM baselines have now been run: Claude Sonnet 5 through the API
+(cached in `results/llm-external.md`), Haiku through the Claude Code CLI, and a local
+`mistral:latest`; a Codex CLI row is pending a quota reset.
+
+What is *not* done is the part the threat model leans on hardest. See `PLAN.md §8`, but in
+short: sources are verified against files on disk rather than real Git/Slack/Jira connectors,
+signing uses a shared secret rather than per-principal public keys, and a `principal` is a
+signed name rather than an identity bound to a commit signature or an SSO group. Until those
+land, Aegis demonstrates that the *decision procedure* is sound; it does not yet prove the
+identities feeding it are.
 
 ## Why not OPA/Gatekeeper?
 
@@ -889,7 +912,7 @@ derives **unstructured human constraints** (from Slack, Jira, Git) and applies
 ## Development
 
 ```bash
-venv/bin/python -m pytest -q      # 1198 passed, 1 xfailed (last full green run; re-run to confirm)
+venv/bin/python -m pytest -q      # 1257 passed (last full green run; CI runs this on 3.11/3.13/3.14)
 venv/bin/python -m ruff check src tests scripts examples
 vhs docs/demo.tape                # regenerate docs/demo.gif
 ```
