@@ -20,7 +20,8 @@
       "opa",
       "opa-signed",
       "ollama-replay",
-      "claude-cli-replay"
+      "claude-cli-replay",
+      "codex"
     ]
   },
   "verifiers": {
@@ -48,9 +49,9 @@
         "f1": 1.0,
         "fn": 0,
         "fp": 0,
-        "latency_p50_ms": 0.08641649037599564,
-        "latency_p95_ms": 0.2523610426578671,
-        "latency_p99_ms": 0.2729080224526115,
+        "latency_p50_ms": 0.09139598114416003,
+        "latency_p95_ms": 0.25661107210908085,
+        "latency_p99_ms": 0.27854417072376236,
         "n": 120,
         "over_block_rate": 0.0,
         "pe_forged": 0.0,
@@ -74,7 +75,7 @@
       "note": null,
       "skipped": false,
       "stub": false,
-      "wall_ms": 14.932584017515182
+      "wall_ms": 15.116208989638835
     },
     "claude-cli-replay": {
       "metrics": {
@@ -100,9 +101,9 @@
         "f1": 0.8,
         "fn": 14,
         "fp": 9,
-        "latency_p50_ms": 0.025541987270116806,
-        "latency_p95_ms": 0.031381254666484885,
-        "latency_p99_ms": 0.04021847445983441,
+        "latency_p50_ms": 0.025249988539144397,
+        "latency_p95_ms": 0.03592950670281425,
+        "latency_p99_ms": 0.04412871814565734,
         "n": 120,
         "over_block_rate": 0.15,
         "pe_forged": 0.25,
@@ -126,7 +127,59 @@
       "note": "replayed from claude-cli-cache.jsonl, agent harness (claude -p), model=haiku, 100-constraint holdout subset",
       "skipped": false,
       "stub": false,
-      "wall_ms": 3.398125001695007
+      "wall_ms": 3.3784589904826134
+    },
+    "codex": {
+      "metrics": {
+        "confusion_matrix": {
+          "ALLOW": {
+            "ALLOW": 51,
+            "BLOCK": 5,
+            "ESCALATE": 4
+          },
+          "BLOCK": {
+            "ALLOW": 10,
+            "BLOCK": 28,
+            "ESCALATE": 5
+          },
+          "ESCALATE": {
+            "ALLOW": 5,
+            "BLOCK": 4,
+            "ESCALATE": 8
+          }
+        },
+        "coverage": 0.75,
+        "exact_match_rate": 0.725,
+        "f1": 0.7894736842105262,
+        "fn": 15,
+        "fp": 9,
+        "latency_p50_ms": 4990.277250006329,
+        "latency_p95_ms": 7530.655277069308,
+        "latency_p99_ms": 11402.292834234253,
+        "n": 120,
+        "over_block_rate": 0.15,
+        "pe_forged": 0.25,
+        "pe_tampered": 0.0,
+        "pe_unauthorized": 0.2,
+        "poison_candidate_count": 30,
+        "poison_candidates_forged": 8,
+        "poison_candidates_tampered": 12,
+        "poison_candidates_unauthorized": 10,
+        "poison_susceptibility": 0.3,
+        "precision": 0.8333333333333334,
+        "ps_forged": 0.375,
+        "ps_tampered": 0.16666666666666666,
+        "ps_unauthorized": 0.0,
+        "recall": 0.75,
+        "strict_precision": 0.6666666666666666,
+        "tn": 51,
+        "tp": 45
+      },
+      "n_constraints_fed": 100,
+      "note": "agent harness (codex exec), model=gpt-6-astra (account default), 100-constraint holdout subset",
+      "skipped": false,
+      "stub": false,
+      "wall_ms": 631153.2182499941
     },
     "llm-heuristic": {
       "metrics": {
@@ -152,9 +205,9 @@
         "f1": 0.8,
         "fn": 0,
         "fp": 30,
-        "latency_p50_ms": 0.027292000595480204,
-        "latency_p95_ms": 0.0913874973775819,
-        "latency_p99_ms": 0.10410047369077803,
+        "latency_p50_ms": 0.02766601392067969,
+        "latency_p95_ms": 0.09057531569851562,
+        "latency_p99_ms": 0.11100446688942611,
         "n": 120,
         "over_block_rate": 0.5,
         "pe_forged": 0.25,
@@ -178,7 +231,7 @@
       "note": null,
       "skipped": false,
       "stub": false,
-      "wall_ms": 6.1691659793723375
+      "wall_ms": 6.176291004521772
     },
     "ollama-replay": {
       "metrics": {
@@ -204,9 +257,9 @@
         "f1": 0.6666666666666666,
         "fn": 0,
         "fp": 60,
-        "latency_p50_ms": 0.025416025891900063,
-        "latency_p95_ms": 0.029351744160521775,
-        "latency_p99_ms": 0.033395307254977524,
+        "latency_p50_ms": 0.025375018594786525,
+        "latency_p95_ms": 0.033986040216404945,
+        "latency_p99_ms": 0.04007145267678426,
         "n": 120,
         "over_block_rate": 1.0,
         "pe_forged": 0.625,
@@ -230,7 +283,7 @@
       "note": "replayed from ollama-cache.jsonl, local, mistral:latest, num_ctx=32768, temp=0 seed=0, 100-constraint holdout subset",
       "skipped": false,
       "stub": false,
-      "wall_ms": 3.3826669969130307
+      "wall_ms": 3.4586249967105687
     },
     "opa": {
       "metrics": {
@@ -256,9 +309,9 @@
         "f1": 0.8,
         "fn": 0,
         "fp": 30,
-        "latency_p50_ms": 26.1091040156316,
-        "latency_p95_ms": 28.66642049921211,
-        "latency_p99_ms": 29.657050975656603,
+        "latency_p50_ms": 26.523083506617695,
+        "latency_p95_ms": 29.031642015615944,
+        "latency_p99_ms": 30.099259230773896,
         "n": 120,
         "over_block_rate": 0.5,
         "pe_forged": 0.625,
@@ -282,7 +335,7 @@
       "note": null,
       "skipped": false,
       "stub": false,
-      "wall_ms": 3233.2032500125933
+      "wall_ms": 3291.852624999592
     },
     "opa-signed": {
       "metrics": {
@@ -308,9 +361,9 @@
         "f1": 0.888888888888889,
         "fn": 0,
         "fp": 15,
-        "latency_p50_ms": 23.18849999574013,
-        "latency_p95_ms": 25.944116950267926,
-        "latency_p99_ms": 28.93785167892929,
+        "latency_p50_ms": 22.136603991384618,
+        "latency_p95_ms": 23.351618445303757,
+        "latency_p99_ms": 25.659439446171753,
         "n": 120,
         "over_block_rate": 0.25,
         "pe_forged": 0.125,
@@ -334,7 +387,7 @@
       "note": null,
       "skipped": false,
       "stub": false,
-      "wall_ms": 2845.0439590087626
+      "wall_ms": 2677.4393339874223
     }
   }
 }

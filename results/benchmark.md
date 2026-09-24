@@ -8,9 +8,10 @@ Constraints loaded (all verifiers, every label): 500 — 323 distinct `(provider
 
 | verifier | n | n_distinct | precision | strict precision | recall | F1 | over-block | poison-susceptibility | ps_unauth | ps_tampered | ps_forged | pe_unauth | pe_tampered | pe_forged | coverage | p50 (ms) | p99 (ms) | notes |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- |
-| aegis | 120 | 323 | 1.000 | 1.000 | 1.000 | 1.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.750 | 0.0864 | 0.2729 |  |
-| llm-heuristic | 120 | 323 | 0.667 | 0.511 | 1.000 | 0.800 | 0.500 | 1.000 | 0.400 | 0.833 | 0.750 | 0.600 | 0.167 | 0.250 | 0.750 | 0.0273 | 0.1041 |  |
-| opa | 120 | 323 | 0.667 | 0.589 | 1.000 | 0.800 | 0.500 | 1.000 | 0.100 | 0.750 | 0.375 | 0.900 | 0.250 | 0.625 | 0.750 | 26.1091 | 29.6571 |  |
-| opa-signed | 120 | 323 | 0.800 | 0.773 | 1.000 | 0.889 | 0.250 | 0.500 | 0.100 | 0.000 | 0.375 | 0.900 | 0.083 | 0.125 | 0.750 | 23.1885 | 28.9379 |  |
-| ollama-replay | 120 | 323 | 0.500 | 0.175 | 1.000 | 0.667 | 1.000 | 1.000 | 0.000 | 0.083 | 0.375 | 1.000 | 0.917 | 0.625 | 0.750 | 0.0254 | 0.0334 | replayed from ollama-cache.jsonl, local, mistral:latest, num_ctx=32768, temp=0 seed=0, 100-constraint holdout subset |
-| claude-cli-replay | 120 | 323 | 0.836 | 0.673 | 0.767 | 0.800 | 0.150 | 0.300 | 0.000 | 0.167 | 0.375 | 0.200 | 0.000 | 0.250 | 0.750 | 0.0255 | 0.0402 | replayed from claude-cli-cache.jsonl, agent harness (claude -p), model=haiku, 100-constraint holdout subset |
+| aegis | 120 | 323 | 1.000 | 1.000 | 1.000 | 1.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.750 | 0.0914 | 0.2785 |  |
+| llm-heuristic | 120 | 323 | 0.667 | 0.511 | 1.000 | 0.800 | 0.500 | 1.000 | 0.400 | 0.833 | 0.750 | 0.600 | 0.167 | 0.250 | 0.750 | 0.0277 | 0.1110 |  |
+| opa | 120 | 323 | 0.667 | 0.589 | 1.000 | 0.800 | 0.500 | 1.000 | 0.100 | 0.750 | 0.375 | 0.900 | 0.250 | 0.625 | 0.750 | 26.5231 | 30.0993 |  |
+| opa-signed | 120 | 323 | 0.800 | 0.773 | 1.000 | 0.889 | 0.250 | 0.500 | 0.100 | 0.000 | 0.375 | 0.900 | 0.083 | 0.125 | 0.750 | 22.1366 | 25.6594 |  |
+| ollama-replay | 120 | 323 | 0.500 | 0.175 | 1.000 | 0.667 | 1.000 | 1.000 | 0.000 | 0.083 | 0.375 | 1.000 | 0.917 | 0.625 | 0.750 | 0.0254 | 0.0401 | replayed from ollama-cache.jsonl, local, mistral:latest, num_ctx=32768, temp=0 seed=0, 100-constraint holdout subset |
+| claude-cli-replay | 120 | 323 | 0.836 | 0.673 | 0.767 | 0.800 | 0.150 | 0.300 | 0.000 | 0.167 | 0.375 | 0.200 | 0.000 | 0.250 | 0.750 | 0.0252 | 0.0441 | replayed from claude-cli-cache.jsonl, agent harness (claude -p), model=haiku, 100-constraint holdout subset |
+| codex | 120 | 323 | 0.833 | 0.667 | 0.750 | 0.789 | 0.150 | 0.300 | 0.000 | 0.167 | 0.375 | 0.200 | 0.000 | 0.250 | 0.750 | 4990.2773 | 11402.2928 | agent harness (codex exec), model=gpt-6-astra (account default), 100-constraint holdout subset |

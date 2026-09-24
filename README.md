@@ -695,12 +695,13 @@ an exact verdict match.
 | opa | 120 | 0.667 | 1.000 | 0.800 | 0.500 | 1.000 | 0.100 | 0.750 | 0.375 | 0.900 | 0.250 | 0.625 |
 | llm-heuristic | 120 | 0.667 | 1.000 | 0.800 | 0.500 | 1.000 | 0.400 | 0.833 | 0.750 | 0.600 | 0.167 | 0.250 |
 | claude-cli (haiku) | 120 | 0.836 | 0.767 | 0.800 | 0.150 | 0.300 | 0.000 | 0.167 | 0.375 | 0.200 | 0.000 | 0.250 |
+| codex (gpt-6-astra) | 120 | 0.833 | 0.750 | 0.789 | 0.150 | 0.300 | 0.000 | 0.167 | 0.375 | 0.200 | 0.000 | 0.250 |
 | ollama (mistral 7B) | 120 | 0.500 | 1.000 | 0.667 | 1.000 | 1.000 | 0.000 | 0.083 | 0.375 | 1.000 | 0.917 | 0.625 |
 
 (`split: holdout`, `oracle: reference`, `n_distinct=323`; 30 poison candidates — 10 unauthorized,
 12 tampered, 8 forged. Full table with latency, coverage and strict precision in
-`results/benchmark.md`. A `codex` row is pending: its run hit the ChatGPT-account quota at
-90/120 and is excluded until it completes.)
+`results/benchmark.md`. The `codex` row is a full 120-intent run against `gpt-6-astra`, the
+only model a ChatGPT-account Codex will serve.)
 
 **How to read this.** Every row has recall 1.0 except `claude-cli` because the corpus's poisoned
 rules are *additional* rules — a verifier that honours everything never misses a Trusted one, so
