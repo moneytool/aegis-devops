@@ -1087,3 +1087,65 @@ def test_load_cached_returns_the_same_object_until_the_file_changes(tmp_path):
     third = CS.load_cached(path, insecure=True)
     assert third is not first
     assert "ok2" in third.constraints
+
+
+def test_full_intercept_scans_only_the_indexed_bucket(tmp_path, monkeypatch):
+    """A decision, not just matching, must be O(k) in the plausible constraints.
+
+    get_matching_constraints used the index, but get_env_unresolved and
+    get_time_window_unresolved -- which the interceptor calls on every intent --
+    scanned the whole store, so intercept() stayed O(n) even though matching was
+    O(k). All three now draw from ConstraintStore._candidates. This counts every
+    per-constraint predicate a full intercept() evaluates and requires it to stay
+    within a small multiple of the bucket, never the store."""
+    from datetime import UTC, datetime
+
+    import yaml
+
+    from aegis_core import store as store_module
+    from aegis_core.intent import InfrastructureIntent
+    from aegis_core.interceptor import AegisInterceptor
+
+    providers = ["kubernetes", "terraform", "helm", "aws", "gcp"]
+    actions = [f"action-{j}" for j in range(20)]
+    entries = [
+        _constraint_entry(make_constraint(
+            id=f"c-{i}",
+            provider=providers[i % len(providers)],
+            resource_pattern=f"kind{i % 50}/*",
+            actions={actions[i % len(actions)]},
+            time_window=None,
+        ))
+        for i in range(10_000)
+    ]
+    path = tmp_path / "constraints.yaml"
+    path.write_text(yaml.safe_dump({"constraints": entries}, sort_keys=False))
+    store = ConstraintStore.load(path, authority_map=AUTHORITY, insecure=True)
+    interceptor = AegisInterceptor(store)
+
+    calls = 0
+
+    def counted(fn):
+        def wrapper(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            return fn(*args, **kwargs)
+        return wrapper
+
+    for name in ("_constraint_matches", "_matches_except_scope", "time_window_unresolved"):
+        monkeypatch.setattr(store_module, name, counted(getattr(store_module, name)))
+
+    now = datetime(2026, 1, 5, 12, 0, tzinfo=UTC)
+    for i in range(200):
+        intent = InfrastructureIntent(
+            resource=f"kind{i % 50}/x",
+            action=actions[i % len(actions)],
+            provider=providers[i % len(providers)],
+        )
+        bucket = len(store._candidates(intent))
+        before = calls
+        interceptor.intercept(intent, now=now)
+        # matching (2 predicate calls per candidate), env and time-window checks
+        # (1 each): a bounded multiple of the bucket, never of the store
+        assert calls - before <= 4 * bucket, (calls - before, bucket)
+        assert bucket < len(store.constraints) / 10

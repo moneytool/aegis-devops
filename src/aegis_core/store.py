@@ -838,6 +838,23 @@ class ConstraintStore:
         self.constraints[constraint.id] = constraint
         return constraint
 
+    def _candidates(self, intent: InfrastructureIntent) -> list[Constraint]:
+        """Every loaded constraint that could possibly apply to ``intent``: the
+        ``(provider, action)`` and ``(provider, "*")`` buckets of the index.
+
+        Each matcher below rejects a constraint unless its provider equals the
+        intent's and its actions contain the intent's action or ``"*"``, which is
+        exactly the index key -- so these buckets are a superset of anything any
+        of them can return. All three draw from here so they cannot drift apart,
+        and a decision costs O(k) in the plausible constraints, not O(n) in the
+        store (REVIEW-4 T2.3)."""
+        candidates = self._index.get((intent.provider, intent.action), [])
+        wildcard = self._index.get((intent.provider, ANY_ACTION), [])
+        if wildcard:
+            seen = {id(c) for c in candidates}
+            candidates = candidates + [c for c in wildcard if id(c) not in seen]
+        return candidates
+
     def get_matching_constraints(
         self, intent: InfrastructureIntent, now: datetime
     ) -> list[Constraint]:
@@ -848,14 +865,9 @@ class ConstraintStore:
         constraints that could plausibly match, not O(n) in the whole
         store -- rather than every loaded constraint."""
         _require_tz_aware(now)
-        candidates = self._index.get((intent.provider, intent.action), [])
-        wildcard = self._index.get((intent.provider, ANY_ACTION), [])
-        if wildcard:
-            seen = {id(c) for c in candidates}
-            candidates = candidates + [c for c in wildcard if id(c) not in seen]
         return [
             c
-            for c in candidates
+            for c in self._candidates(intent)
             if _constraint_matches(c, intent, now, self.default_tz, self.tzdata_available)
         ]
 
@@ -867,7 +879,7 @@ class ConstraintStore:
         _require_tz_aware(now)
         return [
             c
-            for c in self.constraints.values()
+            for c in self._candidates(intent)
             if _matches_except_scope(c, intent, now, self.default_tz, self.tzdata_available)
             and env_unresolved(c.scope, intent)
         ]
@@ -884,7 +896,7 @@ class ConstraintStore:
         _require_tz_aware(now)
         return [
             c
-            for c in self.constraints.values()
+            for c in self._candidates(intent)
             if time_window_unresolved(c, intent, now, self.default_tz, self.tzdata_available)
         ]
 
