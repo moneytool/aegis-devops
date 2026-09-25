@@ -45,37 +45,51 @@ by one `WARNING: …` line per store warning (`using example signing key`, `inse
 not verified`, `ledger: chain-broken`, rate-limit key typos). Quarantines also go to stderr as
 `aegis: WARNING …` lines.
 
-Integrity failures **fail closed**. A constraint that was quarantined at load (`tampered`,
-`forged`) or discarded at decision time (`tampered`, `unauthorized`) is still matched, and if it
-was a BLOCK or ESCALATE rule its match contributes **ESCALATE** — never BLOCK (nobody can vouch
-for the rule) and never ALLOW (the action it covers is contested). The decision reports it in
-`discarded` and with a `fail-closed: <id> (<reason>)` note:
+An untrustworthy constraint gets **no vote**. A constraint that was quarantined at load
+(`tampered`, `forged`, `principal-mismatch`, `invalid`) or discarded at decision time
+(`tampered`, `unauthorized`) contributes nothing to the verdict — but it is never silently
+dropped. It is named in `discarded`, counted in `STORE: … quarantined=N`, and logged to stderr:
 
 ```bash
 aegis check kubectl --constraints /tmp/oneflip.yaml --key file:data/example-signing.key \
-    --pretty -- kubectl delete node/x
+    --plan-constraints '' --pretty -- kubectl delete node/x --context kind-local
 ```
 
 ```
 aegis: WARNING Quarantined constraint no-delete-nodes: provenance hash mismatch
-ESCALATE: kubernetes delete node/x
+ALLOW: kubernetes delete node/x
   discarded: [{'id': 'no-delete-nodes', 'reason': 'tampered'}]
-  note: env-unresolved: no-delete-in-prod-env
-  note: fail-closed: no-delete-nodes (tampered)
-  covered: True  latency_ms: 0.13
-PLAN ESCALATE: 1 intent(s)
-  plan citations: plan-k8s-delete-ratio
-  note: ratio: 1/1 = 1.00 > 0.5
-WARNING: Quarantined constraint no-delete-nodes: provenance hash mismatch
+  covered: True  latency_ms: 0.25
 STORE: loaded=20 quarantined=1 principals=3
   quarantined: no-delete-nodes (tampered)
+  warning: Quarantined constraint no-delete-nodes: provenance hash mismatch
 ```
+
+Why not stop the line instead? Because if an untrustworthy rule could force ESCALATE, anyone
+able to write a rule could stall every matching action — a denial of service on the guardrail,
+and the usual reason guardrails get switched off. Measured on the benchmark, that policy scores
+the same poison-susceptibility and over-block rate as a verifier with no trust model at all.
+Visibility, not obedience, is what makes a poisoned rule safe.
+
+If you would rather an edited rule stopped the line, and accept that anyone who can write a
+rule can then stop it, opt in with `--on-untrusted-match escalate`. The same command then
+exits 2:
+
+```
+ESCALATE: kubernetes delete node/x
+  discarded: [{'id': 'no-delete-nodes', 'reason': 'tampered'}]
+  note: fail-closed: no-delete-nodes (tampered)
+```
+
+Even then, an untrustworthy rule can never produce BLOCK.
 
 (`/tmp/oneflip.yaml` here is `data/constraints.example.yaml` with the last hex digit of
 `no-delete-nodes`'s `provenance_hash` flipped and re-signed with the example key — a valid
 signature, invalid content, exactly what a hand-edited rule or a one-bit storage error looks
 like. `--key` is explicit because the example key normally auto-resolves next to
-`--constraints`, and `/tmp` has no `example-signing.key` of its own.)
+`--constraints`, and `/tmp` has no `example-signing.key` of its own. `--context kind-local`
+resolves the environment and `--plan-constraints ''` switches off plan rules, so the tampered
+rule is the only thing deciding this intent.)
 
 Aegis refuses to decide at all (exit 65, one-line message, no verdict) when the store loaded
 zero constraints, the authority map grants nothing to anyone, or more than
@@ -83,7 +97,8 @@ zero constraints, the authority map grants nothing to anyone, or more than
 additionally turns an *uncovered* intent (no rule matched) into ESCALATE with the note
 `fail-closed: uncovered`.
 
-Two more fail-closed clauses live in the interceptor: a rule that scopes on `env` when the
+Some clauses *do* fail closed, because they cover missing information rather than an
+attacker's choice: a rule that scopes on `env` when the
 intent's environment could not be resolved contributes ESCALATE with the note
 `env-unresolved: <id>` (see [Environment mapping](constraints.md#environment-mapping)), and an
 intent whose target the parser could not pin down (`git push -f` with no refspec) contributes

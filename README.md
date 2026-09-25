@@ -24,6 +24,8 @@ Helm/ArgoCD/Flux, Git/GitHub, SQL/migrations, and Pulumi — through one shared 
 
 ## Quick start
 
+Requires Python 3.11+ (tested on 3.11, 3.13 and 3.14 on Linux and macOS).
+
 ```bash
 pip install aegis-devops
 aegis init ./.aegis
@@ -119,7 +121,8 @@ Every target below is checked with `aegis check <target> [flags] -- <argv...>`, 
 ![Benchmark results](docs/benchmark.svg)
 
 `scripts/benchmark.py` runs Aegis and several baselines over the labeled 500-constraint corpus
-in `data/corpus/`, scored against an oracle that never imports Aegis's own code. The full table
+in `data/corpus/` (323 distinct rule structures), on 120 held-out intents, scored against an
+oracle that never imports Aegis's own code. The full table
 (precision/recall/F1, latency, coverage) and methodology are in
 [`docs/benchmark.md`](docs/benchmark.md); the columns that matter most are summarized below.
 

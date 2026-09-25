@@ -275,7 +275,7 @@ same `--seed` reproduces every file byte-for-byte.
 It also emits 600 intents (300 aimed at Trusted rules, 150 aimed at poisoned rules that no
 Trusted rule shadows, 150 that match nothing), labelled by `../scripts/reference_oracle.py` — never
 by the interceptor — and `../data/corpus/stats.json`, which records the diversity numbers the
-benchmark header reports alongside `n = 500`: `n_distinct_structural = 196`, `n_distinct_patterns = 71`, `n_distinct_rule_text = 66`. `split.json` carries two 20% holdouts: a constraint split (per label, for store-level
+benchmark header reports alongside `n = 500`: `n_distinct_structural = 323`, `n_distinct_patterns = 145`, `n_distinct_rule_text = 118`. `split.json` carries two 20% holdouts: a constraint split (per label, for store-level
 experiments) and the intent split (stratified by expected verdict × poison candidate) that
 `scripts/benchmark.py` scores by default. To relabel intents after editing labels or
 constraints by hand: `venv/bin/python scripts/reference_oracle.py --corpus data/corpus`.
@@ -290,10 +290,12 @@ constraints by hand: `venv/bin/python scripts/reference_oracle.py --corpus data/
 the matcher itself), and **argv-evasion** (command-line shapes that used to parse into an
 intent nothing matched: global flags before the verb, `-nprod`, label selectors, comma kinds,
 namespace deletion). `tests/test_adversarial.py` proves every tampered and unauthorized attack
-is discarded *and fails closed to ESCALATE* (never ALLOW, never BLOCK), that each argv-evasion
-shape now hits the rule its author would expect, and that the matcher behaves correctly under
-the evasion attempts, with one documented gap (`evade-case-variant`, `xfail`: `fnmatch` is
-case-sensitive on POSIX).
+is discarded and gets no vote by default (and, under `--on-untrusted-match escalate`,
+contributes ESCALATE but never BLOCK), that each argv-evasion shape now hits the rule its
+author would expect, and that the matcher behaves correctly under the evasion attempts.
+`evade-case-variant` used to be an `xfail`; it is now a passing test, because the parser
+lower-cases resource kinds and an upper-case `resource_pattern` warns at load — the
+matcher itself is still case-sensitive on names.
 
 ```bash
 venv/bin/python -m pytest tests/test_adversarial.py -v

@@ -104,7 +104,8 @@ that says which principal the *transport* attributes each source to. It defaults
 with the shipped layout forgery is detected without any flag. A constraint whose cited source
 doesn't back it (missing file, or different content) is quarantined as `forged` at load time; one
 whose transport principal differs from the principal it claims is quarantined as
-`principal-mismatch`. Both fail closed like any other quarantine.
+`principal-mismatch`. Either way it gets no vote, like any other quarantine (see
+[Store health](cli.md#store-health)).
 
 `FileSourceFetcher` is a v1 stand-in for real Git/Slack/Jira connectors — it re-reads a flat
 JSON file rather than calling out to a commit, a permalink, or a ticket API (see "Open gaps" in
@@ -121,20 +122,22 @@ aegis check kubectl --now 2026-03-16T10:00:00-05:00 --pretty --sources data/sour
 
 ```
 aegis: WARNING Quarantined constraint no-scale-prod-peak: source does not back its claimed fields
-ESCALATE: kubernetes scale deployment/api-server
+ALLOW: kubernetes scale deployment/api-server
   discarded: [{'id': 'no-scale-prod-peak', 'reason': 'forged'}]
-  note: fail-closed: no-scale-prod-peak (forged)
-  covered: True  latency_ms: 1.53
-PLAN ESCALATE: 1 intent(s)
-WARNING: using example signing key
-WARNING: Quarantined constraint no-scale-prod-peak: source does not back its claimed fields
+  covered: True  latency_ms: 0.14
+PLAN ALLOW: 1 intent(s)
 STORE: loaded=20 quarantined=1 principals=3
   quarantined: no-scale-prod-peak (forged)
+  warning: using example signing key
+  warning: Quarantined constraint no-scale-prod-peak: source does not back its claimed fields
 ```
 
 The same `kubectl scale ...` command against the real `data/sources` (the CLI's default) is a
-plain `BLOCK` — see the [README](../README.md)'s Quick start; forging the source turns a
-legitimate rule into a fail-closed `ESCALATE` instead of quietly ceasing to apply.
+plain `BLOCK` — see the [README](../README.md)'s Quick start. Forging the source turns a
+legitimate rule into one with no vote, which is loud rather than quiet: the action is
+allowed on the strength of the rules that remain, and the forged one is named in
+`discarded` and in the store's health. Add `--on-untrusted-match escalate` to make it
+`ESCALATE` instead.
 
 ## Rate limits & ledger
 
