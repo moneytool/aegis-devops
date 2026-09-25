@@ -5,6 +5,36 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while the major version is 0,
 any release may change behaviour.
 
+## [0.1.1] — 2026-09-24
+
+Documentation and packaging only; no change to the decision engine. Released so the PyPI
+page carries the current README, and so the release is archived on Zenodo with a DOI.
+
+### Added
+- Codex CLI (`gpt-6-astra`) and Claude Code CLI (Haiku) rows in the benchmark. Both are
+  agent harnesses rather than raw completions, scored on a 100-constraint hold-out subset.
+- `SECURITY.md`, `CITATION.cff`, and this changelog.
+- `scripts/make_benchmark_svg.py`: the benchmark chart is generated from
+  `results/benchmark.json` instead of drawn by hand.
+- `tests/test_docs_consistency.py`: CI now fails if a results table, the chart, a corpus
+  diversity figure, or a description of the default policy disagrees with the data or the
+  code.
+
+### Changed
+- The README is now a short entry point; reference material moved to `docs/cli.md`,
+  `docs/constraints.md`, `docs/configuration.md` and `docs/benchmark.md`.
+- The quick start leads with `pip install` and `aegis init ./.aegis`. Without `init`, a fresh
+  install had no policy files and every check exited 66.
+- The alpha caveats moved from a banner at the top of the README into Project status.
+
+### Fixed
+- `docs/cli.md` and `docs/configuration.md` still described the old escalate-on-untrusted
+  default and showed ESCALATE output for tampered and forged rules. On 0.1.0 both examples
+  ALLOW, with the rule named in `discarded` and in store health. They now show real output
+  from the current code.
+- `docs/benchmark.md` quoted the previous corpus's diversity figures and called
+  `evade-case-variant` an `xfail`.
+
 ## [0.1.0] — 2026-09-23
 
 First release. Published to PyPI as `aegis-devops`.
@@ -48,4 +78,5 @@ See "Project status" in the README and `PLAN.md` §8. In short: the source fetch
 rather than real connectors, signing uses a shared secret, and a principal is a signed name
 rather than a bound identity.
 
+[0.1.1]: https://github.com/moneytool/aegis-devops/releases/tag/v0.1.1
 [0.1.0]: https://github.com/moneytool/aegis-devops/releases/tag/v0.1.0
