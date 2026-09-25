@@ -997,28 +997,31 @@ def test_get_matching_constraints_finds_direct_dict_assignments_and_overwrites()
     assert store.get_matching_constraints(intent, now) == []
 
 
-def test_matching_10k_constraints_against_500_intents_is_fast(tmp_path):
+def test_matching_10k_constraints_examines_only_the_indexed_bucket(tmp_path, monkeypatch):
     """REVIEW-4 T2.3: matching should be O(k) in the constraints that could
-    plausibly apply, not O(n) in the whole store -- generous bound, the
-    point is the scaling, not a tight latency number."""
-    import time as _time
+    plausibly apply, not O(n) in the whole store.
+
+    This used to assert a wall-clock bound (500 intents in < 0.5 s). That was
+    flaky on shared CI runners -- it failed once at 0.513 s on a change that
+    touched no code -- and it only tested the scaling indirectly. Counting how
+    many constraints the matcher actually examines tests it directly and is
+    deterministic. Real latency is measured by scripts/latency_sweep.py."""
     from datetime import UTC, datetime
 
     import yaml
 
+    from aegis_core import store as store_module
     from aegis_core.intent import InfrastructureIntent
 
     providers = ["kubernetes", "terraform", "helm", "aws", "gcp"]
     actions = [f"action-{j}" for j in range(20)]
     entries = []
     for i in range(10_000):
-        provider = providers[i % len(providers)]
-        action = actions[i % len(actions)]
         c = make_constraint(
             id=f"c-{i}",
-            provider=provider,
+            provider=providers[i % len(providers)],
             resource_pattern=f"kind{i % 50}/*",
-            actions={action},
+            actions={actions[i % len(actions)]},
             time_window=None,
         )
         entries.append(_constraint_entry(c))
@@ -1028,20 +1031,34 @@ def test_matching_10k_constraints_against_500_intents_is_fast(tmp_path):
     assert store.quarantined == []
     assert len(store.constraints) == 10_000
 
+    examined = 0
+    real_match = store_module._constraint_matches
+
+    def counting_match(*args, **kwargs):
+        nonlocal examined
+        examined += 1
+        return real_match(*args, **kwargs)
+
+    monkeypatch.setattr(store_module, "_constraint_matches", counting_match)
+
     now = datetime(2026, 1, 5, 12, 0, tzinfo=UTC)
-    intents = [
-        InfrastructureIntent(
-            resource=f"kind{i % 50}/x", action=actions[i % len(actions)],
+    matched = 0
+    for i in range(500):
+        intent = InfrastructureIntent(
+            resource=f"kind{i % 50}/x",
+            action=actions[i % len(actions)],
             provider=providers[i % len(providers)],
         )
-        for i in range(500)
-    ]
-    start = _time.perf_counter()
-    for intent in intents:
-        store.get_matching_constraints(intent, now)
-    elapsed = _time.perf_counter() - start
-    assert elapsed < 0.5, f"500 intents against 10k constraints took {elapsed:.3f}s"
+        bucket = len(store._index.get((intent.provider, intent.action), []))
+        before = examined
+        matched += len(store.get_matching_constraints(intent, now))
+        # exactly the (provider, action) bucket is scanned, nothing else
+        assert examined - before == bucket
+        assert bucket < len(store.constraints) / 10
 
+    assert matched > 0, "the fixture must actually produce matches"
+    # 500 intents over 10k constraints: a full scan would examine 5,000,000
+    assert examined < 500 * len(store.constraints) / 10
 
 def _constraint_entry(c: Constraint) -> dict:
     from aegis_core.store import _constraint_to_dict
