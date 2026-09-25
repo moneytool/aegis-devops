@@ -1,5 +1,8 @@
 # Aegis-DevOps — Policy Verifier for AI DevOps Agents
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22950337.svg)](https://doi.org/10.5281/zenodo.22950337)
+[![PyPI](https://img.shields.io/pypi/v/aegis-devops)](https://pypi.org/project/aegis-devops/)
+
 **Provenance-backed, authority-aware guardrails that stop context poisoning and agentic drift
 before an AI agent's `kubectl` or `terraform` action reaches your infrastructure.**
 

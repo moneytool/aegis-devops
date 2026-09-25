@@ -12,6 +12,14 @@ type: software
 license: Apache-2.0
 version: 0.1.1
 date-released: "2026-09-24"
+doi: "10.5281/zenodo.22950337"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.22950337"
+    description: "Concept DOI: all versions, resolves to the latest."
+  - type: doi
+    value: "10.5281/zenodo.22950338"
+    description: "v0.1.1"
 repository-code: "https://github.com/moneytool/aegis-devops"
 url: "https://pypi.org/project/aegis-devops/"
 keywords:
