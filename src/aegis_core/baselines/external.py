@@ -78,6 +78,9 @@ _CODEX_BASE_ARGS = [
 
 _VERDICT_LINE_RE = re.compile(r"^\s*(ALLOW|BLOCK|ESCALATE)\b.*$", re.IGNORECASE | re.MULTILINE)
 _MODEL_BANNER_RE = re.compile(r"^model:\s*(\S+)\s*$", re.MULTILINE)
+# Claude Code's usage-limit reply, e.g. "You've hit your session limit · resets 2:10am".
+_CLAUDE_LIMIT_RE = re.compile(r"(session|usage|rate|weekly) limit|limit reached", re.I)
+_CLAUDE_RESET_RE = re.compile(r"resets?\s+(?:at\s+)?([0-9]{1,2}(?::[0-9]{2})?\s?(?:am|pm)?)", re.I)
 _TOKENS_USED_RE = re.compile(r"tokens used\s*\n\s*([\d,]+)", re.IGNORECASE)
 
 
@@ -154,10 +157,20 @@ class CodexCliClient:
             # <time>") land on stderr, not stdout -- combine both so a
             # quota error doesn't silently look like an empty response.
             combined = stdout + "\n" + stderr if stderr else stdout
+            if re.search(r"usage limit", combined, re.I):
+                when = re.search(r"try again at ([^.\n]+)", combined, re.I)
+                raise QuotaExceededError(
+                    "codex usage limit reached", when.group(1).strip() if when else None
+                )
 
             model_match = _MODEL_BANNER_RE.search(combined)
             if model_match:
                 self.resolved_model = model_match.group(1)
+                if self.model and self.resolved_model != self.model:
+                    raise ModelMismatchError(
+                        f"requested codex model {self.model!r} but the CLI ran "
+                        f"{self.resolved_model!r}"
+                    )
             tokens_match = _TOKENS_USED_RE.search(combined)
             if tokens_match:
                 self.last_tokens_used = int(tokens_match.group(1).replace(",", ""))
@@ -300,6 +313,27 @@ class OllamaClient:
 _AUTH_FAILURE_RE = re.compile(r"\b(401|authenticate|oauth)\b", re.IGNORECASE)
 
 
+class QuotaExceededError(RuntimeError):
+    """The CLI refused the call because the account hit a usage limit.
+
+    ``resets_at`` is the reset time as the CLI printed it ("10:44 PM",
+    "2:10am"), or None. Never retried and never cached, so a runner can wait
+    for the reset and resume from the recorded answers."""
+
+    def __init__(self, message: str, resets_at: str | None = None):
+        super().__init__(message)
+        self.resets_at = resets_at
+
+
+class ModelMismatchError(RuntimeError):
+    """The CLI answered with a different model than the one requested.
+
+    Agent CLIs can fall back to an account default without failing (a ChatGPT
+    account's Codex did exactly that), which would put one model's numbers under
+    another model's name. Never retried: a mismatch is a configuration problem,
+    not a transient one."""
+
+
 class ClaudeCliAuthError(RuntimeError):
     """Raised when ``claude -p`` reports ``is_error: true`` with a result
     that looks like an expired/missing OAuth session (see
@@ -421,8 +455,24 @@ class ClaudeCliClient:
         is_error = bool(envelope.get("is_error"))
         if is_error and _AUTH_FAILURE_RE.search(result_text):
             raise ClaudeCliAuthError("claude CLI is not authenticated: run 'claude login'")
+        if is_error and _CLAUDE_LIMIT_RE.search(result_text):
+            when = _CLAUDE_RESET_RE.search(result_text)
+            raise QuotaExceededError(
+                f"claude usage limit reached: {result_text[:120]}",
+                when.group(1).strip() if when else None,
+            )
 
         self.last_model_usage = envelope.get("modelUsage")
+        family = self.model.lower() if self.model else ""
+        known_family = family in ("haiku", "sonnet", "opus", "fable")
+        if known_family and isinstance(self.last_model_usage, dict):
+            used = list(self.last_model_usage)
+            # Claude Code may also call a small model for side tasks, so require the
+            # requested family to be present rather than to be the only one.
+            if used and not any(f"claude-{family}-" in m for m in used):
+                raise ModelMismatchError(
+                    f"requested claude {family!r} but the CLI reported {used}"
+                )
         self.last_tokens_used = _sum_token_usage(self.last_model_usage)
         self.last_session_id = envelope.get("session_id")
         self.last_num_turns = envelope.get("num_turns")
@@ -474,7 +524,7 @@ class RetryingClient:
         for _ in range(attempts):
             try:
                 return self.inner.complete(system, user)
-            except ClaudeCliAuthError:
+            except (ClaudeCliAuthError, ModelMismatchError, QuotaExceededError):
                 raise
             except RuntimeError as exc:
                 last_exc = exc

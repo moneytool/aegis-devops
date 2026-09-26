@@ -280,12 +280,29 @@ class RecordingClient:
         self.cache_path = Path(cache_path)
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
         self.model = model
+        # Resume: answers already on disk are reused, so a run interrupted by a
+        # usage limit continues where it stopped instead of re-asking (and
+        # re-paying for) every prompt. Identical prompts are asked once.
+        self._known: dict[str, str] = {}
+        if self.cache_path.exists():
+            for line in self.cache_path.read_text().splitlines():
+                if line.strip():
+                    row = json.loads(line)
+                    if (row.get("response") or "").strip():
+                        self._known[row["key"]] = row["response"]
+        self.reused = 0
 
     def complete(self, system: str, user: str) -> str:
+        key = _cache_key(system, user, self.model)
+        if key in self._known:
+            self.reused += 1
+            return self._known[key]
+        # A usage-limit error raises out of inner.complete, so it is never cached.
         response = self.inner.complete(system, user)
-        entry = _CacheEntry(key=_cache_key(system, user, self.model), response=response)
+        entry = _CacheEntry(key=key, response=response)
         with open(self.cache_path, "a") as f:
             f.write(json.dumps({"key": entry.key, "response": entry.response}) + "\n")
+        self._known[key] = response
         return response
 
 

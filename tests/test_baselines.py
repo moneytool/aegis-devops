@@ -831,3 +831,162 @@ def test_cache_key_includes_model_name_and_avoids_collisions(tmp_path):
     replay_untagged = ReplayClient(cache_path)
     with pytest.raises(KeyError):
         replay_untagged.complete("same system prompt", "same user turn")
+
+
+# --- ModelMismatchError: a CLI must not silently answer with another model ----------
+
+def test_codex_banner_naming_another_model_raises_mismatch(monkeypatch, tmp_path):
+    import subprocess as sp
+
+    from aegis_core.baselines import external
+
+    def fake_run(cmd, **kwargs):
+        return sp.CompletedProcess(cmd, 0, stdout=b"model: gpt-6-astra\ncodex\nALLOW\n", stderr=b"")
+
+    monkeypatch.setattr(external.shutil, "which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(external.subprocess, "run", fake_run)
+    client = external.CodexCliClient(model="gpt-6-sol")
+    with pytest.raises(external.ModelMismatchError, match="gpt-6-sol"):
+        client.complete("sys", "user")
+
+
+def test_claude_cli_model_usage_without_requested_family_raises_mismatch(monkeypatch):
+    import json as _json
+    import subprocess as sp
+
+    from aegis_core.baselines import external
+
+    envelope = {"result": "ALLOW", "is_error": False,
+                "modelUsage": {"claude-haiku-4-5-20251001": {"inputTokens": 1}}}
+
+    def fake_run(cmd, **kwargs):
+        return sp.CompletedProcess(cmd, 0, stdout=_json.dumps(envelope).encode(), stderr=b"")
+
+    monkeypatch.setattr(external.shutil, "which", lambda _: "/usr/bin/claude")
+    monkeypatch.setattr(external.subprocess, "run", fake_run)
+    with pytest.raises(external.ModelMismatchError, match="opus"):
+        external.ClaudeCliClient(model="opus").complete("sys", "user")
+
+
+def test_claude_cli_side_model_alongside_requested_family_is_accepted(monkeypatch):
+    import json as _json
+    import subprocess as sp
+
+    from aegis_core.baselines import external
+
+    envelope = {"result": "BLOCK", "is_error": False,
+                "modelUsage": {"claude-opus-5": {"inputTokens": 1},
+                               "claude-haiku-4-5-20251001": {"inputTokens": 1}}}
+
+    def fake_run(cmd, **kwargs):
+        return sp.CompletedProcess(cmd, 0, stdout=_json.dumps(envelope).encode(), stderr=b"")
+
+    monkeypatch.setattr(external.shutil, "which", lambda _: "/usr/bin/claude")
+    monkeypatch.setattr(external.subprocess, "run", fake_run)
+    assert external.ClaudeCliClient(model="opus").complete("sys", "user") == "BLOCK"
+
+
+def test_retrying_client_does_not_retry_a_model_mismatch():
+    from aegis_core.baselines import external
+
+    calls = []
+
+    class Mismatching:
+        def complete(self, system, user):
+            calls.append(1)
+            raise external.ModelMismatchError("wrong model")
+
+    with pytest.raises(external.ModelMismatchError):
+        external.RetryingClient(Mismatching()).complete("s", "u")
+    assert len(calls) == 1
+
+
+# --- resume + usage limits: what a long benchmark run depends on ---------------------
+
+def test_recording_client_resumes_from_its_own_cache(tmp_path):
+    from aegis_core.baselines.llm import RecordingClient
+
+    calls = []
+
+    class Model:
+        def complete(self, system, user):
+            calls.append(user)
+            return f"ALLOW {user}"
+
+    cache = tmp_path / "c.jsonl"
+    first = RecordingClient(Model(), cache, model="m")
+    first.complete("s", "a")
+    first.complete("s", "b")
+    # a new run over the same cache must not re-ask a or b
+    second = RecordingClient(Model(), cache, model="m")
+    assert second.complete("s", "a") == "ALLOW a"
+    second.complete("s", "c")
+    assert calls == ["a", "b", "c"] and second.reused == 1
+
+
+def test_recording_client_asks_an_identical_prompt_once(tmp_path):
+    from aegis_core.baselines.llm import RecordingClient
+
+    calls = []
+
+    class Model:
+        def complete(self, system, user):
+            calls.append(user)
+            return "BLOCK"
+
+    rc = RecordingClient(Model(), tmp_path / "c.jsonl")
+    rc.complete("s", "same")
+    rc.complete("s", "same")
+    assert calls == ["same"]
+
+
+def test_quota_error_is_neither_retried_nor_cached(tmp_path):
+    from aegis_core.baselines.external import QuotaExceededError, RetryingClient
+    from aegis_core.baselines.llm import RecordingClient
+
+    calls = []
+
+    class Limited:
+        def complete(self, system, user):
+            calls.append(1)
+            raise QuotaExceededError("limit", "10:44 PM")
+
+    cache = tmp_path / "c.jsonl"
+    with pytest.raises(QuotaExceededError) as exc:
+        RecordingClient(RetryingClient(Limited()), cache).complete("s", "u")
+    assert exc.value.resets_at == "10:44 PM"
+    assert len(calls) == 1
+    assert not cache.exists() or cache.read_text() == ""
+
+
+def test_codex_usage_limit_raises_quota_with_reset_time(monkeypatch):
+    import subprocess as sp
+
+    from aegis_core.baselines import external
+
+    def fake_run(cmd, **kwargs):
+        err = b"ERROR: You've hit your usage limit. try again at 10:44 PM."
+        return sp.CompletedProcess(cmd, 1, stdout=b"", stderr=err)
+
+    monkeypatch.setattr(external.shutil, "which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(external.subprocess, "run", fake_run)
+    with pytest.raises(external.QuotaExceededError) as exc:
+        external.CodexCliClient(model="gpt-6-luna").complete("s", "u")
+    assert exc.value.resets_at == "10:44 PM"
+
+
+def test_claude_session_limit_raises_quota_with_reset_time(monkeypatch):
+    import json as _json
+    import subprocess as sp
+
+    from aegis_core.baselines import external
+
+    env = {"is_error": True, "modelUsage": {},
+           "result": "You've hit your session limit · resets 2:10am"}
+    out = _json.dumps(env).encode()
+    monkeypatch.setattr(external.shutil, "which", lambda _: "/usr/bin/claude")
+    monkeypatch.setattr(external.subprocess, "run",
+                        lambda cmd, **k: sp.CompletedProcess(cmd, 0, stdout=out, stderr=b""))
+    with pytest.raises(external.QuotaExceededError) as exc:
+        external.ClaudeCliClient(model="fable").complete("s", "u")
+    assert exc.value.resets_at == "2:10am"
