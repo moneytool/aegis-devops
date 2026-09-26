@@ -123,3 +123,18 @@ def test_docs_do_not_describe_escalate_as_the_default(doc):
 
 def test_changelog_has_an_entry_for_the_package_version():
     assert f"## [{__version__}]" in (ROOT / "CHANGELOG.md").read_text()
+
+
+def test_latency_svg_is_regenerated_from_current_results(tmp_path):
+    """docs/latency.svg used to be hand-drawn; it is generated now and must match."""
+    committed = (ROOT / "docs" / "latency.svg").read_text()
+    for d in ("results", "docs", "scripts"):
+        (tmp_path / d).mkdir()
+    latency = (ROOT / "results" / "latency.json").read_text()
+    (tmp_path / "results" / "latency.json").write_text(latency)
+    script = tmp_path / "scripts" / "make_latency_svg.py"
+    script.write_text((ROOT / "scripts" / "make_latency_svg.py").read_text())
+    subprocess.run([sys.executable, str(script)], check=True, capture_output=True)
+    assert (tmp_path / "docs" / "latency.svg").read_text() == committed, (
+        "docs/latency.svg is stale: run venv/bin/python scripts/make_latency_svg.py"
+    )
