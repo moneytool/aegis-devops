@@ -124,3 +124,28 @@ discovering later.
 *   **Plan constraints are evaluated per invocation, not across invocations.** `evaluate_plan`
     sees one batch of intents from one `aegis check` call; there is no persistence of partial
     plan state across multiple separate invocations that together make up one logical change.
+
+### 9. Next milestone: v0.2 — real trust roots (planned 2026-09-25)
+v0.1.x proves the *decision procedure*; it does not prove the *identities* feeding it. The
+three stand-ins named in §8 and the README's Project status are what v0.2 replaces, in this
+order:
+
+1.  **Git source connector** (first — closes two of the three gaps). Read a constraint's
+    cited source as the file at the commit SHA in `source_ref`, not a JSON file on disk, and
+    set `principal` from that commit's verified signature (`git verify-commit`, GPG or SSH)
+    instead of trusting a name written in the rule or in `PRINCIPALS.yaml`. Policy repos are
+    where most constraints come from, so this covers the common case. Needs: a `source_ref`
+    grammar (`git:<repo>@<sha>:<path>`), a mapping from signing key to principal, and tests
+    with real signed commits in a temp repo.
+2.  **Per-principal public-key signing** replacing the shared BLAKE2b secret. Falls out of
+    (1): a principal's signing key *is* their Git signing key, so a constraint can be
+    verified against the key of whoever is authorised to assert its class.
+3.  **Slack / Jira connectors**, only after (1) and (2) settle the interface.
+
+Before any of this: refresh the latency figures (they predate `afb7cea`, which made a full
+`intercept()` O(k) instead of O(n), so they now overstate cost at large store sizes) and
+generate `docs/latency.svg` from `results/latency.json` like the benchmark chart.
+
+Write the design for (1) before code: it changes the threat model's trust boundary, and the
+key-to-principal mapping is itself a policy file that needs the same integrity guarantee as
+everything else.
