@@ -35,6 +35,5 @@ keywords:
 authors:
   - family-names: "Jannapu Reddy"
     given-names: "Vamshidher Reddy"
-    # TODO: add affiliation and orcid before citing, e.g.
-    #   affiliation: "..."
-    #   orcid: "https://orcid.org/0000-0000-0000-0000"
+    affiliation: "Independent researcher"
+    orcid: "https://orcid.org/0009-0005-1167-2026"
