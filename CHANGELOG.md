@@ -5,6 +5,42 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while the major version is 0,
 any release may change behaviour.
 
+## [0.1.2] — 2026-09-26
+
+No change to how a decision is made. Released so the PyPI page and the Zenodo record carry the
+full benchmark.
+
+### Added
+- The benchmark now covers seven agent-harness models across two vendors: Claude Haiku 4.5,
+  Sonnet 5, Opus 5 and Fable 5.1 through `claude -p`; `gpt-6-astra`, `gpt-6-sol` and
+  `gpt-6-luna` through `codex exec`. All land between 0.23 and 0.33 poison-susceptibility and
+  every one acts on 5 of 8 forged rules; Aegis acts on none of the 30 poisoned intents.
+- `scripts/run_until_done.sh` runs a verifier to completion across CLI usage limits: it waits
+  for the reset time the CLI reports and resumes from the cached answers.
+- `scripts/make_latency_svg.py`: the latency chart is generated from `results/latency.json`, and
+  the docs drift test fails if it is stale.
+
+### Changed
+- A decision is now O(k) in the matching (provider, action) bucket rather than O(n) in the
+  store: the environment and time-window checks scanned every constraint. p99 at 10,000
+  constraints fell from 5.9 ms to 3.7 ms.
+- Latency figures report p95/p99 only; p50 fell between the cheap no-match decisions and real
+  matches and described neither.
+
+### Fixed
+- LLM benchmark runs could not resume: the recording client never read its own cache, so every
+  run re-asked every prompt. A usage-limit reply was cached as an empty answer; it now raises
+  and is never cached.
+- Each call verifies the model that actually answered; a mismatch stops the run instead of
+  recording one model's numbers under another's name.
+- `.gitignore` excluded all of `results/`, so its whitelist had never applied; the harness caches
+  and the preserved fail-closed results are now tracked.
+- A timing test that failed on shared CI runners was replaced by a count of the work done.
+
+### Known
+- Loading a store with `--sources` is about 35% slower than first measured, most likely from
+  the path-traversal guard resolving every source path; it is a once-per-load cost.
+
 ## [0.1.1] — 2026-09-24
 
 Documentation and packaging only; no change to the decision engine. Released so the PyPI
@@ -78,5 +114,6 @@ See "Project status" in the README and `PLAN.md` §8. In short: the source fetch
 rather than real connectors, signing uses a shared secret, and a principal is a signed name
 rather than a bound identity.
 
+[0.1.2]: https://github.com/moneytool/aegis-devops/releases/tag/v0.1.2
 [0.1.1]: https://github.com/moneytool/aegis-devops/releases/tag/v0.1.1
 [0.1.0]: https://github.com/moneytool/aegis-devops/releases/tag/v0.1.0
