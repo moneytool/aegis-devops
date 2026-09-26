@@ -8,7 +8,8 @@ latency for each.
 
     venv/bin/python scripts/benchmark.py \\
         [--corpus data/corpus] [--split holdout|dev|all] \\
-        [--verifiers aegis,llm-heuristic,opa,opa-signed,llm,aegis-nosources,codex,ollama,claude-cli]
+        [--verifiers aegis,llm-heuristic,opa,opa-signed,llm,aegis-nosources,
+                     codex,ollama,claude-cli,claude-cli-sonnet]
         [--llm-cache results/llm-cache.jsonl] [--out results/]
 
 Ground truth
@@ -44,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 from datetime import datetime
@@ -294,12 +296,20 @@ def build_verifier(
         )
         return verifier, None, False
 
-    if name in ("codex", "codex-replay"):
+    codex_named = re.fullmatch(r"codex-(gpt-[a-z0-9.-]+?)(-replay)?", name)
+    if name in ("codex", "codex-replay") or codex_named:
         if holdout_constraints is None:
             raise ValueError(f"{name} requires holdout_constraints")
-        cache_path = codex_cache_path or REPO_ROOT / "results" / "codex-cache.jsonl"
+        if codex_named:
+            # codex-<slug> pins the model and gets its own cache; plain `codex` stays the
+            # account-default (gpt-6-astra) row. CodexCliClient refuses to return an
+            # answer from any other model than the one named here.
+            codex_model = codex_named.group(1)
+            cache_path = REPO_ROOT / "results" / f"codex-{codex_model}-cache.jsonl"
+        else:
+            cache_path = codex_cache_path or REPO_ROOT / "results" / "codex-cache.jsonl"
         n_c = len(holdout_constraints)
-        if name == "codex-replay":
+        if name.endswith("-replay"):
             if not cache_path.exists():
                 return None, f"skipped: no cache at {cache_path}; run `codex` first", False
             client = ReplayClient(cache_path, model=codex_model)
@@ -345,16 +355,25 @@ def build_verifier(
         verifier.note = note
         return verifier, None, False
 
-    if name in ("claude-cli", "claude-cli-replay"):
+    if re.fullmatch(r"claude-cli(-sonnet|-opus|-fable)?(-replay)?", name):
         if holdout_constraints is None:
             raise ValueError(f"{name} requires holdout_constraints")
-        cache_path = claude_cli_cache_path or REPO_ROOT / "results" / "claude-cli-cache.jsonl"
-        model = claude_cli_model or "haiku"
+        # claude-cli is Haiku (the cheap default); claude-cli-sonnet is its own row with
+        # its own cache, so a stronger model can sit beside Haiku in one table instead of
+        # replacing it. --claude-cli-model / --claude-cli-cache still override the Haiku row.
+        larger = re.fullmatch(r"claude-cli-(sonnet|opus|fable)(-replay)?", name)
+        if larger:
+            model = larger.group(1)
+            cache_path = REPO_ROOT / "results" / f"claude-cli-{model}-cache.jsonl"
+        else:
+            cache_path = claude_cli_cache_path or REPO_ROOT / "results" / "claude-cli-cache.jsonl"
+            model = claude_cli_model or "haiku"
         n_c = len(holdout_constraints)
         note = f"agent harness (claude -p), model={model}, {n_c}-constraint holdout subset"
-        if name == "claude-cli-replay":
+        if name.endswith("-replay"):
             if not cache_path.exists():
-                return None, f"skipped: no cache at {cache_path}; run `claude-cli` first", False
+                live = name.removesuffix("-replay")
+                return None, f"skipped: no cache at {cache_path}; run `{live}` first", False
             client = ReplayClient(cache_path, model=model)
             verifier = LLMVerifier(client, holdout_constraints, name=name)
             verifier.note = "replayed from " + cache_path.name + ", " + note
@@ -604,5 +623,18 @@ def main() -> int:
     return 0
 
 
+def _main_with_quota_exit() -> int:
+    """A usage limit exits 75 (EX_TEMPFAIL) with a machine-readable line, so a
+    wrapper (scripts/run_until_done.sh) can wait for the reset and resume from
+    the answers already cached."""
+    from aegis_core.baselines.external import QuotaExceededError
+
+    try:
+        return main()
+    except QuotaExceededError as exc:
+        print(f"QUOTA_EXCEEDED resets_at={exc.resets_at or 'unknown'} :: {exc}", file=sys.stderr)
+        return 75
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(_main_with_quota_exit())

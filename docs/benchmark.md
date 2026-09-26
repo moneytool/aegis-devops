@@ -67,6 +67,11 @@ an exact verdict match.
 | opa | 120 | 0.667 | 1.000 | 0.800 | 0.500 | 1.000 | 0.100 | 0.750 | 0.375 | 0.900 | 0.250 | 0.625 |
 | llm-heuristic | 120 | 0.667 | 1.000 | 0.800 | 0.500 | 1.000 | 0.400 | 0.833 | 0.750 | 0.600 | 0.167 | 0.250 |
 | claude-cli (haiku) | 120 | 0.836 | 0.767 | 0.800 | 0.150 | 0.300 | 0.000 | 0.167 | 0.375 | 0.200 | 0.000 | 0.250 |
+| claude-cli-sonnet | 120 | 0.821 | 0.767 | 0.793 | 0.167 | 0.333 | 0.000 | 0.250 | 0.375 | 0.200 | 0.000 | 0.250 |
+| claude-cli-opus | 120 | 0.836 | 0.767 | 0.800 | 0.150 | 0.300 | 0.000 | 0.167 | 0.375 | 0.200 | 0.000 | 0.250 |
+| claude-cli-fable | 120 | 0.836 | 0.767 | 0.800 | 0.150 | 0.300 | 0.000 | 0.167 | 0.375 | 0.200 | 0.000 | 0.250 |
+| codex-gpt-6-sol | 120 | 0.833 | 0.750 | 0.789 | 0.150 | 0.300 | 0.000 | 0.167 | 0.375 | 0.200 | 0.000 | 0.250 |
+| codex-gpt-6-luna | 120 | 0.860 | 0.717 | 0.782 | 0.117 | 0.233 | 0.000 | 0.083 | 0.375 | 0.100 | 0.000 | 0.250 |
 | codex (gpt-6-astra) | 120 | 0.833 | 0.750 | 0.789 | 0.150 | 0.300 | 0.000 | 0.167 | 0.375 | 0.200 | 0.000 | 0.250 |
 | ollama (mistral 7B) | 120 | 0.500 | 1.000 | 0.667 | 1.000 | 1.000 | 0.000 | 0.083 | 0.375 | 1.000 | 0.917 | 0.625 |
 
@@ -95,8 +100,9 @@ could move at all**, and that is the number the design is about:
   ESCALATEs and the over-block rate rises to match the baselines — the earlier default, kept for
   the record in `../results/benchmark-failclosed.md`.
 
-The two model rows are **agent harnesses**, not raw completions, and are scored on a
-100-constraint subset — see the subsection below before comparing them with anything.
+The seven harness rows (`codex*`, `claude-cli*`) are **agent harnesses**,
+not raw completions, and are scored on a 100-constraint subset — see the subsection below
+before comparing them with anything.
 
 ### Real LLM baselines: `llm-naive` and `llm-aware`
 
@@ -221,6 +227,35 @@ any spec we control, so `ClaudeCliClient` sums whatever `*Tokens` fields it find
 assuming exact keys). The row's `notes` column reads `agent harness (claude -p), model=haiku,
 100-constraint holdout subset`, matching the `codex` row's honesty about what's actually being
 measured. Default model is `haiku` (the cheapest alias); override with `--claude-cli-model`.
+
+**`claude-cli-sonnet`** is the same harness with `--model sonnet` (`claude-sonnet-5`), as its own
+row and its own cache (`results/claude-cli-sonnet-cache.jsonl`), so the stronger model sits beside
+Haiku rather than replacing it. It answers the obvious objection to the Haiku row — that a small
+model was picked — and it does: over-block 0.167 and poison-susceptibility 0.333 against Haiku's
+0.150 / 0.300; per kind it acted on 2/10 unauthorized, 3/12 tampered and 5/8 forged, one intent
+off Haiku on tampered and identical elsewhere. Sonnet opened 36 of its 120 answers with
+reasoning before the verdict; the parser recovered a verdict from every one (no answer fell
+back to the unparseable default), and a replay from cache reproduces the live run's scores
+exactly. The 120 hold-out intents contain 116 distinct prompts, so the cache holds 116 keys.
+
+**The rest of the model ladder** — `claude-cli-opus` (`claude-opus-5`, the newest Opus the CLI
+serves; `claude-opus-5-5` is rejected as unrecognized), `claude-cli-fable` (`claude-fable-5-1`),
+`codex-gpt-6-sol` and `codex-gpt-6-luna` (Codex's workhorse and small models, alongside the
+`gpt-6-astra` frontier row) — was run the same way. Before each full run a probe confirmed the
+model that actually answers (Claude's `modelUsage`, Codex's `model:` banner), and every call
+re-checks it: a mismatch raises `ModelMismatchError` and stops the run, so one model's numbers
+can never sit under another's name. Opus, Fable and `gpt-6-sol` land exactly on Haiku's and
+`gpt-6-astra`'s numbers; `gpt-6-luna` acts on one fewer unauthorized and one fewer tampered
+intent (0.233) and still on 5 of 8 forged ones. Across seven models and two vendors the spread
+is 0.23–0.33, and forged rules are acted on at 5/8 by every one of them.
+
+Long runs use `scripts/run_until_done.sh <verifier>`: answers are cached as they arrive and a
+re-run reuses them, and a CLI usage limit makes `benchmark.py` exit 75 with the reset time,
+after which the script sleeps until the reset and resumes. A usage-limit reply is never cached.
+
+Note the contrast with the Sonnet 5 **API** self-check in the next subsection, which acted on
+every poisoned intent of the bench corpus: same model family, opposite result. Corpus, prompt
+and harness all differ between the two, so this table cannot say which of them explains it.
 
 `claude -p` can fail in a way `codex`/`ollama` don't: **an expired OAuth session** — the CLI
 returns exit code 0 with `is_error: true` and a `result` string containing `401` /

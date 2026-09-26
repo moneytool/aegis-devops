@@ -133,7 +133,12 @@ oracle that never imports Aegis's own code. The full table
 | :--- | ---: | ---: | ---: |
 | **aegis** | **0.000** | **0.000** | **0.000** |
 | codex (gpt-6-astra) | 0.150 | 0.300 | 0.200 |
+| codex-gpt-6-sol | 0.150 | 0.300 | 0.200 |
+| codex-gpt-6-luna | 0.117 | 0.233 | 0.100 |
 | claude-cli (haiku) | 0.150 | 0.300 | 0.200 |
+| claude-cli-sonnet | 0.167 | 0.333 | 0.200 |
+| claude-cli-opus | 0.150 | 0.300 | 0.200 |
+| claude-cli-fable | 0.150 | 0.300 | 0.200 |
 | opa-signed | 0.250 | 0.500 | 1.000 |
 | opa | 0.500 | 1.000 | 1.000 |
 | llm-heuristic | 0.500 | 1.000 | 1.000 |
@@ -146,10 +151,15 @@ It's the headline column because **signing a policy bundle proves it wasn't alte
 not that its author was ever allowed to write the rule** — `opa-signed` scores `1.000` on it for
 exactly that reason, while Aegis's independent authority check scores `0.000`.
 
-The `codex` and `claude-cli` rows are **agent harnesses wrapped around a model**, not raw
-completions, and — unlike the other rows — are scored against a 100-constraint holdout subset
-rather than the full 500-constraint store, for context-window and cost reasons; see
-[`docs/benchmark.md`](docs/benchmark.md) before comparing them with anything else in the table.
+The `codex*` and `claude-cli*` rows are **agent harnesses wrapped around a model**, not raw
+completions — seven models across two vendors (Claude Haiku 4.5, Sonnet 5, Opus 5 and Fable
+5.1; GPT `gpt-6-astra`, `gpt-6-sol` and `gpt-6-luna`), each verified before its run to be the
+model that actually answered — and — unlike the other rows — are scored against a
+100-constraint holdout subset rather than the full 500-constraint store, for context-window and
+cost reasons; see [`docs/benchmark.md`](docs/benchmark.md) before comparing them with anything
+else in the table. Model size and vendor do not change the picture: all seven land between
+0.23 and 0.33 poison-susceptibility, and every one acts on 5 of 8 forged rules — a model can
+reason about who wrote a rule, but not recompute a hash or fetch a source.
 
 ## Why not OPA/Gatekeeper?
 

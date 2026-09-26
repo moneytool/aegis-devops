@@ -12,7 +12,7 @@ build/
 .env.*
 !.env.example.ruff_cache/
 data/*.jsonl
-results/
+results/*
 # ...but the published benchmark artefacts are part of the paper record:
 !results/benchmark.md
 !results/benchmark.json
@@ -21,3 +21,14 @@ results/
 !results/llm-external.md
 !results/llm-cache-naive.jsonl
 !results/llm-cache-aware.jsonl
+!results/codex-cache.jsonl
+!results/ollama-cache.jsonl
+!results/claude-cli-cache.jsonl
+!results/claude-cli-sonnet-cache.jsonl
+!results/claude-cli-opus-cache.jsonl
+!results/codex-gpt-6-sol-cache.jsonl
+!results/claude-cli-fable-cache.jsonl
+!results/codex-gpt-6-luna-cache.jsonl
+!results/benchmark-failclosed.md
+!results/benchmark-failclosed.json
+.DS_Store

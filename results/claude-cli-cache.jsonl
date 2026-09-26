@@ -1,0 +1,120 @@
+{"key": "d6bc3bfc821a10f176fe8014bd7bc67070775203f18483b872e7408eaf6676d0", "response": "ALLOW"}
+{"key": "d36465fd740df6efdeb0396ce42eb46ecbcc933ef5f9ff1144bd64ecd4cae41c", "response": "BLOCK\ncitations: c-0018, c-0141"}
+{"key": "c4b72da9af945c5e2ef722bfdee6f9fa0fbb362ea8f88201767c23df50fcda56", "response": "ESCALATE\ncitations: c-0221, c-0440"}
+{"key": "c3fbeb8220abe6bf5845a45f607c72db13187b798392acaa46b36e3b88b6e8c3", "response": "BLOCK\ncitations: c-0404"}
+{"key": "035e3b0e7e1e5af5f48225fb141a6d3b6ccfba636c484a5e4684f088d4bbe4b0", "response": "BLOCK\ncitations: c-0466, c-0074, c-0077, c-0222, c-0304"}
+{"key": "2a2d99632fb3332b5072f4a35eecfea620a60194a3d4a8a3e573279461641456", "response": "BLOCK\ncitations: c-0477"}
+{"key": "f84449cc6ea9dab0671e7bfbe003c4e1e68c3118600f92f90c7966a8b33b0e8b", "response": "BLOCK\ncitations: c-0018, c-0224"}
+{"key": "af0e0f4a25e85dc155aba4ad1df8d74f3c08c884494b7d2bbb8845c15d8e0120", "response": "BLOCK\ncitations: c-0477"}
+{"key": "f84449cc6ea9dab0671e7bfbe003c4e1e68c3118600f92f90c7966a8b33b0e8b", "response": "BLOCK\ncitations: c-0018, c-0224"}
+{"key": "cb20e857aa817c32965f320488b84a5f37bab8721eb067b9a5f2e5530ebacb12", "response": "BLOCK\ncitations: c-0113"}
+{"key": "254ff003092776c3ba7db2b25d58b644cf2a7c20fdf352dd89f236be1c525ef2", "response": "ALLOW"}
+{"key": "3553b2f622886d5c2905bdf7bad2fe96a64b2c9043c60f9954947fdcd6472622", "response": "BLOCK\ncitations: c-0075"}
+{"key": "8f667e16357338a601ad71c70c255e2e68a71824872607ddc9d0c3909e8e6e66", "response": "ALLOW\n\n---\n\nNo constraints apply to this intent. The resource `history/worker` does not match any of the git constraints:\n- c-0076: pattern `history/gateway-*` (worker \u2260 gateway-*)\n- c-0321: pattern `history/web-*` (worker \u2260 web-*)\n- c-0349: pattern `branch/*` (resource is under history/, not branch/)\n- c-0460: pattern `branch/web-*` (resource is under history/, not branch/)"}
+{"key": "b8e52499ff8734db7268e68566789e769e044b9c4d697da95849e8af79a040cc", "response": "BLOCK\ncitations: c-0126"}
+{"key": "fbf57d628116ca758a114987523db109e513c4b1e7c6d815548c8237315b4cbf", "response": "BLOCK\ncitations: c-0354"}
+{"key": "4466a98d20af00618da1f51fbaa90577b63db7499d2d6ee270d8ab1b1f259c82", "response": "ALLOW"}
+{"key": "c70d3b266f05d65fbae8bee0234fa62b435f5d834a1b48f76a8c3e248edb8d25", "response": "ALLOW\n\nNo applicable constraints. While c-0148 matches on provider (azure), resource_pattern (web/app/* matches web/app/api-web), and action (update), its scope requirement (resource_group: rg-prod-westus2) is not specified in the intent, so the constraint does not apply."}
+{"key": "d0835f4da50bab9648102fd66ff410e3856696c267b1cbd346d202fb59c8a795", "response": "BLOCK\ncitations: c-0241"}
+{"key": "e370bcc7867f977138ecee82d52011387202f6dbf7ec807e8406fb5beb7e7615", "response": "ESCALATE\ncitations: c-0486"}
+{"key": "5f98025d8bc1dc01039adb183099b3cbe5af7ebaf2b961e254908efd7c63b9b0", "response": "BLOCK\ncitations: c-0037"}
+{"key": "089361074a445d96895151e483fa66374b5f8d9d7103929dd96f0c17453371ab", "response": "BLOCK\ncitations: c-0113"}
+{"key": "9c4e7e14a430cc6fd4352c50d664b661236ceffc20f2c9c40a7be1d75067b39e", "response": "ESCALATE\ncitations: c-0476"}
+{"key": "1805431294fdc046e0f3ce9f4a41f15788521c4ac5372035cfd86d9af154a59a", "response": "ESCALATE\ncitations: c-0153"}
+{"key": "7813fe39d92c23e855347c49d1c6f684633a2b9194f73e7ef3973de0b96acf54", "response": "ALLOW"}
+{"key": "f69e5d5105ba8f175f440b887f60d31a8332b2dfe12def17457e7f41f57ac203", "response": "BLOCK\ncitations: c-0184"}
+{"key": "505b3a5e087b041ae0532a6e97d5a0cec98e8b4dbfb5f9ae6f81db0cfce4098e", "response": "BLOCK\ncitations: c-0404"}
+{"key": "bec0568a429c8709dc4f2c77f76be3485c1fed3dfb48d99ed84be28b9d58b9ec", "response": "BLOCK\ncitations: c-0037"}
+{"key": "08b274aca2c1afa8be7a6bbbf5beedecb86670477d24dc2fcdd4a5cde2b2a448", "response": "ESCALATE\ncitations: c-0455"}
+{"key": "d93defcf23afea81fd7be2d9b612cc894fd88ba6d93d9749cd5b9bc6fd002582", "response": "ALLOW"}
+{"key": "ba035bd920f30560dbd0254f0aff0b9d095b8edda82baa6b5e90bb24103f9dbe", "response": "BLOCK\ncitations: c-0075"}
+{"key": "21adacee2c8bc42b9098795ca25892e2cc68462b0f00f80b19805fe2b02fd4e3", "response": "ALLOW"}
+{"key": "eb8d2623b19298552e0f7b4a5c40e96814caacfa42c2a1af13c80054f5ad27ea", "response": "BLOCK\ncitations: c-0018, c-0224, c-0039, c-0102, c-0293"}
+{"key": "8e361182fb163b5249c640276cb3fd8f4af85269d3382484e29923966f034f32", "response": "BLOCK\ncitations: c-0093, c-0395"}
+{"key": "9bc3d70049ebfa1de46073a445430b587b8a39e2099c7ab2553ad04558065e6b", "response": "ESCALATE\ncitations: c-0370, c-0429"}
+{"key": "33d4d6e07757e6e1a80d1d96ad1cf1f1423aea39603c8479a31b5ae956064650", "response": "BLOCK\ncitations: c-0096"}
+{"key": "24e1fd4ac9f188ba804c4a1304c67277d52ebcc222c278b5de66e8d7ccc5460f", "response": "BLOCK\ncitations: c-0018"}
+{"key": "17bbad4235e93990005fe91ff9020870f9c69db576a670ff59940462bba5250f", "response": "BLOCK\ncitations: c-0018, c-0224"}
+{"key": "94683768890766ea13b4a569f62505292a93a77f6011c034128d31aa7dff73fc", "response": "ALLOW"}
+{"key": "197e795d008f8a5afcfba062c7575b68987b56c5320ae0784369507017f71719", "response": "ESCALATE\ncitations: c-0068, c-0242"}
+{"key": "602e8f65e54280573efab84779bf7655bc3ad6f2796c5903fa20972ff2a57a36", "response": "ALLOW"}
+{"key": "0f05db80ac6546c6cb1fe8f64fbcfcddc2fffbfce70e80636b275d798cb374cc", "response": "ESCALATE\ncitations: c-0388"}
+{"key": "9c6f77d10b157d037ce7500870c54c7e27a5b0fa88003fc1a54d892180f753a4", "response": "BLOCK\ncitations: c-0184"}
+{"key": "15751f8dabade4f51b7e4e8fad62246a29e7e6a1bd5a6f81a8a7a64de5517ad3", "response": "BLOCK\ncitations: c-0184"}
+{"key": "a14d66c65a385b2c49ad89487503617c6fb72618dfbb541514c65838f5e72ad9", "response": "BLOCK\ncitations: c-0404"}
+{"key": "04449f7bad207ecf78ea0fae096445ecb92df73f4e4d4d3a81b59b51164770d7", "response": "BLOCK\ncitations: c-0184, c-0464"}
+{"key": "020f0fca5c2f65ff4b3c1c2d534f0a40404d407c4d4469b7b70b8ed09ec0ef7c", "response": "ESCALATE\ncitations: c-0074, c-0222, c-0304, c-0478"}
+{"key": "799647ba400de3485e0683f0add0c51d4a11cd4488406621fc56636d7f6ee108", "response": "BLOCK\ncitations: c-0026, c-0242, c-0471"}
+{"key": "b1e84185a0119929279cd066afafacacc6eb9d77ba9004374b9160a486942ece", "response": "ESCALATE\ncitations: c-0074, c-0222, c-0304, c-0478"}
+{"key": "8256a8d6cd25f80def7eaceb5278c002cb169b69be04dedabf8fb31dbac8b86a", "response": "ESCALATE\ncitations: c-0074, c-0222, c-0304, c-0478"}
+{"key": "c56319fba79cc8eb8f76254fc111d00a01536720b09dcf1f006673c92ef9af40", "response": "ESCALATE\ncitations: c-0397"}
+{"key": "5901a2af9b715130b90106cb281ad7c2226fe58eb0bc9aeb8c56ab727faf27a9", "response": "ALLOW"}
+{"key": "e2111ad0338059c889c647555799096feb37b06f08202cc89259489821ed7442", "response": "BLOCK\ncitations: c-0126"}
+{"key": "a6bbc93dac774678608910a5db40b21ee412450809ce074def2881a9a3b686d1", "response": "BLOCK\ncitations: c-0018, c-0224"}
+{"key": "e628de655561e3baacb90ca4919ffbe01abe6dc606bdc6f2b1a7894484406aa8", "response": "BLOCK\ncitations: c-0204, c-0224"}
+{"key": "7a5837fe5fa7c93ef3f09f12e756b3c6023ed0b02e5d151ea203339b40b6d6ce", "response": "ALLOW"}
+{"key": "f443f8a5f372c225fe19d76f9663f049ce07a7ce85cb6a0cfa47ae95a767fda7", "response": "BLOCK\ncitations: c-0117"}
+{"key": "40a671d5296b662f10702e9db8a55f68a069e45eff55a8536fc9c9f71e2e8752", "response": "ALLOW"}
+{"key": "a29f3613cb3bb14d0245e86f2a862740b1481424d53fe716597083ebcb621f99", "response": "ALLOW\n\nLooking at the proposed action:\n- Provider: kubernetes\n- Resource: cronjob/billing\n- Action: apply\n- Namespace: kube-system\n\nChecking applicable constraints:\n\n**c-0117**: resource_pattern=`cronjob/*`, actions=[apply, update], scope={namespace: staging}\n- Resource matches \u2713, action matches \u2713, but scope requires namespace: staging (not kube-system) \u2717\n\n**c-0132**: resource_pattern=`cronjob/ingest-*`, actions=[apply, update], scope={namespace: prod}\n- Resource `cronjob/billing` doesn't match pattern `cronjob/ingest-*` \u2717\n\nNo constraints match all required fields (provider, resource_pattern, actions, AND scope). The action is allowed."}
+{"key": "3eaa6fe53e7ca227f1b1633831d77c2b32918f2903acd8e60b783ebae37b8974", "response": "BLOCK\ncitations: c-0404"}
+{"key": "8c87239bc07cdfd4ad92e3254f1ba67b1624b1a1acbf87ad081b62c9252232a8", "response": "ESCALATE\ncitations: c-0304, c-0478"}
+{"key": "01ee3330f70b85d7436ad7e26bfe67b876ab72a44a2e3872e9e49aeb6c5bad27", "response": "ESCALATE\ncitations: c-0041"}
+{"key": "9d7f2cc9858120620fe385d6c0746a893136e4270db34883697bd75e818e979f", "response": "ALLOW"}
+{"key": "7ba064cc0b7dbd9a9746183f19ca83517216033c96afbd8842ae0f8577ab12ce", "response": "ALLOW"}
+{"key": "b85f96e809852194a82df13f91bc1743ab7ed56a90f84a700db53664848838d5", "response": "ALLOW"}
+{"key": "9e50a011594371b7668a6120534ef29dec990d515e2a252a0b44e33ee15e84bf", "response": "ALLOW\n\nThe constraints c-0093 and c-0395 both specify `scope: {resource_group: rg-prod-eastus}`, meaning they only apply to resources in that specific resource group. The intent does not specify a resource group in its scope field\u2014the resource is given as `keyvault/vault/api` without qualifying which resource group it belongs to. Since the constraint scopes do not match the intent's scope, these constraints do not apply. No other constraints match this delete action on an azure key vault resource."}
+{"key": "354194816f22dceada42e7f4ba6396bb8046ee91bf0367aa8b55b135cfaea299", "response": "ALLOW"}
+{"key": "49f635a280239bba075ec601827a25decf9e307ad88fcf1b40f0aac80efa054e", "response": "ALLOW\n\nNo applicable constraints match this action. The proposed update to `kubernetes/ingress/ingest` does not match any constraint's provider, resource_pattern, or action combination."}
+{"key": "f3bf6fde93539d118165ac8a1c26b31b284bac7f0c3889cff103669d44336241", "response": "ALLOW"}
+{"key": "80faecf85fe80922a8130028ffe00d16e8872b3a1bf80e3e893c1aa1ff0a4d63", "response": "ALLOW"}
+{"key": "f76c8302df1e4b1478880ab52c9030f1496b01c70de29a1f3e43ecab73b64827", "response": "ALLOW"}
+{"key": "b543b175f97bd8220c894a31054af8ebaa4cb58841a1cafc66ac199f93630cce", "response": "ESCALATE\ncitations: c-0094"}
+{"key": "2178da841d15362f1ef7e2741c91dae4c1b8c36ac053ea4893bf0bd60aada8c9", "response": "ALLOW"}
+{"key": "29d577ac4e6f0623cd9e783cbcb2bc8ecac0f456990e137937bbacab6cf5aae7", "response": "ALLOW"}
+{"key": "c8f27d3176f200224c8c5e684da77e7558452338943ff2895849bfb9ebf51cce", "response": "BLOCK\ncitations: c-0012"}
+{"key": "e4cba19ee396d2fc255e95d8049b78fab54f399b68760adfd5d318a9c490905c", "response": "ALLOW"}
+{"key": "c8c532f894fa21d791c6bb62af2cbbfd2dc3ff02d0aac901ac5f71ff7a0e5043", "response": "ESCALATE\ncitations: c-0132"}
+{"key": "8482344a22d99009c3b90b68ce80c8d84e363eaab1937d32e288b12f560301cd", "response": "BLOCK\ncitations: c-0012"}
+{"key": "cd44d6e7b46e71d22e586ad771037eed5e8414ec81301656b920ab59a7492aff", "response": "ALLOW"}
+{"key": "371732ac8bce97d6d1aa1d9e0082b3f125aad6c19b38284fc3c35c67691f4851", "response": "ALLOW"}
+{"key": "4f2c45fb2635992aa7476d5ec02d4d32fe58b01393f0c0c5a6af5a99010163a6", "response": "ALLOW"}
+{"key": "01cde4664fd3a5bb6c4afefec82129e53fd60dab12bbffe390b3d1fe6a05c6ca", "response": "ALLOW"}
+{"key": "a20517209e0e2a78336a38acc2ad4a97100df97ce60a744a9447ad1d7a4c0ad7", "response": "ALLOW"}
+{"key": "28260ee633b77ac8ef0ff6042997589b9f733b90a0264d0c1fa988ad8c9cdc5b", "response": "ESCALATE\ncitations: c-0041"}
+{"key": "a52c6f3c94fd15785e33a16c113c635fa18e157d1364f345a9119e2ec304fcf2", "response": "BLOCK\ncitations: c-0012"}
+{"key": "321776726b14434a1d133740d3f1e484fbcee4fa5a875e9cd91f19bd0e0e6ccc", "response": "ALLOW"}
+{"key": "ed297735301fa9932c184a519b6492be5370054878f84b3fac7ece5f1012a727", "response": "ALLOW"}
+{"key": "a52c6f3c94fd15785e33a16c113c635fa18e157d1364f345a9119e2ec304fcf2", "response": "BLOCK\ncitations: c-0012"}
+{"key": "b85f96e809852194a82df13f91bc1743ab7ed56a90f84a700db53664848838d5", "response": "ALLOW"}
+{"key": "a52c6f3c94fd15785e33a16c113c635fa18e157d1364f345a9119e2ec304fcf2", "response": "BLOCK\ncitations: c-0012"}
+{"key": "6e01d116af5b7d5da5f210254c53fe71c5ba72fc4421b7accb8b958b2f074849", "response": "ALLOW"}
+{"key": "eaacbb568abdbdd98afde5242caadf062ed60089eafbd8f81451f377819adf94", "response": "ALLOW"}
+{"key": "2abb0569c53a86be9c3cddbb0f2c833dcd0c1c7c55715ee457734e93fbbf2e9b", "response": "ALLOW"}
+{"key": "9ce65ed5871b9f18e1019c811afea285079d30d754fb2f3fbc9f3965e178d3ba", "response": "ALLOW"}
+{"key": "1c0dd5f245eedfa103adf9e37639fa4dad83659e2cf6e89788fc2b6ba446f1be", "response": "ALLOW"}
+{"key": "cfd491ab6095eb32e7dda76f63de79bba932305d43b2744805929a8fdc5dbe2b", "response": "ALLOW"}
+{"key": "8dd68bf0024082ab79186338da671d896d67c01bacd49a111fee08462ed14814", "response": "ALLOW"}
+{"key": "f93c10e75fe14a853f8e54ac0ac39b3b0f75d9d979942b18e7e7837017dcfa93", "response": "ALLOW"}
+{"key": "52406090feaecf844d895b50cd29e5fc54573e37002813153bcf00de9378588b", "response": "ALLOW\n\nNo applicable constraints found. The resource pattern \"unmatched-kind-0484/ingest\" does not match any terraform constraints, and the \"describe\" action is not restricted in any available rules."}
+{"key": "42dc44ed315cf9c1ebd5257a882306a8b57325f890981a5d414028898bc674b2", "response": "ALLOW"}
+{"key": "f9dc8c107efc8f412c03a63a32d1b0886cb4dd851193afddaf1f2d82e081274d", "response": "ALLOW"}
+{"key": "abfe2293eb4573cbb8d23934fad0c449c1dddcb90c995534450a1d53ee8bf064", "response": "ALLOW"}
+{"key": "c2c02c188be071499922534535a30aa71f10f7f8c33b50aa456ade67c7b9eb84", "response": "ALLOW"}
+{"key": "83a6119542bcfe5eef5b2755aa6935cb4e3db10397766b0df5b5268a9bbaba21", "response": "ALLOW"}
+{"key": "215c94dd56633f9f112b4f0aa7fe3c31d1db29fb0ebcd2f27dcf845a6cc1ef42", "response": "ALLOW"}
+{"key": "44964a82b6050c802eb4e9eee36f1663312c7aa264838a68fa473cd8a211848c", "response": "ALLOW"}
+{"key": "db2e2db4c73de77982e8a4f42a6dd72476be53d36027c9cc62ca3c58ec66bfff", "response": "ALLOW"}
+{"key": "e48c0748fb0d4ce1632adfbe86c3fb0afb08e29c6abd517e17a72fb354dbbe90", "response": "ALLOW"}
+{"key": "baf5354c4705c42361ca53bad0ee05f9e2179559748198189d4786c75d4336ac", "response": "ALLOW"}
+{"key": "0a04e80022b373301e3d4a67766f2a3cd47a40595f99078921257038b2c2345a", "response": "ALLOW"}
+{"key": "34042710a183329214b923e9ed20f6bfee0130fc580620849990e71a0c9ff0fc", "response": "ALLOW"}
+{"key": "90ddd85ede3b7a2c6c350a9265a75d91abdde7ca05d131a9c407dea97933d348", "response": "ALLOW"}
+{"key": "c1316e709b6fe67ebd7936fc645ed1a69058f3509ada6cdc686fdab3f2fe740c", "response": "ALLOW"}
+{"key": "8789b7a6986a4a9ed5a758102f9dcabdf3ca5ed2a7460f3bfc72696fef5912dc", "response": "ALLOW"}
+{"key": "08bf2791c05d096f68f0ca5ad5592f45f48ebfa1e619562bdeb04a0cbffc7684", "response": "ALLOW\n\nNo applicable constraints found. The action \"describe\" on kubernetes resources is not matched by any constraint (all Kubernetes constraints specify actions like `create`, `delete`, `apply`, `update`, `scale`, `exec`, `set-image`, `label`, `patch`, but not `describe`). Read-only operations like `describe` are permitted by default."}
+{"key": "fcc355884b4115985454620efb9d062c3c2a87eb9ed7e7dbf88d7711b47f4411", "response": "ALLOW"}
+{"key": "009d3a55cd1c904c15ba9a9da02f83f7ce565742464bbc19d579d624e7913e10", "response": "ALLOW"}
+{"key": "1fcc19bf38011bb951218f545d51c3ffadccabb0d3b58a938e6c63b94cf7bd72", "response": "ALLOW\n\nNo applicable constraints found. The proposed action is a read-only `describe` operation on a Kubernetes resource. The constraint set contains no rules for the `describe` action; all constraints target mutative operations (create, update, delete, apply, set-image, scale, exec, etc.)."}
+{"key": "b162bdfd58ec3d0c6f288678254b33ff22f17b755a280c4b32f456fcfc5f1550", "response": "ALLOW"}
+{"key": "ce825f57d4d0734a90eb21cfc83fe44bc78fcc302f29f2ddf16dd01f1cd4e4b7", "response": "ALLOW"}
+{"key": "574497ea9085fc08641146e7190c162bb0a784efd839d5395a77be9c23e678ef", "response": "ALLOW"}

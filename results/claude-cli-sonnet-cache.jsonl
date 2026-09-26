@@ -1,0 +1,120 @@
+{"key": "d3382c6b9bbbb26aed5f8515ac0dc9651c77209dafa18c19be2293e16260484c", "response": "ALLOW"}
+{"key": "6327591e38fa0c17f4667534bc4423859af4be4ca68d7b8084cfd04ca0f59410", "response": "BLOCK\ncitations: c-0018"}
+{"key": "e02cbd607df959549e272fc30fa590cf56fbebf0afa2b455e6f424883ee9c890", "response": "Applicable constraints: c-0221, c-0341, c-0440 (aws, es/domain/*, create/update).\n\nc-0341 has scope region: us-west-2, but intent has no region specified, so it doesn't match (scope mismatch). c-0221 and c-0440 have empty scope, matching, both effect ESCALATE.\n\nNo BLOCK applies (c-0341's region scope doesn't match unscoped intent).\n\nESCALATE\ncitations: c-0221, c-0440"}
+{"key": "8fa1d11166991e8ca261c24ed46c4f0a8119bb7044e2eb5c5630e6b78f751cd2", "response": "BLOCK\ncitations: c-0404"}
+{"key": "0125d100c8ec3957117f839f9de36d43017f4c338a147a8fdd924b859df96ef6", "response": "BLOCK\ncitations: c-0466"}
+{"key": "2e84a3bc7cd9e7e3a16965180ac273d5f0b5d80a08c835d856c0fd660aa5afb4", "response": "BLOCK\ncitations: c-0477"}
+{"key": "6327886e69e9381fba8c0f732c1f2df6c804800f94cac8f78335bcec8e0122b3", "response": "BLOCK\ncitations: c-0018, c-0224"}
+{"key": "24f9260ebf0733823b292883dd3adbec8b27265fa2e07ae33ca79dbe54e8e5a1", "response": "BLOCK\ncitations: c-0477"}
+{"key": "6327886e69e9381fba8c0f732c1f2df6c804800f94cac8f78335bcec8e0122b3", "response": "BLOCK\ncitations: c-0018, c-0102, c-0224"}
+{"key": "e94514d27a53a434300e770dc0ac624d3b287f07644638d1f38ecc52afab13c1", "response": "BLOCK\ncitations: c-0113"}
+{"key": "6128648c00735575edad9700a0694f539ba60a19c37b1362b25dc2833b593985", "response": "No constraints match this intent (provider \"aws\", resource \"ec2/snapshot/billing-cache\") \u2014 none of the constraint resource_patterns (e.g. iam/access-key/*, dynamodb/table/*, es/domain/*, ec2/security-group/*) cover ec2/snapshot/*.\n\nALLOW"}
+{"key": "39540cca656980ff7b6485c607bed117a55cd733ca9204143d0990d08069f762", "response": "BLOCK\ncitations: c-0075"}
+{"key": "2cfdb5f538067ccb65a5051934691263c8900023ade2680d17f7c2eb2c18e594", "response": "ALLOW"}
+{"key": "61fddb1c2c2588accfd324ceee4591b0e109d295a77edad09b36d3b36f2a98a5", "response": "BLOCK\ncitations: c-0126"}
+{"key": "2ff6d277ba1328c0fd5099c76f5188e5fee7b4cf121e8200a47b0d8ad70525d8", "response": "BLOCK\ncitations: c-0354"}
+{"key": "57016b6304d8eee01585a91b7f9774c72562b77e63df3fe53d6f279ecd5c2ea5", "response": "ALLOW"}
+{"key": "2630734cd740abb89666d899159e58eccd38bc6b352004dd13b16d2320d337da", "response": "ALLOW"}
+{"key": "4d991da282f40e7cad885b67def7bf1b42d959e66e39e3e46666dddb399145a0", "response": "BLOCK\ncitations: c-0241"}
+{"key": "4c4f779dad2b3d857e851d5495858328bca65d2d04ac8005459721e04ebe0d34", "response": "ESCALATE\ncitations: c-0486"}
+{"key": "f51c55960505fe6f2240b76ad3e7b237f5241c7e286c47a72d5fb4c347d1059a", "response": "BLOCK\ncitations: c-0037"}
+{"key": "db64e05ee583bc377cc8a9375a6026bb56fb71874f07a5af69729e0e0983019b", "response": "Checking constraints applicable to provider=kubernetes, resource=statefulset/billing, action=scale: c-0113 (resource_pattern statefulset/*, actions include scale, scope {} \u2014 matches, no namespace restriction) \u2192 BLOCK.\n\nBLOCK\ncitations: c-0113"}
+{"key": "8a70e2217c3af3999254b57ad13fb791ddf25f4f77dc4e2dd3069fd2b4da21c7", "response": "ESCALATE\ncitations: c-0476"}
+{"key": "66c890ec230375b2a9b7892a439fbe50edea94b27e3c7201ea6fd49a1bd4a211", "response": "ESCALATE\ncitations: c-0153"}
+{"key": "ae6d2423ede72a454d142dc7c3b342d7613bf6dd3c2e45372acb3ba6e9552cd8", "response": "ALLOW"}
+{"key": "aa04f191fbdf04c0fd14a02f4442ad52c45652f87fab14733cb76d4a4e606cbf", "response": "ESCALATE\ncitations: c-0184"}
+{"key": "514fbc570cecfd9c5614cf93f44cf4dbf212f76e8bcedd2d3139f8f0b8f32c99", "response": "BLOCK\ncitations: c-0404"}
+{"key": "dbfa89a81019bc7e7ca9a5922165b92715fddc9a384fd7cbbd88f98d6554e4e3", "response": "BLOCK\ncitations: c-0037"}
+{"key": "1d62598faaf22b8734092c1968c44a8558702abec80d8e38aec5250db23a00ae", "response": "ESCALATE\ncitations: c-0455"}
+{"key": "e08408aecb954e0eff218361481bf5056fca81926109a278cd324ac00bcf4a9d", "response": "ALLOW"}
+{"key": "0b1a077f6a95784e8ee6bce5054efa4490e1bde3ada92f0cfc1946469e8a2e05", "response": "BLOCK\ncitations: c-0075"}
+{"key": "536e6480aca04d5f93820df9fb5a719450bea53f78cc75c57de76bf7f7b5ca76", "response": "ALLOW"}
+{"key": "4b72287108570e32921ac26058b99f544271e0b1d1c2700875ec6976bb23ee30", "response": "BLOCK\ncitations: c-0018, c-0224"}
+{"key": "38344062fade6436d59e73bf547ebbd6d6ad45659d0629fa061d84a9064930b0", "response": "BLOCK\ncitations: c-0093, c-0395"}
+{"key": "2269d7a24686c8f822798ff4dde835ec516fd4209e5a230aab4c0e0095e3058b", "response": "ESCALATE\ncitations: c-0370, c-0429"}
+{"key": "57d91447a7ab18d059581af791d1121de304e4cf591b8aa08cb3535f6bd146be", "response": "BLOCK\ncitations: c-0096"}
+{"key": "817c18b2361d9205c7b7b0cde97b847186dc1bfcc6d5f2dfb9ee8d4d5ac3f8f9", "response": "BLOCK\ncitations: c-0018, c-0102, c-0141"}
+{"key": "0fee4791e2006e5733cffc8fdc6f3bc664c6af2a1d9d03c8c827fd98003a0d07", "response": "BLOCK\ncitations: c-0018, c-0224"}
+{"key": "85ebeae6ebd20459ebce3e4dab1d0479a9e66e71d63a6cac36b6430f9dec5e2a", "response": "ALLOW"}
+{"key": "84b7e017c82832ec8ae4e0cf60d5e609a49586f816e0ef2dc6d5de23008420ab", "response": "Checking constraints matching kubernetes/service/auth, action=create, namespace=staging:\n\n- c-0475: service/worker-* create staging \u2192 doesn't match \"auth\" pattern\n- c-0355: service/gateway-* \u2192 doesn't match\n- c-0068/c-0303/c-0303: not staging or doesn't match\n- c-0026: service/* apply \u2014 action is create, not apply, no match\n- c-0242: service/* apply/create, scope {} (any) \u2192 matches! ESCALATE\n- c-0053: service/* create scope namespace=kube-system \u2192 not staging, no match\n- c-0068: service/* create scope {} \u2192 matches! ESCALATE\n\nBoth c-0242 and c-0068 apply (generic service/* create, no scope restriction), both ESCALATE. No BLOCK applies.\n\nESCALATE\ncitations: c-0068, c-0242"}
+{"key": "90be96e89fad2839ef0a7e03f9993458aefdffe7eae96fe65dff26ef73dcf162", "response": "ALLOW"}
+{"key": "4bf31e18467efa01c8957ad7a54b7f81f0b788d913844930263172a1880ef75a", "response": "ESCALATE\ncitations: c-0388"}
+{"key": "6fda73f27d01cea5b85d06f7bc8607c2ade2c28d78ef70fbb6cd4eeda42bb1aa", "response": "BLOCK\ncitations: c-0184"}
+{"key": "11b23fbc10691d1092217bacfb4db685f7c9ebd464077e9a056c7e87de8613f4", "response": "BLOCK\ncitations: c-0184"}
+{"key": "6ecd144b6cbb9d6a2de3bd8e4bf5a30e2361c07cd34a05ff44f5ac9eebdc58f4", "response": "BLOCK\ncitations: c-0404"}
+{"key": "e06b500a6b78b07ee8684093887d453ddac2084164abac6f075b9ddffde057b6", "response": "BLOCK\ncitations: c-0184, c-0464"}
+{"key": "cc26f32b36550d0eb16084b774a2db47d223f82f81d6b906184ed8aaa27e94b1", "response": "ESCALATE\ncitations: c-0074, c-0222, c-0304, c-0478"}
+{"key": "7c5e5ab82eeaeb88dc182483c379ebcd6f917d112c5eb1ddc7bcce256a0b12db", "response": "BLOCK\ncitations: c-0471, c-0026, c-0242"}
+{"key": "485e792273142ecc4f72f6d505877499063a53a5b4f2ccb36b71be72d7311f7a", "response": "Checking constraints for kubernetes provider, resource pod/auth, action create, scope namespace=kube-system.\n\nMatching constraints: c-0074 (pod/*, create, scope {}, ESCALATE), c-0222 (pod/*, create, scope {}, ESCALATE), c-0478 (pod/*, create, scope {}, ESCALATE) \u2014 all scope-less so apply regardless of namespace. c-0398 requires namespace prod (doesn't match), c-0466/c-0077/c-0304 require staging (doesn't match), c-0168/c-0099 are pod/cache-*/pod/web-* patterns (doesn't match \"pod/auth\").\n\nNo BLOCK-effect constraints match; ESCALATE constraints do match.\n\nESCALATE\ncitations: c-0074, c-0222, c-0478"}
+{"key": "326f883219ecb9ca42f9356e0e7020eba91091252fc3ee29ab8de7bceadcfc38", "response": "ESCALATE\ncitations: c-0074, c-0222, c-0304, c-0478"}
+{"key": "012338704fa1a85339dfbb26431428007b3d72fe847b58b2c6f59cf2ae881e7e", "response": "ESCALATE\ncitations: c-0397"}
+{"key": "ef2af713157103fae3aad7aaef18ae9d615a6fd76ca0771d13eb26ea28c512b1", "response": "ALLOW"}
+{"key": "276ff3959ccb9bd1a38aed716a31dbbedf35847692f41accb77b9d24b0140ae5", "response": "BLOCK\ncitations: c-0126"}
+{"key": "51b627eb681fac075c310d86949354b83a227f1e0515fcad23a77ad212f84432", "response": "BLOCK\ncitations: c-0018, c-0224"}
+{"key": "c3e3b86b3974203c779c3f9a7bbbc76badb75c52b86d2090e20ea230660c3cd3", "response": "BLOCK\ncitations: c-0204, c-0224"}
+{"key": "878d336d64f00944c5a72705740d37d524ae7f120ec9e6f39e411eb341d4c608", "response": "ALLOW"}
+{"key": "d3da87e7b6b467fc8e532f348bd804cec722e43ef598d6f58ba2cd2b70fbb602", "response": "BLOCK\ncitations: c-0117"}
+{"key": "612dbb456f05bfa64efa5751b1c6265c3c1abc43ad8dd23aae8ec0aab1f75b53", "response": "ESCALATE\ncitations: c-0105"}
+{"key": "703d65673958e1d8e84e8aaa93fb49c0bb1f56c5492ac64d2b4a9d65b82ea17a", "response": "ALLOW"}
+{"key": "214a7e59848ceaff5cacd26dfd6fdaebf81e8d7d0615a72b9ad34629305bb468", "response": "ALLOW"}
+{"key": "f81b7bcf2bdc46b94a65b2f81722d00381d6db9a3be4dcaaa0ae43951d08d31f", "response": "ESCALATE\ncitations: c-0304, c-0478"}
+{"key": "e7ae39ccc818470f0ff8f24c01680486779bd61193d344bd33f96bc289503c82", "response": "ESCALATE\ncitations: c-0041"}
+{"key": "cbceee4a212d73e56f22026ca9b84115858071c7cd935fc57386d125ca279cae", "response": "ALLOW"}
+{"key": "55bbafc00e42df293169b7108108c89e13b0ea92e0822a56b5f799eb1b97b309", "response": "ALLOW"}
+{"key": "297f3e45632fd625e53f6fc7ad3ddb2126f53f320cbe31eb4c8fcba7dfb09f91", "response": "ALLOW"}
+{"key": "16f75ca0ace59d1b38352892ae7b51467f8070f3fc2c8c6d652d745473013745", "response": "Matching constraints: c-0093 and c-0395, both provider=azure, resource_pattern=keyvault/vault/*, actions=delete, scope resource_group=rg-prod-eastus. Intent has no resource_group specified, so scope can't be confirmed to match, but both are BLOCK anyway \u2014 no ESCALATE conflict to resolve.\n\nBLOCK\ncitations: c-0093, c-0395"}
+{"key": "e39b450378f4a4f407492da9fdaae57dd805ddeed504cfbc7fc2aba98df3b3ae", "response": "No applicable constraints match this intent (provider kubernetes, resource ingress/worker-worker, action apply \u2014 no constraint's resource_pattern matches \"ingress/*\").\n\nALLOW"}
+{"key": "2509b73c313bffcd91935a3a6a83cf61e56c460313a4ab76f064be8177c57cb3", "response": "Checking intent: provider=kubernetes, resource=ingress/ingest, action=update. No constraint has resource_pattern matching \"ingress/*\" (only deployment/*, service/*, pod/*, node/*, namespace/*, etc.) \u2014 none match \"ingress\".\n\nALLOW"}
+{"key": "dc770bb4a2c2bc5b33610a0034cc69be7a56ce00bd1203502b54a82a11beae60", "response": "ALLOW"}
+{"key": "893c26e566a48f6f0b9836320d5d444f7fc4645f3aa54b341aa1f77f2c082e14", "response": "ALLOW"}
+{"key": "5868e7e1cccb21ab9fcb27f3fdb62db7182215f1597dc62ef05146671f1b4f57", "response": "ALLOW"}
+{"key": "f0798d2665b25c41c456d0bcbd334ba4f1eb9879ac2f0c9804b6eecbe691b130", "response": "ESCALATE\ncitations: c-0094"}
+{"key": "bdc81de561afe7faa4dfbdb6a5af1823c427a5f444c3f8ac5fc29bd1f52bba00", "response": "ALLOW"}
+{"key": "4355ed11f4dd9745416705dfdf8ece005706ab9b389c0c646210329dca1b4831", "response": "ALLOW"}
+{"key": "72356bdd620cec60eb6198f33c5ea2be90bc0d5e02e4cb1974ec01804704ccf1", "response": "BLOCK\ncitations: c-0012"}
+{"key": "8ae720456ebdb14667aabd98d09b42ea9850494c4fe1912c0827e9681cdb567c", "response": "ALLOW"}
+{"key": "1e572b9ad3e67c4988ceb8d898fb72c8e9c636014a2151b020b567cef95be2e9", "response": "ESCALATE\ncitations: c-0132"}
+{"key": "3c7c697369b44d6d141ebbed8067d98c47e4e6b1b1e674ea5b87637e5cbe5661", "response": "c-0012 matches: provider flux, resource_pattern helmrelease/* matches helmrelease/web-web, action exec is in [delete, exec], scope {} matches any. Effect BLOCK.\n\nBLOCK\ncitations: c-0012"}
+{"key": "c2a3f214665dc3a6e07ed4fe58c57d381f2fc2184589d1738c553d0c09e4afb8", "response": "ALLOW"}
+{"key": "db01b37bfa1a65748f3eea7d23f6f4de8a16b1c09ab496e1a5a0ab331225e5d4", "response": "ALLOW"}
+{"key": "75934033e95a5a9537bdf020d6961e7bea644467acd2746b531a54e743bc7a82", "response": "ALLOW"}
+{"key": "2e35727a7843f44292a100bcfa8eba11c0a68687b3fc4da9891293e355e4f3f9", "response": "ALLOW"}
+{"key": "b02b4dcae978403a9feaef4fd2db8351ac8ab4ac33a5cb2bacee36f4f822d518", "response": "ALLOW"}
+{"key": "cd3b1eb8fecd57a4db008b3f8e334646fc92983ddeafae6abd76aa6117972dc2", "response": "ESCALATE\ncitations: c-0041"}
+{"key": "8c8e37cb51e0bef8bd3dcdc64172a602579c7c25104139caa41bd4c5c949d09f", "response": "BLOCK\ncitations: c-0012"}
+{"key": "768134d72cccd37546fabed0cc8206a441216d2b31d893c9ef6ab393c0dfbae5", "response": "No matching constraints \u2014 provider is \"azure\" with resource \"sql/server/cache-cache\", but no constraint has provider azure with a matching resource_pattern for sql/server/*.\n\nALLOW"}
+{"key": "9430733cbfc11ad4811b8756323e3966a7ae4e005c4a21acc1b47c072fb89a19", "response": "ALLOW"}
+{"key": "8c8e37cb51e0bef8bd3dcdc64172a602579c7c25104139caa41bd4c5c949d09f", "response": "c-0012 matches: provider flux, resource helmrelease/billing matches helmrelease/*, action delete, effect BLOCK.\n\nBLOCK\ncitations: c-0012"}
+{"key": "297f3e45632fd625e53f6fc7ad3ddb2126f53f320cbe31eb4c8fcba7dfb09f91", "response": "No applicable constraints match (provider kubernetes, resource ingress/web, action update \u2014 none of the constraints' resource_patterns match \"ingress/*\").\n\nALLOW"}
+{"key": "8c8e37cb51e0bef8bd3dcdc64172a602579c7c25104139caa41bd4c5c949d09f", "response": "c-0012 matches: provider flux, resource helmrelease/billing matches helmrelease/*, action delete, effect BLOCK.\n\nBLOCK\ncitations: c-0012"}
+{"key": "25c612c42f3deadf7ee66e48baddf615100f1b2364d7cbe7d095f39f30066a3b", "response": "ALLOW"}
+{"key": "4f423d57f65d5a5f2b7e1f68f72e79e09741feb01496f3ac4fa913a7c049baa3", "response": "No constraints match: provider \"terraform\" with action \"describe\" and resource \"unmatched-kind-0451/ingest\" doesn't correspond to any constraint's resource_pattern/action combination.\n\nALLOW"}
+{"key": "52e0c4564b04f87fe84e269cce4fcf559ec8c3c948cf7e64f8949048540fd668", "response": "No constraints match this intent (provider \"terraform\" + action \"describe\" + resource \"unmatched-kind-0452/gateway\" doesn't align with any resource_pattern/action pair listed).\n\nALLOW"}
+{"key": "8f04c6ccc2e82555742bfcad23434522908165a772d8cb21522372de951e50ad", "response": "No constraint matches this intent (provider terraform, action describe, resource unmatched-kind-0459/worker doesn't match any resource_pattern).\n\nALLOW"}
+{"key": "6592c0cc939671082d6f3179471001bce3c4a9e17ca6252e3240ab9b9b51c12d", "response": "The intent action is \"describe\" and resource is \"unmatched-kind-0464/auth\" \u2014 no constraint's actions list includes \"describe\", and no resource_pattern matches this resource. No applicable constraints.\n\nALLOW"}
+{"key": "f39fc9a98a98d428607729bd41150106d5cc373bf9fd16930abb36b9f6c48357", "response": "No constraints match: the resource \"unmatched-kind-0465/web\" doesn't fit any resource_pattern (all patterns require a known kind/prefix like deployment/, service/, pod/, etc.), and \"describe\" isn't listed as an action in any constraint.\n\nALLOW"}
+{"key": "1b29dcdf86ee6c974d63fb7b0498edb54d587ba2958c413642c9a4cc23c2e026", "response": "ALLOW"}
+{"key": "ac5bc83258d48faeceffcb2f2b87bf788324d4b98b7c098c99d15cf6a710f646", "response": "No constraint has provider \"terraform\" combined with resource_pattern matching \"unmatched-kind-0483/cache\" or action \"describe\" \u2014 no rule applies.\n\nALLOW"}
+{"key": "fad60a9bfe84a0e1994c110074912f775d623deb9848f3f82857cd5a67e116f9", "response": "ALLOW"}
+{"key": "0f4d9067e0baf5201dc64d78ee4fe151b44b437b2440bea4b4487d3d49f52085", "response": "No constraint's resource_pattern matches \"unmatched-kind-0485/ingest\" (no `kind` prefix matches any pattern), and the action \"describe\" doesn't match any constraint's actions list either.\n\nALLOW"}
+{"key": "d83e4f4d35b8ff6b10c6e1bb3d145575e4bcc1877efbdaf45cf9b17644c8f226", "response": "No constraint matches this intent: provider is terraform, action is \"describe\" (not in any constraint's actions list), and resource \"unmatched-kind-0486/cache\" doesn't match any resource_pattern.\n\nALLOW"}
+{"key": "cf0c6d551a14af64be1c396967a9093978ce48ed089191f55b4587248227955d", "response": "No constraints match this intent (provider terraform, resource \"unmatched-kind-0493/auth\", action \"describe\" \u2014 no constraint's resource_pattern or actions align).\n\nALLOW"}
+{"key": "3e4f2a1c8504cb3aea487764988eb57dc41d09338fad59749135f6feddbe63c3", "response": "No constraint applies (provider terraform with action \"describe\" doesn't match any listed actions, and resource \"unmatched-kind-0498/gateway\" doesn't match any resource_pattern).\n\nALLOW"}
+{"key": "d2628a0f8829d90246dfb40c06d9a0b9ab0a2f3fa1f281b8d5c99abe54a4e110", "response": "ALLOW"}
+{"key": "57b070256f2b4b02ad021d2412f9101f2d9a9cc991a72db504bb0f533bd091c3", "response": "No constraint matches this intent (provider terraform, action \"describe\" doesn't match any constraint's actions list, and resource \"unmatched-kind-0506/worker\" doesn't match any resource_pattern).\n\nALLOW"}
+{"key": "82f3b7c9268582265480101dcfc2a0698c21a6f2e52ae919fff35c7a8ac28409", "response": "ALLOW"}
+{"key": "d31c053da89e8517b23c827e9ccce574d4b56edff364a6c5ebc840987cdf532c", "response": "No constraints match this intent \u2014 provider \"terraform\" with resource \"unmatched-kind-0509/cache\" doesn't match any resource_pattern (all terraform patterns are `aws_s3_bucket.*`, `google_container_cluster.*`, or `aws_autoscaling_group.*`), and action \"describe\" isn't listed in any constraint's actions.\n\nALLOW"}
+{"key": "49a8f1f5c05ae891cd311f9f2caaed8f90352cc9d717d57eb4534eee9ba252f7", "response": "ALLOW"}
+{"key": "e04b9573d0d60809cb546266b5f36172ea481216c6bef4a39e6d8febd5eaed80", "response": "No constraints match: action \"describe\" isn't listed in any constraint's actions, and the resource \"unmatched-kind-0514/auth\" doesn't match any resource_pattern.\n\nALLOW"}
+{"key": "769f0359d2cb2c1e6f5b21b72a00bfb0259822a304d20b8830eb166375ee9b0c", "response": "ALLOW"}
+{"key": "3372934162378eb4f3ed15aaf06ee5b5bbf9e8cbf9dd8fd78718f2d9846d5683", "response": "ALLOW"}
+{"key": "d98b81894440655751de12ab0f112a06be32561a9b793bf53c22d0f4eb1c2c15", "response": "No constraint applies (no matching provider/resource/action).\n\nALLOW"}
+{"key": "7ee1c3755ead6a1f53721c77391592e178200bad2fc81426b6a95cd165c646f1", "response": "No constraint's resource_pattern matches \"unmatched-kind-0537/worker\", and none list a \"describe\" action.\n\nALLOW"}
+{"key": "d88e1f052efcb0299138a963aa08924c0d0b3c8a90cc2b654bdb8cd49d253c83", "response": "No constraint matches provider \"terraform\" with a resource_pattern matching \"unmatched-kind-0538/worker\" and action \"describe\".\n\nALLOW"}
+{"key": "cf4739d2ada95b5a82b92e90bc8ae9fb99e11c7285cebd629655bb67b243058b", "response": "No constraints match this intent \u2014 action \"describe\" against resource \"unmatched-kind-0540/api\" doesn't match any resource_pattern/actions combination.\n\nALLOW"}
+{"key": "163ff365d066a5395f0c4c9e651a9977a0455793954d337e0c7c1ea6c63f84b5", "response": "No constraints match this intent (provider terraform, resource \"unmatched-kind-0551/cache\" doesn't match any resource_pattern like `aws_s3_bucket.*`, `aws_autoscaling_group.*`, `aws_instance.*`, or `google_container_cluster.*`).\n\nALLOW"}
+{"key": "93122341a4dfb45adbcd4ab20fa50ab4311b89ca9d3d5fc914a9d477ea60adf4", "response": "No constraint matches (action \"describe\" isn't listed in any constraint's actions, and the resource \"unmatched-kind-0559/api\" doesn't match any resource_pattern).\n\nALLOW"}
+{"key": "e3c72e091d4bffdf4c7a9b339abee8f4de7ecf619f6eed54b72413c6f5d5967c", "response": "No constraint applies: action \"describe\" isn't in any constraint's actions list, and resource \"unmatched-kind-0571/billing\" doesn't match any resource_pattern.\n\nALLOW"}
+{"key": "6c411682e9aa8cb5a0516e211d89cc5e4e2a514cbced56d171729eab627478b9", "response": "No constraints match this intent \u2014 the provider (`terraform`), resource (`unmatched-kind-0572/ingest`), and action (`describe`) don't align with any constraint's provider/resource_pattern/action combination.\n\nALLOW"}
+{"key": "658923c700e3deb04d27135e0cf009588869651d37f1cfa7070020b2605aae80", "response": "No constraint's resource_pattern matches \"unmatched-kind-0579/ingest\", and none apply to the \"describe\" action.\n\nALLOW"}
+{"key": "0f5925d9d5bf15e935d3ce58f0752f5782c8d3dd06ec4f28d8702c80d66ab833", "response": "No constraints match: action \"describe\" isn't in any constraint's actions list, and the resource \"unmatched-kind-0591/web\" doesn't match any resource_pattern.\n\nALLOW"}

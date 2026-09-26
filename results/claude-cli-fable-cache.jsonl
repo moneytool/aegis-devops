@@ -1,0 +1,116 @@
+{"key": "d2031778021d1ea1a53c4b88daf5d6aeb1f8e61c1a6897caf44def05a426b31b", "response": "Intent: provider pulumi, resource `aws/rds/instance/cache`, action delete. The only pulumi constraint is c-0267, whose pattern `stack/cache-*` does not match this resource, so no constraint applies.\n\nALLOW"}
+{"key": "f40ad99e25a2a602853c61cbafe58487e3d7436ceda1b242935dc1bd87ad24c7", "response": "BLOCK\ncitations: c-0018"}
+{"key": "3a112d3e73f6975f19a1fbad45e503cb7c9dcf7c22a4cd7abd8da363ab998242", "response": "Matching constraints for provider aws, resource es/domain/ingest-worker, action update: c-0221 (ESCALATE, empty scope), c-0440 (ESCALATE, empty scope). c-0341 is BLOCK but scoped to region us-west-2, and the intent has no region, so it does not apply. No applicable BLOCK, so the verdict is ESCALATE.\n\nESCALATE\ncitations: c-0221, c-0440"}
+{"key": "42bb4b62d44cf37ae624eba2040fb067f2955d6fa4bea8f8d76d174c93759ba9", "response": "BLOCK\ncitations: c-0404"}
+{"key": "1017b81f878b39373ea5934f7f7d93d319c75995f612515ce1aec402f945a082", "response": "BLOCK\ncitations: c-0466, c-0074, c-0077, c-0222, c-0304, c-0478"}
+{"key": "498c393a4ee9eec6eefaf68a83b4d8b92759285abfe70319ba2a9bb416d156ea", "response": "BLOCK\ncitations: c-0477"}
+{"key": "26ae54e904606f6bf1d8a4857de4c1b0c5acd4c6c23506f2cd8554389baa7337", "response": "BLOCK\ncitations: c-0018, c-0224"}
+{"key": "3df5f60c5fba5e9f88bf55de1048bc840991ffd94e6f5c30fee131e53d7b73e8", "response": "BLOCK\ncitations: c-0477"}
+{"key": "b2956f5d4d5fb85f5dae9f4a2b45ef4306c77221277a6decbfddc60de819449d", "response": "BLOCK\ncitations: c-0113"}
+{"key": "d71d8daad7eff70ac28cd493b199f06252909dcf317994977cc181c07f83befe", "response": "Intent: provider aws, resource ec2/snapshot/billing-cache, action update, region us-west-2. No constraint has provider aws with a resource_pattern matching ec2/snapshot/* (the aws constraints cover iam/*, es/domain/*, ec2/security-group/*, dynamodb/table/*). No applicable constraint.\n\nALLOW"}
+{"key": "e76bbd9d7d147af85de444a095a43a0dbfbe65b2f101d95111fe96d9e267bfb9", "response": "Applicable: c-0075 (mongodb, collection/* matches collection/billing-worker, action delete, empty scope) \u2192 BLOCK. c-0105 is update-only, so it does not apply.\n\nBLOCK\ncitations: c-0075"}
+{"key": "652da0ac739cf3c0e1374b7b57745e3d53f7155324dc4164d99b3631b803566a", "response": "ALLOW"}
+{"key": "fa0d0da0d270370939bbda74f5517b5e9fdd3646f0ef93c53b832fcbf1397643", "response": "Intent: azure, aks/cluster/api-cache, update, resource_group rg-staging-eastus.\n\nc-0126 matches: provider azure, pattern aks/cluster/*, action update, scope resource_group rg-staging-eastus, effect BLOCK.\n\nBLOCK\ncitations: c-0126"}
+{"key": "b9189464b75fe4a1bac69f42c2a5a0c57c3d4af6d82b64720d9b441dade7f7cf", "response": "BLOCK\ncitations: c-0354"}
+{"key": "43500f63ca8eede2d740414de388921314e45743abc0b8ef3e2ecae67d5ef687", "response": "Checking the azure aks/cluster constraints: c-0126 matches provider, pattern, and action, but its scope is rg-staging-eastus, not rg-prod-eastus, so it does not apply. No other constraint matches.\n\nALLOW"}
+{"key": "a506d51823dc0e57734bb8d8db0cf109f2d41933b9eb015329a967fa315a2436", "response": "ALLOW"}
+{"key": "8ef7ce8187968afa27f895bc4aae0c8004eaaa9240ad5b9635026d8f634682c9", "response": "Intent: gcp, create, iam/service-account/auth, empty scope.\n\nMatching: c-0241 (gcp, iam/service-account/*, create, scope {}) \u2192 BLOCK. c-0348 requires region eu-west-1, which the intent lacks, so it does not apply.\n\nBLOCK\ncitations: c-0241"}
+{"key": "843bd41867525e31eca430c30e2121e5206b321dabb0e9c0ca79d1108f32151f", "response": "ESCALATE\ncitations: c-0486"}
+{"key": "b933cb8cb3459bb9e217300c02848b9e90b33fa1fbd0e0fd8eaab9d13ab38395", "response": "BLOCK\ncitations: c-0037"}
+{"key": "fc933e70a8da120aee2928ad461e81c800e82f54c9e0060ec587dfd85b4d8a75", "response": "BLOCK\ncitations: c-0113"}
+{"key": "eb37ab7ae0dc9f978476e5f0021f0644f71813ca1f45c0a8d011f1b883164e38", "response": "Intent: provider migration, resource migration/gateway-api, action rollback, env staging.\n\n- c-0476: migration, migration/gateway-* matches, rollback, scope env staging matches \u2192 ESCALATE.\n- c-0056: scope env prod, no match. c-0495: env dev, no match.\n\nNo BLOCK applies.\n\nESCALATE\ncitations: c-0476"}
+{"key": "1dece9af2d1c66de6d773be0623b6aabb38661691ac48edc2563e358d18776b2", "response": "ESCALATE\ncitations: c-0153"}
+{"key": "479bd0230e47b535adf4b5a7d79603c46acc45e15eb47f1762ad0846ab242cca", "response": "ALLOW"}
+{"key": "ded26b4909bc95f4729462b1179336b4325777c9720a7a378a05035990408679", "response": "BLOCK\ncitations: c-0184"}
+{"key": "dddcfd774238bbd84bccca612388f063b94b4f7a3f72e5e74db1000ceecee18c", "response": "BLOCK\ncitations: c-0404"}
+{"key": "14fccdd8b0ca94a6bb5aaaf442d87c8c9935fe4b51de80930ee05bbea18de54a", "response": "BLOCK\ncitations: c-0037"}
+{"key": "caf51eb8e7cd219d47a7cd212a5c55beb7768037ab7a44da57bbcc1e86aeced8", "response": "Intent: azure, storage/account/web-api, update, resource_group rg-prod-eastus.\n\nMatching: c-0455 (azure, storage/account/web-*, update, rg-prod-eastus) \u2192 ESCALATE. c-0100 requires worker-* pattern, no match. No BLOCK applies.\n\nESCALATE\ncitations: c-0455"}
+{"key": "ad4962fd1abe53a95a4675b30e30a57f6be43d191411b6a3fe105bbd7b2bce19", "response": "Azure constraints: c-0093/c-0395 (keyvault delete), c-0100 (storage/account/worker-*), c-0126 (aks), c-0148 (web/app/*, rg-prod-westus2), c-0153 (web/app/gateway-*, rg-staging-eastus), c-0455 (storage/account/web-*). Resource `web/functionapp/cache` matches none of the resource patterns (web/app/* does not match web/functionapp/\u2026, and the resource groups also differ).\n\nALLOW"}
+{"key": "0083d85dc604ba163adc6b6ced1fe744c56fba8604af2ae488babf28b67e900f", "response": "Applicable: c-0075 (mongodb, collection/* matches collection/billing, action delete, empty scope) \u2192 BLOCK. c-0105 matches the resource prefix but only covers update.\n\nBLOCK\ncitations: c-0075"}
+{"key": "e35445f7d5cb9315c204da3be697c0ee21519e91318f73b64d7bf09d53a3c1fb", "response": "ALLOW"}
+{"key": "b7b064166e28b0d004417b3412589df407fcee87ebfbdcfc5ee509b8f2a9855c", "response": "BLOCK\ncitations: c-0018, c-0224"}
+{"key": "076c57d083bfb55106f5a35980ae3597326ebf1dc51317c108e9fc6be2a54eea", "response": "BLOCK\ncitations: c-0093, c-0395"}
+{"key": "9f01ce1bae40d59b24ab3c8149618ea1a568b8e2c2f45a18cf2c1d8886eb8ae9", "response": "Intent: gcp, update, sql/instance/cache, region us-west-2.\n\nMatching constraints: c-0370 (sql/instance/*, update, us-west-2, ESCALATE) and c-0429 (same, ESCALATE). c-0080 requires ingest-* prefix, so it does not match. No BLOCK applies.\n\nESCALATE\ncitations: c-0370, c-0429"}
+{"key": "bdc8867e892549e26e83330cf8b6c82f33dc8707526bfa6020fc39b278d84846", "response": "BLOCK\ncitations: c-0096"}
+{"key": "0c747e9259055e2df5fe9cfa886388a037bbd535d3fba35a65db104185395648", "response": "BLOCK\ncitations: c-0018"}
+{"key": "a376c982f6055945764d54a7c0a9c8f57a09713d987e11d9bd0ca16720c882c2", "response": "BLOCK\ncitations: c-0018, c-0224"}
+{"key": "fa2363d9053997f6f30af18f56ca2c999188d46df42e19c35b07c98869b17c64", "response": "ALLOW"}
+{"key": "db9694da82b80dcb26adb3553667e046ee6fdb4212a857c3e9a13c621cb258c0", "response": "ESCALATE\ncitations: c-0068, c-0242"}
+{"key": "3e48499937ca240e6a1e545e3e36df68e5570b44e58d87c9cb5bbfc544f7faa3", "response": "Intent: provider `sql`, resource `database/cache`, action `delete`.\n\nChecking constraints with provider `sql`: c-0182 (table/cache-*, update) and c-0409 (table/*, update). Neither matches resource `database/*` nor action `delete`. The `database/*` delete BLOCKs (c-0059, c-0164) are provider `migration`, not `sql`, so they don't apply.\n\nALLOW"}
+{"key": "4afaaaa78c7d435d7651180c1a3af034182e0a1871448c9704f62a2b52216e64", "response": "ESCALATE\ncitations: c-0388"}
+{"key": "8b15b3fed1dadc3f558ea012a017e0474df94b416c361337252cda2537d8e935", "response": "BLOCK\ncitations: c-0184"}
+{"key": "f6e1988cc0d30dbdc0827207b124e8d5a6bfb1213eab1033f99a9829a9f76401", "response": "BLOCK\ncitations: c-0184, c-0464"}
+{"key": "4d177e2fa051e6eed97b1629fb05628ecdbda5873a1b016e7686323922cc049e", "response": "BLOCK\ncitations: c-0404"}
+{"key": "9433032ea9fb15a34a6a84ab958c97fb39a8c2ec24915fc90d42add016846cf9", "response": "BLOCK\ncitations: c-0184, c-0464"}
+{"key": "f7ca9b41f81cc6c12b76c063ad10ff91eb1abb8e41c668f0f535217526e03120", "response": "ESCALATE\ncitations: c-0074, c-0222, c-0304, c-0478"}
+{"key": "7221aaf26a4b14d3ee91b943fbbef109c53b0f67cf708dc6c48be0121852e037", "response": "BLOCK\ncitations: c-0471, c-0026, c-0242"}
+{"key": "ba46c902f893b791e6e70a9de9a8d762e22a1b50a175673656218c2b35c85083", "response": "ESCALATE\ncitations: c-0074, c-0222, c-0304, c-0478"}
+{"key": "a627a89fef4474a46859180338dc2a36a4f6e33683563c89991749be14cd7729", "response": "ESCALATE\ncitations: c-0074, c-0222, c-0304, c-0478"}
+{"key": "2d6ece8dae151922940e8a9cfb726eb621904787830238ef4b5d2e86c311d397", "response": "ESCALATE\ncitations: c-0397"}
+{"key": "ce5d83c8c7dc5ead7ce212d02da126653090111814a9a52a9db1765eb0d72dfc", "response": "Provider is helm; no constraint targets helm.\n\nALLOW"}
+{"key": "103f26af8a10f3c234c7cdb2ca437b7a22768d3a4c97c5d60bbbf6541373acca", "response": "Applicable: c-0126 (azure, aks/cluster/*, update, resource_group rg-staging-eastus) \u2192 effect BLOCK.\n\nBLOCK\ncitations: c-0126"}
+{"key": "8298639abb63f60e3fc69b0013229cd10093f28a7b392ad37241c8ce01a2af05", "response": "BLOCK\ncitations: c-0018, c-0224"}
+{"key": "aab7d1f57d602cbc2a820c775820b80de4dba19253275a412a987071ceb2c5ed", "response": "Intent: kubernetes, set-image, deployment/api-web, namespace kube-system.\n\nApplicable constraints:\n- c-0204: kubernetes, deployment/api-* matches, set-image, scope namespace kube-system matches \u2192 BLOCK.\n- c-0224: kubernetes, deployment/*, set-image, scope {} \u2192 BLOCK.\n- c-0393: scope namespace prod \u2192 does not match.\n\nBLOCK\ncitations: c-0204, c-0224"}
+{"key": "0af219e34feafe22f58ea2652434d4580d56f43be58266d49db6ce26dfa48a19", "response": "ALLOW"}
+{"key": "8c5a36eaf36c01eee16003d752c40f6fd76220310eafe2d61504303cb561b14a", "response": "BLOCK\ncitations: c-0117"}
+{"key": "3c7a33cedbbdde5469c075e4bfd499ca24e4aaadde2ffe547f20893624b3132e", "response": "ALLOW"}
+{"key": "a25c6940ea3b5306d1093ba23dcd613e25c3612899644a0f8e09664903f8fbcc", "response": "ALLOW"}
+{"key": "3464c11128fab882c50d58294d84cce7b6a56be41256fe6ce5038de9817cdbd2", "response": "BLOCK\ncitations: c-0404"}
+{"key": "cce688458cf4b7c2cdc26d75a5e495304ba4164f9e34aae4de7f927b264b5af5", "response": "ESCALATE\ncitations: c-0304, c-0478"}
+{"key": "b61338b70361df20c69dcc241ecf7c87d15c272ef69b4282d2ded496b0f3d077", "response": "Intent: kubernetes, delete, configmap/gateway-worker, namespace staging.\n\nMatching: c-0041 (configmap/gateway-*, delete, namespace staging) \u2192 ESCALATE. c-0024/c-0320 are configmap/coredns only, no match. No BLOCK applies.\n\nESCALATE\ncitations: c-0041"}
+{"key": "8413b4689722b6bce1e183c2fdcd4f59375b54fcc0c4bc7705dc192c252e1e12", "response": "No constraint has provider `terraform` with a resource pattern matching `aws_db_instance.auth` for action `delete`. The terraform constraints cover `aws_s3_bucket.*`, `google_container_cluster.*`, `aws_autoscaling_group.*`, and `aws_instance.*` only. None apply.\n\nALLOW"}
+{"key": "64b6cb1f494e0df0b9054fa4aaccefa3252cbedad73561b690909974d186c2a1", "response": "ALLOW"}
+{"key": "14a01813634fcbb38041263f1fe34ea5c25fb9cba7d0c65723f5de22a19dcc2c", "response": "No constraint matches provider kubernetes with resource `ingress/web` and action `update`.\n\nALLOW"}
+{"key": "58055643d412942c196fbc72af1f2d7018e7815ce5f48697cac448c6b64f90df", "response": "ALLOW"}
+{"key": "b0cf869735d0ac0784a3a391c5f3744246e11f27e991ea7011f7b681e7636f20", "response": "No constraint targets kubernetes `ingress/*`, so nothing applies.\n\nALLOW"}
+{"key": "07a36c4ae82b9a4415643a24cd3f8ad1b833672a6cfdcfb9f2c9df2766c91489", "response": "ALLOW"}
+{"key": "fbd1e7737268afb3679d4c18900b3325ea3ec349c23f6373c8598b91152e4024", "response": "ALLOW"}
+{"key": "b62ea7006f5efc6613cbc78a121ffe68c15054948d077c42250c4c72c6068df3", "response": "Intent: kubernetes, exec, ingress/worker-cache, namespace staging. No constraint has a resource_pattern matching `ingress/*`. The exec constraints (c-0278, c-0388, c-0012) target pod/* or flux helmrelease/*, not ingress. Nothing applies.\n\nALLOW"}
+{"key": "6241ed71b18385dda0797c77163b1717605de7d146c70a8872f7a1f9cada5a46", "response": "ALLOW"}
+{"key": "d058b45c8e9b7dd7aa65d5827752a0245c8bc9b3ee41eb35b3d3f9d84bfdc0d2", "response": "Intent: provider flux, resource kustomization/auth, action update, env dev.\n\nMatching: c-0094 (flux, kustomization/*, update, scope env: dev) applies with effect ESCALATE. No BLOCK constraints apply.\n\nESCALATE\ncitations: c-0094"}
+{"key": "306b6412fd932aeafe0e37588a8f152ccabd64fce944ed56059419878dcfc144", "response": "ALLOW"}
+{"key": "876d46a89ecef47ff5f09bcbe52f6a82ef7ec1b46de5fd9e454b35a12c923f6a", "response": "ALLOW"}
+{"key": "fcf2906e34de5b1f315ce917766bcabba501fb69001b5084010aba8df1e9fa80", "response": "BLOCK\ncitations: c-0012"}
+{"key": "6c5d98b015211d7b3dcc32dbd3cdf76a407d28a8ef57337a6fc63ad45c3a5bca", "response": "ALLOW"}
+{"key": "a6b5be243c5998cc3851b997b7df05a10edfc20ec360a96ce2d203fc2a964995", "response": "ESCALATE\ncitations: c-0132"}
+{"key": "530837ebead007b9dfee03f353c73accd648103e4295de0eff1242813274f004", "response": "BLOCK\ncitations: c-0012"}
+{"key": "d26f32349dfb92c79cd8a98b37e8cca8e9cf7a97bc1987ce101ff3fde35bd3d7", "response": "ALLOW"}
+{"key": "0282f2384447436284d86457ceaa929ab5bc23e57efd306eed471294a5762b8b", "response": "Intent: kubernetes, resource deployment/worker-web, action exec, no scope.\n\nChecking kubernetes deployment/* constraints: c-0018 (apply/create), c-0039 (apply), c-0096 (scale), c-0102 (apply/create), c-0141 (create), c-0224 (apply/set-image), c-0251 (scale), c-0293 (apply), c-0393 (set-image), c-0128 (ingest-*, create), c-0204 (api-*), c-0451 (auth-*), c-0358 (gateway-*, delete). None list `exec`. The exec constraints (c-0278, c-0388) target pod/*, and c-0012 targets flux helmrelease/*. Nothing applies.\n\nALLOW"}
+{"key": "2c8d013d3ca97e717fef69c694e11b56f991f0d0b2bd4e29a00c6bddf7cf3ed0", "response": "ALLOW"}
+{"key": "023ceffb641ce5582333f33d9d71255ea13505942d4876920cdf8ef60be96726", "response": "Intent: provider pulumi, resource stack/api-web, action exec, scope stack=prod.\n\nOnly pulumi constraint is c-0267, pattern stack/cache-* (no match on stack/api-web) and action delete (not exec). No constraint applies.\n\nALLOW"}
+{"key": "7fba1b78320c7d29a046bbfd4ab89f956e0c18e7893c9896185721fc01e2881f", "response": "Provider is helm; no constraint has provider helm, so nothing applies.\n\nALLOW"}
+{"key": "ba7919854d935d0477a73814e306c07f7205eb2bede6e00ee3aafcddde8191cc", "response": "ESCALATE\ncitations: c-0041"}
+{"key": "8c757485bc4f5fcee2d3d37f5005dcc08c689a149d40d5d2894893fc2480265c", "response": "BLOCK\ncitations: c-0012"}
+{"key": "2dec0f7e89a4229949e6efc7d3bb5ee44b2ab3d0ab8e9572077f68b8f461db57", "response": "Intent: provider azure, resource sql/server/cache-cache, action update. Azure constraints cover keyvault, storage accounts, web apps, and AKS clusters, none of which match an sql/server resource pattern. No constraint applies.\n\nALLOW"}
+{"key": "6cd3644d6ecef11527d52042866ad66f0b8044e184134b44f546f9699879967a", "response": "ALLOW"}
+{"key": "a2de3e32983c3e2852dfd38e6bfb0056d00831ec1038db0d779470d4b4396e36", "response": "Intent: provider gcp, resource storage/bucket/gateway-ingest, action exec. No gcp constraint matches a storage/bucket resource pattern (the gcp ones cover sql/instance, compute/instance, iam/service-account, container/cluster), and none list exec.\n\nALLOW"}
+{"key": "403d6c41d7fcb92ef600d61a6f1e06fe5ddaea9e0cb5ec45e5a512405135c7d2", "response": "ALLOW"}
+{"key": "0d527f32287e0061a2e5bd8255e1941b7360bf17892cd769c7a334342a3de875", "response": "No terraform constraint covers a `describe` action on a resource matching `unmatched-kind-0452/gateway`. The terraform constraints present target `aws_s3_bucket.*`, `google_container_cluster.*`, `aws_autoscaling_group.*`, and `aws_instance.*` with update/replace/delete actions, none of which match.\n\nALLOW"}
+{"key": "f7c87f95cc1003e745bde7dbf84d233de95ba676588c433fb6450201c551d682", "response": "The intent is provider terraform, action describe, resource unmatched-kind-0459/worker. The terraform constraints cover aws_s3_bucket, google_container_cluster, aws_autoscaling_group, and aws_instance patterns, none of which match this resource, and none list a describe action.\n\nALLOW"}
+{"key": "34dac447313c3e6851b87b2ae1369aab7d98101e04fc109a71e3b06bac93750a", "response": "ALLOW"}
+{"key": "f8714b35a5e7e9ed0b96e604e7a97d44a794939bba4168d21e13ea033b6df5a2", "response": "ALLOW"}
+{"key": "85346b0ca146b54a68ca355a825e7823546cd49a842f84ab592ac44368e6efc1", "response": "Provider terraform, action describe, resource unmatched-kind-0466/auth. No terraform constraint covers a \"describe\" action or a resource pattern matching this resource.\n\nALLOW"}
+{"key": "d7e998833836f36835012c24b8f40f4b8b9c2fca84fd122250a8212c1a1889ad", "response": "ALLOW"}
+{"key": "2c144d1eb2b461163c38813e4d61352bcb5b8ca5826a5b98cfb91a4959a7d6f3", "response": "ALLOW"}
+{"key": "7aea77fab6dda7e1419c7972d200cd0a763e6cd993160fd7761e7215eb9e7c2b", "response": "ALLOW"}
+{"key": "73a41b86a76ad96162a58f64273022284fdcaa34bf74c3f2d3035103f3dfb133", "response": "ALLOW"}
+{"key": "655f9165c211dd7f04bc2513837378f9396710ce08247e2da77f084c2e144d3d", "response": "Provider terraform, action describe, resource \"unmatched-kind-0493/auth\". The terraform constraints (c-0103, c-0225, c-0249, c-0363, c-0375, c-0486) all have patterns like aws_s3_bucket.*, google_container_cluster.*, aws_autoscaling_group.*, aws_instance.*, none of which match, and none list a describe action.\n\nALLOW"}
+{"key": "e92145800d06b370c9bf5e1733d5a2a895883ad884389793368c847248b1a1f3", "response": "No terraform constraint matches resource `unmatched-kind-0498/gateway` with action `describe`; the terraform patterns (aws_s3_bucket.*, google_container_cluster.*, aws_autoscaling_group.*, aws_instance.*) and actions (update, replace, delete) don't apply.\n\nALLOW"}
+{"key": "b94cdcf455fbbdd108e0c1e1e0962323f87569b9dbcd59564237dcc9f89f3f64", "response": "ALLOW"}
+{"key": "25c98b6d836d3d1e5791b5a3ae54dc0a6114df7ebe40f00ebca389cfdc15d19b", "response": "ALLOW"}
+{"key": "e6d461e41d278d5049026cdb52d8c72cf3a8d2f432cb368df8138d29f5104dc4", "response": "ALLOW"}
+{"key": "1d6cef5d3a6a8868edf6270e26c9769750dde65b0a3283b9dc195b1e8b8d52a5", "response": "ALLOW"}
+{"key": "20fca50c0951626b7a5fa597976c7e172a290048b767606344c75c97fe6416c4", "response": "ALLOW"}
+{"key": "f85b8a3553607c8285f74cc0b04c920a72d0c91996493f82d5a49749a9e249c0", "response": "ALLOW"}
+{"key": "b16300603d47dfca32ec2a098cd551f4248d771a8d45873c84b4afe2283d26c3", "response": "ALLOW"}
+{"key": "1dc934c14f4131a32fed0a892b4f11166b9d789336030b9b55a4c6d30d284f8f", "response": "ALLOW"}
+{"key": "2673f542cf46e476e342b373c0e3de72a261c8c6fce1d7dee085c82193b24ffd", "response": "ALLOW"}
+{"key": "a223ff5727e259f88b2b25735020f6a3422cbb31d8ea87a6c9e8c048c2fa9a53", "response": "ALLOW"}
+{"key": "824bfbb926b4a19339a553818880c8459218785d3a461c6a961e7e5f35550429", "response": "ALLOW"}
+{"key": "32503a84068277c49b3c4f1eb7905f24092a4039ad3612a67bc9750afb5694b5", "response": "ALLOW"}
+{"key": "ba5b18531f42d8c519aa2e2aca6b26e4fefb8a1cb9be31ca27a44a11bbabaa68", "response": "ALLOW"}
+{"key": "9723858e51d186542bde13c60ba48bc5f55a99a2d9f98c0c3299f3ada625442f", "response": "ALLOW"}
+{"key": "dfc688997871090ff77ed255a27e45875e3fa434ef4e34590caf219e42d7ed47", "response": "No constraint matches a `describe` action on `unmatched-kind-0571/billing`; nothing applies, so the default verdict holds.\n\nALLOW"}
+{"key": "cb36758f6c89c9cbbd19ffc3c822c00c6762023418ea3ca603783eeae23fa350", "response": "ALLOW"}
+{"key": "5863b7b55565bd095dcd010b30bab1ca9123c72b01967057bf59a9b85c96f3ac", "response": "ALLOW"}
+{"key": "b54c2493906bcbbe725eb002c7be3392f917b7268b0a3b4a2a460c33365f1577", "response": "ALLOW"}

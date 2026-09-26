@@ -26,12 +26,17 @@ GROUPS = [
 SERIES = [
     ("aegis", "aegis", "#2f855a"),
     ("codex", "codex (gpt-6-astra)", "#3182ce"),
-    ("claude-cli", "claude-cli (haiku)", "#63b3ed"),
+    ("codex-gpt-6-sol", "codex (gpt-6-sol)", "#805ad5"),
+    ("codex-gpt-6-luna", "codex (gpt-6-luna)", "#b794f4"),
+    ("claude-cli", "claude-cli (haiku 4.5)", "#63b3ed"),
+    ("claude-cli-sonnet", "claude-cli (sonnet 5)", "#2b6cb0"),
+    ("claude-cli-opus", "claude-cli (opus 5)", "#1a365d"),
+    ("claude-cli-fable", "claude-cli (fable 5.1)", "#2c7a7b"),
     ("opa-signed", "opa-signed", "#d69e2e"),
     ("opa", "opa", "#dd6b20"),
     ("ollama", "ollama (mistral 7B)", "#c53030"),
 ]
-W, H = 1000, 520
+W, H = 1000, 580
 X0, X1, YTOP, YBASE = 150, 960, 110, 400
 
 
@@ -82,15 +87,21 @@ def main() -> int:
             else:
                 out.append(f'<rect x="{bx:.1f}" y="{YBASE-bh:.1f}" width="{bw*0.86:.1f}" '
                            f'height="{bh:.1f}" fill="{colour}"/>')
-            out.append(f'<text x="{bx+bw*0.43:.1f}" y="{YBASE-bh-6:.1f}" text-anchor="middle" '
-                       f'font-size="9.5" fill="#2d3748">{v:.2f}</text>')
+            if bw >= 28:  # labels on narrow bars collide; the table below the chart has the numbers
+                out.append(f'<text x="{bx+bw*0.43:.1f}" y="{YBASE-bh-6:.1f}" text-anchor="middle" '
+                           f'font-size="9.5" fill="#2d3748">{v:.2f}</text>')
 
+    # legend: wrap onto as many rows as needed instead of running off the edge
     ly = YBASE + 58
     lx = X0
     for key, label, colour in present:
+        item_w = 22 + len(label) * 6.2
+        if lx + item_w > X1 and lx > X0:
+            lx = X0
+            ly += 20
         out.append(f'<rect x="{lx}" y="{ly-9}" width="11" height="11" fill="{colour}"/>')
         out.append(f'<text x="{lx+16}" y="{ly}" font-size="11" fill="#4a5568">{label}</text>')
-        lx += 22 + len(label) * 6.2
+        lx += item_w
     out.append(f'<text x="{X0}" y="{ly+26}" font-size="10.5" fill="#718096">'
                'Rightmost group = ps_unauth + pe_unauth: the share of unauthorized-principal rules that moved a '
                'verdict at all.</text>')

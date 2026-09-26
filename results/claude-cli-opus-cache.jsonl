@@ -1,0 +1,120 @@
+{"key": "b9fd201c2c25888f8c9ec36293c1af2a05ab81b68ce9760515ba4071ff59a533", "response": "ALLOW"}
+{"key": "c24453889eec81ae46c6b5cd9354a49fb5f9792e768b7fb09239356b59513c42", "response": "BLOCK\ncitations: c-0018"}
+{"key": "1f08c717aeab72313691d3877d6531c461c0ab141eb7d4f78525a5eccfc25b03", "response": "ESCALATE\ncitations: c-0221, c-0440"}
+{"key": "67945520b0559408e6b2ea0d50c5bbcb8f408ea84ee9d7e364a3d440171e992c", "response": "BLOCK\ncitations: c-0404"}
+{"key": "682c9b2df962e0ba61ffa2c0033d808a66afbbc6c560f62997c51c95ce872115", "response": "BLOCK\ncitations: c-0466, c-0074, c-0077, c-0222, c-0304, c-0478"}
+{"key": "4dd6e386bc0ef595039c68caf4b3d4d9d0a172b1380fb6b4a5b23630d2a3a46f", "response": "BLOCK\ncitations: c-0477"}
+{"key": "3e4e6d5a61c2030f2f18d0559a8d592786fd19968962981418d1099ec5da252f", "response": "BLOCK\ncitations: c-0018, c-0224"}
+{"key": "c90897621eed4b050c913b015c9a48fc72c58001b5ae7bf1c38a5037c4a28b02", "response": "BLOCK\ncitations: c-0477"}
+{"key": "3e4e6d5a61c2030f2f18d0559a8d592786fd19968962981418d1099ec5da252f", "response": "BLOCK\ncitations: c-0018, c-0224"}
+{"key": "68a61ba9e24b644e99f908aa58bbab45a689d770d83f087e023568037a366364", "response": "BLOCK\ncitations: c-0113"}
+{"key": "8e0ffc172220fe549e44191d6302961f032ea57581cfee31f2d4c1192bfbb104", "response": "ALLOW"}
+{"key": "4698765d4a8444e7b28f0f8c15c9799c7adaab7e0fc0d33f3eabb34bd4ca4703", "response": "BLOCK\ncitations: c-0075"}
+{"key": "0c4f2abff49fe01c338723cfbd0c781c484ef81cba354cb206f69a5f2c3565ea", "response": "ALLOW"}
+{"key": "ca570264fc1e34085a86e2104b8b1dc025a71a72a80aa3f52fc59d02958cfa3e", "response": "BLOCK\ncitations: c-0126"}
+{"key": "f722ae3db9a8ab09c10ba5a77ac7428d01803729efd4157215058b7f0a6209ce", "response": "BLOCK\ncitations: c-0354"}
+{"key": "90f95cafa071fcb655b644dc977c4d24a2521c04f5cb1ac14ee870820e7b293d", "response": "ALLOW"}
+{"key": "4dba7c7df7b2071dc2f96f8cba54bc869f169d8867463acd9c71cf7e9b00bfc6", "response": "ALLOW"}
+{"key": "78e67d9317d96d3c71806b2f3e880e8bbbbc627010dc4a2e8c3fadeb8039ce8f", "response": "BLOCK\ncitations: c-0241"}
+{"key": "a662bafc04c870344329001956bddab7a4944e6c0d4d643cf63e878cdbed8704", "response": "ESCALATE\ncitations: c-0486"}
+{"key": "14736da178b45445d2fd0f524c158e4dbe6122e7aac1a1d3c553d5687b49e817", "response": "BLOCK\ncitations: c-0037"}
+{"key": "1a2d8e4c71490854360d9364cf17363fd4b9f5428459c72131bc05f83a2cea80", "response": "BLOCK\ncitations: c-0113"}
+{"key": "f606b348b3cd12ee98a51eb401a439cdfdb5bcaeb01b26b60b9ee0f2e6cea37c", "response": "ESCALATE\ncitations: c-0476"}
+{"key": "0969f53cb63bfd0efbcad080d801675ca762c3105eadff6be850c26f435929f2", "response": "ESCALATE\ncitations: c-0153"}
+{"key": "a27d696af8385f1ba57f97b5efa2b1d3083263d29e5fa76e09801058f32e9e18", "response": "ALLOW"}
+{"key": "cb0e91d69b1d1a639e01a3ef558e92192e5161164fbb05d2de7a0f1e43073af0", "response": "BLOCK\ncitations: c-0184"}
+{"key": "740c2b297c0ad0b36076d5a44b3a53bef42ffcbf0a65336cdf91d1431a28f98c", "response": "BLOCK\ncitations: c-0404"}
+{"key": "97630c71488bf0da23c17aecb3b3b3b1ed1a4b18242c112d37cb3dde0c16255c", "response": "BLOCK\ncitations: c-0037"}
+{"key": "aa56ec48d98425ab139b9cfcb66cd660fc419d99b1f04fccf8be934323fe1657", "response": "ESCALATE\ncitations: c-0455"}
+{"key": "e9fd2146f65ca28fe9d6c462838e2ea83ac5c8a92daf87e7f465891a3d78c8c6", "response": "ALLOW"}
+{"key": "35551ba247c325deda9bc6c7be9be290b31077c3f4262956f8e7bfa61b63cb3a", "response": "BLOCK\ncitations: c-0075"}
+{"key": "4d08eb825d0e1b54b0f2b5f9edfee71d72c6bc74550b8b8a43b1905f0c4e6fdd", "response": "ALLOW"}
+{"key": "4fd0889d13dca4d059d7e79ff56587808d7102d571af6c79c4234b167e9b4cd6", "response": "BLOCK\ncitations: c-0018, c-0224"}
+{"key": "e21828ba62aac76ffdf2ccc49e808ec09643cb9c0f9b384010ca5dfd73ed994b", "response": "BLOCK\ncitations: c-0093, c-0395"}
+{"key": "a26063019621aa24a6e47637c80aacdbf999cd7811ca10c5e068bcac493c61b7", "response": "ESCALATE\ncitations: c-0429, c-0370"}
+{"key": "46d7fa2229ae38981b756d36e41ef7db5b92ba34ddc895007c6c13dcef99de3a", "response": "BLOCK\ncitations: c-0096"}
+{"key": "142b25406f5970289d45a78a55c29170ef43fdcc4c4334af04d8e41f78a257ed", "response": "BLOCK\ncitations: c-0018"}
+{"key": "1d3e901ce3f0d9b62e8b24f2b463133fe7a3026f50fd2421ef28134003bb012d", "response": "BLOCK\ncitations: c-0018, c-0224"}
+{"key": "b4e80e31960b5edae8fc4ec73afb6f044ad7d3a918b6c94851c6a6b53ad9d85d", "response": "ALLOW"}
+{"key": "c83b2dd4f86e616d6a97c848cb7c33792c252f1e37b08459db204ec67a16fa73", "response": "ESCALATE\ncitations: c-0068, c-0242"}
+{"key": "e0c83f5f9fb7d809a60176ffc674a3a1a1b861ca61d7db1eee1b0999b93fbc31", "response": "ALLOW"}
+{"key": "62f93c4751c9125fcdc4a61991c59a6a6dfc4036eff7bc7d4340c0dfec22e187", "response": "ESCALATE\ncitations: c-0388"}
+{"key": "a650339380795734d76c02498d8b4d4e35496273caa2998254a8a24376a25e1a", "response": "BLOCK\ncitations: c-0184"}
+{"key": "bfec4a14bfca362daec9c95b26182255958d7e7617ace4f1e0593b3cb60b344d", "response": "BLOCK\ncitations: c-0184, c-0464"}
+{"key": "a7e69a436f3ab3c41b3eab897373ff1e97acfb8a49ec742231ebd0794e419610", "response": "BLOCK\ncitations: c-0404"}
+{"key": "9558b16762a65350c150125d3f915517898ea2904bcd1dd5cdfc82ef1f9dc90c", "response": "BLOCK\ncitations: c-0184, c-0464"}
+{"key": "3a7df9c79b44af1ce646311d2650f3b705d36381ca2216dba972d6dde7e82da5", "response": "ESCALATE\ncitations: c-0074, c-0222, c-0304, c-0478"}
+{"key": "da141ce5fc5183ce5c954387646acd19887000fe2dc6f2488750b2e20377a4ec", "response": "BLOCK\ncitations: c-0471"}
+{"key": "6e7d554f40020800771c557b2d2fd1689ba8398300a50f2954365f25b2bea1b1", "response": "ESCALATE\ncitations: c-0074, c-0222, c-0304, c-0478"}
+{"key": "4d14df6802dab7d4bbece4914ac31c9569ecdffd69c432e7b218df80717950e9", "response": "ESCALATE\ncitations: c-0074, c-0222, c-0304, c-0478"}
+{"key": "f5860822ed3c11fe4021d36adb4ba607edbae4eb32d206ba521865e921df080b", "response": "ESCALATE\ncitations: c-0397"}
+{"key": "ed9e88dd42abdc16a6d2ccd40c44f66503828ecb9656bec25b2510fed1582ad5", "response": "ALLOW"}
+{"key": "c6f0c1b7c844b75fad5aa1a9cf674253c9b5f3d1915a2999ebe3126508c489d0", "response": "BLOCK\ncitations: c-0126"}
+{"key": "e21bbd2669f96c0ebf94c88b647bc5a02a8624694fa7c0aacb2bf29608d77ce9", "response": "BLOCK\ncitations: c-0018, c-0224"}
+{"key": "8e99b8844708588ad646e40ea04222c66eb04f659e977ce1ca6ab8c0373581be", "response": "BLOCK\ncitations: c-0204, c-0224"}
+{"key": "9f158ccca410a3b62ded0dd2f2ca6f6ffacd17e8c9d4d478bcda87c9bb032093", "response": "ALLOW"}
+{"key": "b82fca3cc8ade91bd1ed805374664c3c6b97bf6ad2a307c3805ffb2009d7c87e", "response": "BLOCK\ncitations: c-0117"}
+{"key": "f2ac22646e685f8769df23a255fec548b7e5b8ffe866615ecb2ba46638c6ef6b", "response": "ALLOW"}
+{"key": "2e3f47336cbc7fe8de9aa86977c70cce4dbdf3aae65e4cb87845cdab77cba601", "response": "ALLOW"}
+{"key": "c4de80c34c656bc90621cd2a0a2057b38b2c9e604b02023ddeff1c83cb596539", "response": "BLOCK\ncitations: c-0404"}
+{"key": "c08ce62b6d123cf4b9271c968b898a9700d17e7b2669c2611dcae1664caf3470", "response": "ESCALATE\ncitations: c-0304, c-0478"}
+{"key": "4ca818c1cdedc718ca70872810da938f701bf6d06801a2e77e9fc633c4583bf1", "response": "ESCALATE\ncitations: c-0041"}
+{"key": "096723ef1c6d2be39ff7a1a6e9c3829c002398995b0ce5207dcbce44f3aae59d", "response": "ALLOW"}
+{"key": "b3228fd60bd9ae80be417a0168cd33791fb653cde56a3d065a5abcee37816f42", "response": "ALLOW"}
+{"key": "ebd32b9b2ea43f9f07040dda5f6a46d7fb42496b39f07e84be51ff760e7051f2", "response": "ALLOW"}
+{"key": "528b263c98c5ef8d868fbb9c76b18c93714271ccb157267f9c61ded5c0c872c9", "response": "ALLOW"}
+{"key": "7a98d2545e827c253e09f6e51e1849d7e55ffa12fe33cde06c519b354daa0eba", "response": "ALLOW"}
+{"key": "7738a8c512499ce28a6729d9828fe059c7bffd33b9508a4aa1f4e8121c40ea6d", "response": "ALLOW"}
+{"key": "15df7422740855ca2cb06fa6a9d0c1da167f12c398bf6f1150b1c972a6f6652b", "response": "ALLOW"}
+{"key": "384586d50b5cd5454429129534f2eee5f1605f872873f902c3d28c70cd3a12ff", "response": "ALLOW"}
+{"key": "79daf80835372b4000702e439405422090360c47a80ea7b87f009bdbf44a2876", "response": "ALLOW"}
+{"key": "c8265f2e5bce4b33265002269d102f8add997d744eebba3d7545bb0fe373c6e3", "response": "ESCALATE\ncitations: c-0094"}
+{"key": "9180768efede9e6ba48e1502cd702383ef31ff8f5fc7ac6bbc66a36905dd89d0", "response": "ALLOW"}
+{"key": "54bb2f4019cc251188bf3e45c1d46d35427b3eb35493be7a911f3611f8578063", "response": "ALLOW"}
+{"key": "0787e0dc8b50912270768452372644da1568181dacede4db00bac6cc2929ccc7", "response": "BLOCK\ncitations: c-0012"}
+{"key": "55cebcbcf22dd310ebc7cc2bc78e8d49e5f19b5e492773d421bf3fcf3e3dbb4d", "response": "ALLOW"}
+{"key": "3e337ed77db8b743a58c1333e8c5b7fdb673a953192585f9c81539b85ee508ad", "response": "ESCALATE\ncitations: c-0132"}
+{"key": "bfde9812068ced321d937a2acbc02f0f92c16cbb6a260aa967d2b103c52d61f3", "response": "BLOCK\ncitations: c-0012"}
+{"key": "54ef78bbe90edac06a8054fe37d83ca280bdf7eb76b9f88f0fe05d5372b03b43", "response": "ALLOW"}
+{"key": "14c164ebd7c46f32218e0b193ffc99455d6e17319507fc3393e8ca9c07b3377a", "response": "ALLOW"}
+{"key": "05db8c65beb473597d501fd09d173c7f8d53b589affe7842dfc4511a43a693b8", "response": "ALLOW"}
+{"key": "d41a5c005325bbaf2956373b45261977ff2a632eb05debcc4c30da8a9ba7d44a", "response": "ALLOW"}
+{"key": "1a81e5ce9a38db4ac16bfa7c1932d01512b33fa229d0322d68dddd4df3e9af38", "response": "ALLOW"}
+{"key": "495dc17a8927a39d5e920523521f21713ce1fb48d0d01271c4ad94adad343ef1", "response": "ESCALATE\ncitations: c-0041"}
+{"key": "fdacbbc96543391a50bae3a4326acc6f620ee2aa1034a7902d8d2ec99c40c792", "response": "BLOCK\ncitations: c-0012"}
+{"key": "e29739755bee6feb687afff5fec87aaee530711b2088f1443cb70df3ce6f1255", "response": "ALLOW"}
+{"key": "97685cf2f3c4796a0cfef39a0329526e163b01d6b98a05a0d626c8fa87ee9256", "response": "ALLOW"}
+{"key": "fdacbbc96543391a50bae3a4326acc6f620ee2aa1034a7902d8d2ec99c40c792", "response": "BLOCK\ncitations: c-0012"}
+{"key": "ebd32b9b2ea43f9f07040dda5f6a46d7fb42496b39f07e84be51ff760e7051f2", "response": "ALLOW"}
+{"key": "fdacbbc96543391a50bae3a4326acc6f620ee2aa1034a7902d8d2ec99c40c792", "response": "BLOCK\ncitations: c-0012"}
+{"key": "204ee6a309dd4d7d821e44d00ffa56a89fd3523297c1246d6e990d563bf128e7", "response": "ALLOW"}
+{"key": "fc98f87569ad3580aa28a4bb4dc7d71affad5760a681d3bf4f6dd9b228b466ec", "response": "ALLOW"}
+{"key": "6efb7ed0d2e117facf87438fcc3e6366fcb049229c4bb395c8274174b8d40001", "response": "ALLOW"}
+{"key": "aa76213ee73a154ef13be1c19a626397e7faaada772b7773cda8ce0ad47424bd", "response": "ALLOW"}
+{"key": "6557287a9e4346072ef9efada986b438c4e811dc50f2762acabbcbb1c85a38f1", "response": "ALLOW"}
+{"key": "fbe824df17f789a5c3eab89218f48c5463f35110084b52c63f10835a03748721", "response": "ALLOW"}
+{"key": "73aad9d441615a9d0c778a72c7f4536aad8703e59d5543150d93248cbcc26462", "response": "ALLOW"}
+{"key": "6266c42ea92de7dd2a4985423ae1bfef6394b8eefe42f8c33d06a7a079574435", "response": "ALLOW"}
+{"key": "9417fd99cee2db5c658a760a7afa1e02d0cc5b9c9faf0241e9c3f3732b339bc9", "response": "ALLOW"}
+{"key": "d8fae00effc3fc8a600de4edccb6a0e364c2ff227f3c1a68e5b5353637eb3a49", "response": "ALLOW"}
+{"key": "3dbf5157462aba45f45c8f1fb72876aee6900dbeabdca68575978eac66a4e5ba", "response": "ALLOW"}
+{"key": "491156ca76d183ac9530c0654695d7ef62ed14efa72e94c2956977851bb0c396", "response": "ALLOW"}
+{"key": "a12abe8f770725d2decbd5846a9eac78bb60f2e955d2c89f0ab642e15140a632", "response": "ALLOW"}
+{"key": "3c060ea52770cb507dd4f5fad4381528a86e79954e6f761b0c26741ffa572fe5", "response": "ALLOW"}
+{"key": "76f0ccdaf184fbf8d06e26f9e5e3b71d4ee246bc7a7088dc2e3cf242991c0a60", "response": "ALLOW"}
+{"key": "89f1cd5ca909db85fc0c6ad917da206a8f67788c3d3d2f593bdb5cc491347ad4", "response": "ALLOW"}
+{"key": "9c3ee51da977d5f8dcde6e5c990e34918b5aeb2b944796c761611d75560a9e0b", "response": "ALLOW"}
+{"key": "ec4abe47aefd9757b627bebdf46beac915794de1c5c61a47e1f3a7801f9a4415", "response": "ALLOW"}
+{"key": "5ff13ad7426ca3c2b2ad1b5d6da54d0438da83de1c78289fd2e653cc392b8e14", "response": "ALLOW"}
+{"key": "fabd7715d22b432816580f6095ae314ccc262d8535c69de7310f8a1d20b8522b", "response": "ALLOW"}
+{"key": "077f4f4d9631508c2a3338b6bedfadc433bbf19a44746598f6810b583c17acec", "response": "ALLOW"}
+{"key": "ed09095f2a617866e6817242e1d012e780ec0d4ddc6b0e9251599a1d9c9812ea", "response": "ALLOW"}
+{"key": "4014f4369bf52b936d502fb9d1d1383e1329c7fc482c4e3d54b5505dec52e5d0", "response": "ALLOW"}
+{"key": "950c7f2eb910aae460040f77dee60cc567d24e5f10537524a0a2ea97215cace5", "response": "ALLOW"}
+{"key": "ceec5a4387816557630aa9bba2104d09697ddc029b3cfe8bec1aa5a472379a97", "response": "ALLOW"}
+{"key": "736ac5edfb2ca6c369c9ea514e85dd71a83490b679a3137b8b4f793276853578", "response": "ALLOW"}
+{"key": "24a9160fb056319374377cd7bcc2b9843f75e6482b2f990117c48c4c9d306cc3", "response": "ALLOW"}
+{"key": "8d5ad116592f655ea86593f7750b3d4aa3962927cb622e38fa8bb976b59bf2b9", "response": "ALLOW"}
+{"key": "ab793597fa9e948ff558c09123b56fd1c287a1e197cb6c7bef1a3d89ae53d8dd", "response": "ALLOW"}
+{"key": "349377feca77f5f2d743291cb0b42b98fb93d68bcb0285100e06828719fe84e1", "response": "ALLOW"}
+{"key": "1c4504d788cbd83a6dbcea4cdeb4f496403b6c00157189fe7bf336953b717a88", "response": "ALLOW"}
