@@ -1,16 +1,31 @@
-# Aegis-DevOps — Policy Verifier for AI DevOps Agents
+# Aegis-DevOps
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22950337.svg)](https://doi.org/10.5281/zenodo.22950337)
 [![PyPI](https://img.shields.io/pypi/v/aegis-devops)](https://pypi.org/project/aegis-devops/)
 
-**Provenance-backed, authority-aware guardrails that stop context poisoning and agentic drift
-before an AI agent's `kubectl` or `terraform` action reaches your infrastructure.**
+**Stop AI agents from running `kubectl delete`, `terraform destroy` or `DROP TABLE` because a
+ticket told them to.**
 
-**Keywords:** AI agent security · AgentOps · prompt injection · context poisoning · policy
-enforcement · policy-as-code · Kubernetes · Terraform · OPA · SRE · LLM guardrails ·
-provenance · infrastructure-as-code
+Aegis-DevOps checks every command an agent wants to run before it runs, and blocks it if your
+policy says no. A policy rule only counts if nobody has edited it since it was signed, and if
+its author was allowed to write that kind of rule. So a planted line in a Jira ticket can't
+become policy.
 
-![Aegis demo](docs/demo.gif)
+![Aegis-DevOps blocking an injected kubectl delete](docs/where-it-sits.gif)
+
+### Install in Claude Code
+
+```bash
+pip install aegis-devops && aegis init .aegis
+claude plugin marketplace add moneytool/aegis-devops
+claude plugin install aegis-devops@aegis-devops
+```
+
+Codex, GitHub Copilot (CLI and VS Code) and Cursor: `aegis install codex|copilot|vscode|cursor`
+(see [Coding agents](docs/agents.md)). It only acts in projects with a `.aegis/` policy, and
+only blocks what that policy blocks. It also works as a CI step
+(`aegis check terraform plan.json --exit-style ci`) and as a Python library; see
+[Quick start](#quick-start).
 
 ## What it does
 
@@ -60,19 +75,7 @@ a key everyone has. `aegis init` prints the two commands that replace it with yo
 replace `constraints.example.yaml` with your own `constraints.yaml` (a real file wins over the
 `.example` one when both exist).
 
-### In your coding agent
-
-Aegis can check every shell command Claude Code, Codex, GitHub Copilot (CLI and VS Code) or
-Cursor wants to run, before it runs. In Claude Code:
-
-```bash
-pip install aegis-devops && aegis init .aegis
-claude plugin marketplace add moneytool/aegis-devops
-claude plugin install aegis-devops@aegis-devops
-```
-
-For the others, `aegis install codex|copilot|vscode|cursor`. It only acts in projects with a
-`.aegis/` policy, and only blocks what that policy blocks. See [Coding agents](docs/agents.md).
+![Aegis CLI demo](docs/demo.gif)
 
 ### From a clone
 
@@ -181,11 +184,31 @@ OPA/Gatekeeper evaluates **structured API objects** against **hand-authored rule
 derives **unstructured human constraints** (from Slack, Jira, Git) and applies
 **authority-driven validation** to the agent's intent *before* it reaches the infrastructure.
 
+## How it compares
+
+Other tools stop destructive commands in coding agents, and cover more agents and more kinds of
+command than Aegis does today. The difference is where the rules come from: Aegis treats every
+rule as a claim that has to be checked (was it changed since it was signed, does its cited
+source back it, was its author allowed to write that kind of rule), because in an agent's
+context a rule can arrive from a ticket or a chat message as easily as from you.
+
+| | Aegis-DevOps | [nah](https://github.com/manuelschipper/nah) | [claude-code-safety-net](https://github.com/kenryu42/claude-code-safety-net) | [destructive_command_guard](https://github.com/Dicklesworthstone/destructive_command_guard) |
+|---|---|---|---|---|
+| Guards | Infra commands and plans: kubectl, terraform/tofu, aws/az/gcloud, helm, argocd, flux, git/gh, SQL, pulumi | Git, filesystem, infra CLIs (Terraform, OpenTofu, Pulumi, kubectl, Docker), secrets, publishing | Destructive git and filesystem commands, secret access; cloud CLIs via optional rulebooks | Git, filesystem, databases, Kubernetes, IaC, clouds, Docker and more (50+ packs) |
+| Agents | Claude Code, Codex, Copilot CLI, VS Code, Cursor | Claude Code, Codex, Cursor, Copilot and 10+ more | Claude Code, Codex, Cursor, Copilot CLI, Gemini CLI and 8+ more | Claude Code, Codex, Copilot, Cursor, Gemini CLI and 9+ more |
+| Rules | Signed rules, each citing a source and an author; checked against an authority map (who may assert what) | Built-in deterministic guards; custom guards can only make it stricter | Built-in AST-based protections, configurable presets, community rulebooks | Built-in regex/AST packs, TOML config, custom YAML packs |
+| Rule provenance and authority | Yes: a tampered, forged or unauthorised rule gets no vote | — | — | — |
+| Terraform/Pulumi plan checks | Yes (plan JSON) | Whole-stack destroy commands | Commands via rulebooks | Destroy commands |
+| CI / non-agent use | `aegis check ... --exit-style ci`, Python library | `nah test` | Node.js library mode | `dcg scan` (SARIF) |
+
+"—" means the project's README does not describe it. Checked against each project's README on
+2026-09-27; corrections welcome.
+
 ## Project status / roadmap
 
 The engine (constraint store, interceptor, environment mapping, dry-run handling, rate limits,
 plan-level constraints, and parsers for every tool in "Supported tools") is complete, and
-v0.1.0 is on PyPI as an **alpha**. Real LLM baselines have been run: Claude Sonnet 5 through
+v0.1.3 is on PyPI as an **alpha**. Real LLM baselines have been run: Claude Sonnet 5 through
 the API (cached in `results/llm-external.md`), Haiku through the Claude Code CLI, `gpt-6-astra`
 through the Codex CLI, and a local `mistral:latest`.
 
@@ -202,6 +225,7 @@ of anything you care about.
 
 | Page | Covers |
 | :--- | :--- |
+| [`docs/agents.md`](docs/agents.md) | Claude Code, Codex, Copilot, VS Code and Cursor: install, what gets blocked |
 | [`docs/cli.md`](docs/cli.md) | Exit codes, store health, the Claude Code hook, argv forms, compound commands, dry runs, library usage |
 | [`docs/constraints.md`](docs/constraints.md) | Writing constraints, metadata vocabulary, authority policy, environment mapping |
 | [`docs/configuration.md`](docs/configuration.md) | Configuration/config-dir discovery, signing, source verification, rate limits & ledger |
