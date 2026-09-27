@@ -1,0 +1,9 @@
+{
+  "name": "aegis-devops",
+  "description": "Checks the infrastructure commands Claude Code wants to run (kubectl, terraform/tofu, aws/az/gcloud, helm, argocd, git, SQL) against your signed, authority-checked policy before they run. Only active in projects with a .aegis/ policy directory.",
+  "author": { "name": "Vamshidher Reddy Jannapu Reddy" },
+  "homepage": "https://github.com/moneytool/aegis-devops",
+  "repository": "https://github.com/moneytool/aegis-devops",
+  "license": "Apache-2.0",
+  "keywords": ["security", "devops", "kubernetes", "terraform", "policy", "hooks"]
+}

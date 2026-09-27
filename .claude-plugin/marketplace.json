@@ -1,0 +1,14 @@
+{
+  "name": "aegis-devops",
+  "description": "Aegis-DevOps: a pre-execution policy gate for AI agents' infrastructure commands",
+  "owner": {
+    "name": "Vamshidher Reddy Jannapu Reddy"
+  },
+  "plugins": [
+    {
+      "name": "aegis-devops",
+      "source": "./",
+      "description": "Pre-execution policy gate for AI agents' infrastructure commands"
+    }
+  ]
+}
