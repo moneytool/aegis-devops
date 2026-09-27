@@ -106,6 +106,11 @@ ESCALATE with the note `unknown-target`, so it cannot slip past a `ref/main` rul
 
 ### Claude Code hook
 
+For Claude Code, Codex, Copilot, VS Code and Cursor, use `aegis hook <agent>` and
+`aegis install <agent>` instead; see [Coding agents](agents.md). The script below predates
+them and is kept for existing setups: unlike `aegis hook`, it gates every project it is
+registered in, whether or not the project has a policy.
+
 `examples/claude-code-hook.sh` is a `PreToolUse` hook: it reads the hook JSON from stdin and
 hands `tool_input.command` — the raw string — to `aegis check command --exit-style claude-hook`.
 ALLOW lets the tool call proceed; ESCALATE and BLOCK exit 2 with the reason on stderr (which

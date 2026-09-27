@@ -60,6 +60,20 @@ a key everyone has. `aegis init` prints the two commands that replace it with yo
 replace `constraints.example.yaml` with your own `constraints.yaml` (a real file wins over the
 `.example` one when both exist).
 
+### In your coding agent
+
+Aegis can check every shell command Claude Code, Codex, GitHub Copilot (CLI and VS Code) or
+Cursor wants to run, before it runs. In Claude Code:
+
+```bash
+pip install aegis-devops && aegis init .aegis
+claude plugin marketplace add moneytool/aegis-devops
+claude plugin install aegis-devops@aegis-devops
+```
+
+For the others, `aegis install codex|copilot|vscode|cursor`. It only acts in projects with a
+`.aegis/` policy, and only blocks what that policy blocks. See [Coding agents](docs/agents.md).
+
 ### From a clone
 
 ```bash
