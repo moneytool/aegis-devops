@@ -1,10 +1,15 @@
 {
   "hooks": {
-    "PreToolUse": [
+    "BeforeTool": [
       {
-        "matcher": "Bash",
+        "matcher": "run_shell_command",
         "hooks": [
-          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/hooks/aegis-hook.sh claude", "timeout": 30 }
+          {
+            "name": "aegis-devops",
+            "type": "command",
+            "command": "\"${extensionPath}${/}hooks${/}aegis-hook.sh\" gemini",
+            "timeout": 30000
+          }
         ]
       }
     ]

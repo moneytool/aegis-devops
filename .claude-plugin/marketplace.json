@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "aegis-devops",
-      "source": "./",
+      "source": "./plugins/claude",
       "description": "Pre-execution policy gate for AI agents' infrastructure commands"
     }
   ]

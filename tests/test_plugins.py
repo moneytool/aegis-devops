@@ -1,5 +1,6 @@
-"""Packaging of the Claude Code and Copilot plugins, and the wrapper script
-they both run when ``aegis`` itself may be missing."""
+"""Packaging of the Claude Code plugin, the Copilot plugin and the Gemini CLI
+extension, and the wrapper script all three run when ``aegis`` itself may be
+missing."""
 
 import json
 import os
@@ -13,6 +14,7 @@ from aegis_core import __version__
 ROOT = Path(__file__).resolve().parent.parent
 WRAPPER = ROOT / "hooks" / "aegis-hook.sh"
 COPILOT = ROOT / "plugins" / "copilot"
+CLAUDE = ROOT / "plugins" / "claude"
 
 
 def test_copilot_plugin_manifest():
@@ -30,16 +32,50 @@ def test_copilot_plugin_hook_runs_the_wrapper():
     assert (COPILOT / "aegis-hook.sh").stat().st_mode & 0o111
 
 
-def test_copilot_wrapper_is_a_copy_of_the_claude_one():
+@pytest.mark.parametrize(
+    "copy", ["plugins/copilot/aegis-hook.sh", "plugins/claude/hooks/aegis-hook.sh"]
+)
+def test_plugin_wrappers_are_copies_of_the_root_one(copy):
     # a plugin can only ship files inside its own folder
-    assert (COPILOT / "aegis-hook.sh").read_bytes() == WRAPPER.read_bytes()
+    path = ROOT / copy
+    assert path.read_bytes() == WRAPPER.read_bytes()
+    assert path.stat().st_mode & 0o111
+
+
+def test_claude_marketplace_points_at_the_plugin_folder():
+    market = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text())
+    [entry] = market["plugins"]
+    assert entry["name"] == "aegis-devops"
+    assert entry["source"] == "./plugins/claude"
+    manifest = json.loads((CLAUDE / ".claude-plugin" / "plugin.json").read_text())
+    assert manifest["name"] == entry["name"]
+    # the repo root is the Gemini extension now; no Claude plugin manifest there
+    assert not (ROOT / ".claude-plugin" / "plugin.json").exists()
 
 
 def test_claude_plugin_hook_runs_the_wrapper():
-    hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())
+    hooks = json.loads((CLAUDE / "hooks" / "hooks.json").read_text())
     [entry] = hooks["hooks"]["PreToolUse"]
     assert entry["matcher"] == "Bash"
     assert entry["hooks"][0]["command"] == '"${CLAUDE_PLUGIN_ROOT}"/hooks/aegis-hook.sh claude'
+
+
+def test_gemini_extension_manifest():
+    manifest = json.loads((ROOT / "gemini-extension.json").read_text())
+    assert manifest["name"] == "aegis-devops"
+    assert manifest["version"] == __version__
+
+
+def test_gemini_extension_hook_runs_the_wrapper():
+    # Gemini CLI reads an extension's hooks from hooks/hooks.json at its root;
+    # nothing else may live there (Gemini warns about unknown events)
+    hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())
+    assert set(hooks["hooks"]) == {"BeforeTool"}
+    [entry] = hooks["hooks"]["BeforeTool"]
+    assert entry["matcher"] == "run_shell_command"
+    [h] = entry["hooks"]
+    assert h["command"] == '"${extensionPath}${/}hooks${/}aegis-hook.sh" gemini'
+    assert h["timeout"] == 30000
 
 
 # --- the wrapper with no aegis installed --------------------------------------------

@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while the major version is 0,
 any release may change behaviour.
 
+## [Unreleased]
+
+### Added
+- The repository is a Gemini CLI extension (`gemini-extension.json`, `hooks/hooks.json`):
+  `gemini extensions install https://github.com/moneytool/aegis-devops`.
+
+### Changed
+- The Claude Code plugin moved to `plugins/claude/` (the marketplace entry points there, so
+  `claude plugin marketplace add moneytool/aegis-devops` and the install command are
+  unchanged). Gemini CLI reads an extension's hooks from `hooks/hooks.json` at the root, where
+  the Claude plugin's hooks used to be.
+
 ## [0.1.5] — 2026-09-27
 
 Gemini CLI and OpenCode join the supported agents; all seven are live-tested. No change to how

@@ -11,7 +11,7 @@ that agent's own format: allow, block (with the reason shown to the model), or a
 | GitHub Copilot CLI | plugin, or `aegis install copilot` | `preToolUse` (bash) | yes |
 | VS Code (Copilot agent mode) | `aegis install vscode` | `PreToolUse` (run_in_terminal) | yes |
 | Cursor | `aegis install cursor` | `beforeShellExecution` | yes (`cursor-agent`) |
-| Gemini CLI | `aegis install gemini` | `BeforeTool` (run_shell_command) | yes |
+| Gemini CLI | extension, or `aegis install gemini` | `BeforeTool` (run_shell_command) | yes |
 | OpenCode | `aegis install opencode` | plugin, `tool.execute.before` (bash) | yes |
 
 "Live-tested" means a real session of that agent (Claude Code, Codex, Copilot, Cursor,
@@ -131,6 +131,16 @@ The entry sets `failClosed: true`, so a crashed or timed-out hook blocks the com
 of letting it run. Restart Cursor after installing.
 
 ## Gemini CLI
+
+As an extension (the repository is one):
+
+```bash
+pip install aegis-devops
+gemini extensions install https://github.com/moneytool/aegis-devops
+```
+
+It runs the same wrapper as the Claude Code and Copilot plugins, so without `aegis` installed it
+still allows everything outside opted-in projects. Or as a hook in your settings:
 
 ```bash
 aegis install gemini            # this project: .gemini/settings.json

@@ -1,0 +1,5 @@
+{
+  "name": "aegis-devops",
+  "version": "0.1.5",
+  "description": "Checks the infrastructure commands Gemini CLI wants to run (kubectl, terraform/tofu, aws/az/gcloud, helm, argocd, git, SQL) against your signed, authority-checked policy before they run. Only active in projects with a .aegis/ policy. Needs 'pip install aegis-devops'."
+}
