@@ -5,7 +5,10 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while the major version is 0,
 any release may change behaviour.
 
-## [Unreleased]
+## [0.1.4] — 2026-09-27
+
+A GitHub Copilot plugin, and a fix to the forged-source demo. No change to how a decision is
+made.
 
 ### Added
 - A GitHub Copilot plugin (`plugins/copilot/`, Agent Plugins 1.0):
@@ -157,6 +160,7 @@ See "Project status" in the README and [`docs/dev/PLAN.md`](docs/dev/PLAN.md) §
 rather than real connectors, signing uses a shared secret, and a principal is a signed name
 rather than a bound identity.
 
+[0.1.4]: https://github.com/moneytool/aegis-devops/releases/tag/v0.1.4
 [0.1.3]: https://github.com/moneytool/aegis-devops/releases/tag/v0.1.3
 [0.1.2]: https://github.com/moneytool/aegis-devops/releases/tag/v0.1.2
 [0.1.1]: https://github.com/moneytool/aegis-devops/releases/tag/v0.1.1
