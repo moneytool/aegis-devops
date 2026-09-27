@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "type": "command",
+        "bash": "\"${PLUGIN_ROOT}\"/aegis-hook.sh copilot",
+        "timeoutSec": 30
+      }
+    ]
+  }
+}

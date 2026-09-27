@@ -8,7 +8,7 @@ that agent's own format: allow, block (with the reason shown to the model), or a
 |---|---|---|---|
 | Claude Code | plugin, or `aegis install claude` | `PreToolUse` (Bash) | yes |
 | Codex CLI | `aegis install codex` | `PreToolUse` (Bash) | yes |
-| GitHub Copilot CLI | `aegis install copilot` | `preToolUse` (bash) | yes |
+| GitHub Copilot CLI | plugin, or `aegis install copilot` | `preToolUse` (bash) | yes |
 | VS Code (Copilot agent mode) | `aegis install vscode` | `PreToolUse` (run_in_terminal) | yes |
 | Cursor | `aegis install cursor` | `beforeShellExecution` | yes (`cursor-agent`) |
 
@@ -87,6 +87,15 @@ approve the hook in `/hooks`. Codex records trust against the hook's hash, so re
 `aegis install` after moving the `aegis` binary asks again.
 
 ## GitHub Copilot CLI
+
+As a plugin (from the repository; the same plugin works in VS Code):
+
+```bash
+pip install aegis-devops
+copilot plugin install moneytool/aegis-devops:plugins/copilot
+```
+
+Or as a hook in your config:
 
 ```bash
 aegis install copilot --user    # every project: ~/.copilot/hooks/aegis.json

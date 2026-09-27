@@ -625,3 +625,12 @@ def test_remove_deletes_a_file_that_only_held_our_hook(tmp_path, monkeypatch):
 def test_cursor_allow_is_explicit_when_opted_in(opted_in_project):
     code, out, _err = run("cursor", payload_for("cursor", "ls -la"))
     assert (code, json.loads(out)) == (0, {"permission": "allow"})
+
+
+def test_copilot_reply_carries_the_vscode_shape_too(opted_in_project):
+    # Copilot plugins and .github/hooks are read by both Copilot CLI and VS Code
+    code, out, _err = run("copilot", payload_for("copilot", BLOCK_COMMAND))
+    body = json.loads(out)
+    assert code == 2
+    assert body["permissionDecision"] == "deny"
+    assert body["hookSpecificOutput"]["permissionDecision"] == "deny"

@@ -5,6 +5,22 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while the major version is 0,
 any release may change behaviour.
 
+## [Unreleased]
+
+### Added
+- A GitHub Copilot plugin (`plugins/copilot/`, Agent Plugins 1.0):
+  `copilot plugin install moneytool/aegis-devops:plugins/copilot`. It runs the same wrapper as
+  the Claude Code plugin, so without `aegis` installed it still allows everything outside
+  opted-in projects instead of failing every command.
+
+### Changed
+- Copilot replies now carry VS Code's `hookSpecificOutput` shape as well as Copilot CLI's
+  top-level `permissionDecision`, since both read the same hook files and plugins.
+
+### Fixed
+- `data/sources-forged/` lacked the eight sources added with the default rules, so the
+  `--sources data/sources-forged` demo quarantined 9 of 29 rules and refused to decide.
+
 ## [0.1.3] — 2026-09-27
 
 Aegis can now sit in front of a coding agent's shell commands, and the example policy blocks
