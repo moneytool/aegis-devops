@@ -396,13 +396,15 @@ def merge_config(agent: str, existing: dict, command: str | None) -> dict:
             "matcher": "Bash" if agent == "claude" else "^Bash$",
             "hooks": [{"type": "command", "command": command, "timeout": 30}],
         }
-    elif agent in ("copilot", "vscode"):
+    elif agent == "copilot":
         doc.setdefault("version", 1)
-        # VS Code reads PascalCase events from .github/hooks; Copilot CLI camelCase.
-        if agent == "copilot":
-            event, entry = "preToolUse", {"type": "command", "bash": command, "timeoutSec": 30}
-        else:
-            event, entry = "PreToolUse", {"type": "command", "command": command, "timeout": 30}
+        event, entry = "preToolUse", {"type": "command", "bash": command, "timeoutSec": 30}
+    elif agent == "vscode":
+        # VS Code's native format: PascalCase events and no "version" (a
+        # numeric version marks the Copilot CLI format instead). VS Code
+        # ignores matchers here, so the hook sees every tool call and
+        # parse_request lets the non-terminal ones through.
+        event, entry = "PreToolUse", {"type": "command", "command": command, "timeout": 30}
     else:  # cursor
         doc.setdefault("version", 1)
         event, entry = "beforeShellExecution", {"command": command, "failClosed": True}
