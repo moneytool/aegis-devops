@@ -1,10 +1,10 @@
-"""Baseline C — OPA/Rego (PLAN.md §4).
+"""Baseline C — OPA/Rego (docs/dev/PLAN.md §4).
 
 Like the LLM baseline, this one loads *every* constraint — tampered,
 unauthorized, and forged included — because OPA/Gatekeeper has no concept
 of provenance or authority. It evaluates structured input against
 hand-authored (here, generated) rules, which is exactly the "why not
-OPA/Gatekeeper" distinction PLAN.md §3 draws.
+OPA/Gatekeeper" distinction docs/dev/PLAN.md §3 draws.
 
 Known limitation: constraint ``time_window`` is NOT evaluated by the
 generated Rego (OPA has ``time.now_ns`` but wiring day-of-week + local-tz

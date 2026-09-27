@@ -1,5 +1,5 @@
 """Tests for scripts/benchmark.py and aegis_core.baselines.metrics
-(PLAN.md §4 Week 7-8, REVIEW-4 T0.5 / T2.2)."""
+(docs/dev/PLAN.md §4 Week 7-8, REVIEW-4 T0.5 / T2.2)."""
 
 import json
 import subprocess

@@ -109,7 +109,7 @@ whose transport principal differs from the principal it claims is quarantined as
 
 `FileSourceFetcher` is a v1 stand-in for real Git/Slack/Jira connectors — it re-reads a flat
 JSON file rather than calling out to a commit, a permalink, or a ticket API (see "Open gaps" in
-`../PLAN.md`).
+`dev/PLAN.md`).
 
 `data/sources-forged/` is `data/sources/` with `jira-1001.json`'s `rule_text` edited after the
 fact (still validly signed — signing proves the *file* wasn't touched in transit, not that its

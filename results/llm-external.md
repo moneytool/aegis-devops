@@ -7,7 +7,7 @@ this repo's `aegis_core.baselines.llm` (`LLMVerifier` / `RecordingClient` /
 `claude-sonnet-5` self-check (both the naive prompt and the
 provenance/authority-aware prompt) before this repo's own corpus finished
 its T0.5 rewrite (independent oracle, intent-level holdout split — see
-REVIEW-4.md).
+docs/dev/REVIEW-4.md).
 
 **Provenance**
 - Source repo: `agent-guardrail-bench`, commit `a98a8fa` ("results: Claude

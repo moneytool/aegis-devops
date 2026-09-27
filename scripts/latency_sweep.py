@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Latency-vs-scale sweep (PLAN.md §4, REVIEW-4 T2.3).
+"""Latency-vs-scale sweep (docs/dev/PLAN.md §4, REVIEW-4 T2.3).
 
 For each store size in ``--sizes``, synthesises a constraint store (reusing
 ``scripts/build_corpus.py``'s seed-expansion helpers -- same seeds.yaml,

@@ -1,4 +1,4 @@
-"""Tests for the baseline verifiers (PLAN.md §4 Week 7-8)."""
+"""Tests for the baseline verifiers (docs/dev/PLAN.md §4 Week 7-8)."""
 
 import json
 import subprocess

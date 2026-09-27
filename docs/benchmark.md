@@ -146,7 +146,7 @@ rough $3/M input tokens that's on the order of $50 for both variants, before pro
 than a naive per-call estimate).
 
 **Already measured, on the pre-T0.5 corpus.** Before this corpus's T0.5 rewrite (independent
-oracle, intent-level holdout — see `../REVIEW-4.md`), a sibling harness
+oracle, intent-level holdout — see `dev/REVIEW-4.md`), a sibling harness
 (`agent-guardrail-bench@a98a8fa`) ran both `llm-naive` and `llm-aware` for real against the
 corpus as it stood at commit `a2497e4^`, importing this repo's `aegis_core.baselines.llm`
 directly. Full tables, provenance, and the replay-hit-rate verification are in
@@ -338,4 +338,4 @@ venv/bin/python -m pytest tests/test_adversarial.py -v
 
 Forged constraints are caught only by `verify_source()`, which isn't wired into `intercept()`
 at decision time — see "Source verification" in [`configuration.md`](configuration.md) and
-"Open gaps" in `../PLAN.md`.
+"Open gaps" in `dev/PLAN.md`.

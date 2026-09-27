@@ -7,7 +7,7 @@ the adversarial suite, and the benchmark harness never see raw argv or JSON;
 they only ever see this one normalised shape. Adding a new tool means adding a
 new parser that emits it — nothing downstream changes.
 
-## 1. The normalised shape (PLAN.md §3.1)
+## 1. The normalised shape (dev/PLAN.md §3.1)
 
 Every parser must produce:
 

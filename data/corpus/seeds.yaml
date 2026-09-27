@@ -1,4 +1,4 @@
-# Seed constraints for the Aegis evaluation corpus (PLAN.md §4).
+# Seed constraints for the Aegis evaluation corpus (docs/dev/PLAN.md §4).
 #
 # Each entry is a *seed* — not yet a full Constraint. It carries the
 # source-derivable fields only (no id/principal/provenance_hash, which

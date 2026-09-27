@@ -6,7 +6,7 @@ aegis_core.plan. It exists so the benchmark's ground truth is not the
 system under test.
 
 It is a deliberately naive re-implementation of the constraint-matching
-semantics PLAN.md §4 defines, driven off the *labels* rather than off
+semantics docs/dev/PLAN.md §4 defines, driven off the *labels* rather than off
 Aegis's own hash / authority machinery:
 
   * constraints  — ``constraints.yaml`` read with plain ``yaml.safe_load``
