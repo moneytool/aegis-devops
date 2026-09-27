@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The Week 7-8 benchmark harness (PLAN.md §4): "Baseline vs. Aegis".
+"""The Week 7-8 benchmark harness (docs/dev/PLAN.md §4): "Baseline vs. Aegis".
 
 Runs Aegis and the baselines (LLM self-check, OPA/Rego, signed-bundle OPA)
 over the labeled evaluation corpus and produces a confusion matrix,

@@ -1,5 +1,5 @@
 """Tests for the labeled evaluation corpus built by scripts/build_corpus.py
-(PLAN.md §4) and the reference oracle that labels its intents
+(docs/dev/PLAN.md §4) and the reference oracle that labels its intents
 (scripts/reference_oracle.py, REVIEW-4 T0.5).
 
 These tests exercise the *committed* corpus under data/corpus/ (regenerating

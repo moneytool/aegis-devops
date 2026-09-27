@@ -1,4 +1,4 @@
-"""Baseline B — LLM Self-Check (PLAN.md §4).
+"""Baseline B — LLM Self-Check (docs/dev/PLAN.md §4).
 
 The model is handed the *same* 500 constraints Aegis loads into its store
 (constraint parity) as a YAML blob in the system prompt, and the intent as

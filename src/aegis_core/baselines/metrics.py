@@ -1,4 +1,4 @@
-"""Benchmark metrics (PLAN.md §4): confusion matrix, over-block rate,
+"""Benchmark metrics (docs/dev/PLAN.md §4): confusion matrix, over-block rate,
 coverage, poison susceptibility (per attack kind) and latency percentiles.
 
 The harness consumes ``Decision`` objects duck-typed: only ``verdict``,

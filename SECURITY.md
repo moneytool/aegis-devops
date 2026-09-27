@@ -3,7 +3,7 @@
 ## Status
 
 Aegis is **alpha** (v0.1.x) and is not production-ready. Read the gaps in
-[`PLAN.md` §8](PLAN.md) before deploying it in front of anything you care about.
+[`docs/dev/PLAN.md` §8](docs/dev/PLAN.md) before deploying it in front of anything you care about.
 
 ## Reporting a vulnerability
 
@@ -33,7 +33,7 @@ makes it decide **wrongly** is in scope, in rough order of severity:
 
 ## What does not count
 
-These are documented limitations, not vulnerabilities. They are listed in `PLAN.md` §8 and
+These are documented limitations, not vulnerabilities. They are listed in `docs/dev/PLAN.md` §8 and
 named in the README's "Project status" section:
 
 - The source fetcher reads files on disk rather than connecting to Git, Slack or Jira. Anyone

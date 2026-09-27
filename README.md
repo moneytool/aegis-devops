@@ -175,13 +175,13 @@ v0.1.0 is on PyPI as an **alpha**. Real LLM baselines have been run: Claude Sonn
 the API (cached in `results/llm-external.md`), Haiku through the Claude Code CLI, `gpt-6-astra`
 through the Codex CLI, and a local `mistral:latest`.
 
-What is *not* done is the part the threat model leans on hardest. See `PLAN.md §8`, but in
+What is *not* done is the part the threat model leans on hardest. See `docs/dev/PLAN.md §8`, but in
 short: sources are verified against files on disk rather than real Git/Slack/Jira connectors,
 signing uses a shared secret rather than per-principal public keys, and a `principal` is a
 signed name rather than an identity bound to a commit signature or an SSO group. Until those
 land, Aegis demonstrates that the *decision procedure* is sound; it does not yet prove the
 identities feeding it are. Resource matching is also case-sensitive on names. It is not
-production-ready: read `PLAN.md §8` for the full list of open gaps before putting it in front
+production-ready: read `docs/dev/PLAN.md §8` for the full list of open gaps before putting it in front
 of anything you care about.
 
 ## Documentation
@@ -193,10 +193,10 @@ of anything you care about.
 | [`docs/configuration.md`](docs/configuration.md) | Configuration/config-dir discovery, signing, source verification, rate limits & ledger |
 | [`docs/benchmark.md`](docs/benchmark.md) | Benchmark methodology, full results table, real LLM baselines, agent-harness baselines, corpus, adversarial suite |
 | [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) | Adding a new parser or tool |
-| [`PLAN.md`](PLAN.md) | Design plan and open gaps |
+| [`docs/dev/PLAN.md`](docs/dev/PLAN.md) | Design plan and open gaps |
 | [`SECURITY.md`](SECURITY.md) | Reporting a bypass |
 | [`CHANGELOG.md`](CHANGELOG.md) | Release history |
-| [`REVIEW-4.md`](REVIEW-4.md) | Corpus/oracle rewrite (independent oracle, intent-level holdout) |
+| [`docs/dev/REVIEW-4.md`](docs/dev/REVIEW-4.md) | Corpus/oracle rewrite (independent oracle, intent-level holdout) |
 
 ## Development
 

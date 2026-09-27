@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Builds the Aegis evaluation corpus described in PLAN.md §4.
+"""Builds the Aegis evaluation corpus described in docs/dev/PLAN.md §4.
 
 Expands the hand-derived seeds in ``data/corpus/seeds.yaml`` (themselves
 drawn from the Kubernetes failure-stories index and the OPA Gatekeeper
@@ -7,7 +7,7 @@ policy library) into exactly 500 labeled constraints, using
 ``aegis_core.store`` and ``aegis_core.provenance`` directly so every hash
 is real, not simulated.
 
-Labels (operational definitions, PLAN.md §4):
+Labels (operational definitions, docs/dev/PLAN.md §4):
   * Trusted   (~50%) — valid provenance, principal IS authorized.
   * Untrusted (~25%) — valid provenance, principal is NOT authorized.
   * Malicious (~25%) — provenance fails, split evenly between:

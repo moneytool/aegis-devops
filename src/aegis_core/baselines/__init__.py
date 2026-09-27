@@ -1,5 +1,5 @@
 """Baseline verifiers compared against Aegis in the Week 7-8 benchmark
-(PLAN.md §4).
+(docs/dev/PLAN.md §4).
 
 Every verifier here implements the same tiny protocol (see ``base.py``) so
 ``scripts/benchmark.py`` can run Aegis and the baselines through one loop
