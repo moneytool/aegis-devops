@@ -11,11 +11,11 @@ that agent's own format: allow, block (with the reason shown to the model), or a
 | GitHub Copilot CLI | plugin, or `aegis install copilot` | `preToolUse` (bash) | yes |
 | VS Code (Copilot agent mode) | `aegis install vscode` | `PreToolUse` (run_in_terminal) | yes |
 | Cursor | `aegis install cursor` | `beforeShellExecution` | yes (`cursor-agent`) |
-| Gemini CLI | `aegis install gemini` | `BeforeTool` (run_shell_command) | unit tests only |
-| OpenCode | `aegis install opencode` | plugin, `tool.execute.before` (bash) | plugin tested under Node |
+| Gemini CLI | `aegis install gemini` | `BeforeTool` (run_shell_command) | yes |
+| OpenCode | `aegis install opencode` | plugin, `tool.execute.before` (bash) | yes |
 
-"Live-tested" means a real session of that agent (Claude Code, Codex, Copilot and Cursor
-from their CLIs, VS Code from its chat panel), asked to run `ls -la`,
+"Live-tested" means a real session of that agent (Claude Code, Codex, Copilot, Cursor,
+Gemini CLI and OpenCode from their CLIs, VS Code from its chat panel), asked to run `ls -la`,
 `kubectl get pods` and `kubectl delete nodes --all` in a project with the example policy,
 ran the first two and was stopped on the third with the policy's reason. The unit tests
 (`tests/test_hook.py`) cover every agent's payload and reply format.
@@ -138,7 +138,10 @@ aegis install gemini --user     # every project: ~/.gemini/settings.json
 ```
 
 The hook runs before `run_shell_command`. Gemini CLI fingerprints project hooks and may ask
-you to trust a new one; `/hooks` lists and enables them.
+you to trust a new one; `/hooks` lists and enables them. A block is exit code 2, which Gemini CLI enforces
+but also reports as a failed hook (`Hook(s) [aegis-devops] failed for event BeforeTool`); the
+tool call is still refused with Aegis's reason. Exit 2 is kept deliberately: it cannot be
+misread as "allow".
 
 ## OpenCode
 
