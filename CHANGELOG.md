@@ -5,6 +5,15 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while the major version is 0,
 any release may change behaviour.
 
+## [Unreleased]
+
+### Added
+- `aegis hook gemini` / `aegis install gemini`: a `BeforeTool` hook on Gemini CLI's
+  `run_shell_command`.
+- `aegis hook opencode` / `aegis install opencode`: OpenCode's hooks are JavaScript plugins, so
+  the installer writes a bundled plugin (`tool.execute.before`) that hands each `bash` command
+  to `aegis hook opencode` and throws when Aegis says no.
+
 ## [0.1.4] — 2026-09-27
 
 A GitHub Copilot plugin, and a fix to the forged-source demo. No change to how a decision is

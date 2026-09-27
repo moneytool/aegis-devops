@@ -41,6 +41,7 @@ is a deny.
 from __future__ import annotations
 
 import contextlib
+import importlib.resources
 import io
 import json
 import os
@@ -53,7 +54,7 @@ from pathlib import Path
 from aegis_core import config as config_module
 from aegis_core.shell import _KNOWN_BINARIES, ShellRejected, intents_from_command
 
-AGENTS = ("claude", "codex", "copilot", "cursor", "vscode")
+AGENTS = ("claude", "codex", "copilot", "cursor", "gemini", "opencode", "vscode")
 
 # Binaries whose commands are gated even when the policy is unusable or the
 # command cannot be parsed. terraform/tofu have no argv parser (their plans
@@ -156,6 +157,7 @@ def _project_dir(request: HookRequest) -> Path:
         os.environ.get("CLAUDE_PROJECT_DIR"),
         os.environ.get("COPILOT_PROJECT_DIR"),
         os.environ.get("CURSOR_PROJECT_DIR"),
+        os.environ.get("GEMINI_PROJECT_DIR"),
     ):
         if candidate:
             return Path(candidate)
@@ -255,6 +257,11 @@ def decide(command: str, config_dir: Path, extra_args: list[str] | None = None) 
 # --- replying --------------------------------------------------------------------
 
 
+# Agents whose hooks cannot ask the user: an ESCALATE is a deny there.
+# (Codex treats an unknown decision as an error and runs the command.)
+_NO_ASK = frozenset({"codex", "gemini", "opencode"})
+
+
 def _both_shapes(decision: str, reason: str) -> dict:
     """Copilot CLI reads a top-level ``permissionDecision``; VS Code reads
     ``hookSpecificOutput``. Both read the same ``.github/hooks`` files and
@@ -275,7 +282,7 @@ def render(agent: str, verdict: HookVerdict, *, escalate_as: str = "ask") -> tup
     stderr (Cursor: its JSON on exit 0); ask is each agent's own JSON with
     exit 0."""
     decision = verdict.decision
-    if decision == "ask" and (agent == "codex" or escalate_as == "deny"):
+    if decision == "ask" and (agent in _NO_ASK or escalate_as == "deny"):
         decision = "deny"
     if decision == "allow":
         return _allow(agent)
@@ -291,6 +298,9 @@ def render(agent: str, verdict: HookVerdict, *, escalate_as: str = "ask") -> tup
             "copilot": _both_shapes("deny", reason),
             "vscode": _both_shapes("deny", reason),
             "cursor": {"permission": "deny", "user_message": reason, "agent_message": reason},
+            "gemini": {"decision": "deny", "reason": reason},
+            # the OpenCode plugin throws with stderr; stdout is not read
+            "opencode": {"decision": "deny", "reason": reason},
         }[agent]
         if agent == "cursor":
             # Cursor shows the stdout of an exit-2 hook verbatim as the
@@ -389,6 +399,10 @@ def config_path(agent: str, *, user: bool, project: Path) -> Path:
         ("vscode", False): project / ".github" / "hooks" / "aegis-vscode.json",
         ("cursor", True): home / ".cursor" / "hooks.json",
         ("cursor", False): project / ".cursor" / "hooks.json",
+        ("gemini", True): home / ".gemini" / "settings.json",
+        ("gemini", False): project / ".gemini" / "settings.json",
+        ("opencode", True): home / ".config" / "opencode" / "plugins" / "aegis-devops.js",
+        ("opencode", False): project / ".opencode" / "plugins" / "aegis-devops.js",
     }[(agent, user)]
 
 
@@ -423,6 +437,12 @@ def merge_config(agent: str, existing: dict, command: str | None) -> dict:
             "matcher": "Bash" if agent == "claude" else "^Bash$",
             "hooks": [{"type": "command", "command": command, "timeout": 30}],
         }
+    elif agent == "gemini":
+        event, entry = "BeforeTool", {
+            "matcher": "run_shell_command",
+            "hooks": [{"name": "aegis-devops", "type": "command", "command": command,
+                       "timeout": 30000}],
+        }
     elif agent == "copilot":
         doc.setdefault("version", 1)
         event, entry = "preToolUse", {"type": "command", "bash": command, "timeoutSec": 30}
@@ -454,11 +474,33 @@ _AFTER_INSTALL = {
     "vscode": "Hooks are a Preview feature in VS Code; enable chat hooks in its settings if "
     "they do not run.",
     "cursor": "Restart Cursor to load it.",
+    "gemini": "Restart Gemini CLI; '/hooks' lists it (project hooks may ask to be trusted).",
+    "opencode": "Restart OpenCode to load the plugin.",
 }
+
+
+def _install_opencode_plugin(path: Path, *, remove: bool) -> Path:
+    """OpenCode hooks are JS plugins: write (or delete) our plugin file, with
+    the argv of this aegis filled in."""
+    if remove:
+        if path.exists():
+            path.unlink()
+        return path
+    template = (
+        importlib.resources.files("aegis_core") / "integrations" / "opencode-plugin.js"
+    ).read_text()
+    marker = "const INSTALLED = null"
+    if marker not in template:
+        raise ValueError("opencode plugin template has no INSTALLED marker")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(template.replace(marker, f"const INSTALLED = {json.dumps(_aegis_command())}"))
+    return path
 
 
 def install(agent: str, *, user: bool, project: Path, remove: bool = False) -> Path:
     path = config_path(agent, user=user, project=project)
+    if agent == "opencode":
+        return _install_opencode_plugin(path, remove=remove)
     existing: dict = {}
     if path.exists():
         text = path.read_text()
