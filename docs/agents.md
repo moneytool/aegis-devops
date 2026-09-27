@@ -10,9 +10,10 @@ that agent's own format: allow, block (with the reason shown to the model), or a
 | Codex CLI | `aegis install codex` | `PreToolUse` (Bash) | yes |
 | GitHub Copilot CLI | `aegis install copilot` | `preToolUse` (bash) | yes |
 | VS Code (Copilot agent mode) | `aegis install vscode` | `PreToolUse` (run_in_terminal) | yes |
-| Cursor | `aegis install cursor` | `beforeShellExecution` | unit tests only |
+| Cursor | `aegis install cursor` | `beforeShellExecution` | yes (`cursor-agent`) |
 
-"Live-tested" means a real session of that agent, asked to run `ls -la`,
+"Live-tested" means a real session of that agent (Claude Code, Codex, Copilot and Cursor
+from their CLIs, VS Code from its chat panel), asked to run `ls -la`,
 `kubectl get pods` and `kubectl delete nodes --all` in a project with the example policy,
 ran the first two and was stopped on the third with the policy's reason. The unit tests
 (`tests/test_hook.py`) cover every agent's payload and reply format.

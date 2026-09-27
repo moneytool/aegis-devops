@@ -136,7 +136,8 @@ def run(agent: str, payload: dict, **kwargs) -> tuple[int, str, str]:
 def test_not_opted_in_always_allows(isolated, agent, command):
     code, out, err = run(agent, payload_for(agent, command))
     assert code == 0
-    assert out == ""
+    # Cursor (failClosed) blocks on silence, so it is told "allow" explicitly.
+    assert out == ('{"permission": "allow"}' if agent == "cursor" else "")
     assert err == ""
 
 
@@ -268,13 +269,14 @@ def test_copilot_deny_format(opted_in_project):
 
 
 def test_cursor_deny_format(opted_in_project):
+    # Cursor shows an exit-2 hook's stdout verbatim, so a deny is JSON on exit 0.
     code, out, err = run("cursor", payload_for("cursor", BLOCK_COMMAND))
-    assert code == 2
+    assert code == 0
     body = json.loads(out)
     assert body["permission"] == "deny"
-    assert body["user_message"]
+    assert "no-delete-nodes" in body["user_message"]
     assert body["agent_message"]
-    assert err
+    assert err == ""
 
 
 def test_vscode_deny_format_has_both_shapes(opted_in_project):
@@ -314,8 +316,11 @@ def test_escalate_codex_denies(opted_in_project):
 @pytest.mark.parametrize("agent", hook.AGENTS)
 def test_escalate_as_deny_denies_for_every_agent(opted_in_project, agent):
     code, out, err = run(agent, payload_for(agent, ESCALATE_COMMAND), escalate_as="deny")
-    assert code == 2
-    assert err
+    if agent == "cursor":
+        assert (code, json.loads(out)["permission"]) == (0, "deny")
+    else:
+        assert code == 2
+        assert err
 
 
 # --- 6. broken policy --------------------------------------------------------------
@@ -615,3 +620,8 @@ def test_remove_deletes_a_file_that_only_held_our_hook(tmp_path, monkeypatch):
     assert path.exists()
     hook.install("copilot", user=True, project=tmp_path, remove=True)
     assert not path.exists()
+
+
+def test_cursor_allow_is_explicit_when_opted_in(opted_in_project):
+    code, out, _err = run("cursor", payload_for("cursor", "ls -la"))
+    assert (code, json.loads(out)) == (0, {"permission": "allow"})

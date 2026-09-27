@@ -27,8 +27,12 @@ involve infrastructure tooling -- one of the binaries Aegis has a parser
 for, or terraform/tofu -- and allows the rest: ``ls`` has nothing to do
 with a broken policy. The block message says what is wrong.
 
-**Replies.** A block is always exit code 2 with the reason on stderr,
-which every supported agent treats as "deny". An ESCALATE verdict asks
+**Replies.** A block is exit code 2 with the reason on stderr, which
+Claude Code, Codex, Copilot and VS Code all treat as "deny". Cursor is the
+exception on both sides: it shows an exit-2 hook's stdout verbatim, so a
+block there is its JSON ``{"permission": "deny"}`` on exit 0, and with
+``failClosed`` it blocks a hook that printed nothing, so "allow" is said
+explicitly. An ESCALATE verdict asks
 the user where the agent supports that ("ask"); Codex does not (an
 unknown decision makes it log an error and run the command), so there it
 is a deny.
@@ -69,6 +73,15 @@ _SHELL_TOOL_NAMES = frozenset(
 
 EXIT_ALLOW = 0
 EXIT_BLOCK = 2
+
+
+def _allow(agent: str) -> tuple[int, str, str]:
+    """Silence means "allow" everywhere except Cursor, which with
+    ``failClosed`` treats a hook that printed nothing as a failure and
+    blocks -- so there "allow" has to be said."""
+    if agent == "cursor":
+        return EXIT_ALLOW, json.dumps({"permission": "allow"}), ""
+    return EXIT_ALLOW, "", ""
 
 
 class HookInputError(ValueError):
@@ -244,13 +257,13 @@ def decide(command: str, config_dir: Path, extra_args: list[str] | None = None) 
 
 def render(agent: str, verdict: HookVerdict, *, escalate_as: str = "ask") -> tuple[int, str, str]:
     """``(exit_code, stdout, stderr)`` for this agent. Deny is exit 2 +
-    stderr everywhere (the one contract all five share); ask is each
-    agent's own JSON with exit 0."""
+    stderr (Cursor: its JSON on exit 0); ask is each agent's own JSON with
+    exit 0."""
     decision = verdict.decision
     if decision == "ask" and (agent == "codex" or escalate_as == "deny"):
         decision = "deny"
     if decision == "allow":
-        return EXIT_ALLOW, "", ""
+        return _allow(agent)
     reason = verdict.reason or "aegis: blocked by policy"
     if decision == "deny":
         body = {
@@ -267,6 +280,11 @@ def render(agent: str, verdict: HookVerdict, *, escalate_as: str = "ask") -> tup
                                               "permissionDecisionReason": reason}},
             "cursor": {"permission": "deny", "user_message": reason, "agent_message": reason},
         }[agent]
+        if agent == "cursor":
+            # Cursor shows the stdout of an exit-2 hook verbatim as the
+            # reason; a JSON deny with exit 0 is parsed and shown properly.
+            # (failClosed still turns anything unparseable into a block.)
+            return EXIT_ALLOW, json.dumps(body), ""
         return EXIT_BLOCK, json.dumps(body), reason
     # ask
     body = {
@@ -296,15 +314,15 @@ def run_hook(agent: str, stdin_text: str, *, escalate_as: str = "ask",
             raise HookInputError(f"hook payload is not JSON: {exc}") from None
         request = parse_request(agent, payload)
         if request.command is None or not request.command.strip():
-            return EXIT_ALLOW, "", ""
+            return _allow(agent)
         config_dir = find_opt_in_config(_project_dir(request))
         if config_dir is None:
-            return EXIT_ALLOW, "", ""
+            return _allow(agent)
         verdict = decide(request.command, config_dir, extra_args)
         return render(agent, verdict, escalate_as=escalate_as)
     except Exception as exc:  # noqa: BLE001 - a hook must answer, never crash
         if config_dir is None and not isinstance(exc, HookInputError):
-            return EXIT_ALLOW, "", ""
+            return _allow(agent)
         if config_dir is None:
             # Unreadable payload: only block if Aegis is configured anywhere.
             try:
@@ -312,7 +330,7 @@ def run_hook(agent: str, stdin_text: str, *, escalate_as: str = "ask",
             except Exception:  # noqa: BLE001
                 config_dir = None
             if config_dir is None:
-                return EXIT_ALLOW, "", ""
+                return _allow(agent)
         reason = f"aegis: hook error ({exc.__class__.__name__}: {exc}); blocking to fail closed"
         return render(agent, HookVerdict("deny", reason))
 
