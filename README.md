@@ -21,8 +21,15 @@ claude plugin marketplace add moneytool/aegis-devops
 claude plugin install aegis-devops@aegis-devops
 ```
 
-Codex, GitHub Copilot (CLI and VS Code), Cursor, Gemini CLI and OpenCode:
-`aegis install codex|copilot|vscode|cursor|gemini|opencode`
+### Install in Gemini CLI
+
+```bash
+pip install aegis-devops && aegis init .aegis
+gemini extensions install https://github.com/moneytool/aegis-devops
+```
+
+Codex, GitHub Copilot (CLI and VS Code), Cursor and OpenCode:
+`aegis install codex|copilot|vscode|cursor|opencode`
 (see [Coding agents](docs/agents.md)). It only acts in projects with a `.aegis/` policy, and
 only blocks what that policy blocks. It also works as a CI step
 (`aegis check terraform plan.json --exit-style ci`) and as a Python library; see
