@@ -21,7 +21,8 @@ claude plugin marketplace add moneytool/aegis-devops
 claude plugin install aegis-devops@aegis-devops
 ```
 
-Codex, GitHub Copilot (CLI and VS Code) and Cursor: `aegis install codex|copilot|vscode|cursor`
+Codex, GitHub Copilot (CLI and VS Code), Cursor, Gemini CLI and OpenCode:
+`aegis install codex|copilot|vscode|cursor|gemini|opencode`
 (see [Coding agents](docs/agents.md)). It only acts in projects with a `.aegis/` policy, and
 only blocks what that policy blocks. It also works as a CI step
 (`aegis check terraform plan.json --exit-style ci`) and as a Python library; see
@@ -195,7 +196,7 @@ context a rule can arrive from a ticket or a chat message as easily as from you.
 | | Aegis-DevOps | [nah](https://github.com/manuelschipper/nah) | [claude-code-safety-net](https://github.com/kenryu42/claude-code-safety-net) | [destructive_command_guard](https://github.com/Dicklesworthstone/destructive_command_guard) |
 |---|---|---|---|---|
 | Guards | Infra commands and plans: kubectl, terraform/tofu, aws/az/gcloud, helm, argocd, flux, git/gh, SQL, pulumi | Git, filesystem, infra CLIs (Terraform, OpenTofu, Pulumi, kubectl, Docker), secrets, publishing | Destructive git and filesystem commands, secret access; cloud CLIs via optional rulebooks | Git, filesystem, databases, Kubernetes, IaC, clouds, Docker and more (50+ packs) |
-| Agents | Claude Code, Codex, Copilot CLI, VS Code, Cursor | Claude Code, Codex, Cursor, Copilot and 10+ more | Claude Code, Codex, Cursor, Copilot CLI, Gemini CLI and 8+ more | Claude Code, Codex, Copilot, Cursor, Gemini CLI and 9+ more |
+| Agents | Claude Code, Codex, Copilot CLI, VS Code, Cursor, Gemini CLI, OpenCode | Claude Code, Codex, Cursor, Copilot and 10+ more | Claude Code, Codex, Cursor, Copilot CLI, Gemini CLI and 8+ more | Claude Code, Codex, Copilot, Cursor, Gemini CLI and 9+ more |
 | Rules | Signed rules, each citing a source and an author; checked against an authority map (who may assert what) | Built-in deterministic guards; custom guards can only make it stricter | Built-in AST-based protections, configurable presets, community rulebooks | Built-in regex/AST packs, TOML config, custom YAML packs |
 | Rule provenance and authority | Yes: a tampered, forged or unauthorised rule gets no vote | — | — | — |
 | Terraform/Pulumi plan checks | Yes (plan JSON) | Whole-stack destroy commands | Commands via rulebooks | Destroy commands |

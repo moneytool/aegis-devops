@@ -11,6 +11,8 @@ that agent's own format: allow, block (with the reason shown to the model), or a
 | GitHub Copilot CLI | plugin, or `aegis install copilot` | `preToolUse` (bash) | yes |
 | VS Code (Copilot agent mode) | `aegis install vscode` | `PreToolUse` (run_in_terminal) | yes |
 | Cursor | `aegis install cursor` | `beforeShellExecution` | yes (`cursor-agent`) |
+| Gemini CLI | `aegis install gemini` | `BeforeTool` (run_shell_command) | unit tests only |
+| OpenCode | `aegis install opencode` | plugin, `tool.execute.before` (bash) | plugin tested under Node |
 
 "Live-tested" means a real session of that agent (Claude Code, Codex, Copilot and Cursor
 from their CLIs, VS Code from its chat panel), asked to run `ls -la`,
@@ -51,7 +53,7 @@ a broken policy.
 
 **Escalations.** An ESCALATE verdict asks the user in Claude Code, Copilot, VS Code and Cursor.
 Codex has no "ask" for hooks (it treats an unknown decision as an error and runs the command),
-so there an escalation is a block. `aegis hook <agent> --escalate-as deny` makes every agent
+and Gemini CLI and OpenCode have none either, so there an escalation is a block. `aegis hook <agent> --escalate-as deny` makes every agent
 block instead of asking.
 
 ## Claude Code
@@ -127,6 +129,28 @@ aegis install cursor --user     # every project: ~/.cursor/hooks.json
 
 The entry sets `failClosed: true`, so a crashed or timed-out hook blocks the command instead
 of letting it run. Restart Cursor after installing.
+
+## Gemini CLI
+
+```bash
+aegis install gemini            # this project: .gemini/settings.json
+aegis install gemini --user     # every project: ~/.gemini/settings.json
+```
+
+The hook runs before `run_shell_command`. Gemini CLI fingerprints project hooks and may ask
+you to trust a new one; `/hooks` lists and enables them.
+
+## OpenCode
+
+```bash
+aegis install opencode          # this project: .opencode/plugins/aegis-devops.js
+aegis install opencode --user   # every project: ~/.config/opencode/plugins/aegis-devops.js
+```
+
+OpenCode's hooks are JavaScript plugins, so this writes a small plugin that hands each `bash`
+command to `aegis hook opencode` and throws (which blocks the call and shows the model the
+reason) when Aegis says no. If `aegis` cannot be started, the plugin still refuses
+infrastructure commands in opted-in projects. Restart OpenCode after installing.
 
 ## Removing it
 

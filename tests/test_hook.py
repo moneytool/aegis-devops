@@ -117,7 +117,16 @@ AGENT_PAYLOAD_BUILDERS = {
     "vscode": claude_payload,
     "copilot": copilot_payload,
     "cursor": cursor_payload,
+    # Gemini CLI's BeforeTool payload; its shell tool is run_shell_command
+    "gemini": lambda command, cwd=None: {
+        **claude_payload(command, cwd, tool_name="run_shell_command"),
+        "hook_event_name": "BeforeTool",
+    },
+    # what the bundled OpenCode plugin sends
+    "opencode": lambda command, cwd=None: claude_payload(command, cwd, tool_name="bash"),
 }
+
+JSON_CONFIG_AGENTS = tuple(a for a in hook.AGENTS if a != "opencode")
 
 
 def payload_for(agent: str, command: str | None, cwd: str | None = None) -> dict:
@@ -316,6 +325,9 @@ def test_escalate_codex_denies(opted_in_project):
 @pytest.mark.parametrize("agent", hook.AGENTS)
 def test_escalate_as_deny_denies_for_every_agent(opted_in_project, agent):
     code, out, err = run(agent, payload_for(agent, ESCALATE_COMMAND), escalate_as="deny")
+    if agent in ("gemini", "opencode"):
+        assert code == 2 and err
+        return
     if agent == "cursor":
         assert (code, json.loads(out)["permission"]) == (0, "deny")
     else:
@@ -507,7 +519,7 @@ def test_install_cursor_json_shape(isolated, tmp_path):
     assert "hook cursor" in entries[0]["command"]
 
 
-@pytest.mark.parametrize("agent", hook.AGENTS)
+@pytest.mark.parametrize("agent", JSON_CONFIG_AGENTS)
 def test_install_is_idempotent(isolated, agent, tmp_path):
     hook.install(agent, user=False, project=tmp_path)
     path = hook.install(agent, user=False, project=tmp_path)
@@ -540,7 +552,7 @@ def test_install_preserves_unrelated_settings_and_hooks(isolated, tmp_path):
     assert matchers == {"Write", "Bash"}
 
 
-@pytest.mark.parametrize("agent", hook.AGENTS)
+@pytest.mark.parametrize("agent", JSON_CONFIG_AGENTS)
 def test_install_remove_removes_only_ours(isolated, agent, tmp_path):
     path = hook.config_path(agent, user=False, project=tmp_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -634,3 +646,42 @@ def test_copilot_reply_carries_the_vscode_shape_too(opted_in_project):
     assert code == 2
     assert body["permissionDecision"] == "deny"
     assert body["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+# --- Gemini CLI and OpenCode ------------------------------------------------------
+
+
+def test_gemini_deny_format(opted_in_project):
+    code, out, err = run("gemini", payload_for("gemini", BLOCK_COMMAND))
+    assert code == 2
+    assert json.loads(out)["decision"] == "deny"
+    assert "no-delete-nodes" in err
+
+
+@pytest.mark.parametrize("agent", ["gemini", "opencode"])
+def test_escalate_is_a_deny_where_the_agent_cannot_ask(opted_in_project, agent):
+    code, _out, err = run(agent, payload_for(agent, ESCALATE_COMMAND))
+    assert code == 2
+    assert "ESCALATE" in err
+
+
+def test_install_gemini_json_shape(isolated, tmp_path):
+    path = hook.install("gemini", user=False, project=tmp_path)
+    assert path == tmp_path / ".gemini" / "settings.json"
+    [entry] = json.loads(path.read_text())["hooks"]["BeforeTool"]
+    assert entry["matcher"] == "run_shell_command"
+    assert entry["hooks"][0]["command"].endswith("hook gemini")
+    assert entry["hooks"][0]["timeout"] == 30000  # milliseconds in Gemini CLI
+
+
+def test_install_opencode_writes_the_plugin_with_this_aegis(isolated, tmp_path):
+    path = hook.install("opencode", user=False, project=tmp_path)
+    assert path == tmp_path / ".opencode" / "plugins" / "aegis-devops.js"
+    text = path.read_text()
+    assert "const INSTALLED = null" not in text
+    assert f"const INSTALLED = {json.dumps(hook._aegis_command())}" in text
+    assert "tool.execute.before" in text
+    hook.install("opencode", user=False, project=tmp_path)  # idempotent: rewrites
+    assert path.read_text() == text
+    hook.install("opencode", user=False, project=tmp_path, remove=True)
+    assert not path.exists()
