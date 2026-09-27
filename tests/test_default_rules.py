@@ -108,3 +108,19 @@ def test_plan_json_intents_are_not_caught_by_the_workspace_rule(capsys):
                                   "name": "b", "change": {"actions": ["delete"]}}]}
     [intent] = from_terraform_plan(plan)
     assert not intent.resource.startswith("workspace/")
+
+
+def test_forged_sources_differ_from_sources_in_one_file_only():
+    """data/sources-forged/ is data/sources/ with jira-1001.json edited, for
+    the --sources demo. Any other difference (a source missing after new
+    rules were added) quarantines more rules and breaks the demo."""
+    from pathlib import Path
+
+    real, forged = Path("data/sources"), Path("data/sources-forged")
+    names = {p.name for p in real.iterdir()} | {p.name for p in forged.iterdir()}
+    differing = sorted(
+        n for n in names - {"AEGIS-MANIFEST.sig"}
+        if not (real / n).exists() or not (forged / n).exists()
+        or (real / n).read_bytes() != (forged / n).read_bytes()
+    )
+    assert differing == ["jira-1001.json"]
