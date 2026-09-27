@@ -299,7 +299,7 @@ def test_store_health_of_example_store_is_clean():
         "data/constraints.example.yaml", authority_map=load_authority_map(AUTHORITY_PATH)
     )
     health = store.health
-    assert health.loaded == 21
+    assert health.loaded == 29
     assert health.quarantined == []
     assert health.principals == 3
     assert len(health.constraints_sha256) == 64
@@ -479,7 +479,7 @@ def test_shipped_example_store_loads_signed_with_sources_and_no_warnings():
         source_fetcher=FileSourceFetcher("data/sources", key=key),
         key=key,
     )
-    assert store.health.loaded == 21
+    assert store.health.loaded == 29
     assert store.health.quarantined == []
     assert store.health.warnings == []
 

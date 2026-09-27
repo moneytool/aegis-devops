@@ -1,0 +1,15 @@
+{
+  "provider": "terraform",
+  "resource_pattern": "workspace/*",
+  "actions": [
+    "delete"
+  ],
+  "scope": {},
+  "time_window": null,
+  "effect": "BLOCK",
+  "constraint_class": "deletion",
+  "principal": "admin",
+  "source_ref": "git-6001",
+  "source_timestamp": "2026-09-27T12:00:00+00:00",
+  "rule_text": "Block 'terraform destroy' and 'tofu destroy' (and apply -destroy): tearing down a whole configuration needs a reviewed plan, not an agent's command."
+}

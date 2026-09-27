@@ -49,7 +49,7 @@ BLOCK: kubernetes scale deployment/api-server
   citations: no-scale-prod-peak
   covered: True  latency_ms: 0.20
 PLAN BLOCK: 1 intent(s)
-STORE: loaded=21 quarantined=0 principals=3
+STORE: loaded=29 quarantined=0 principals=3
   warning: using example signing key
 ```
 
@@ -59,6 +59,20 @@ a key everyone has. `aegis init` prints the two commands that replace it with yo
 [Signing](docs/configuration.md#signing). The example rules are a demo, not a starting policy;
 replace `constraints.example.yaml` with your own `constraints.yaml` (a real file wins over the
 `.example` one when both exist).
+
+### In your coding agent
+
+Aegis can check every shell command Claude Code, Codex, GitHub Copilot (CLI and VS Code) or
+Cursor wants to run, before it runs. In Claude Code:
+
+```bash
+pip install aegis-devops && aegis init .aegis
+claude plugin marketplace add moneytool/aegis-devops
+claude plugin install aegis-devops@aegis-devops
+```
+
+For the others, `aegis install codex|copilot|vscode|cursor`. It only acts in projects with a
+`.aegis/` policy, and only blocks what that policy blocks. See [Coding agents](docs/agents.md).
 
 ### From a clone
 

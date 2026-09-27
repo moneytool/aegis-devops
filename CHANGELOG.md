@@ -5,6 +5,30 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while the major version is 0,
 any release may change behaviour.
 
+## [Unreleased]
+
+### Added
+- `aegis hook <agent>`: runs as the pre-tool hook of Claude Code, Codex CLI, GitHub Copilot
+  CLI, VS Code agent mode or Cursor, reads that agent's payload and answers in its format.
+  It acts only in projects that opted in (`.aegis/` here or above, `$AEGIS_CONFIG_DIR`, or
+  `~/.config/aegis`) and blocks only what the policy blocks; an unusable policy or a command
+  that cannot be analysed blocks only infrastructure commands. See `docs/agents.md`.
+- `aegis install <agent> [--user] [--remove]` writes (or removes) that hook in the agent's
+  config without touching its other settings.
+- A Claude Code plugin and marketplace (`.claude-plugin/`, `hooks/`):
+  `claude plugin marketplace add moneytool/aegis-devops`.
+- Default rules in the example policy for infrastructure-breaking commands: `terraform destroy`
+  / `tofu destroy` / `apply -destroy`, `pulumi destroy` and `stack rm`, deleting a Kubernetes
+  namespace, an S3 bucket, an RDS database, a GCP project or an Azure resource group (BLOCK),
+  and deleting an Argo CD application (ESCALATE). The example store now loads 29 rules.
+- `terraform`/`tofu` `destroy` (and `apply -destroy`) are recognised from the command line as
+  a `terraform` `delete` intent on `workspace/<dir>`; other terraform subcommands still need a
+  plan and are not gated from their argv.
+
+### Changed
+- The design notes and review history (`PLAN.md`, `REVIEW*.md`, `FEEDBACK.md`) moved to
+  `docs/dev/`.
+
 ## [0.1.2] — 2026-09-26
 
 No change to how a decision is made. Released so the PyPI page and the Zenodo record carry the

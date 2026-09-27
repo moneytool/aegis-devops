@@ -2718,6 +2718,44 @@ def from_gh(argv: list[str]) -> InfrastructureIntent:
 _MIGRATION_TOOLS = {"alembic", "flyway", "rails", "prisma"}
 
 
+def from_terraform_argv(argv: list[str]) -> list[InfrastructureIntent] | None:
+    """The one terraform/tofu invocation whose argv alone says it is
+    destructive: ``destroy`` (and ``apply -destroy``) removes everything the
+    configuration manages. That is one intent, provider ``terraform``,
+    resource ``workspace/<name>`` (``$TF_WORKSPACE`` is not visible here, so
+    the name is ``current`` unless ``-chdir=`` gives a directory), action
+    ``delete``. Every other subcommand returns ``None``: what ``apply`` or
+    ``import`` would change is only known from a plan, which
+    :func:`from_terraform_plan` checks.
+    """
+    if not argv or _basename(argv[0]) not in ("terraform", "tofu"):
+        raise ValueError(f"not a recognizable terraform/tofu invocation: {argv!r}")
+    tool = "opentofu" if _basename(argv[0]) == "tofu" else "terraform"
+    chdir: str | None = None
+    rest = argv[1:]
+    while rest and rest[0].startswith("-"):
+        if rest[0].startswith("-chdir="):
+            chdir = rest[0].split("=", 1)[1]
+        rest = rest[1:]
+    if not rest:
+        return None
+    sub, args = rest[0], rest[1:]
+    destroy = sub == "destroy" or (
+        sub == "apply" and any(a in ("-destroy", "--destroy") for a in args)
+    )
+    if not destroy:
+        return None
+    return [
+        InfrastructureIntent(
+            resource=f"workspace/{chdir or 'current'}",
+            action="delete",
+            provider="terraform",
+            params={"argv": list(argv), "auto_approve": "-auto-approve" in args},
+            metadata={"tool": tool},
+        )
+    ]
+
+
 def from_argv(argv: list[str]) -> list[InfrastructureIntent]:
     """Dispatches a raw argv to the right parser based on ``basename(argv[0])``,
     always returning a list of InfrastructureIntents (even for the
@@ -2729,6 +2767,9 @@ def from_argv(argv: list[str]) -> list[InfrastructureIntent]:
     if name == "kubectl":
         return from_kubectl_multi(argv)
     if name in ("terraform", "tofu"):
+        destroy = from_terraform_argv(argv)
+        if destroy is not None:
+            return destroy
         raise ValueError(
             f"{name} invocations need a '{name} show -json' plan; "
             "use from_terraform_plan(plan_json) directly instead of from_argv"

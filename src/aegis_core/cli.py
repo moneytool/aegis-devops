@@ -87,6 +87,7 @@ from datetime import UTC, datetime, timedelta
 import yaml
 
 from aegis_core import config as config_module
+from aegis_core import hook as hook_module
 from aegis_core import signing
 from aegis_core.authority import load_authority_map
 from aegis_core.environments import (
@@ -447,6 +448,40 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     keygen_parser.add_argument(
         "--out", default="aegis-signing.key", help="path to write the key to"
+    )
+
+    hook_parser = subparsers.add_parser(
+        "hook",
+        help="Run as a coding agent's pre-tool hook: read its JSON payload on stdin, answer "
+        "in its format (see 'aegis install')",
+    )
+    hook_parser.add_argument("agent", choices=hook_module.AGENTS)
+    hook_parser.add_argument(
+        "--escalate-as",
+        choices=("ask", "deny"),
+        default="ask",
+        help="what an ESCALATE verdict becomes: 'ask' the user (default, where the agent "
+        "supports it; Codex does not, so it always denies) or 'deny'",
+    )
+    hook_parser.add_argument(
+        "check_args",
+        nargs=argparse.REMAINDER,
+        help="extra 'aegis check command' options after --, e.g. -- --fail-closed",
+    )
+
+    install_parser = subparsers.add_parser(
+        "install", help="Register 'aegis hook' in a coding agent's hook config"
+    )
+    install_parser.add_argument("agent", choices=hook_module.AGENTS)
+    scope = install_parser.add_mutually_exclusive_group()
+    scope.add_argument(
+        "--user", action="store_true", help="install for every project (the user's config)"
+    )
+    scope.add_argument(
+        "--project", default=".", help="project directory to install into (default: .)"
+    )
+    install_parser.add_argument(
+        "--remove", action="store_true", help="remove the aegis hook instead"
     )
 
     return parser
@@ -1000,6 +1035,16 @@ def _run(argv: list[str]) -> int:
         return _run_init(args)
     if args.command == "keygen":
         return _run_keygen(args)
+    if args.command == "hook":
+        return hook_module.main_hook(
+            args.agent,
+            escalate_as=args.escalate_as,
+            extra_args=_strip_leading_separator(args.check_args),
+        )
+    if args.command == "install":
+        return hook_module.main_install(
+            args.agent, user=args.user, project=args.project, remove=args.remove
+        )
     if args.command != "check":
         raise UsageError("unknown command")
 

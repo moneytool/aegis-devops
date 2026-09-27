@@ -1,0 +1,15 @@
+{
+  "provider": "aws",
+  "resource_pattern": "rds/*",
+  "actions": [
+    "delete"
+  ],
+  "scope": {},
+  "time_window": null,
+  "effect": "BLOCK",
+  "constraint_class": "deletion",
+  "principal": "admin",
+  "source_ref": "git-6005",
+  "source_timestamp": "2026-09-27T12:00:00+00:00",
+  "rule_text": "Block deleting RDS databases, clusters and snapshots."
+}
