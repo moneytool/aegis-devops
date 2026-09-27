@@ -5,7 +5,10 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while the major version is 0,
 any release may change behaviour.
 
-## [Unreleased]
+## [0.1.5] — 2026-09-27
+
+Gemini CLI and OpenCode join the supported agents; all seven are live-tested. No change to how
+a decision is made.
 
 ### Added
 - `aegis hook gemini` / `aegis install gemini`: a `BeforeTool` hook on Gemini CLI's
@@ -169,6 +172,7 @@ See "Project status" in the README and [`docs/dev/PLAN.md`](docs/dev/PLAN.md) §
 rather than real connectors, signing uses a shared secret, and a principal is a signed name
 rather than a bound identity.
 
+[0.1.5]: https://github.com/moneytool/aegis-devops/releases/tag/v0.1.5
 [0.1.4]: https://github.com/moneytool/aegis-devops/releases/tag/v0.1.4
 [0.1.3]: https://github.com/moneytool/aegis-devops/releases/tag/v0.1.3
 [0.1.2]: https://github.com/moneytool/aegis-devops/releases/tag/v0.1.2
