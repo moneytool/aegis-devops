@@ -44,7 +44,7 @@ from pathlib import Path
 from typing import Any
 
 from aegis_core.intent import InfrastructureIntent
-from aegis_core.parser import from_argv
+from aegis_core.parser import from_argv, from_terraform_argv
 
 
 class ShellRejected(ValueError):
@@ -479,7 +479,8 @@ def unwrap(argv: list[str]) -> tuple[list[str], dict[str, str]]:
 
 # Binaries from_argv can turn into intents. terraform/tofu are deliberately
 # absent: their argv carries no plan, so they surface as an unknown binary
-# (a synthetic shell/exec intent) instead of a ValueError.
+# (a synthetic shell/exec intent) instead of a ValueError -- except
+# ``destroy`` / ``apply -destroy``, which from_terraform_argv recognises.
 _KNOWN_BINARIES = frozenset(
     {
         "kubectl", "aws", "az", "gcloud", "gsutil", "helm", "argocd", "flux", "git", "gh",
@@ -555,7 +556,12 @@ def intents_from_command(command: str) -> list[InfrastructureIntent]:
         if not simple.argv:
             continue
         name = _basename(simple.argv[0])
-        if name in _KNOWN_BINARIES:
+        destroy = (
+            from_terraform_argv(simple.argv) if name in ("terraform", "tofu") else None
+        )
+        if destroy is not None:
+            produced = destroy
+        elif name in _KNOWN_BINARIES:
             produced = from_argv(simple.argv)
         elif simple.in_pipeline:
             continue

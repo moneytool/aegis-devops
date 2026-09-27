@@ -1,0 +1,15 @@
+{
+  "provider": "kubernetes",
+  "resource_pattern": "namespace/*",
+  "actions": [
+    "delete"
+  ],
+  "scope": {},
+  "time_window": null,
+  "effect": "BLOCK",
+  "constraint_class": "deletion",
+  "principal": "admin",
+  "source_ref": "git-6003",
+  "source_timestamp": "2026-09-27T12:00:00+00:00",
+  "rule_text": "Block deleting Kubernetes namespaces: it deletes everything inside them."
+}

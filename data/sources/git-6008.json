@@ -1,0 +1,15 @@
+{
+  "provider": "argocd",
+  "resource_pattern": "app/*",
+  "actions": [
+    "delete"
+  ],
+  "scope": {},
+  "time_window": null,
+  "effect": "ESCALATE",
+  "constraint_class": "deletion",
+  "principal": "admin",
+  "source_ref": "git-6008",
+  "source_timestamp": "2026-09-27T12:00:00+00:00",
+  "rule_text": "Escalate deleting Argo CD applications (with cascade this deletes the deployed resources) for human review."
+}

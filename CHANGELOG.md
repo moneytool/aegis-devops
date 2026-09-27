@@ -17,6 +17,13 @@ any release may change behaviour.
   config without touching its other settings.
 - A Claude Code plugin and marketplace (`.claude-plugin/`, `hooks/`):
   `claude plugin marketplace add moneytool/aegis-devops`.
+- Default rules in the example policy for infrastructure-breaking commands: `terraform destroy`
+  / `tofu destroy` / `apply -destroy`, `pulumi destroy` and `stack rm`, deleting a Kubernetes
+  namespace, an S3 bucket, an RDS database, a GCP project or an Azure resource group (BLOCK),
+  and deleting an Argo CD application (ESCALATE). The example store now loads 29 rules.
+- `terraform`/`tofu` `destroy` (and `apply -destroy`) are recognised from the command line as
+  a `terraform` `delete` intent on `workspace/<dir>`; other terraform subcommands still need a
+  plan and are not gated from their argv.
 
 ### Changed
 - The design notes and review history (`PLAN.md`, `REVIEW*.md`, `FEEDBACK.md`) moved to

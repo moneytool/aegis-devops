@@ -336,3 +336,118 @@ constraints:
   rule_text: Block deleting Helm releases in any production environment (resolved
     from the kube context), whatever the namespace; use the decommission runbook instead.
   provenance_hash: 747653b3b34300a18e4773a0784706fcb0147fb10507e88ce93f2fb5cdcd4df8
+- id: block-terraform-destroy
+  provider: terraform
+  resource_pattern: workspace/*
+  actions:
+  - delete
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  principal: admin
+  source_ref: git-6001
+  source_timestamp: '2026-09-27T12:00:00+00:00'
+  rule_text: 'Block ''terraform destroy'' and ''tofu destroy'' (and apply -destroy):
+    tearing down a whole configuration needs a reviewed plan, not an agent''s command.'
+  provenance_hash: 48bd0974d281efa45af89240c0ffc997a4ee7323d07471bb97a4a047081c4178
+- id: block-pulumi-destroy
+  provider: pulumi
+  resource_pattern: stack/*
+  actions:
+  - delete
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  principal: admin
+  source_ref: git-6002
+  source_timestamp: '2026-09-27T12:00:00+00:00'
+  rule_text: 'Block ''pulumi destroy'' and ''pulumi stack rm'': removing a whole stack
+    needs a human.'
+  provenance_hash: 41428597dfe6a997f0797c3c700db953399d515447b2857552cbf4635d3e1782
+- id: block-namespace-delete
+  provider: kubernetes
+  resource_pattern: namespace/*
+  actions:
+  - delete
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  principal: admin
+  source_ref: git-6003
+  source_timestamp: '2026-09-27T12:00:00+00:00'
+  rule_text: 'Block deleting Kubernetes namespaces: it deletes everything inside them.'
+  provenance_hash: 44ee6f6790b2e4996f1fa03bc8d79782e876d1aae27dca7630b81a88206de572
+- id: block-s3-bucket-delete
+  provider: aws
+  resource_pattern: s3/bucket/*
+  actions:
+  - delete
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  principal: admin
+  source_ref: git-6004
+  source_timestamp: '2026-09-27T12:00:00+00:00'
+  rule_text: Block deleting S3 buckets (aws s3 rb, s3api delete-bucket).
+  provenance_hash: 27e8b1723128c747f4780969cf2b44f639235bc1e83e4188686618cb23d42125
+- id: block-rds-delete
+  provider: aws
+  resource_pattern: rds/*
+  actions:
+  - delete
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  principal: admin
+  source_ref: git-6005
+  source_timestamp: '2026-09-27T12:00:00+00:00'
+  rule_text: Block deleting RDS databases, clusters and snapshots.
+  provenance_hash: e44c7617a771c4f53260e751bf23b1bf6c1df648e1b0aa6a6629a2a344b60b0d
+- id: block-gcp-project-delete
+  provider: gcp
+  resource_pattern: project/*
+  actions:
+  - delete
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  principal: admin
+  source_ref: git-6006
+  source_timestamp: '2026-09-27T12:00:00+00:00'
+  rule_text: Block deleting GCP projects.
+  provenance_hash: 7e6fe5ce1001c1c8849af9bbbc66ce4c9f4c2303772f77dcbf9fef0d58f2b4a0
+- id: block-azure-resource-group-delete
+  provider: azure
+  resource_pattern: resource/group/*
+  actions:
+  - delete
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: deletion
+  principal: admin
+  source_ref: git-6007
+  source_timestamp: '2026-09-27T12:00:00+00:00'
+  rule_text: 'Block deleting Azure resource groups: it deletes every resource in them.'
+  provenance_hash: 733126d10190f8cdcde09cbbcd6a6aef719b97e9dc8bd070cf3b84aa381029b9
+- id: escalate-argocd-app-delete
+  provider: argocd
+  resource_pattern: app/*
+  actions:
+  - delete
+  scope: {}
+  time_window: null
+  effect: ESCALATE
+  constraint_class: deletion
+  principal: admin
+  source_ref: git-6008
+  source_timestamp: '2026-09-27T12:00:00+00:00'
+  rule_text: Escalate deleting Argo CD applications (with cascade this deletes the
+    deployed resources) for human review.
+  provenance_hash: dc24eb69ac5c8b66279284b6df19095e3f0096303f3ef18da712a53e5e339aeb
