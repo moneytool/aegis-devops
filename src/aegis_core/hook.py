@@ -255,6 +255,21 @@ def decide(command: str, config_dir: Path, extra_args: list[str] | None = None) 
 # --- replying --------------------------------------------------------------------
 
 
+def _both_shapes(decision: str, reason: str) -> dict:
+    """Copilot CLI reads a top-level ``permissionDecision``; VS Code reads
+    ``hookSpecificOutput``. Both read the same ``.github/hooks`` files and
+    the same Copilot plugins, so their reply carries both."""
+    return {
+        "permissionDecision": decision,
+        "permissionDecisionReason": reason,
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": decision,
+            "permissionDecisionReason": reason,
+        },
+    }
+
+
 def render(agent: str, verdict: HookVerdict, *, escalate_as: str = "ask") -> tuple[int, str, str]:
     """``(exit_code, stdout, stderr)`` for this agent. Deny is exit 2 +
     stderr (Cursor: its JSON on exit 0); ask is each agent's own JSON with
@@ -273,11 +288,8 @@ def render(agent: str, verdict: HookVerdict, *, escalate_as: str = "ask") -> tup
             "codex": {"hookSpecificOutput": {
                 "hookEventName": "PreToolUse", "permissionDecision": "deny",
                 "permissionDecisionReason": reason}},
-            "copilot": {"permissionDecision": "deny", "permissionDecisionReason": reason},
-            "vscode": {"permissionDecision": "deny", "permissionDecisionReason": reason,
-                       "hookSpecificOutput": {"hookEventName": "PreToolUse",
-                                              "permissionDecision": "deny",
-                                              "permissionDecisionReason": reason}},
+            "copilot": _both_shapes("deny", reason),
+            "vscode": _both_shapes("deny", reason),
             "cursor": {"permission": "deny", "user_message": reason, "agent_message": reason},
         }[agent]
         if agent == "cursor":
@@ -291,11 +303,8 @@ def render(agent: str, verdict: HookVerdict, *, escalate_as: str = "ask") -> tup
         "claude": {"hookSpecificOutput": {
             "hookEventName": "PreToolUse", "permissionDecision": "ask",
             "permissionDecisionReason": reason}},
-        "copilot": {"permissionDecision": "ask", "permissionDecisionReason": reason},
-        "vscode": {"permissionDecision": "ask", "permissionDecisionReason": reason,
-                   "hookSpecificOutput": {"hookEventName": "PreToolUse",
-                                          "permissionDecision": "ask",
-                                          "permissionDecisionReason": reason}},
+        "copilot": _both_shapes("ask", reason),
+        "vscode": _both_shapes("ask", reason),
         "cursor": {"permission": "ask", "user_message": reason, "agent_message": reason},
     }[agent]
     return EXIT_ALLOW, json.dumps(body), ""
