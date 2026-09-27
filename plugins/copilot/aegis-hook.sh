@@ -30,7 +30,7 @@ fi
 opted_in() {
   [ -n "${AEGIS_CONFIG_DIR:-}" ] && return 0
   [ -d "$HOME/.config/aegis" ] && return 0
-  d=${CLAUDE_PROJECT_DIR:-${COPILOT_PROJECT_DIR:-$PWD}}
+  d=${CLAUDE_PROJECT_DIR:-${COPILOT_PROJECT_DIR:-${GEMINI_PROJECT_DIR:-$PWD}}}
   while [ -n "$d" ]; do
     [ -d "$d/.aegis" ] && return 0
     [ "$d" = "/" ] && break
