@@ -10,7 +10,7 @@ abstract: >-
   against OPA and LLM self-checks.
 type: software
 license: Apache-2.0
-version: 0.1.6
+version: 0.1.7
 date-released: "2026-09-27"
 doi: "10.5281/zenodo.22950337"
 identifiers:

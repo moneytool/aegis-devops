@@ -17,7 +17,10 @@ any release may change behaviour.
   unchanged). Gemini CLI reads an extension's hooks from `hooks/hooks.json` at the root, where
   the Claude plugin's hooks used to be.
 
-## [Unreleased]
+## [0.1.7] — 2026-09-27
+
+Git sources: a rule can cite a signed commit, and its principal is the commit's verified
+signer. Opt-in; nothing changes unless a rule cites `git:`.
 
 ### Added
 - **Git sources with signature-derived principals** (v0.2 step 1,
@@ -28,8 +31,11 @@ any release may change behaviour.
   `unknown-commit`, `unsigned-source`, `unknown-signer`, `commit-does-not-touch-source`,
   `superseded`, `stale-source`, `invalid-git-source`. New options `--repos`, `--signers`,
   `--max-source-age`. Git runs with a from-scratch environment and overrides for every
-  signature setting, so a repository's own config cannot choose the trusted keys. File sources
-  are unchanged.
+  signature setting, so a repository's own config cannot choose the trusted keys. Shallow and
+  grafted clones are refused (they change which parents Git reports), the commit-graph cache is
+  off, and "did this commit add the rule" is read from the signed commit object. A `git:`
+  citation with no Git configuration is always rejected (`unknown-repo`). File sources are
+  unchanged.
 
 ## [0.1.6] — 2026-09-27
 
@@ -226,6 +232,7 @@ See "Project status" in the README and [`docs/dev/PLAN.md`](docs/dev/PLAN.md) §
 rather than real connectors, signing uses a shared secret, and a principal is a signed name
 rather than a bound identity.
 
+[0.1.7]: https://github.com/moneytool/aegis-devops/releases/tag/v0.1.7
 [0.1.6]: https://github.com/moneytool/aegis-devops/releases/tag/v0.1.6
 [0.1.5]: https://github.com/moneytool/aegis-devops/releases/tag/v0.1.5
 [0.1.4]: https://github.com/moneytool/aegis-devops/releases/tag/v0.1.4
