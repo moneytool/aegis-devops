@@ -151,3 +151,14 @@ key-to-principal mapping is itself a policy file that needs the same integrity g
 everything else.
 
 Design for (1), draft for review (2026-09-27): [`DESIGN-v0.2-git-sources.md`](DESIGN-v0.2-git-sources.md).
+
+### 10. Next after v0.2: server-side enforcement (proposed 2026-09-28)
+Client-side hooks stop only what passes through them. Proposal: compile the verified policy to
+each control plane's native enforcement — AWS SCPs first, then Kubernetes
+ValidatingAdmissionPolicy — deny-by-default for any identity not listed as trusted, with the
+ways an agent could act as another identity closed; an admission webhook later for what
+compiled policy cannot express. Design (revision 2,
+after a three-model council review): [`DESIGN-v0.3-server-side.md`](DESIGN-v0.3-server-side.md);
+council reviews in [`council-v0.3/`](council-v0.3/). The review also found two bugs in the
+current engine (unresolved-condition ESCALATEs from unverified rules; kubectl normal forms for
+drain/exec/plural kinds), scheduled for v0.2.1.
