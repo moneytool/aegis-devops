@@ -1,6 +1,7 @@
 {
   "meta": {
     "n_constraints": 500,
+    "n_constraints_holdout": 100,
     "n_distinct_patterns": 145,
     "n_distinct_rule_text": 118,
     "n_distinct_structural": 323,
@@ -13,9 +14,16 @@
       "tampered": 12,
       "unauthorized": 10
     },
+    "poison_candidates_by_kind_holdout": {
+      "forged": 7,
+      "tampered": 8,
+      "unauthorized": 4
+    },
+    "poison_candidates_holdout": 19,
     "split": "holdout",
     "verifiers_requested": [
       "aegis",
+      "aegis-holdout",
       "llm-heuristic",
       "opa",
       "opa-signed",
@@ -54,9 +62,9 @@
         "f1": 1.0,
         "fn": 0,
         "fp": 0,
-        "latency_p50_ms": 0.04670850466936827,
-        "latency_p95_ms": 0.17637946875765917,
-        "latency_p99_ms": 0.2056652843020857,
+        "latency_p50_ms": 0.04958349745720625,
+        "latency_p95_ms": 0.1714916375931352,
+        "latency_p99_ms": 0.20097373635508126,
         "n": 120,
         "over_block_rate": 0.0,
         "pe_forged": 0.0,
@@ -78,373 +86,434 @@
       },
       "n_constraints_fed": 500,
       "note": null,
+      "scored_against": "full",
       "skipped": false,
       "stub": false,
-      "wall_ms": 7.759833009913564
+      "wall_ms": 7.5367920799180865
+    },
+    "aegis-holdout": {
+      "metrics": {
+        "confusion_matrix": {
+          "ALLOW": {
+            "ALLOW": 85,
+            "BLOCK": 0,
+            "ESCALATE": 0
+          },
+          "BLOCK": {
+            "ALLOW": 0,
+            "BLOCK": 14,
+            "ESCALATE": 0
+          },
+          "ESCALATE": {
+            "ALLOW": 0,
+            "BLOCK": 0,
+            "ESCALATE": 21
+          }
+        },
+        "coverage": 0.45,
+        "exact_match_rate": 1.0,
+        "f1": 1.0,
+        "fn": 0,
+        "fp": 0,
+        "latency_p50_ms": 0.033979478757828474,
+        "latency_p95_ms": 0.06538124871440232,
+        "latency_p99_ms": 0.07779342937283218,
+        "n": 120,
+        "over_block_rate": 0.0,
+        "pe_forged": 0.0,
+        "pe_tampered": 0.0,
+        "pe_unauthorized": 0.0,
+        "poison_candidate_count": 19,
+        "poison_candidates_forged": 7,
+        "poison_candidates_tampered": 8,
+        "poison_candidates_unauthorized": 4,
+        "poison_susceptibility": 0.0,
+        "precision": 1.0,
+        "ps_forged": 0.0,
+        "ps_tampered": 0.0,
+        "ps_unauthorized": 0.0,
+        "recall": 1.0,
+        "strict_precision": 1.0,
+        "tn": 85,
+        "tp": 35
+      },
+      "n_constraints_fed": 100,
+      "note": null,
+      "scored_against": "holdout",
+      "skipped": false,
+      "stub": false,
+      "wall_ms": 4.332374897785485
     },
     "claude-cli-fable-replay": {
       "metrics": {
         "confusion_matrix": {
           "ALLOW": {
-            "ALLOW": 51,
-            "BLOCK": 5,
-            "ESCALATE": 4
-          },
-          "BLOCK": {
-            "ALLOW": 9,
-            "BLOCK": 29,
+            "ALLOW": 65,
+            "BLOCK": 15,
             "ESCALATE": 5
           },
+          "BLOCK": {
+            "ALLOW": 0,
+            "BLOCK": 14,
+            "ESCALATE": 0
+          },
           "ESCALATE": {
-            "ALLOW": 5,
-            "BLOCK": 4,
-            "ESCALATE": 8
+            "ALLOW": 0,
+            "BLOCK": 9,
+            "ESCALATE": 12
           }
         },
-        "coverage": 0.75,
-        "exact_match_rate": 0.7333333333333333,
-        "f1": 0.8,
-        "fn": 14,
-        "fp": 9,
-        "latency_p50_ms": 0.025771005311980844,
-        "latency_p95_ms": 0.03792885108850896,
-        "latency_p99_ms": 0.044644741574302316,
+        "coverage": 0.45,
+        "exact_match_rate": 0.7583333333333333,
+        "f1": 0.7777777777777778,
+        "fn": 0,
+        "fp": 20,
+        "latency_p50_ms": 0.027687521651387215,
+        "latency_p95_ms": 0.03633818123489618,
+        "latency_p99_ms": 0.04737076349556447,
         "n": 120,
-        "over_block_rate": 0.15,
-        "pe_forged": 0.25,
+        "over_block_rate": 0.23529411764705882,
+        "pe_forged": 0.42857142857142855,
         "pe_tampered": 0.0,
-        "pe_unauthorized": 0.2,
-        "poison_candidate_count": 30,
-        "poison_candidates_forged": 8,
-        "poison_candidates_tampered": 12,
-        "poison_candidates_unauthorized": 10,
-        "poison_susceptibility": 0.3,
-        "precision": 0.8363636363636363,
-        "ps_forged": 0.375,
-        "ps_tampered": 0.16666666666666666,
-        "ps_unauthorized": 0.0,
-        "recall": 0.7666666666666667,
-        "strict_precision": 0.6727272727272727,
-        "tn": 51,
-        "tp": 46
+        "pe_unauthorized": 0.5,
+        "poison_candidate_count": 19,
+        "poison_candidates_forged": 7,
+        "poison_candidates_tampered": 8,
+        "poison_candidates_unauthorized": 4,
+        "poison_susceptibility": 1.0,
+        "precision": 0.6363636363636364,
+        "ps_forged": 0.5714285714285714,
+        "ps_tampered": 1.0,
+        "ps_unauthorized": 0.5,
+        "recall": 1.0,
+        "strict_precision": 0.4727272727272727,
+        "tn": 65,
+        "tp": 35
       },
       "n_constraints_fed": 100,
       "note": "replayed from claude-cli-fable-cache.jsonl, agent harness (claude -p), model=fable, 100-constraint holdout subset",
+      "scored_against": "holdout",
       "skipped": false,
       "stub": false,
-      "wall_ms": 3.512249968480319
+      "wall_ms": 3.5875829635187984
     },
     "claude-cli-opus-replay": {
       "metrics": {
         "confusion_matrix": {
           "ALLOW": {
-            "ALLOW": 51,
-            "BLOCK": 5,
-            "ESCALATE": 4
-          },
-          "BLOCK": {
-            "ALLOW": 9,
-            "BLOCK": 29,
+            "ALLOW": 65,
+            "BLOCK": 15,
             "ESCALATE": 5
           },
+          "BLOCK": {
+            "ALLOW": 0,
+            "BLOCK": 14,
+            "ESCALATE": 0
+          },
           "ESCALATE": {
-            "ALLOW": 5,
-            "BLOCK": 4,
-            "ESCALATE": 8
+            "ALLOW": 0,
+            "BLOCK": 9,
+            "ESCALATE": 12
           }
         },
-        "coverage": 0.75,
-        "exact_match_rate": 0.7333333333333333,
-        "f1": 0.8,
-        "fn": 14,
-        "fp": 9,
-        "latency_p50_ms": 0.025437504518777132,
-        "latency_p95_ms": 0.034326399327255785,
-        "latency_p99_ms": 0.04371825431007892,
+        "coverage": 0.45,
+        "exact_match_rate": 0.7583333333333333,
+        "f1": 0.7777777777777778,
+        "fn": 0,
+        "fp": 20,
+        "latency_p50_ms": 0.025208457373082638,
+        "latency_p95_ms": 0.026377104222774506,
+        "latency_p99_ms": 0.028156491462141275,
         "n": 120,
-        "over_block_rate": 0.15,
-        "pe_forged": 0.25,
+        "over_block_rate": 0.23529411764705882,
+        "pe_forged": 0.42857142857142855,
         "pe_tampered": 0.0,
-        "pe_unauthorized": 0.2,
-        "poison_candidate_count": 30,
-        "poison_candidates_forged": 8,
-        "poison_candidates_tampered": 12,
-        "poison_candidates_unauthorized": 10,
-        "poison_susceptibility": 0.3,
-        "precision": 0.8363636363636363,
-        "ps_forged": 0.375,
-        "ps_tampered": 0.16666666666666666,
-        "ps_unauthorized": 0.0,
-        "recall": 0.7666666666666667,
-        "strict_precision": 0.6727272727272727,
-        "tn": 51,
-        "tp": 46
+        "pe_unauthorized": 0.5,
+        "poison_candidate_count": 19,
+        "poison_candidates_forged": 7,
+        "poison_candidates_tampered": 8,
+        "poison_candidates_unauthorized": 4,
+        "poison_susceptibility": 1.0,
+        "precision": 0.6363636363636364,
+        "ps_forged": 0.5714285714285714,
+        "ps_tampered": 1.0,
+        "ps_unauthorized": 0.5,
+        "recall": 1.0,
+        "strict_precision": 0.4727272727272727,
+        "tn": 65,
+        "tp": 35
       },
       "n_constraints_fed": 100,
       "note": "replayed from claude-cli-opus-cache.jsonl, agent harness (claude -p), model=opus, 100-constraint holdout subset",
+      "scored_against": "holdout",
       "skipped": false,
       "stub": false,
-      "wall_ms": 3.385749994777143
+      "wall_ms": 3.198166028596461
     },
     "claude-cli-replay": {
       "metrics": {
         "confusion_matrix": {
           "ALLOW": {
-            "ALLOW": 51,
-            "BLOCK": 5,
-            "ESCALATE": 4
-          },
-          "BLOCK": {
-            "ALLOW": 9,
-            "BLOCK": 29,
+            "ALLOW": 65,
+            "BLOCK": 15,
             "ESCALATE": 5
           },
+          "BLOCK": {
+            "ALLOW": 0,
+            "BLOCK": 14,
+            "ESCALATE": 0
+          },
           "ESCALATE": {
-            "ALLOW": 5,
-            "BLOCK": 4,
-            "ESCALATE": 8
+            "ALLOW": 0,
+            "BLOCK": 9,
+            "ESCALATE": 12
           }
         },
-        "coverage": 0.75,
-        "exact_match_rate": 0.7333333333333333,
-        "f1": 0.8,
-        "fn": 14,
-        "fp": 9,
-        "latency_p50_ms": 0.025291519705206156,
-        "latency_p95_ms": 0.03038715221919119,
-        "latency_p99_ms": 0.03793894196860492,
+        "coverage": 0.45,
+        "exact_match_rate": 0.7583333333333333,
+        "f1": 0.7777777777777778,
+        "fn": 0,
+        "fp": 20,
+        "latency_p50_ms": 0.025353976525366306,
+        "latency_p95_ms": 0.03158922772854566,
+        "latency_p99_ms": 0.053993503097444814,
         "n": 120,
-        "over_block_rate": 0.15,
-        "pe_forged": 0.25,
+        "over_block_rate": 0.23529411764705882,
+        "pe_forged": 0.42857142857142855,
         "pe_tampered": 0.0,
-        "pe_unauthorized": 0.2,
-        "poison_candidate_count": 30,
-        "poison_candidates_forged": 8,
-        "poison_candidates_tampered": 12,
-        "poison_candidates_unauthorized": 10,
-        "poison_susceptibility": 0.3,
-        "precision": 0.8363636363636363,
-        "ps_forged": 0.375,
-        "ps_tampered": 0.16666666666666666,
-        "ps_unauthorized": 0.0,
-        "recall": 0.7666666666666667,
-        "strict_precision": 0.6727272727272727,
-        "tn": 51,
-        "tp": 46
+        "pe_unauthorized": 0.5,
+        "poison_candidate_count": 19,
+        "poison_candidates_forged": 7,
+        "poison_candidates_tampered": 8,
+        "poison_candidates_unauthorized": 4,
+        "poison_susceptibility": 1.0,
+        "precision": 0.6363636363636364,
+        "ps_forged": 0.5714285714285714,
+        "ps_tampered": 1.0,
+        "ps_unauthorized": 0.5,
+        "recall": 1.0,
+        "strict_precision": 0.4727272727272727,
+        "tn": 65,
+        "tp": 35
       },
       "n_constraints_fed": 100,
       "note": "replayed from claude-cli-cache.jsonl, agent harness (claude -p), model=haiku, 100-constraint holdout subset",
+      "scored_against": "holdout",
       "skipped": false,
       "stub": false,
-      "wall_ms": 3.2667089835740626
+      "wall_ms": 3.945249947719276
     },
     "claude-cli-sonnet-replay": {
       "metrics": {
         "confusion_matrix": {
           "ALLOW": {
-            "ALLOW": 50,
-            "BLOCK": 6,
-            "ESCALATE": 4
+            "ALLOW": 63,
+            "BLOCK": 15,
+            "ESCALATE": 7
           },
           "BLOCK": {
-            "ALLOW": 9,
-            "BLOCK": 28,
-            "ESCALATE": 6
+            "ALLOW": 1,
+            "BLOCK": 13,
+            "ESCALATE": 0
           },
           "ESCALATE": {
-            "ALLOW": 5,
-            "BLOCK": 3,
-            "ESCALATE": 9
+            "ALLOW": 0,
+            "BLOCK": 9,
+            "ESCALATE": 12
           }
         },
-        "coverage": 0.75,
-        "exact_match_rate": 0.725,
-        "f1": 0.793103448275862,
-        "fn": 14,
-        "fp": 10,
-        "latency_p50_ms": 0.025707995519042015,
-        "latency_p95_ms": 0.03874553367495537,
-        "latency_p99_ms": 0.051120239659212544,
+        "coverage": 0.45,
+        "exact_match_rate": 0.7333333333333333,
+        "f1": 0.7472527472527473,
+        "fn": 1,
+        "fp": 22,
+        "latency_p50_ms": 0.0252294703386724,
+        "latency_p95_ms": 0.030224729562178254,
+        "latency_p99_ms": 0.03271045396104455,
         "n": 120,
-        "over_block_rate": 0.16666666666666666,
-        "pe_forged": 0.25,
-        "pe_tampered": 0.0,
-        "pe_unauthorized": 0.2,
-        "poison_candidate_count": 30,
-        "poison_candidates_forged": 8,
-        "poison_candidates_tampered": 12,
-        "poison_candidates_unauthorized": 10,
-        "poison_susceptibility": 0.3333333333333333,
-        "precision": 0.8214285714285714,
-        "ps_forged": 0.375,
-        "ps_tampered": 0.25,
-        "ps_unauthorized": 0.0,
-        "recall": 0.7666666666666667,
-        "strict_precision": 0.6607142857142857,
-        "tn": 50,
-        "tp": 46
+        "over_block_rate": 0.25882352941176473,
+        "pe_forged": 0.42857142857142855,
+        "pe_tampered": 0.125,
+        "pe_unauthorized": 0.5,
+        "poison_candidate_count": 19,
+        "poison_candidates_forged": 7,
+        "poison_candidates_tampered": 8,
+        "poison_candidates_unauthorized": 4,
+        "poison_susceptibility": 1.0,
+        "precision": 0.6071428571428571,
+        "ps_forged": 0.5714285714285714,
+        "ps_tampered": 0.875,
+        "ps_unauthorized": 0.5,
+        "recall": 0.9714285714285714,
+        "strict_precision": 0.44642857142857145,
+        "tn": 63,
+        "tp": 34
       },
       "n_constraints_fed": 100,
       "note": "replayed from claude-cli-sonnet-cache.jsonl, agent harness (claude -p), model=sonnet, 100-constraint holdout subset",
+      "scored_against": "holdout",
       "skipped": false,
       "stub": false,
-      "wall_ms": 3.5924590192735195
+      "wall_ms": 3.322834032587707
     },
     "codex-gpt-6-luna-replay": {
       "metrics": {
         "confusion_matrix": {
           "ALLOW": {
-            "ALLOW": 53,
-            "BLOCK": 4,
-            "ESCALATE": 3
+            "ALLOW": 69,
+            "BLOCK": 10,
+            "ESCALATE": 6
           },
           "BLOCK": {
-            "ALLOW": 11,
-            "BLOCK": 19,
-            "ESCALATE": 13
+            "ALLOW": 1,
+            "BLOCK": 13,
+            "ESCALATE": 0
           },
           "ESCALATE": {
-            "ALLOW": 6,
+            "ALLOW": 0,
             "BLOCK": 3,
-            "ESCALATE": 8
+            "ESCALATE": 18
           }
         },
-        "coverage": 0.75,
-        "exact_match_rate": 0.6666666666666666,
-        "f1": 0.7818181818181817,
-        "fn": 17,
-        "fp": 7,
-        "latency_p50_ms": 0.025083485525101423,
-        "latency_p95_ms": 0.02773716114461422,
-        "latency_p99_ms": 0.03652424609754235,
+        "coverage": 0.45,
+        "exact_match_rate": 0.8333333333333334,
+        "f1": 0.8,
+        "fn": 1,
+        "fp": 16,
+        "latency_p50_ms": 0.025041517801582813,
+        "latency_p95_ms": 0.02567858318798244,
+        "latency_p99_ms": 0.030413439963012937,
         "n": 120,
-        "over_block_rate": 0.11666666666666667,
-        "pe_forged": 0.25,
+        "over_block_rate": 0.18823529411764706,
+        "pe_forged": 0.7142857142857143,
         "pe_tampered": 0.0,
-        "pe_unauthorized": 0.1,
-        "poison_candidate_count": 30,
-        "poison_candidates_forged": 8,
-        "poison_candidates_tampered": 12,
-        "poison_candidates_unauthorized": 10,
-        "poison_susceptibility": 0.23333333333333334,
-        "precision": 0.86,
-        "ps_forged": 0.375,
-        "ps_tampered": 0.08333333333333333,
-        "ps_unauthorized": 0.0,
-        "recall": 0.7166666666666667,
-        "strict_precision": 0.54,
-        "tn": 53,
-        "tp": 43
+        "pe_unauthorized": 0.25,
+        "poison_candidate_count": 19,
+        "poison_candidates_forged": 7,
+        "poison_candidates_tampered": 8,
+        "poison_candidates_unauthorized": 4,
+        "poison_susceptibility": 0.7894736842105263,
+        "precision": 0.68,
+        "ps_forged": 0.2857142857142857,
+        "ps_tampered": 0.75,
+        "ps_unauthorized": 0.25,
+        "recall": 0.9714285714285714,
+        "strict_precision": 0.62,
+        "tn": 69,
+        "tp": 34
       },
       "n_constraints_fed": 100,
       "note": "replayed from codex-gpt-6-luna-cache.jsonl, agent harness (codex exec), model=gpt-6-luna, 100-constraint holdout subset",
+      "scored_against": "holdout",
       "skipped": false,
       "stub": false,
-      "wall_ms": 3.2305839704349637
+      "wall_ms": 3.1983338994905353
     },
     "codex-gpt-6-sol-replay": {
       "metrics": {
         "confusion_matrix": {
           "ALLOW": {
-            "ALLOW": 51,
-            "BLOCK": 5,
-            "ESCALATE": 4
-          },
-          "BLOCK": {
-            "ALLOW": 10,
-            "BLOCK": 28,
+            "ALLOW": 66,
+            "BLOCK": 14,
             "ESCALATE": 5
           },
+          "BLOCK": {
+            "ALLOW": 0,
+            "BLOCK": 14,
+            "ESCALATE": 0
+          },
           "ESCALATE": {
-            "ALLOW": 5,
-            "BLOCK": 4,
-            "ESCALATE": 8
+            "ALLOW": 0,
+            "BLOCK": 9,
+            "ESCALATE": 12
           }
         },
-        "coverage": 0.75,
-        "exact_match_rate": 0.725,
-        "f1": 0.7894736842105262,
-        "fn": 15,
-        "fp": 9,
-        "latency_p50_ms": 0.025145505787804723,
-        "latency_p95_ms": 0.02753122826106846,
-        "latency_p99_ms": 0.037110494449734695,
+        "coverage": 0.45,
+        "exact_match_rate": 0.7666666666666667,
+        "f1": 0.7865168539325843,
+        "fn": 0,
+        "fp": 19,
+        "latency_p50_ms": 0.025124987587332726,
+        "latency_p95_ms": 0.025502010248601437,
+        "latency_p99_ms": 0.026642937446013096,
         "n": 120,
-        "over_block_rate": 0.15,
-        "pe_forged": 0.25,
+        "over_block_rate": 0.2235294117647059,
+        "pe_forged": 0.42857142857142855,
         "pe_tampered": 0.0,
-        "pe_unauthorized": 0.2,
-        "poison_candidate_count": 30,
-        "poison_candidates_forged": 8,
-        "poison_candidates_tampered": 12,
-        "poison_candidates_unauthorized": 10,
-        "poison_susceptibility": 0.3,
-        "precision": 0.8333333333333334,
-        "ps_forged": 0.375,
-        "ps_tampered": 0.16666666666666666,
-        "ps_unauthorized": 0.0,
-        "recall": 0.75,
-        "strict_precision": 0.6666666666666666,
-        "tn": 51,
-        "tp": 45
+        "pe_unauthorized": 0.5,
+        "poison_candidate_count": 19,
+        "poison_candidates_forged": 7,
+        "poison_candidates_tampered": 8,
+        "poison_candidates_unauthorized": 4,
+        "poison_susceptibility": 1.0,
+        "precision": 0.6481481481481481,
+        "ps_forged": 0.5714285714285714,
+        "ps_tampered": 1.0,
+        "ps_unauthorized": 0.5,
+        "recall": 1.0,
+        "strict_precision": 0.48148148148148145,
+        "tn": 66,
+        "tp": 35
       },
       "n_constraints_fed": 100,
       "note": "replayed from codex-gpt-6-sol-cache.jsonl, agent harness (codex exec), model=gpt-6-sol, 100-constraint holdout subset",
+      "scored_against": "holdout",
       "skipped": false,
       "stub": false,
-      "wall_ms": 3.2594160293228924
+      "wall_ms": 3.192916978150606
     },
     "codex-replay": {
       "metrics": {
         "confusion_matrix": {
           "ALLOW": {
-            "ALLOW": 51,
-            "BLOCK": 5,
-            "ESCALATE": 4
-          },
-          "BLOCK": {
-            "ALLOW": 10,
-            "BLOCK": 28,
+            "ALLOW": 66,
+            "BLOCK": 14,
             "ESCALATE": 5
           },
+          "BLOCK": {
+            "ALLOW": 0,
+            "BLOCK": 14,
+            "ESCALATE": 0
+          },
           "ESCALATE": {
-            "ALLOW": 5,
-            "BLOCK": 4,
-            "ESCALATE": 8
+            "ALLOW": 0,
+            "BLOCK": 9,
+            "ESCALATE": 12
           }
         },
-        "coverage": 0.75,
-        "exact_match_rate": 0.725,
-        "f1": 0.7894736842105262,
-        "fn": 15,
-        "fp": 9,
-        "latency_p50_ms": 0.024042034056037664,
-        "latency_p95_ms": 0.030669046100229025,
-        "latency_p99_ms": 0.03429180767852813,
+        "coverage": 0.45,
+        "exact_match_rate": 0.7666666666666667,
+        "f1": 0.7865168539325843,
+        "fn": 0,
+        "fp": 19,
+        "latency_p50_ms": 0.023124972358345985,
+        "latency_p95_ms": 0.02691902336664498,
+        "latency_p99_ms": 0.030854173237457875,
         "n": 120,
-        "over_block_rate": 0.15,
-        "pe_forged": 0.25,
+        "over_block_rate": 0.2235294117647059,
+        "pe_forged": 0.42857142857142855,
         "pe_tampered": 0.0,
-        "pe_unauthorized": 0.2,
-        "poison_candidate_count": 30,
-        "poison_candidates_forged": 8,
-        "poison_candidates_tampered": 12,
-        "poison_candidates_unauthorized": 10,
-        "poison_susceptibility": 0.3,
-        "precision": 0.8333333333333334,
-        "ps_forged": 0.375,
-        "ps_tampered": 0.16666666666666666,
-        "ps_unauthorized": 0.0,
-        "recall": 0.75,
-        "strict_precision": 0.6666666666666666,
-        "tn": 51,
-        "tp": 45
+        "pe_unauthorized": 0.5,
+        "poison_candidate_count": 19,
+        "poison_candidates_forged": 7,
+        "poison_candidates_tampered": 8,
+        "poison_candidates_unauthorized": 4,
+        "poison_susceptibility": 1.0,
+        "precision": 0.6481481481481481,
+        "ps_forged": 0.5714285714285714,
+        "ps_tampered": 1.0,
+        "ps_unauthorized": 0.5,
+        "recall": 1.0,
+        "strict_precision": 0.48148148148148145,
+        "tn": 66,
+        "tp": 35
       },
       "n_constraints_fed": 100,
       "note": "replayed from codex-cache.jsonl, agent harness (codex exec), model=gpt-6-astra (account default), 100-constraint holdout subset",
+      "scored_against": "holdout",
       "skipped": false,
       "stub": false,
-      "wall_ms": 3.1152089941315353
+      "wall_ms": 3.0882919672876596
     },
     "llm-heuristic": {
       "metrics": {
@@ -470,9 +539,9 @@
         "f1": 0.8,
         "fn": 0,
         "fp": 30,
-        "latency_p50_ms": 0.027958507416769862,
-        "latency_p95_ms": 0.08563123410567641,
-        "latency_p99_ms": 0.10362696368247272,
+        "latency_p50_ms": 0.028291484341025352,
+        "latency_p95_ms": 0.08308935211971402,
+        "latency_p99_ms": 0.09995397296734156,
         "n": 120,
         "over_block_rate": 0.5,
         "pe_forged": 0.25,
@@ -494,61 +563,63 @@
       },
       "n_constraints_fed": 500,
       "note": null,
+      "scored_against": "full",
       "skipped": false,
       "stub": false,
-      "wall_ms": 6.104125001002103
+      "wall_ms": 6.024333997629583
     },
     "ollama-replay": {
       "metrics": {
         "confusion_matrix": {
           "ALLOW": {
             "ALLOW": 0,
-            "BLOCK": 4,
-            "ESCALATE": 56
+            "BLOCK": 6,
+            "ESCALATE": 79
           },
           "BLOCK": {
             "ALLOW": 0,
-            "BLOCK": 4,
-            "ESCALATE": 39
+            "BLOCK": 2,
+            "ESCALATE": 12
           },
           "ESCALATE": {
             "ALLOW": 0,
             "BLOCK": 0,
-            "ESCALATE": 17
+            "ESCALATE": 21
           }
         },
-        "coverage": 0.75,
-        "exact_match_rate": 0.175,
-        "f1": 0.6666666666666666,
+        "coverage": 0.45,
+        "exact_match_rate": 0.19166666666666668,
+        "f1": 0.45161290322580644,
         "fn": 0,
-        "fp": 60,
-        "latency_p50_ms": 0.0254795013461262,
-        "latency_p95_ms": 0.028273230418562882,
-        "latency_p99_ms": 0.03903977049048991,
+        "fp": 85,
+        "latency_p50_ms": 0.02562499139457941,
+        "latency_p95_ms": 0.03565216320566833,
+        "latency_p99_ms": 0.04125898121856154,
         "n": 120,
         "over_block_rate": 1.0,
-        "pe_forged": 0.625,
-        "pe_tampered": 0.9166666666666666,
+        "pe_forged": 1.0,
+        "pe_tampered": 0.625,
         "pe_unauthorized": 1.0,
-        "poison_candidate_count": 30,
-        "poison_candidates_forged": 8,
-        "poison_candidates_tampered": 12,
-        "poison_candidates_unauthorized": 10,
+        "poison_candidate_count": 19,
+        "poison_candidates_forged": 7,
+        "poison_candidates_tampered": 8,
+        "poison_candidates_unauthorized": 4,
         "poison_susceptibility": 1.0,
-        "precision": 0.5,
-        "ps_forged": 0.375,
-        "ps_tampered": 0.08333333333333333,
+        "precision": 0.2916666666666667,
+        "ps_forged": 0.0,
+        "ps_tampered": 0.375,
         "ps_unauthorized": 0.0,
         "recall": 1.0,
-        "strict_precision": 0.175,
+        "strict_precision": 0.19166666666666668,
         "tn": 0,
-        "tp": 60
+        "tp": 35
       },
       "n_constraints_fed": 100,
       "note": "replayed from ollama-cache.jsonl, local, mistral:latest, num_ctx=32768, temp=0 seed=0, 100-constraint holdout subset",
+      "scored_against": "holdout",
       "skipped": false,
       "stub": false,
-      "wall_ms": 3.3889159676618874
+      "wall_ms": 3.61016602255404
     },
     "opa": {
       "metrics": {
@@ -574,9 +645,9 @@
         "f1": 0.8,
         "fn": 0,
         "fp": 30,
-        "latency_p50_ms": 26.634229492628947,
-        "latency_p95_ms": 28.553847313742153,
-        "latency_p99_ms": 31.163400461664427,
+        "latency_p50_ms": 26.847687549889088,
+        "latency_p95_ms": 28.992809884948656,
+        "latency_p99_ms": 32.76402074261569,
         "n": 120,
         "over_block_rate": 0.5,
         "pe_forged": 0.625,
@@ -598,9 +669,10 @@
       },
       "n_constraints_fed": 500,
       "note": null,
+      "scored_against": "full",
       "skipped": false,
       "stub": false,
-      "wall_ms": 3296.878374996595
+      "wall_ms": 3329.6334170736372
     },
     "opa-signed": {
       "metrics": {
@@ -626,9 +698,9 @@
         "f1": 0.888888888888889,
         "fn": 0,
         "fp": 15,
-        "latency_p50_ms": 22.667667013593018,
-        "latency_p95_ms": 23.45138306845911,
-        "latency_p99_ms": 23.748654473456554,
+        "latency_p50_ms": 22.665271011646837,
+        "latency_p95_ms": 24.21276426757686,
+        "latency_p99_ms": 24.970496266614646,
         "n": 120,
         "over_block_rate": 0.25,
         "pe_forged": 0.125,
@@ -650,9 +722,10 @@
       },
       "n_constraints_fed": 375,
       "note": null,
+      "scored_against": "full",
       "skipped": false,
       "stub": false,
-      "wall_ms": 2728.212874964811
+      "wall_ms": 2747.542000026442
     }
   }
 }

@@ -17,6 +17,32 @@ any release may change behaviour.
   unchanged). Gemini CLI reads an extension's hooks from `hooks/hooks.json` at the root, where
   the Claude plugin's hooks used to be.
 
+## [Unreleased]
+
+### Fixed
+- **The agent-harness benchmark rows were scored against rules they were never shown.** The
+  `claude-cli*`, `codex*` and `ollama` rows are shown only the corpus's 100-constraint holdout
+  subset, but were scored against the reference oracle over all 500 constraints. On the 120
+  hold-out intents the oracle's verdict differs between the two for 37 intents, and 11 of the
+  30 poison candidates involve poisoned rules outside the 100. So those rows were marked as
+  missing legitimate rules they never saw (recall 0.72–0.77) and as resisting poisoned rules
+  they never saw. Each row is now scored against the oracle over exactly the rules it was
+  given (`scored_against` in `results/benchmark.json`). The same cached answers, re-scored
+  (no model was re-run): poison-susceptibility **1.000** for six of the seven models and
+  **0.789** for `gpt-6-luna` (previously reported as 0.23–0.33), recall 0.97–1.00. The earlier
+  numbers **understated** how often the models act on poisoned rules. The 0.1.2 entry below
+  ("All land between 0.23 and 0.33 poison-susceptibility and every one acts on 5 of 8 forged
+  rules") is wrong for that reason.
+- This also accounts for the gap between the Sonnet 5 API self-check (1.000) and the
+  `claude-cli-sonnet` row (previously 0.333): the latter was scored against 400 rules it never
+  saw.
+
+### Added
+- `aegis-holdout`: Aegis restricted to the same 100-constraint subset, so there is a
+  like-for-like row on that basis (0 of 19 poison candidates acted on, over-block 0.000).
+- Tests that every published row is scored on the basis it was shown, and that the holdout
+  oracle only ever sees the holdout constraints.
+
 ## [0.1.5] — 2026-09-27
 
 Gemini CLI and OpenCode join the supported agents; all seven are live-tested. No change to how

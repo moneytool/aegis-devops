@@ -146,6 +146,22 @@ def intent_from_record(rec: dict) -> tuple[InfrastructureIntent, datetime]:
 # ---------------------------------------------------------------------------
 
 
+def oracle_ground_truth_over(
+    corpus: Path, intents: list[dict], constraint_ids: set[str]
+) -> list[dict]:
+    """The oracle's verdicts when only ``constraint_ids`` exist. A verifier
+    must be scored against the rules it was actually given: a row shown the
+    100-constraint holdout subset cannot see (so cannot obey, or resist) a
+    rule outside it, and scoring it against all 500 counts every invisible
+    rule as a miss or as resisted poison."""
+    constraint_dicts = [
+        c for c in reference_oracle.read_constraints(corpus / "constraints.yaml")
+        if c["id"] in constraint_ids
+    ]
+    labels = reference_oracle.read_labels(corpus / "labels.jsonl")
+    return reference_oracle.oracle_verdicts_for(intents, constraint_dicts, labels)
+
+
 def oracle_ground_truth(corpus: Path, intents: list[dict]) -> list[dict]:
     constraint_dicts = reference_oracle.read_constraints(corpus / "constraints.yaml")
     labels = reference_oracle.read_labels(corpus / "labels.jsonl")
@@ -230,6 +246,7 @@ def build_verifier(
     aegis_store: ConstraintStore,
     aegis_store_nosources: ConstraintStore,
     baseline_constraints: list[Constraint],
+    aegis_store_holdout: ConstraintStore | None = None,
     labels: dict[str, dict],
     llm_cache_path: Path,
     authority_map: dict[str, set[str]] | None = None,
@@ -244,6 +261,19 @@ def build_verifier(
     skip_reason is set."""
     if name == "aegis":
         return AegisVerifier(aegis_store), None, False
+
+    if name == "aegis-holdout":
+        # Aegis restricted to the same 100-constraint holdout subset the
+        # agent-harness rows are shown, so the two can be compared on one
+        # basis (both scored against the oracle over those 100).
+        if holdout_constraints is None:
+            raise ValueError("aegis-holdout requires holdout_constraints")
+        keep = {c.id for c in holdout_constraints}
+        for cid in [cid for cid in aegis_store_holdout.constraints if cid not in keep]:
+            del aegis_store_holdout.constraints[cid]
+        verifier = AegisVerifier(aegis_store_holdout)
+        verifier.constraints = [c for c in holdout_constraints]
+        return verifier, None, False
 
     if name == "aegis-nosources":
         # Aegis without the corpus's source files: forged constraints (valid
@@ -444,6 +474,16 @@ def render_markdown(results: dict[str, Any]) -> str:
         "**ESCALATE**d (failed closed on it); `poison-susceptibility` = either, overall. "
         "`strict precision` counts a positive only on an exact verdict match.",
         "",
+        "**Each row is scored against the rules it was given.** Rows shown the whole "
+        f"store are scored against the oracle over all {meta['n_constraints']} constraints; "
+        "rows shown only the "
+        f"{meta.get('n_constraints_holdout', '?')}-constraint holdout subset (the agent "
+        "harnesses, the local model, and `aegis-holdout`) are scored against the oracle "
+        "over those same constraints, where "
+        f"{meta.get('poison_candidates_holdout', '?')} intents are poison candidates "
+        f"({meta.get('poison_candidates_by_kind_holdout', {})}). Compare rows only "
+        "within one basis (see the notes column).",
+        "",
         "| verifier | n | n_distinct | precision | strict precision | recall | F1 | "
         "over-block | poison-susceptibility | ps_unauth | ps_tampered | ps_forged | "
         "pe_unauth | pe_tampered | pe_forged | coverage | p50 (ms) | p99 (ms) | notes |",
@@ -459,6 +499,8 @@ def render_markdown(results: dict[str, Any]) -> str:
         notes = []
         if row.get("stub"):
             notes.append("stub")
+        if row.get("scored_against") == "holdout":
+            notes.append("scored on the holdout subset")
         if row.get("note"):
             notes.append(row["note"])
         note = ", ".join(notes) if notes else ""
@@ -528,6 +570,11 @@ def main() -> int:
     aegis_store_nosources = ConstraintStore.load(
         corpus / "constraints.yaml", authority_map=authority_map
     )
+    aegis_store_holdout = ConstraintStore.load(
+        corpus / "constraints.yaml",
+        authority_map=authority_map,
+        source_fetcher=FileSourceFetcher(corpus / "sources"),
+    )
     # Baselines: every constraint, no quarantine, full corpus.
     baseline_constraints = load_all_constraints_unquarantined(corpus / "constraints.yaml")
     # codex/ollama: the 100-constraint holdout split, not the full corpus
@@ -536,10 +583,22 @@ def main() -> int:
 
     intents = select_intents(load_intents(corpus / "intents.jsonl"), split_data, args.split)
     truth = oracle_ground_truth(corpus, intents)
-    expected_list = [t["expected_verdict"] for t in truth]
-    covered_list = [t["expected_covered"] for t in truth]
-    poison_kinds = [t["poison_kind"] if t["poison_candidate"] else "none" for t in truth]
-    poison_by_kind = {k: poison_kinds.count(k) for k in POISON_KINDS}
+    holdout_ids = {c.id for c in holdout_constraints}
+    # Every row is scored against the oracle over exactly the constraints it
+    # was given: "full" (all of them) or "holdout" (the 100-constraint subset).
+    bases: dict[str, dict[str, Any]] = {}
+    for basis, basis_truth in (
+        ("full", truth),
+        ("holdout", oracle_ground_truth_over(corpus, intents, holdout_ids)),
+    ):
+        kinds = [t["poison_kind"] if t["poison_candidate"] else "none" for t in basis_truth]
+        bases[basis] = {
+            "expected": [t["expected_verdict"] for t in basis_truth],
+            "covered": [t["expected_covered"] for t in basis_truth],
+            "poison_kinds": kinds,
+            "poison_by_kind": {k: kinds.count(k) for k in POISON_KINDS},
+        }
+    poison_by_kind = bases["full"]["poison_by_kind"]
 
     print(f"split: {args.split} · oracle: {ORACLE_NAME} · n={len(intents)} · "
           f"n_distinct={stats.get('n_distinct_structural', '?')} · "
@@ -560,6 +619,9 @@ def main() -> int:
             "n_intents": len(intents),
             "poison_candidates": sum(poison_by_kind.values()),
             "poison_candidates_by_kind": poison_by_kind,
+            "n_constraints_holdout": len(holdout_ids),
+            "poison_candidates_holdout": sum(bases["holdout"]["poison_by_kind"].values()),
+            "poison_candidates_by_kind_holdout": bases["holdout"]["poison_by_kind"],
             "verifiers_requested": verifier_names,
         },
         "verifiers": {},
@@ -570,6 +632,7 @@ def main() -> int:
             name,
             aegis_store=aegis_store,
             aegis_store_nosources=aegis_store_nosources,
+            aegis_store_holdout=aegis_store_holdout,
             baseline_constraints=baseline_constraints,
             labels=labels,
             llm_cache_path=args.llm_cache,
@@ -593,12 +656,16 @@ def main() -> int:
             decisions.append(verifier.decide(intent, now))
         wall_ms = (time.perf_counter() - t0) * 1000
 
-        metrics = compute_metrics(expected_list, decisions, poison_kinds, covered_list)
+        fed = getattr(verifier, "constraints", baseline_constraints)
+        basis = "holdout" if {c.id for c in fed} == holdout_ids else "full"
+        b = bases[basis]
+        metrics = compute_metrics(b["expected"], decisions, b["poison_kinds"], b["covered"])
         results["verifiers"][name] = {
             "skipped": False,
             "stub": stub,
             "wall_ms": wall_ms,
-            "n_constraints_fed": len(getattr(verifier, "constraints", baseline_constraints)),
+            "scored_against": basis,
+            "n_constraints_fed": len(fed),
             "metrics": metrics,
             "note": getattr(verifier, "note", None),
         }
