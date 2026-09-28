@@ -40,7 +40,7 @@ import shutil
 import subprocess
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -195,16 +195,36 @@ def load_repos(path: str | Path, *, key: bytes | None = None, insecure: bool = F
     return out
 
 
+_GPG_FPR_RE = re.compile(r"[0-9A-F]{40}")
+
+
+@dataclass
+class Signers:
+    """What ``signers.yaml`` trusts. ``ssh``: ``"<type> <base64>" ->
+    principal``; ``gpg``: primary-key fingerprint (40 hex, upper case) ->
+    principal, with ``gpg_keys`` the armored public keys to import."""
+
+    ssh: dict[str, str] = field(default_factory=dict)
+    gpg: dict[str, str] = field(default_factory=dict)
+    gpg_keys: list[str] = field(default_factory=list)
+
+    @property
+    def principals(self) -> set[str]:
+        return set(self.ssh.values()) | set(self.gpg.values())
+
+
 def load_signers(path: str | Path, *, key: bytes | None = None, insecure: bool = False,
-                 warnings: list[str] | None = None) -> dict[str, str]:
-    """``signers.yaml`` -> ``{"<ssh key type> <base64>": principal}``. A key
-    listed twice (under any principals) is a load error, not a guess."""
+                 warnings: list[str] | None = None) -> Signers:
+    """``signers.yaml`` -> :class:`Signers`. A key listed twice (under any
+    principals) is a load error, not a guess. GPG keys carry both the
+    armored public key and its fingerprint; the fingerprint is checked
+    against the key when it is imported."""
     path = Path(path)
     raw = _load_yaml_mapping(path, key, insecure, warnings if warnings is not None else [])
     entries = raw.get("signers")
     if not isinstance(entries, list) or not entries:
         raise ValueError(f"{path}: 'signers' must be a non-empty list")
-    out: dict[str, str] = {}
+    out = Signers()
     for entry in entries:
         if not isinstance(entry, dict):
             raise ValueError(f"{path}: every signer must be a mapping")
@@ -212,18 +232,34 @@ def load_signers(path: str | Path, *, key: bytes | None = None, insecure: bool =
         if not isinstance(principal, str) or not _PRINCIPAL_RE.fullmatch(principal):
             raise ValueError(f"{path}: invalid principal {principal!r}")
         for k in entry.get("keys") or []:
-            if not isinstance(k, dict) or k.get("type") != "ssh":
-                raise ValueError(
-                    f"{path}: {principal}: only 'type: ssh' keys are supported so far"
-                )
-            m = _SSH_KEY_RE.match(str(k.get("key", "")).strip())
-            if not m:
-                raise ValueError(f"{path}: {principal}: not an SSH public key: {k.get('key')!r}")
-            canonical = m.group(0)
-            if canonical in out:
-                raise ValueError(f"{path}: key listed twice ({out[canonical]} and {principal})")
-            out[canonical] = principal
-    if not out:
+            kind = k.get("type") if isinstance(k, dict) else None
+            if kind == "ssh":
+                m = _SSH_KEY_RE.match(str(k.get("key", "")).strip())
+                if not m:
+                    raise ValueError(
+                        f"{path}: {principal}: not an SSH public key: {k.get('key')!r}")
+                canonical = m.group(0)
+                if canonical in out.ssh:
+                    raise ValueError(
+                        f"{path}: key listed twice ({out.ssh[canonical]} and {principal})")
+                out.ssh[canonical] = principal
+            elif kind == "gpg":
+                fpr = re.sub(r"\s+", "", str(k.get("fingerprint", ""))).upper()
+                armored = str(k.get("key", ""))
+                if not _GPG_FPR_RE.fullmatch(fpr):
+                    raise ValueError(f"{path}: {principal}: a gpg key needs its full "
+                                     "40-hex primary fingerprint")
+                if "BEGIN PGP PUBLIC KEY BLOCK" not in armored:
+                    raise ValueError(f"{path}: {principal}: a gpg key needs its armored "
+                                     "public key in 'key'")
+                if fpr in out.gpg:
+                    raise ValueError(
+                        f"{path}: key listed twice ({out.gpg[fpr]} and {principal})")
+                out.gpg[fpr] = principal
+                out.gpg_keys.append(armored)
+            else:
+                raise ValueError(f"{path}: {principal}: key type must be 'ssh' or 'gpg'")
+    if not out.ssh and not out.gpg:
         raise ValueError(f"{path}: no keys")
     return out
 
@@ -244,11 +280,15 @@ class _Git:
     from the calling process could otherwise redirect it) and overrides
     for every setting that decides how signatures are verified."""
 
-    def __init__(self, repo: Path, allowed_signers: Path, empty_file: Path, home: Path):
+    def __init__(self, repo: Path, allowed_signers: Path, empty_file: Path, home: Path,
+                 gpg: str | None = None, gnupghome: Path | None = None):
         self.repo = repo
         self.git = _find("git")
         ssh_keygen = _find("ssh-keygen")
         false = shutil.which("false") or "/usr/bin/false"
+        # OpenPGP signatures are only checkable when signers.yaml lists gpg
+        # keys; the keyring is a private one holding exactly those keys
+        gpg_program = gpg or false
         self.env = {
             "PATH": os.pathsep.join(sorted({str(Path(self.git).parent),
                                              str(Path(ssh_keygen).parent), "/usr/bin", "/bin"})),
@@ -262,6 +302,8 @@ class _Git:
             # paths after "--" are literal, never ":(glob)"-style pathspec magic
             "GIT_LITERAL_PATHSPECS": "1",
         }
+        if gnupghome is not None:
+            self.env["GNUPGHOME"] = str(gnupghome)
         self.overrides = [
             f"safe.directory={repo}",
             "core.hooksPath=" + os.devnull,
@@ -273,8 +315,8 @@ class _Git:
             f"gpg.ssh.program={ssh_keygen}",
             f"gpg.ssh.allowedSignersFile={allowed_signers}",
             f"gpg.ssh.revocationFile={empty_file}",
-            f"gpg.program={false}",
-            f"gpg.openpgp.program={false}",
+            f"gpg.program={gpg_program}",
+            f"gpg.openpgp.program={gpg_program}",
             f"gpg.x509.program={false}",
             "log.showSignature=false",
         ]
@@ -295,6 +337,43 @@ class _Git:
 # --- the fetcher ------------------------------------------------------------------
 
 
+def _import_gpg_keys(gpg: str, home: Path, signers: Signers) -> None:
+    """Imports exactly the listed public keys into a private keyring and
+    marks them trusted (so git reports a good signature as ``G``). A key
+    block that holds any key other than the listed fingerprints is a load
+    error: the keyring must contain nothing else."""
+    env = {"GNUPGHOME": str(home), "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+           "LC_ALL": "C"}
+    base = [gpg, "--batch", "--no-tty", "--no-autostart", "--homedir", str(home)]
+    for armored in signers.gpg_keys:
+        subprocess.run([*base, "--import"], input=armored, text=True, env=env,
+                       capture_output=True, check=True, timeout=60)
+    listing = subprocess.run([*base, "--with-colons", "--fingerprint", "--list-keys"],
+                             env=env, capture_output=True, text=True, check=True,
+                             timeout=60).stdout
+    primaries, expect_fpr = set(), False
+    for line in listing.splitlines():
+        rec = line.split(":")
+        if rec[0] == "pub":
+            expect_fpr = True
+        elif rec[0] == "fpr" and expect_fpr:
+            primaries.add(rec[9].upper())
+            expect_fpr = False
+        elif rec[0] == "sub":
+            expect_fpr = False
+    if primaries != set(signers.gpg):
+        missing = set(signers.gpg) - primaries
+        extra = primaries - set(signers.gpg)
+        raise ValueError(
+            "signers.yaml: gpg keys do not match their fingerprints"
+            + (f"; missing {sorted(missing)}" if missing else "")
+            + (f"; unexpected {sorted(extra)}" if extra else "")
+        )
+    trust = "".join(f"{fpr}:6:\n" for fpr in signers.gpg)
+    subprocess.run([*base, "--import-ownertrust"], input=trust, text=True, env=env,
+                   capture_output=True, check=True, timeout=60)
+
+
 class GitSourceFetcher:
     """``SourceFetcher`` for ``git:`` references (see the module docstring).
 
@@ -306,12 +385,14 @@ class GitSourceFetcher:
     def __init__(
         self,
         repos: dict[str, RepoConfig],
-        signers: dict[str, str],
+        signers: Signers | dict[str, str],
         *,
         max_source_age: float | None = None,
         now: float | None = None,
     ):
         self.repos = repos
+        if isinstance(signers, dict):  # SSH keys only
+            signers = Signers(ssh=dict(signers))
         self.signers = signers
         self.max_source_age = max_source_age
         self.warnings: list[str] = []
@@ -320,13 +401,20 @@ class GitSourceFetcher:
         allowed = tmp / "allowed_signers"
         # principals are validated to [A-Za-z0-9_.@-], so no quoting needed
         allowed.write_text("".join(
-            f'{principal} namespaces="git" {k}\n' for k, principal in signers.items()
+            f'{principal} namespaces="git" {k}\n' for k, principal in signers.ssh.items()
         ))
         empty = tmp / "revoked"
         empty.write_text("")
         (tmp / "home").mkdir()
+        gpg, gnupghome = None, None
+        if signers.gpg:
+            gpg = _find("gpg")
+            gnupghome = tmp / "gnupg"
+            gnupghome.mkdir(mode=0o700)
+            _import_gpg_keys(gpg, gnupghome, signers)
         self._git = {
-            rid: _Git(cfg.path, allowed, empty, tmp / "home") for rid, cfg in repos.items()
+            rid: _Git(cfg.path, allowed, empty, tmp / "home", gpg, gnupghome)
+            for rid, cfg in repos.items()
         }
         self._stale: set[str] = set()
         self._principals: dict[str, str] = {}
@@ -386,6 +474,21 @@ class GitSourceFetcher:
         return tree, parents
 
     @staticmethod
+    def _signature_type(git: _Git, sha: str) -> str | None:
+        """``"ssh"``, ``"gpg"``, ``"other"`` or ``None`` (unsigned), from the
+        ``gpgsig`` header of the raw commit object."""
+        for line in git.run("cat-file", "commit", sha).split("\n"):
+            if not line:
+                return None  # end of headers, no signature
+            if line.startswith("gpgsig ") or line.startswith("gpgsig-sha256 "):
+                if "BEGIN SSH SIGNATURE" in line:
+                    return "ssh"
+                if "BEGIN PGP SIGNATURE" in line:
+                    return "gpg"
+                return "other"
+        return None
+
+    @staticmethod
     def _is_ancestor(git: _Git, sha: str, ref: str) -> bool:
         try:
             git.run("merge-base", "--is-ancestor", sha, ref)
@@ -421,13 +524,27 @@ class GitSourceFetcher:
         if kind != "commit":
             raise SourceRejected("unknown-commit", ref.sha)
 
-        # 1. the signature, verified against signers.yaml only
-        status, _, signer = git.run("log", "-1", "--format=%G?%x00%GS", ref.sha).strip().partition(
-            "\x00")
-        if status == "N":
+        # 1. the signature, verified against signers.yaml only. Its type is
+        #    read from the commit object; SSH signers are named by the
+        #    allowed-signers file we wrote, OpenPGP ones by the primary-key
+        #    fingerprint of a key in our private keyring.
+        sig_type = self._signature_type(git, ref.sha)
+        fields = git.run("log", "-1", "--format=%G?%x00%GS%x00%GP%x00%GF", ref.sha).strip()
+        status, signer, primary, subkey = (fields.split("\x00") + ["", "", ""])[:4]
+        if status == "N" or sig_type is None:
             raise SourceRejected("unsigned-source", ref.sha)
-        if status != "G" or signer not in set(self.signers.values()):
+        if status != "G":
             raise SourceRejected("unknown-signer", f"{ref.sha} status {status}")
+        if sig_type == "ssh":
+            principal = signer if signer in set(self.signers.ssh.values()) else None
+        elif sig_type == "gpg":
+            principal = self.signers.gpg.get(primary.upper()) or self.signers.gpg.get(
+                subkey.upper())
+        else:
+            principal = None
+        if principal is None:
+            raise SourceRejected("unknown-signer", f"{ref.sha} ({sig_type})")
+        signer = principal
 
         # 2. the commit added or changed the rule's file (first-parent diff).
         #    Tree and parents are read from the signed commit object itself,

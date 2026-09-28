@@ -17,6 +17,19 @@ any release may change behaviour.
   unchanged). Gemini CLI reads an extension's hooks from `hooks/hooks.json` at the root, where
   the Claude plugin's hooks used to be.
 
+## [Unreleased]
+
+### Added
+- **OpenPGP (GPG) signatures for Git sources**, alongside SSH. A GPG signer is listed with its
+  primary fingerprint and armored public key; Aegis verifies against a private keyring holding
+  exactly those keys (a mismatch is a load error), so neither the user's keyring nor the
+  repository's config can add trusted keys. Expired and revoked keys do not verify.
+- `aegis sources`: one line per constraint with its source transport (`git`, `file`,
+  `unchecked`), the verified principal, or the quarantine reason; exits 1 if any rule is
+  quarantined.
+- `aegis init` writes commented `repos.example.yaml` and `signers.example.yaml` (inert until
+  copied to `repos.yaml` / `signers.yaml`).
+
 ## [0.1.7] — 2026-09-27
 
 Git sources: a rule can cite a signed commit, and its principal is the commit's verified

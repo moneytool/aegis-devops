@@ -227,7 +227,7 @@ through the Codex CLI, and a local `mistral:latest`.
 What is *not* done is the part the threat model leans on hardest. See `docs/dev/PLAN.md §8`, but in
 short: a rule may now cite a signed commit in a policy repository, whose verified signer
 becomes its principal ([Git sources](docs/configuration.md#git-sources-signed-commits), SSH
-signatures only so far), but file sources, the key-to-principal list and the other policy
+or GPG signatures), but file sources, the key-to-principal list and the other policy
 files still rest on a shared signing secret rather than per-principal public keys, and there
 are no Slack/Jira connectors. Until those land, Aegis demonstrates that the *decision
 procedure* is sound; it proves the identities feeding it only for Git-sourced rules. Resource matching is also case-sensitive on names. It is not

@@ -280,6 +280,9 @@ developer's keys:
 3. **One rule per file.** It keeps "which commit wrote this rule" an exact Git question.
    Revisit only on demand.
 4. **SSH signatures first.** GPG follows once SSH is solid; the design does not change.
+   (Both shipped for v0.2.0: GPG signers are listed by primary fingerprint plus armored key,
+   imported into a private keyring that must hold exactly those keys; the signature type is
+   read from the commit object's `gpgsig` header.)
 5. **Stale clones warn by default; an opt-in limit enforces.** Every Aegis rule restricts
    (BLOCK or ESCALATE), so a stale clone either keeps enforcing a revoked rule (the safe
    direction) or misses a newly added one (a gap the warning makes visible). Quarantining on

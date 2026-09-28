@@ -200,7 +200,35 @@ Two operational rules matter more than any of the above:
   reach an SSH or GPG agent holding a listed key (a forwarded `SSH_AUTH_SOCK`, an unlocked
   `gpg-agent`), it can sign as that principal. The store warns when either is set.
 
-Only SSH signatures are supported so far; GPG is planned. Design and threat model:
+To see what every rule's source verified to — its transport (`git`, `file`, or `unchecked`
+when no fetcher applies), the principal, or the quarantine reason — run:
+
+```bash
+aegis sources --pretty
+```
+
+It exits 1 when any rule is quarantined, so it can gate a policy change in CI. `aegis init`
+writes commented `repos.example.yaml` and `signers.example.yaml`; they are never loaded until
+copied to `repos.yaml` / `signers.yaml`.
+
+SSH and OpenPGP (GPG) signatures are both supported. A GPG signer is listed with its full
+primary-key fingerprint and its armored public key; Aegis imports exactly those keys into a
+private keyring for the check (a key block containing anything else is a load error), and a
+signature by an expired or revoked key does not verify:
+
+```yaml
+signers:
+  - principal: admin
+    keys:
+      - type: gpg
+        fingerprint: "4F2A9C31D0E8B7A6F5E4D3C2B1A09F8E7D6C5B4A"
+        key: |
+          -----BEGIN PGP PUBLIC KEY BLOCK-----
+          ...
+          -----END PGP PUBLIC KEY BLOCK-----
+```
+
+Design and threat model:
 [`dev/DESIGN-v0.2-git-sources.md`](dev/DESIGN-v0.2-git-sources.md).
 
 ## Rate limits & ledger

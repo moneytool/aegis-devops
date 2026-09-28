@@ -175,6 +175,8 @@ def test_shipped_example_and_corpus_files_verify_under_the_example_key():
         "data/authority.example.yaml",
         "data/environments.example.yaml",
         "data/plan_constraints.example.yaml",
+        "data/repos.example.yaml",
+        "data/signers.example.yaml",
         "data/sources/PRINCIPALS.yaml",
         "data/sources/jira-1001.json",
         "data/corpus/constraints.yaml",
@@ -188,4 +190,4 @@ def test_shipped_example_and_corpus_files_verify_under_the_example_key():
     ):
         assert verify_file(path, key), path
     assert not any(p.name.endswith(".json.sig") for p in Path("data").rglob("*.sig"))
-    assert len(list(Path("data").rglob("*.sig"))) <= 9
+    assert len(list(Path("data").rglob("*.sig"))) <= 11
