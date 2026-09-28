@@ -1,6 +1,6 @@
 # Design: Git source connector and signature-derived principals (v0.2, step 1)
 
-Status: **draft for review**, 2026-09-27. Implements step 1 of [PLAN.md §9](PLAN.md). No code
+Status: **agreed** 2026-09-27 (decisions in §8); implementation in progress. Implements step 1 of [PLAN.md §9](PLAN.md). No code
 yet: this changes where the threat model's trust boundary sits, so the design is agreed first.
 
 ## 1. Problem
@@ -151,8 +151,12 @@ citing `git:R@C:P`:
    is recomputed with the principal from step 2, exactly as `verify_source_reason` does now. A
    mismatch is `forged`; a principal different from the rule's `principal` field is
    `principal-mismatch` (unchanged semantics).
-5. **Still current** (§4.5): the last commit on the repo's configured `ref` that touched `P` must
-   be `C`. If a later commit changed or deleted `P`, the rule is `superseded`.
+5. **Still current** (§4.5): `C` must be in the history of the repo's configured `ref`, and the
+   file at `ref` must be byte-identical to the file at `C` (same blob). If a later commit
+   changed or deleted `P`, the rule is `superseded`. Comparing blobs rather than asking for "the
+   last commit that touched `P`" keeps a rule cited by its author's own commit current after
+   that branch is merged (`git log -- P` would name the feature commit or the merge depending
+   on history simplification).
 
 Merges: step 3 uses the first-parent diff, so a signed **merge** commit that brings `P` in counts
 as touching it, and its signer becomes the principal. That matches the common "review, then an
@@ -161,8 +165,8 @@ original author instead can cite the non-merge commit; both are verified the sam
 
 ### 4.5 Revocation and freshness
 
-A rule is revoked by committing a change to (or deletion of) its file on the tracked ref. The
-citation of the old commit then fails step 5 on the next load. This only works if the local
+A rule is revoked by committing a change to (or deletion of) its file on the tracked ref: the
+file there no longer matches the cited blob, so the citation fails step 5 on the next load. This only works if the local
 clone is fetched: the store's health output gains the clone's age (`git log -1 --format=%ct` of
 the tracked ref) and a warning when it is older than a configurable limit, because a stale clone
 silently keeps revoked rules alive. Freshness is checked at store load, like source verification
@@ -184,6 +188,14 @@ config are attacker-influenced input:
   but belt and braces.
 - `GIT_TERMINAL_PROMPT=0`, no network commands, `--no-replace-objects` (replace refs could swap
   the object a SHA resolves to), `GIT_NO_LAZY_FETCH=1` for partial clones.
+- **History must be the objects' history.** Shallow clones and grafts change which parents Git
+  reports for a commit — in a depth-1 clone the tip commit has "no parent", so every inherited
+  file looks added by it — and the commit-graph is an unverified cache of parents. So: a
+  shallow or grafted clone is refused at load (a configuration error), `core.commitGraph=false`,
+  and the "did this commit touch the rule" check reads the tree and parent from the raw signed
+  commit object and diffs trees, never relying on Git's view of ancestry. (Found in review of
+  the first implementation: a real `git clone --depth 1` attributed a developer's unsigned rule
+  to the admin who signed the next, unrelated commit.)
 - Arguments are passed as an argv list, never through a shell; paths are passed after `--`.
 
 Feasibility check (2026-09-27, Git 2.52, throwaway repo, SSH ed25519 keys): with the overrides
@@ -227,6 +239,8 @@ New quarantine reasons: `unsigned-source`, `unknown-signer`, `commit-does-not-to
 | Keep using a rule after it was removed upstream | n/a | stopped once the clone is fetched (`superseded`); a stale clone is warned about |
 | Forge the committer name/email | n/a | irrelevant: only the signature counts |
 | Rewrite history / force-push | n/a | irrelevant for the cited commit (SHA-pinned); a force-push that drops it makes the rule `superseded` or `unknown` |
+| Shallow clone, grafts or a doctored commit-graph making an unrelated signed commit look like the rule's author | n/a | stopped: shallow/grafted clones are refused, commit-graph is off, parents are read from the commit object |
+| Cite `git:` in a deployment with no Git configuration, hoping it is not checked | n/a | stopped: a `git:` citation with no Git configuration is always `unknown-repo` |
 | Steal an admin's signing key | — | **not stopped**: that is the new root of trust. Mitigate with hardware keys and key expiry |
 | Agent runs with access to a human's SSH/GPG agent | — | **not stopped**: the agent can sign as that human. Warn when agent sockets are present (§3) |
 | Edit `signers.yaml` | — | needs the operator's config-dir write access and the shared key (until step 2) |
@@ -251,21 +265,27 @@ developer's keys:
 - mixed store: file sources and Git sources side by side; benchmark corpus unaffected.
 - performance: 500 rules across 50 commits load within a stated budget.
 
-## 8. Open questions for review
+## 8. Decisions (agreed 2026-09-27)
 
-1. **Merge commits: merger or author?** The draft makes the signer of the cited commit the
-   principal, so a signed merge makes the merger responsible. Is that the model you want, or
-   should Aegis require the rule's own commit to be signed and treat a merge as approval only?
-2. **Where does `signers.yaml` live?** Draft: operator-held config dir, signed with the existing
-   key (so the shared key still guards the key list until step 2). Alternative now: in the
-   policy repo with a pinned root key and "changes to the signer list must be signed by a
-   previous-version admin". The second is stronger but is really step 2's work.
-3. **One rule per file** is a real constraint on how teams lay out policy repos. Acceptable, or
-   do we need rule blocks inside shared files (and diff-level attribution)?
-4. **SSH only first?** SSH signing is simpler to verify and test and is what most teams adopt
-   now; GPG could follow in the same release or the next.
-5. **Freshness limit default** for the local clone (e.g. 24 h) — warn only, or quarantine
-   everything from a repo whose clone is older than the limit?
+1. **Merge commits: the signer of the cited commit is the principal**, including the signer of
+   a merge commit (the merger vouches for what they merge). The docs must say that the key
+   GitHub uses to sign merges made in its web UI (`web-flow`) must **never** be put in
+   `signers.yaml`: it would make anyone who can press "Merge" on GitHub any principal.
+   Rule changes are merged locally with the merger's own key, or cite the author's own signed
+   commit.
+2. **`signers.yaml` lives in the operator's config directory**, signed with the existing
+   mechanism, until step 2. The shared key's job shrinks from "can attribute any rule to
+   anyone" to "guards one list of public keys". Moving it into the policy repo with a pinned
+   root key and a signed chain of changes is step 2.
+3. **One rule per file.** It keeps "which commit wrote this rule" an exact Git question.
+   Revisit only on demand.
+4. **SSH signatures first.** GPG follows once SSH is solid; the design does not change.
+5. **Stale clones warn by default; an opt-in limit enforces.** Every Aegis rule restricts
+   (BLOCK or ESCALATE), so a stale clone either keeps enforcing a revoked rule (the safe
+   direction) or misses a newly added one (a gap the warning makes visible). Quarantining on
+   staleness by default would turn a broken `git fetch` job into blocked infrastructure
+   commands. Default: a store-health warning when the tracked ref's newest commit is older
+   than 24 h; `--max-source-age` makes it a per-repo quarantine for teams that want it.
 
 ## 9. Rollout
 

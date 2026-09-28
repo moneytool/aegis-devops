@@ -17,6 +17,20 @@ any release may change behaviour.
   unchanged). Gemini CLI reads an extension's hooks from `hooks/hooks.json` at the root, where
   the Claude plugin's hooks used to be.
 
+## [Unreleased]
+
+### Added
+- **Git sources with signature-derived principals** (v0.2 step 1,
+  `docs/dev/DESIGN-v0.2-git-sources.md`). A constraint may cite
+  `git:<repo>@<sha>:<path>` in a locally configured clone (`repos.yaml`); its principal is the
+  verified SSH signer of that commit, mapped through `signers.yaml`, instead of a name in the
+  rule or `PRINCIPALS.yaml`. New quarantine reasons: `invalid-source-ref`, `unknown-repo`,
+  `unknown-commit`, `unsigned-source`, `unknown-signer`, `commit-does-not-touch-source`,
+  `superseded`, `stale-source`, `invalid-git-source`. New options `--repos`, `--signers`,
+  `--max-source-age`. Git runs with a from-scratch environment and overrides for every
+  signature setting, so a repository's own config cannot choose the trusted keys. File sources
+  are unchanged.
+
 ## [0.1.6] — 2026-09-27
 
 A correction to the published benchmark. No change to how a decision is made.
