@@ -526,3 +526,46 @@ def test_git_citation_with_only_file_sources_is_unknown_repo(repo, tmp_path, cap
 
     line = json.loads(capsys.readouterr().out.splitlines()[0])
     assert {"id": "r1", "reason": "unknown-repo"} in line["decision"]["discarded"]
+
+
+# --- aegis sources and aegis init ---------------------------------------------------
+
+
+def test_sources_report_lists_principals_and_quarantine_reasons(repo, tmp_path, capsys):
+    import json
+
+    from aegis_core.cli import main
+
+    conf = _cli_setup(repo, tmp_path, "admin")
+    assert main(["sources", "--config-dir", str(conf), "--insecure", "--sources", ""]) == 0
+    rows = {r["id"]: r for r in map(json.loads, capsys.readouterr().out.splitlines())}
+    assert rows["r1"]["status"] == "ok"
+    assert (rows["r1"]["principal"], rows["r1"]["transport"]) == ("admin", "git")
+    assert rows["f1"]["transport"] == "unchecked"
+
+
+def test_sources_report_exits_1_and_names_the_reason(tmp_path, capsys):
+    from aegis_core.cli import main
+
+    other = tmp_path / "other"
+    other.mkdir()
+    r = Repo(other)
+    r.write_rule("seed", {**RULE, "rule_text": "seed"})
+    r.commit("seed", "admin")
+    conf = _cli_setup(r, other, "mallory")
+    assert main(["sources", "--config-dir", str(conf), "--insecure", "--sources", "",
+                 "--pretty"]) == 1
+    out = capsys.readouterr().out
+    assert "QUARANTINED (unknown-signer)" in out
+    assert "STORE: loaded=1 quarantined=1" in out
+
+
+def test_init_writes_inert_git_examples(tmp_path, capsys):
+    from aegis_core.cli import main
+
+    target = tmp_path / ".aegis"
+    main(["init", str(target)])
+    assert (target / "repos.example.yaml").exists()
+    assert (target / "signers.example.yaml").exists()
+    assert not (target / "repos.yaml").exists()  # examples are never loaded
+    assert "aegis sources" in capsys.readouterr().out

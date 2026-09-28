@@ -1,0 +1,11 @@
+# Git sources (docs/configuration.md#git-sources-signed-commits).
+# Copy to repos.yaml to enable: a constraint may then cite
+#   source_ref: "git:<repo-id>@<full commit sha>:<path>"
+# and its principal becomes the verified signer of that commit.
+# Aegis never fetches: keep each clone up to date with your own `git fetch`,
+# and use full clones (shallow clones and grafts are refused).
+repos:
+  platform-policy:
+    path: /srv/aegis/platform-policy
+    ref: refs/remotes/origin/main   # the ref that defines "current"
+    rule_glob: rules/*.yaml         # one rule per file

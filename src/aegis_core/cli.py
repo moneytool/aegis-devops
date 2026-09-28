@@ -96,6 +96,7 @@ from aegis_core.environments import (
     resolve_current_context,
 )
 from aegis_core.gitsource import (
+    GIT_PREFIX,
     REPOS_FILE,
     SIGNERS_FILE,
     DispatchingSourceFetcher,
@@ -479,6 +480,13 @@ def _build_parser() -> argparse.ArgumentParser:
     keygen_parser.add_argument(
         "--out", default="aegis-signing.key", help="path to write the key to"
     )
+
+    sources_parser = subparsers.add_parser(
+        "sources",
+        help="Report every constraint's source verification: which transport (git, file), "
+        "the verified principal, or why it is quarantined; exit 1 if any is",
+    )
+    _add_common_options(sources_parser)
 
     hook_parser = subparsers.add_parser(
         "hook",
@@ -878,11 +886,12 @@ def _open_ledger(
     return ledger
 
 
-def _evaluate(intents: list[InfrastructureIntent], args: argparse.Namespace) -> int:
+def _load_policy(args: argparse.Namespace):
+    """Resolves the config, verifies and loads the authority map and the
+    constraint store (with file and git source verification). Returns
+    ``(store, authority_map, load, fetcher)``; shared by ``check`` and
+    ``sources``."""
     _resolve_config_paths(args)
-    now = _parse_now(args.now)
-    pretty = bool(args.pretty)
-
     if not os.path.exists(args.constraints):
         raise FileNotFoundError(2, "No such file or directory", args.constraints)
     key_warnings: list[str] = []
@@ -908,6 +917,13 @@ def _evaluate(intents: list[InfrastructureIntent], args: argparse.Namespace) -> 
         "constraints",
     )
     store.warnings[:0] = key_warnings
+    return store, authority_map, load, fetcher
+
+
+def _evaluate(intents: list[InfrastructureIntent], args: argparse.Namespace) -> int:
+    now = _parse_now(args.now)
+    pretty = bool(args.pretty)
+    store, authority_map, load, _fetcher = _load_policy(args)
     plan_store = None
     if args.plan_constraints:
         plan_store = _load_or_data_error(
@@ -1076,7 +1092,55 @@ def _run_init(args: argparse.Namespace) -> int:
         f"  3. Replace the *.example.yaml files in {args.dir} with your own constraints.yaml / "
         "authority.yaml / ... (aegis prefers a real file over the .example one when both exist)"
     )
+    print(
+        "  4. Optional, rules backed by signed Git commits: copy repos.example.yaml and "
+        "signers.example.yaml to repos.yaml / signers.yaml (see docs/configuration.md), then "
+        "check them with: aegis sources --pretty"
+    )
     return 0
+
+
+def _transport(source_ref: str, fetcher) -> str:
+    if source_ref.startswith(GIT_PREFIX):
+        return "git"
+    has_file = fetcher is not None and getattr(fetcher, "file_fetcher", fetcher) is not None
+    return "file" if has_file else "unchecked"
+
+
+def _run_sources(args: argparse.Namespace) -> int:
+    """``aegis sources``: one line per constraint -- loaded (with the
+    principal its source verified) or quarantined (with the reason)."""
+    store, _authority, _load, fetcher = _load_policy(args)
+    rows = []
+    for c in store.constraints.values():
+        rows.append({"id": c.id, "status": "ok", "reason": None, "principal": c.principal,
+                     "transport": _transport(c.source_ref, fetcher),
+                     "source_ref": c.source_ref})
+    reasons = {q["id"]: q["reason"] for q in store.health.quarantined}
+    for c in store.quarantined_constraints:
+        rows.append({"id": c.id, "status": "quarantined", "reason": reasons.get(c.id),
+                     "principal": None, "transport": _transport(c.source_ref, fetcher),
+                     "source_ref": c.source_ref})
+    known = {r["id"] for r in rows}
+    for q in store.health.quarantined:  # entries that never parsed into a Constraint
+        if q["id"] not in known:
+            rows.append({"id": q["id"], "status": "quarantined", "reason": q["reason"],
+                         "principal": None, "transport": None, "source_ref": None})
+    rows.sort(key=lambda r: (r["status"] != "quarantined", r["id"]))
+    if args.pretty:
+        for r in rows:
+            label = "OK" if r["status"] == "ok" else f"QUARANTINED ({r['reason']})"
+            print(f"{label:<44} {r['id']:<40} {r['principal'] or '-':<12} "
+                  f"{r['transport'] or '-':<9} {r['source_ref'] or ''}")
+        h = store.health
+        print(f"STORE: loaded={h.loaded} quarantined={len(h.quarantined)} "
+              f"principals={h.principals}")
+        for w in h.warnings:
+            print(f"  warning: {w}")
+    else:
+        for r in rows:
+            print(json.dumps(r))
+    return 1 if store.health.quarantined else 0
 
 
 def _run_keygen(args: argparse.Namespace) -> int:
@@ -1095,6 +1159,8 @@ def _run(argv: list[str]) -> int:
         return _run_init(args)
     if args.command == "keygen":
         return _run_keygen(args)
+    if args.command == "sources":
+        return _run_sources(args)
     if args.command == "hook":
         return hook_module.main_hook(
             args.agent,

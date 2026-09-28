@@ -1,0 +1,13 @@
+# Which signing key speaks for which principal (the names authority.yaml uses).
+# Copy to signers.yaml alongside repos.yaml, then sign both with `aegis sign`.
+# Never list GitHub's web-flow key (it signs merges made in the GitHub UI):
+# it would make anyone who can press "Merge" any principal.
+signers:
+  - principal: admin
+    keys:
+      - type: ssh
+        key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleOnlyReplaceWithARealPublicKey0000 alice@example.com"
+  - principal: sre_lead
+    keys:
+      - type: ssh
+        key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAnotherExampleKeyReplaceWithARealOne000 bob@example.com"
