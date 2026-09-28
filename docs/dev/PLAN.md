@@ -148,3 +148,5 @@ from `results/latency.json` (see §4).
 Write the design for (1) before code: it changes the threat model's trust boundary, and the
 key-to-principal mapping is itself a policy file that needs the same integrity guarantee as
 everything else.
+
+Design for (1), draft for review (2026-09-27): [`DESIGN-v0.2-git-sources.md`](DESIGN-v0.2-git-sources.md).
