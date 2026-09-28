@@ -254,14 +254,14 @@ def test_from_kubectl_rollout_status():
 def test_from_kubectl_exec_with_command():
     intent = from_kubectl(["kubectl", "exec", "mypod", "--", "ls", "-la"])
     assert intent.action == "exec"
-    assert intent.resource == "mypod"
+    assert intent.resource == "pod/mypod"  # a bare name is a pod
     assert intent.params["command"] == ["ls", "-la"]
 
 
 def test_from_kubectl_logs_resource():
     intent = from_kubectl(["kubectl", "logs", "mypod"])
     assert intent.action == "logs"
-    assert intent.resource == "mypod"
+    assert intent.resource == "pod/mypod"
 
 
 def test_from_kubectl_set_image():
@@ -2487,3 +2487,51 @@ def test_helm_set_replica_count_zero_expressible_as_a_scope_rule():
         ["helm", "upgrade", "api", "./chart", "--set", "replicaCount=3"]
     )
     assert not scope_matches(scope, not_zero.metadata, not_zero.params)
+
+
+# --- v0.2.1: kubectl normal forms (council review of the v0.3 design) --------
+
+
+@pytest.mark.parametrize("argv, expected", [
+    ("kubectl drain node1", [("drain", "node/node1")]),
+    ("kubectl drain node/node1 --ignore-daemonsets", [("drain", "node/node1")]),
+    ("kubectl cordon node1 node2", [("cordon", "node/node1"), ("cordon", "node/node2")]),
+    ("kubectl uncordon node1", [("uncordon", "node/node1")]),
+    ("kubectl exec api-0 -- sh", [("exec", "pod/api-0")]),
+    ("kubectl exec deploy/web -- sh", [("exec", "deployment/web")]),
+    ("kubectl attach api-0", [("attach", "pod/api-0")]),
+    ("kubectl port-forward svc/web 8080:80", [("port-forward", "service/web")]),
+    ("kubectl port-forward api-0 8080:80", [("port-forward", "pod/api-0")]),
+    ("kubectl logs api-0", [("logs", "pod/api-0")]),
+    ("kubectl delete storageclasses fast", [("delete", "storageclass/fast")]),
+    ("kubectl delete sc fast", [("delete", "storageclass/fast")]),
+    ("kubectl delete ingressclasses nginx", [("delete", "ingressclass/nginx")]),
+    ("kubectl delete clusterrolebindings admin", [("delete", "clusterrolebinding/admin")]),
+    ("kubectl delete validatingwebhookconfigurations aegis",
+     [("delete", "validatingwebhookconfiguration/aegis")]),
+    ("kubectl delete ep web", [("delete", "endpoints/web")]),
+])
+def test_kubectl_normal_forms(argv, expected):
+    from aegis_core.parser import from_argv
+
+    assert [(i.action, i.resource) for i in from_argv(argv.split())] == expected
+
+
+def test_kubectl_impersonation_is_recorded_not_dropped():
+    from aegis_core.parser import from_argv
+
+    intents = from_argv("kubectl delete node w1 --as=admin --as-group=system:masters "
+                        "--as-group=ops --as-uid=42".split())
+    assert intents[0].params["impersonate"] == {
+        "user": "admin", "groups": ["system:masters", "ops"], "uid": "42"}
+    # each impersonated identity is also its own intent, so policy can block it
+    assert [(i.action, i.resource) for i in intents] == [
+        ("delete", "node/w1"),
+        ("impersonate", "user/admin"),
+        ("impersonate", "group/system:masters"),
+        ("impersonate", "group/ops"),
+        ("impersonate", "uid/42"),
+    ]
+    leading = from_argv("kubectl --as admin delete node w1".split())
+    assert [(i.action, i.resource) for i in leading] == [
+        ("delete", "node/w1"), ("impersonate", "user/admin")]

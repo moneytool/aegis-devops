@@ -124,3 +124,22 @@ def test_forged_sources_differ_from_sources_in_one_file_only():
         or (real / n).read_bytes() != (forged / n).read_bytes()
     )
     assert differing == ["jira-1001.json"]
+
+
+@pytest.mark.parametrize("command, target", [
+    ("kubectl --as admin get pods", "user/admin"),
+    ("kubectl get pods --as-group=system:masters", "group/system:masters"),
+    ("kubectl delete pod/x --as-uid=0", "uid/0"),
+])
+def test_kubectl_impersonation_is_blocked(command, target, capsys):
+    code, verdicts = _verdicts(command, capsys)
+    assert ("BLOCK", ["block-kubectl-impersonation"]) in verdicts
+    assert code == 3
+    assert ("impersonate", target) in [
+        (i.action, i.resource) for i in intents_from_command(command)]
+
+
+def test_kubectl_without_impersonation_is_unaffected(capsys):
+    code, verdicts = _verdicts("kubectl get pods", capsys)
+    assert code == 0
+    assert all(v == "ALLOW" for v, _ in verdicts)

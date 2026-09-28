@@ -72,7 +72,7 @@ BLOCK: kubernetes scale deployment/api-server
   citations: no-scale-prod-peak
   covered: True  latency_ms: 0.20
 PLAN BLOCK: 1 intent(s)
-STORE: loaded=29 quarantined=0 principals=3
+STORE: loaded=30 quarantined=0 principals=3
   warning: using example signing key
 ```
 

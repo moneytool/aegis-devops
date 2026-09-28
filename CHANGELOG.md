@@ -17,6 +17,34 @@ any release may change behaviour.
   unchanged). Gemini CLI reads an extension's hooks from `hooks/hooks.json` at the root, where
   the Claude plugin's hooks used to be.
 
+## [Unreleased]
+
+### Fixed
+- **An untrustworthy rule could force ESCALATE through an unresolved condition.** When an
+  intent's environment (or, without tzdata, a rule's time window) could not be resolved, every
+  matching rule forced ESCALATE before its integrity or authority was checked, so an
+  unauthorized or tampered rule scoped on `env: prod` could stall any action whose environment
+  was unknown. Those rules are now discarded (reported in `discarded[]`) on that path too, as
+  they are when they match outright; `--on-untrusted-match escalate` keeps the old behaviour
+  for them. Found by the council review of the v0.3 design.
+- **kubectl normal forms.** `kubectl drain node1` (and `cordon`/`uncordon`) parsed to
+  `node1/*` instead of `node/node1`; `exec`, `logs`, `attach`, `port-forward` on a bare pod
+  name parsed to the bare name instead of `pod/<name>`; plural and short kinds such as
+  `storageclasses`, `sc`, `ingressclasses`, `clusterrolebindings`, `crd` were not normalised.
+  A rule written for the normal form missed each of these. Rules written against the old forms
+  need updating (see `docs/constraints.md`).
+- `kubectl drain … --ignore-daemonsets` (and `--delete-emptydir-data`, `--disable-eviction`)
+  was rejected as malformed.
+
+### Changed
+- kubectl `--as` / `--as-group` / `--as-uid` are no longer dropped: they are recorded in
+  `params.impersonate`, and each impersonated identity becomes its own `impersonate` intent
+  (`user/<name>`, `group/<name>`, `uid/<id>`). Impersonation moves a request out of an agent
+  identity's scope on the server side, so the client hook is the one layer that sees it.
+- The example policy blocks kubectl impersonation (`block-kubectl-impersonation`); change its
+  effect to ESCALATE if a human should be able to approve it. The example store now loads 30
+  rules.
+
 ## [0.2.0] — 2026-09-27
 
 **Real trust roots, step 1.** A rule can cite a signed commit in a policy repository, and its

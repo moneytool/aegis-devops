@@ -1,0 +1,15 @@
+{
+  "provider": "kubernetes",
+  "resource_pattern": "*",
+  "actions": [
+    "impersonate"
+  ],
+  "scope": {},
+  "time_window": null,
+  "effect": "BLOCK",
+  "constraint_class": "configuration",
+  "principal": "admin",
+  "source_ref": "git-6009",
+  "source_timestamp": "2026-09-28T12:00:00+00:00",
+  "rule_text": "Block kubectl impersonation (--as, --as-group, --as-uid): the request would run as another identity, outside the controls on the agent's own."
+}

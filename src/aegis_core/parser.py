@@ -177,11 +177,46 @@ _RESOURCE_ALIASES = {
     "jobs": "job",
     "cronjobs": "cronjob",
     "hpa": "horizontalpodautoscaler",
+    "horizontalpodautoscalers": "horizontalpodautoscaler",
+    "sc": "storageclass",
+    "storageclasses": "storageclass",
+    "ingressclasses": "ingressclass",
+    "pv": "persistentvolume",
+    "persistentvolumes": "persistentvolume",
+    "netpol": "networkpolicy",
+    "networkpolicies": "networkpolicy",
+    "pdb": "poddisruptionbudget",
+    "poddisruptionbudgets": "poddisruptionbudget",
+    "roles": "role",
+    "rolebindings": "rolebinding",
+    "clusterroles": "clusterrole",
+    "clusterrolebindings": "clusterrolebinding",
+    "crd": "customresourcedefinition",
+    "crds": "customresourcedefinition",
+    "customresourcedefinitions": "customresourcedefinition",
+    "validatingwebhookconfigurations": "validatingwebhookconfiguration",
+    "mutatingwebhookconfigurations": "mutatingwebhookconfiguration",
+    "priorityclasses": "priorityclass",
+    "pc": "priorityclass",
+    "limitranges": "limitrange",
+    "limits": "limitrange",
+    "resourcequotas": "resourcequota",
+    "quota": "resourcequota",
+    "certificatesigningrequests": "certificatesigningrequest",
+    "csr": "certificatesigningrequest",
+    "ep": "endpoints",  # the kind is "Endpoints"; its singular name is "endpoints"
+    "leases": "lease",
+    "events": "event",
+    "ev": "event",
 }
 
 # kubectl flags that are booleans (no value token follows) when given
 # without "=value".
-_KNOWN_BOOL_FLAGS = {"force", "cascade", "all", "wait", "now", "ignore-not-found"}
+_KNOWN_BOOL_FLAGS = {
+    "force", "cascade", "all", "wait", "now", "ignore-not-found",
+    # kubectl drain
+    "ignore-daemonsets", "delete-emptydir-data", "delete-local-data", "disable-eviction",
+}
 
 # Global boolean flags that are consumed but not recorded anywhere.
 _DISCARD_BOOL_FLAGS = {
@@ -199,9 +234,6 @@ _DISCARD_VALUE_FLAGS = {
     "s",
     "server",
     "v",
-    "as",
-    "as-uid",
-    "as-group",
     "request-timeout",
     "token",
     "user",
@@ -217,6 +249,9 @@ _DISCARD_VALUE_FLAGS = {
     "log-flush-frequency",
 }
 
+# kubectl impersonation flags, recorded in params["impersonate"].
+_IMPERSONATION_FLAGS = {"as", "as-uid", "as-group"}
+
 # Flags that point at a manifest (file or kustomize directory).
 _MANIFEST_FLAGS = {"f", "filename", "k", "kustomize"}
 
@@ -227,15 +262,24 @@ _KUBECTL_IDENTITY_FLAGS = {"n", "namespace", "context", "cluster"}
 _SELECTOR_FLAGS = {"l": "selector", "selector": "selector", "field-selector": "field_selector"}
 
 # Every global option kubectl accepts in front of the verb, split by arity.
-_KUBECTL_GLOBAL_VALUE_FLAGS = _KUBECTL_IDENTITY_FLAGS | _DISCARD_VALUE_FLAGS
+_KUBECTL_GLOBAL_VALUE_FLAGS = _KUBECTL_IDENTITY_FLAGS | _DISCARD_VALUE_FLAGS | _IMPERSONATION_FLAGS
 _KUBECTL_GLOBAL_BOOL_FLAGS = {"A", "all-namespaces"} | _DISCARD_BOOL_FLAGS
 
 # Short flags that may be glued to their value: -nprod, -lapp=web, -fx.yaml.
 _KUBECTL_GLUED_SHORT_FLAGS = {"n", "l", "f", "o", "k", "s", "v"}
 
-# Verbs whose "resource" is just the literal first positional token (a pod
-# name, a path, ...), not a kind/name pair to be normalised.
-_LITERAL_RESOURCE_VERBS = {"exec", "logs", "port-forward", "cp"}
+# Verbs whose "resource" is just the literal first positional token (a
+# path), not a kind/name pair to be normalised.
+_LITERAL_RESOURCE_VERBS = {"cp"}
+
+# Verbs whose target is a pod by default: a bare name is a pod
+# ("exec api-0" -> pod/api-0), and "deploy/web" / "svc/web" normalise like
+# any other kind/name token.
+_POD_TARGET_VERBS = {"exec", "logs", "port-forward", "attach"}
+
+# Verbs that act on nodes: a bare name is a node ("drain node1" ->
+# node/node1), not a kind to list.
+_NODE_TARGET_VERBS = {"cordon", "uncordon", "drain"}
 
 
 def _coerce(value: str) -> Any:
@@ -470,6 +514,18 @@ def _parse_flags(
                     i += 1
                     val = _value_at(tokens, i, tok)
                 manifest_value = val
+            elif key in _IMPERSONATION_FLAGS:
+                # kubectl --as / --as-group / --as-uid: the request runs as
+                # someone else. Recorded (never silently dropped), so a
+                # policy or a server-side check can see it.
+                if val is None:
+                    i += 1
+                    val = _value_at(tokens, i, tok)
+                imp = params.setdefault("impersonate", {})
+                if key == "as-group":
+                    imp.setdefault("groups", []).append(val)
+                else:
+                    imp["user" if key == "as" else "uid"] = val
             elif key in _DISCARD_VALUE_FLAGS:
                 if val is None:
                     i += 1
@@ -514,7 +570,33 @@ def _make_intents(
 def from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
     """Parses a kubectl invocation into one InfrastructureIntent per target
     resource (kubectl commands may name more than one, e.g.
-    ``kubectl delete pod/a pod/b``)."""
+    ``kubectl delete pod/a pod/b``).
+
+    With ``--as`` / ``--as-group`` / ``--as-uid`` the request runs as
+    someone else, which moves it out of an agent identity's scope on the
+    server side. So besides the action itself, each impersonated identity
+    becomes its own ``impersonate`` intent (``user/<name>``,
+    ``group/<name>``, ``uid/<id>``) that a policy can block or escalate."""
+    intents = _from_kubectl_multi(argv)
+    seen: set[str] = set()
+    extra: list[InfrastructureIntent] = []
+    for intent in intents:
+        imp = intent.params.get("impersonate") or {}
+        targets = ([f"user/{imp['user']}"] if "user" in imp else []) + [
+            f"group/{g}" for g in imp.get("groups", [])
+        ] + ([f"uid/{imp['uid']}"] if "uid" in imp else [])
+        for target in targets:
+            if target in seen:
+                continue
+            seen.add(target)
+            extra.append(InfrastructureIntent(
+                resource=target, action="impersonate", provider="kubernetes",
+                params={"impersonate": imp}, metadata=dict(intent.metadata),
+            ))
+    return intents + extra
+
+
+def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
     if len(argv) < 2 or not (argv[0] == "kubectl" or argv[0].endswith("/kubectl")):
         raise ValueError(f"not a recognizable kubectl invocation: {argv!r}")
 
@@ -559,6 +641,22 @@ def from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
         if not positional:
             raise ValueError(f"could not find a target resource in: {argv!r}")
         return _make_intents([positional[0]], verb, params, metadata)
+
+    if verb in _POD_TARGET_VERBS:
+        if not positional:
+            raise ValueError(f"could not find a target resource in: {argv!r}")
+        kind, name = _split_resource_token(positional[0])
+        target = f"{kind}/{name}" if name is not None else f"pod/{positional[0]}"
+        return _make_intents([target], verb, params, metadata)
+
+    if verb in _NODE_TARGET_VERBS:
+        if not positional:
+            raise ValueError(f"could not find a target resource in: {argv!r}")
+        targets = []
+        for token in positional:
+            kind, name = _split_resource_token(token)
+            targets.append(f"{kind}/{name}" if name is not None else f"node/{token}")
+        return _make_intents(targets, verb, params, metadata)
 
     if verb in ("label", "annotate"):
         resource_tokens = [t for t in positional if "=" not in t]

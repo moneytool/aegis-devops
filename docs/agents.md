@@ -36,8 +36,8 @@ project to opt it in.
 demo rules, blocks the obviously infrastructure-breaking commands: `terraform destroy` /
 `tofu destroy`, `pulumi destroy`, deleting a Kubernetes namespace or node, an S3 bucket, an
 RDS database, a GCP project or an Azure resource group, dropping a database or an unbounded
-table, force-pushing `main`, and deleting Helm releases in production; deleting an Argo CD
-application asks first. Replace it with your own `constraints.yaml` once you have one.
+table, force-pushing `main`, deleting Helm releases in production, and running kubectl as
+another identity (`--as`); deleting an Argo CD application asks first. Replace it with your own `constraints.yaml` once you have one.
 
 **Only what the policy says.** Inside an opted-in project, a command is stopped only when the
 policy blocks it or escalates it. `ls`, `npm test`, `git status` and anything else the policy

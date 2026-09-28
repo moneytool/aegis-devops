@@ -57,6 +57,28 @@ plan_constraints:
     max: 0.5
 ```
 
+### Kubernetes resource names
+
+A kubectl target is normalised to `<singular kind>/<name>` before matching, so write
+`resource_pattern` in that form: `pod/api-0`, `node/*`, `storageclass/fast`,
+`clusterrolebinding/*`. Plural and short kind names (`pods`, `po`, `sc`, `storageclasses`,
+`crd`, `netpol`, …) are all mapped to the singular. Two families of verbs name their target
+implicitly:
+
+- `exec`, `logs`, `attach` and `port-forward` act on a **pod** by default: `kubectl exec api-0`
+  is `pod/api-0`; `kubectl exec deploy/web` is `deployment/web`.
+- `drain`, `cordon` and `uncordon` act on **nodes**: `kubectl drain node1` is `node/node1`.
+
+(Before v0.2.1 these produced `api-0` and `node1/*`, and plural kinds such as `storageclasses`
+were kept plural, so a rule written for the normal form missed them. Rules written against the
+old forms need updating.)
+
+`--as`, `--as-group` and `--as-uid` are recorded in `params.impersonate`, and each impersonated
+identity also becomes an intent of its own, `impersonate` on `user/<name>`, `group/<name>` or
+`uid/<id>` — so `kubectl --as admin delete node w1` is two intents, the delete and
+`impersonate user/admin`. The example policy blocks every impersonation
+(`block-kubectl-impersonation`, `resource_pattern: "*"`, `actions: [impersonate]`).
+
 ### Metadata vocabulary
 
 Every parser in `aegis_core.parser` fills `Intent.metadata` with operator-derived context (not

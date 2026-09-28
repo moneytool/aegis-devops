@@ -451,3 +451,18 @@ constraints:
   rule_text: Escalate deleting Argo CD applications (with cascade this deletes the
     deployed resources) for human review.
   provenance_hash: dc24eb69ac5c8b66279284b6df19095e3f0096303f3ef18da712a53e5e339aeb
+- id: block-kubectl-impersonation
+  provider: kubernetes
+  resource_pattern: '*'
+  actions:
+  - impersonate
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: configuration
+  principal: admin
+  source_ref: git-6009
+  source_timestamp: '2026-09-28T12:00:00+00:00'
+  rule_text: 'Block kubectl impersonation (--as, --as-group, --as-uid): the request
+    would run as another identity, outside the controls on the agent''s own.'
+  provenance_hash: 3c2382c07e085d7a10be92490d9b8905085e6996c5c4ef1aaf2ba43980a41fd1
