@@ -139,6 +139,70 @@ allowed on the strength of the rules that remain, and the forged one is named in
 `discarded` and in the store's health. Add `--on-untrusted-match escalate` to make it
 `ESCALATE` instead.
 
+## Git sources (signed commits)
+
+A constraint can cite a rule file at a specific commit in a policy repository instead of a
+`sources/<ref>.json` file:
+
+```yaml
+source_ref: "git:platform-policy@3f1c9e0d2b7a4c6e8f0a1b2c3d4e5f60718293a4:rules/no-delete-nodes.yaml"
+```
+
+The rule's **principal is then the verified signer of that commit**, not a name written in the
+rule or in `PRINCIPALS.yaml`. Two files in the config directory (next to the constraints file,
+or `--repos` / `--signers`) turn this on:
+
+```yaml
+# repos.yaml — local clones; Aegis never fetches (keep them fresh with your own `git fetch`)
+repos:
+  platform-policy:
+    path: /srv/aegis/platform-policy
+    ref: refs/remotes/origin/main      # the ref that defines "current"
+    rule_glob: rules/*.yaml            # optional; one rule per file
+```
+
+```yaml
+# signers.yaml — which SSH signing key speaks for which principal (authority.yaml names)
+signers:
+  - principal: admin
+    keys:
+      - type: ssh
+        key: "ssh-ed25519 AAAAC3Nza... alice@example.com"
+```
+
+Both are policy files and are signed like the others. A rule file holds the same fields as a
+`sources/<ref>.json` payload, minus `principal` and `source_ref`.
+
+A git-sourced constraint is quarantined, with the reason in `store_health`, when the reference
+is malformed (`invalid-source-ref`), names an unconfigured repo (`unknown-repo`) or a commit the
+clone lacks (`unknown-commit`), the commit is unsigned (`unsigned-source`) or signed by a key
+`signers.yaml` does not list (`unknown-signer`), the commit did not add or change the rule's
+file (`commit-does-not-touch-source`), or the file on the tracked ref no longer matches the
+cited version (`superseded`, which is how a rule is revoked). The usual `forged` and
+`principal-mismatch` checks apply on top. A merge commit's signer counts as the principal for
+the files it brings in.
+
+Git runs with an environment built from scratch and with overrides for every signature
+setting, so a repository's own `.git/config` cannot choose which keys are trusted. The clones
+must have full history: a shallow clone or one using grafts is refused at load, because both
+change which parents Git reports for a commit. A `git:` citation in a deployment without a
+`repos.yaml` is never trusted (`unknown-repo`). The store
+warns when a clone's tracked ref has no commit newer than 24 hours (revocations upstream are
+not visible until you fetch); `--max-source-age HOURS` quarantines that repository's rules
+instead.
+
+Two operational rules matter more than any of the above:
+
+- **Never list GitHub's `web-flow` key** (the key GitHub uses to sign merges made in its web UI)
+  in `signers.yaml`. It would make anyone who can press "Merge" on GitHub any principal. Merge
+  rule changes locally with your own key, or cite the author's signed commit.
+- **The agent must not be able to use a human's signing key.** If the agent this gates can
+  reach an SSH or GPG agent holding a listed key (a forwarded `SSH_AUTH_SOCK`, an unlocked
+  `gpg-agent`), it can sign as that principal. The store warns when either is set.
+
+Only SSH signatures are supported so far; GPG is planned. Design and threat model:
+[`dev/DESIGN-v0.2-git-sources.md`](dev/DESIGN-v0.2-git-sources.md).
+
 ## Rate limits & ledger
 
 `--ledger PATH` enables `rate_limit` constraints and records every executed (`ALLOW`,

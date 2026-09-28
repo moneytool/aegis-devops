@@ -36,11 +36,17 @@ makes it decide **wrongly** is in scope, in rough order of severity:
 These are documented limitations, not vulnerabilities. They are listed in `docs/dev/PLAN.md` §8 and
 named in the README's "Project status" section:
 
-- The source fetcher reads files on disk rather than connecting to Git, Slack or Jira. Anyone
-  who can write to the sources directory can author policy.
+- File sources (`sources/<ref>.json`) are files on disk. Anyone who can write to the sources
+  directory and holds the signing key can author policy. Git sources bind a rule to a signed
+  commit instead (see `docs/configuration.md`); there are no Slack or Jira connectors.
+- For Git sources, whoever holds a private key listed in `signers.yaml`, or can make an agent
+  holding one sign (a forwarded `SSH_AUTH_SOCK`), is that principal. Listing GitHub's
+  `web-flow` merge key makes anyone who can merge on GitHub any principal. Both are
+  configuration, not bypasses.
 - Signing uses a shared secret (keyed BLAKE2b), not per-principal public keys. Anyone with the
   key can sign anything.
-- A `principal` is a signed name, not an identity bound to a commit signature or SSO group.
+- For file sources, a `principal` is a signed name, not an identity bound to a commit signature
+  or SSO group.
 - `data/example-signing.key` is public by design, for the demo policy files. Using it for real
   policy is a misconfiguration, which the CLI warns about on every run.
 - Resource matching is case-sensitive on names.
