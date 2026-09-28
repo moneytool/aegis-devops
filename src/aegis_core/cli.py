@@ -1116,17 +1116,19 @@ def _run_sources(args: argparse.Namespace) -> int:
         rows.append({"id": c.id, "status": "ok", "reason": None, "principal": c.principal,
                      "transport": _transport(c.source_ref, fetcher),
                      "source_ref": c.source_ref})
-    reasons = {q["id"]: q["reason"] for q in store.health.quarantined}
-    for c in store.quarantined_constraints:
-        rows.append({"id": c.id, "status": "quarantined", "reason": reasons.get(c.id),
-                     "principal": None, "transport": _transport(c.source_ref, fetcher),
-                     "source_ref": c.source_ref})
-    known = {r["id"] for r in rows}
-    for q in store.health.quarantined:  # entries that never parsed into a Constraint
-        if q["id"] not in known:
-            rows.append({"id": q["id"], "status": "quarantined", "reason": q["reason"],
-                         "principal": None, "transport": None, "source_ref": None})
-    rows.sort(key=lambda r: (r["status"] != "quarantined", r["id"]))
+    # Walk the quarantine log entry by entry, in order. Entries that parsed
+    # into a Constraint were appended to quarantined_constraints in the same
+    # order; "invalid: ..." entries (bad shape, duplicate id) never parsed.
+    # Matching by id instead would drop a duplicate-id entry whose id is
+    # also a loaded rule, and confuse two quarantined entries sharing an id.
+    parsed = iter(store.quarantined_constraints)
+    for q in store.health.quarantined:
+        c = None if q["reason"].startswith("invalid: ") else next(parsed, None)
+        rows.append({"id": q["id"], "status": "quarantined", "reason": q["reason"],
+                     "principal": None,
+                     "transport": _transport(c.source_ref, fetcher) if c else None,
+                     "source_ref": c.source_ref if c else None})
+    rows.sort(key=lambda r: (r["status"] != "quarantined", r["id"]))  # stable
     if args.pretty:
         for r in rows:
             label = "OK" if r["status"] == "ok" else f"QUARANTINED ({r['reason']})"

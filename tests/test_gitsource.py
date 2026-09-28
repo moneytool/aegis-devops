@@ -596,9 +596,11 @@ class GpgKey:
         self.home.chmod(0o700)
         GpgKey.homes.append(self.home)
         self.env = {**os.environ, "GNUPGHOME": str(self.home)}
-        subprocess.run([GPG, "--batch", "--passphrase", "", "--quick-gen-key",
-                        f"{name} <{name}@example.com>", "ed25519", "sign", expire],
-                       env=self.env, check=True, capture_output=True)
+        gen = subprocess.run([GPG, "--batch", "--passphrase", "", "--quick-gen-key",
+                              f"{name} <{name}@example.com>", "ed25519", "sign", expire],
+                             env=self.env, check=False, capture_output=True, text=True)
+        if gen.returncode != 0:  # say why, not just "exit status 2"
+            raise RuntimeError(f"gpg key generation failed (home {self.home}):\n{gen.stderr}")
         colons = subprocess.run([GPG, "--with-colons", "--fingerprint", "--list-keys"],
                                 env=self.env, check=True, capture_output=True,
                                 text=True).stdout
@@ -706,3 +708,22 @@ def test_repository_config_cannot_swap_the_gpg_program(repo, tmp_path):
     store = load(tmp_path, [constraint_for(ref(sha, path), "admin")],
                  fetcher(repo, gpg_signers((alice, "admin"))))
     assert reasons(store) == {"r1": "unknown-signer"}
+
+
+def test_sources_report_keeps_a_duplicate_id_quarantine(repo, tmp_path, capsys):
+    """Review of #12: a duplicate of a loaded rule's id was dropped from the
+    report because rows were matched by id."""
+    import json
+
+    from aegis_core.cli import main
+
+    conf = _cli_setup(repo, tmp_path, "admin")
+    doc = yaml.safe_load((conf / "constraints.yaml").read_text())
+    doc["constraints"].append(dict(doc["constraints"][0]))  # same id "r1" again
+    (conf / "constraints.yaml").write_text(yaml.safe_dump(doc, sort_keys=False))
+    assert main(["sources", "--config-dir", str(conf), "--insecure", "--sources", ""]) == 1
+    rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    r1 = [r for r in rows if r["id"] == "r1"]
+    assert sorted(r["status"] for r in r1) == ["ok", "quarantined"]
+    assert [r["reason"] for r in r1 if r["status"] == "quarantined"] == [
+        "invalid: duplicate id"]
