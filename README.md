@@ -1,7 +1,7 @@
 # Aegis-DevOps
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22950337.svg)](https://doi.org/10.5281/zenodo.22950337)
-[![PyPI](https://img.shields.io/pypi/v/aegis-devops)](https://pypi.org/project/aegis-devops/)
+[![PyPI](https://img.shields.io/pypi/v/aegis-devops?label=pypi)](https://pypi.org/project/aegis-devops/)
 
 **Stop AI agents from running `kubectl delete`, `terraform destroy` or `DROP TABLE` because a
 ticket told them to.**
