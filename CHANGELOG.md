@@ -17,7 +17,15 @@ any release may change behaviour.
   unchanged). Gemini CLI reads an extension's hooks from `hooks/hooks.json` at the root, where
   the Claude plugin's hooks used to be.
 
-## [Unreleased]
+## [0.2.0] — 2026-09-27
+
+**Real trust roots, step 1.** A rule can cite a signed commit in a policy repository, and its
+principal is the commit's verified signer (SSH or GPG) rather than a name written in the rule
+or asserted with the shared signing key. Together with 0.1.7 (Git sources, SSH), this completes
+step 1 of the v0.2 roadmap (`docs/dev/PLAN.md` §9; design in
+`docs/dev/DESIGN-v0.2-git-sources.md`). Opt-in: nothing changes unless a rule cites `git:`.
+Still to come: per-principal public-key signing for the other policy files (step 2) and
+Slack/Jira sources (step 3).
 
 ### Added
 - **OpenPGP (GPG) signatures for Git sources**, alongside SSH. A GPG signer is listed with its
@@ -245,6 +253,7 @@ See "Project status" in the README and [`docs/dev/PLAN.md`](docs/dev/PLAN.md) §
 rather than real connectors, signing uses a shared secret, and a principal is a signed name
 rather than a bound identity.
 
+[0.2.0]: https://github.com/moneytool/aegis-devops/releases/tag/v0.2.0
 [0.1.7]: https://github.com/moneytool/aegis-devops/releases/tag/v0.1.7
 [0.1.6]: https://github.com/moneytool/aegis-devops/releases/tag/v0.1.6
 [0.1.5]: https://github.com/moneytool/aegis-devops/releases/tag/v0.1.5

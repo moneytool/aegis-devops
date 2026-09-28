@@ -130,7 +130,8 @@ v0.1.x proves the *decision procedure*; it does not prove the *identities* feedi
 three stand-ins named in §8 and the README's Project status are what v0.2 replaces, in this
 order:
 
-1.  **Git source connector** (first — closes two of the three gaps). Read a constraint's
+1.  **Git source connector** — **done in v0.2.0 (2026-09-27)**: SSH and GPG commit signatures,
+    `aegis sources`, see `DESIGN-v0.2-git-sources.md`. (first — closes two of the three gaps). Read a constraint's
     cited source as the file at the commit SHA in `source_ref`, not a JSON file on disk, and
     set `principal` from that commit's verified signature (`git verify-commit`, GPG or SSH)
     instead of trusting a name written in the rule or in `PRINCIPALS.yaml`. Policy repos are
