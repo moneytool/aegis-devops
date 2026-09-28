@@ -583,11 +583,18 @@ needs_gpg = pytest.mark.skipif(GPG is None, reason="needs gpg")
 
 
 class GpgKey:
-    """A throwaway OpenPGP key in its own GNUPGHOME."""
+    """A throwaway OpenPGP key in its own GNUPGHOME. The home is a short
+    path under /tmp: gpg-agent's socket path must fit in 104 bytes on
+    macOS, which pytest's tmp_path does not."""
+
+    homes: list[Path] = []
 
     def __init__(self, root: Path, name: str, *, expire: str = "0"):
-        self.home = root / f"gnupg-{name}"
-        self.home.mkdir(mode=0o700)
+        import tempfile
+
+        self.home = Path(tempfile.mkdtemp(prefix="agpg-", dir="/tmp"))
+        self.home.chmod(0o700)
+        GpgKey.homes.append(self.home)
         self.env = {**os.environ, "GNUPGHOME": str(self.home)}
         subprocess.run([GPG, "--batch", "--passphrase", "", "--quick-gen-key",
                         f"{name} <{name}@example.com>", "ed25519", "sign", expire],
@@ -607,6 +614,17 @@ class GpgKey:
                         "commit", "-q", "-S", "-m", message], cwd=repo.path, env=env,
                        check=True, capture_output=True)
         return repo.git("rev-parse", "HEAD")
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_gpg_homes():
+    yield
+    while GpgKey.homes:
+        home = GpgKey.homes.pop()
+        if GPG:
+            subprocess.run(["gpgconf", "--homedir", str(home), "--kill", "all"],
+                           capture_output=True, check=False)
+        shutil.rmtree(home, ignore_errors=True)
 
 
 def gpg_signers(*pairs):
