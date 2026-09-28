@@ -1,6 +1,6 @@
 # Design: Git source connector and signature-derived principals (v0.2, step 1)
 
-Status: **draft for review**, 2026-09-27. Implements step 1 of [PLAN.md §9](PLAN.md). No code
+Status: **agreed** 2026-09-27 (decisions in §8); implementation in progress. Implements step 1 of [PLAN.md §9](PLAN.md). No code
 yet: this changes where the threat model's trust boundary sits, so the design is agreed first.
 
 ## 1. Problem
@@ -251,21 +251,27 @@ developer's keys:
 - mixed store: file sources and Git sources side by side; benchmark corpus unaffected.
 - performance: 500 rules across 50 commits load within a stated budget.
 
-## 8. Open questions for review
+## 8. Decisions (agreed 2026-09-27)
 
-1. **Merge commits: merger or author?** The draft makes the signer of the cited commit the
-   principal, so a signed merge makes the merger responsible. Is that the model you want, or
-   should Aegis require the rule's own commit to be signed and treat a merge as approval only?
-2. **Where does `signers.yaml` live?** Draft: operator-held config dir, signed with the existing
-   key (so the shared key still guards the key list until step 2). Alternative now: in the
-   policy repo with a pinned root key and "changes to the signer list must be signed by a
-   previous-version admin". The second is stronger but is really step 2's work.
-3. **One rule per file** is a real constraint on how teams lay out policy repos. Acceptable, or
-   do we need rule blocks inside shared files (and diff-level attribution)?
-4. **SSH only first?** SSH signing is simpler to verify and test and is what most teams adopt
-   now; GPG could follow in the same release or the next.
-5. **Freshness limit default** for the local clone (e.g. 24 h) — warn only, or quarantine
-   everything from a repo whose clone is older than the limit?
+1. **Merge commits: the signer of the cited commit is the principal**, including the signer of
+   a merge commit (the merger vouches for what they merge). The docs must say that the key
+   GitHub uses to sign merges made in its web UI (`web-flow`) must **never** be put in
+   `signers.yaml`: it would make anyone who can press "Merge" on GitHub any principal.
+   Rule changes are merged locally with the merger's own key, or cite the author's own signed
+   commit.
+2. **`signers.yaml` lives in the operator's config directory**, signed with the existing
+   mechanism, until step 2. The shared key's job shrinks from "can attribute any rule to
+   anyone" to "guards one list of public keys". Moving it into the policy repo with a pinned
+   root key and a signed chain of changes is step 2.
+3. **One rule per file.** It keeps "which commit wrote this rule" an exact Git question.
+   Revisit only on demand.
+4. **SSH signatures first.** GPG follows once SSH is solid; the design does not change.
+5. **Stale clones warn by default; an opt-in limit enforces.** Every Aegis rule restricts
+   (BLOCK or ESCALATE), so a stale clone either keeps enforcing a revoked rule (the safe
+   direction) or misses a newly added one (a gap the warning makes visible). Quarantining on
+   staleness by default would turn a broken `git fetch` job into blocked infrastructure
+   commands. Default: a store-health warning when the tracked ref's newest commit is older
+   than 24 h; `--max-source-age` makes it a per-repo quarantine for teams that want it.
 
 ## 9. Rollout
 
