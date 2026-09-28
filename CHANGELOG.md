@@ -17,7 +17,9 @@ any release may change behaviour.
   unchanged). Gemini CLI reads an extension's hooks from `hooks/hooks.json` at the root, where
   the Claude plugin's hooks used to be.
 
-## [Unreleased]
+## [0.1.6] — 2026-09-27
+
+A correction to the published benchmark. No change to how a decision is made.
 
 ### Fixed
 - **The agent-harness benchmark rows were scored against rules they were never shown.** The
@@ -210,6 +212,7 @@ See "Project status" in the README and [`docs/dev/PLAN.md`](docs/dev/PLAN.md) §
 rather than real connectors, signing uses a shared secret, and a principal is a signed name
 rather than a bound identity.
 
+[0.1.6]: https://github.com/moneytool/aegis-devops/releases/tag/v0.1.6
 [0.1.5]: https://github.com/moneytool/aegis-devops/releases/tag/v0.1.5
 [0.1.4]: https://github.com/moneytool/aegis-devops/releases/tag/v0.1.4
 [0.1.3]: https://github.com/moneytool/aegis-devops/releases/tag/v0.1.3
