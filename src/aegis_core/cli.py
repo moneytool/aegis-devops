@@ -95,6 +95,14 @@ from aegis_core.environments import (
     load_environment_map,
     resolve_current_context,
 )
+from aegis_core.gitsource import (
+    REPOS_FILE,
+    SIGNERS_FILE,
+    DispatchingSourceFetcher,
+    GitSourceFetcher,
+    load_repos,
+    load_signers,
+)
 from aegis_core.intent import InfrastructureIntent
 from aegis_core.interceptor import AegisInterceptor, Decision
 from aegis_core.ledger import DecisionLedger, JsonlLedger, SqliteLedger, parse_window
@@ -283,6 +291,28 @@ def _add_common_options(subparser: argparse.ArgumentParser) -> None:
         help="directory of <source_ref>.json files (default: <dir of --constraints>/sources "
         "when it exists; pass '' to disable); constraints whose cited source does not back "
         "them are quarantined as forged at load time",
+    )
+    subparser.add_argument(
+        "--repos",
+        default=None,
+        help="repos.yaml configuring the local clones of policy repositories that "
+        "constraints may cite as git:<repo>@<sha>:<path> (default: <dir of --constraints>/"
+        "repos.yaml when it exists); needs --signers",
+    )
+    subparser.add_argument(
+        "--signers",
+        default=None,
+        help="signers.yaml mapping SSH signing keys to principals; a git-sourced "
+        "constraint's principal is the verified signer of the commit it cites (default: "
+        "<dir of --constraints>/signers.yaml)",
+    )
+    subparser.add_argument(
+        "--max-source-age",
+        type=float,
+        default=None,
+        metavar="HOURS",
+        help="quarantine git-sourced constraints from a repository whose tracked ref has no "
+        "commit newer than this (default: only warn after 24h)",
     )
     _add_key_options(subparser)
     subparser.add_argument(
@@ -591,6 +621,30 @@ def _resolve_config_paths(args: argparse.Namespace) -> None:
         )
 
 
+def _git_source_fetcher(args: argparse.Namespace, load: dict) -> GitSourceFetcher | None:
+    """A :class:`GitSourceFetcher` when a ``repos.yaml`` is given or sits
+    next to the constraints file; ``None`` otherwise. ``repos.yaml`` without
+    a ``signers.yaml`` is a data error: git sources cannot verify anyone."""
+    base = os.path.dirname(os.path.abspath(args.constraints))
+    repos = args.repos or os.path.join(base, REPOS_FILE)
+    if not os.path.exists(repos):
+        if args.repos:
+            raise FileNotFoundError(2, "No such file or directory", repos)
+        return None
+    signers = args.signers or os.path.join(base, SIGNERS_FILE)
+    if not os.path.exists(signers):
+        raise DataError(f"{repos} is configured but there is no {signers}: git sources need "
+                        "a signers file to verify commit signatures")
+    warnings: list[str] = []
+    fetcher = GitSourceFetcher(
+        load_repos(repos, warnings=warnings, **load),
+        load_signers(signers, warnings=warnings, **load),
+        max_source_age=args.max_source_age * 3600 if args.max_source_age is not None else None,
+    )
+    fetcher.warnings[:0] = warnings
+    return fetcher
+
+
 def _default_sources(args: argparse.Namespace) -> str | None:
     """``--sources`` as given; ``''`` disables; ``None`` means the
     ``sources`` directory next to the constraints file, when it exists."""
@@ -840,6 +894,9 @@ def _evaluate(intents: list[InfrastructureIntent], args: argparse.Namespace) -> 
     )
     sources = _default_sources(args)
     fetcher = FileSourceFetcher(sources, **load) if sources else None
+    git_fetcher = _git_source_fetcher(args, load)
+    if git_fetcher is not None:
+        fetcher = DispatchingSourceFetcher(fetcher, git_fetcher)
     store = _load_or_data_error(
         lambda: ConstraintStore.load(
             args.constraints, authority_map=authority_map, source_fetcher=fetcher, **load

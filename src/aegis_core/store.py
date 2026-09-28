@@ -69,6 +69,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
+from aegis_core.gitsource import REASON_MESSAGES as GIT_REASON_MESSAGES
+from aegis_core.gitsource import SourceNotChecked, SourceRejected
 from aegis_core.intent import InfrastructureIntent
 from aegis_core.provenance import (
     CachingSourceFetcher,
@@ -682,6 +684,10 @@ def _source_failure_reason(
     """
     try:
         return verify_source_reason(constraint, fetcher, warnings)
+    except SourceRejected as exc:  # a git citation: the reason is specific
+        return exc.reason
+    except SourceNotChecked:  # no fetcher for this kind of reference
+        return None
     except (json.JSONDecodeError, TypeError):
         return "invalid-source"
     except (FileNotFoundError, KeyError, ValueError):
@@ -701,6 +707,7 @@ _SOURCE_FAILURE_MESSAGES = {
     "forged": "source does not back its claimed fields",
     "principal-mismatch": "source transport attributes it to a different principal",
     "invalid-source": "source file is not readable JSON (bad content or wrong shape)",
+    **GIT_REASON_MESSAGES,
 }
 
 

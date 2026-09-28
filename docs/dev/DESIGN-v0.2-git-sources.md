@@ -151,8 +151,12 @@ citing `git:R@C:P`:
    is recomputed with the principal from step 2, exactly as `verify_source_reason` does now. A
    mismatch is `forged`; a principal different from the rule's `principal` field is
    `principal-mismatch` (unchanged semantics).
-5. **Still current** (§4.5): the last commit on the repo's configured `ref` that touched `P` must
-   be `C`. If a later commit changed or deleted `P`, the rule is `superseded`.
+5. **Still current** (§4.5): `C` must be in the history of the repo's configured `ref`, and the
+   file at `ref` must be byte-identical to the file at `C` (same blob). If a later commit
+   changed or deleted `P`, the rule is `superseded`. Comparing blobs rather than asking for "the
+   last commit that touched `P`" keeps a rule cited by its author's own commit current after
+   that branch is merged (`git log -- P` would name the feature commit or the merge depending
+   on history simplification).
 
 Merges: step 3 uses the first-parent diff, so a signed **merge** commit that brings `P` in counts
 as touching it, and its signer becomes the principal. That matches the common "review, then an
@@ -161,8 +165,8 @@ original author instead can cite the non-merge commit; both are verified the sam
 
 ### 4.5 Revocation and freshness
 
-A rule is revoked by committing a change to (or deletion of) its file on the tracked ref. The
-citation of the old commit then fails step 5 on the next load. This only works if the local
+A rule is revoked by committing a change to (or deletion of) its file on the tracked ref: the
+file there no longer matches the cited blob, so the citation fails step 5 on the next load. This only works if the local
 clone is fetched: the store's health output gains the clone's age (`git log -1 --format=%ct` of
 the tracked ref) and a warning when it is older than a configurable limit, because a stale clone
 silently keeps revoked rules alive. Freshness is checked at store load, like source verification
