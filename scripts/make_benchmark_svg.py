@@ -24,17 +24,18 @@ GROUPS = [
 # verifier key -> (display label, colour). llm-heuristic is omitted: it is a
 # deterministic stand-in, not a measured system, and opa's numbers match it.
 SERIES = [
-    ("aegis", "aegis", "#2f855a"),
-    ("codex", "codex (gpt-6-astra)", "#3182ce"),
-    ("codex-gpt-6-sol", "codex (gpt-6-sol)", "#805ad5"),
-    ("codex-gpt-6-luna", "codex (gpt-6-luna)", "#b794f4"),
-    ("claude-cli", "claude-cli (haiku 4.5)", "#63b3ed"),
-    ("claude-cli-sonnet", "claude-cli (sonnet 5)", "#2b6cb0"),
-    ("claude-cli-opus", "claude-cli (opus 5)", "#1a365d"),
-    ("claude-cli-fable", "claude-cli (fable 5.1)", "#2c7a7b"),
+    ("aegis", "aegis (500 rules)", "#2f855a"),
+    ("aegis-holdout", "aegis (100 rules)", "#68d391"),
+    ("codex", "codex (gpt-6-astra)*", "#3182ce"),
+    ("codex-gpt-6-sol", "codex (gpt-6-sol)*", "#805ad5"),
+    ("codex-gpt-6-luna", "codex (gpt-6-luna)*", "#b794f4"),
+    ("claude-cli", "claude-cli (haiku 4.5)*", "#63b3ed"),
+    ("claude-cli-sonnet", "claude-cli (sonnet 5)*", "#2b6cb0"),
+    ("claude-cli-opus", "claude-cli (opus 5)*", "#1a365d"),
+    ("claude-cli-fable", "claude-cli (fable 5.1)*", "#2c7a7b"),
     ("opa-signed", "opa-signed", "#d69e2e"),
     ("opa", "opa", "#dd6b20"),
-    ("ollama", "ollama (mistral 7B)", "#c53030"),
+    ("ollama", "ollama (mistral 7B)*", "#c53030"),
 ]
 W, H = 1000, 580
 X0, X1, YTOP, YBASE = 150, 960, 110, 400
@@ -61,7 +62,8 @@ def main() -> int:
         'fill="#1a202c">Benchmark — Aegis vs. baselines (lower is better)</text>',
         f'<text x="{W/2}" y="50" text-anchor="middle" font-size="11.5" fill="#718096">'
         f'holdout split, oracle: reference, n={meta.get("intents", 120)} intents, '
-        f'n_distinct={meta.get("n_distinct_structural", 323)} of 500 constraints</text>',
+        f'n_distinct={meta.get("n_distinct_structural", 323)} of 500 constraints; '
+        '* shown and scored on the 100-constraint holdout subset</text>',
         f'<line x1="{X0}" y1="{YBASE}" x2="{X1}" y2="{YBASE}" stroke="#2d3748" stroke-width="1.5"/>',
         f'<line x1="{X0}" y1="{YTOP}" x2="{X0}" y2="{YBASE}" stroke="#2d3748" stroke-width="1.5"/>',
     ]

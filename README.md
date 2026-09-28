@@ -154,20 +154,21 @@ oracle that never imports Aegis's own code. The full table
 (precision/recall/F1, latency, coverage) and methodology are in
 [`docs/benchmark.md`](docs/benchmark.md); the columns that matter most are summarized below.
 
-| verifier | over-block | poison-susceptibility | ps_unauth + pe_unauth |
-| :--- | ---: | ---: | ---: |
-| **aegis** | **0.000** | **0.000** | **0.000** |
-| codex (gpt-6-astra) | 0.150 | 0.300 | 0.200 |
-| codex-gpt-6-sol | 0.150 | 0.300 | 0.200 |
-| codex-gpt-6-luna | 0.117 | 0.233 | 0.100 |
-| claude-cli (haiku) | 0.150 | 0.300 | 0.200 |
-| claude-cli-sonnet | 0.167 | 0.333 | 0.200 |
-| claude-cli-opus | 0.150 | 0.300 | 0.200 |
-| claude-cli-fable | 0.150 | 0.300 | 0.200 |
-| opa-signed | 0.250 | 0.500 | 1.000 |
-| opa | 0.500 | 1.000 | 1.000 |
-| llm-heuristic | 0.500 | 1.000 | 1.000 |
-| ollama (mistral 7B) | 1.000 | 1.000 | 1.000 |
+| verifier | rules shown & scored on | over-block | poison-susceptibility | ps_unauth + pe_unauth |
+| :--- | ---: | ---: | ---: | ---: |
+| **aegis** | 500 | **0.000** | **0.000** | **0.000** |
+| opa-signed | 500 | 0.250 | 0.500 | 1.000 |
+| opa | 500 | 0.500 | 1.000 | 1.000 |
+| llm-heuristic | 500 | 0.500 | 1.000 | 1.000 |
+| **aegis-holdout** | 100 | **0.000** | **0.000** | **0.000** |
+| codex (gpt-6-astra) | 100 | 0.224 | 1.000 | 1.000 |
+| codex-gpt-6-sol | 100 | 0.224 | 1.000 | 1.000 |
+| codex-gpt-6-luna | 100 | 0.188 | 0.789 | 0.500 |
+| claude-cli (haiku) | 100 | 0.235 | 1.000 | 1.000 |
+| claude-cli-sonnet | 100 | 0.259 | 1.000 | 1.000 |
+| claude-cli-opus | 100 | 0.235 | 1.000 | 1.000 |
+| claude-cli-fable | 100 | 0.235 | 1.000 | 1.000 |
+| ollama (mistral 7B) | 100 | 1.000 | 1.000 | 1.000 |
 
 `poison-susceptibility` (`ps + pe`) is the fraction of poisoned rules — constraints an
 unauthorized/tampered/forged author slipped in — that moved a verdict at all, split by kind;
@@ -179,12 +180,15 @@ exactly that reason, while Aegis's independent authority check scores `0.000`.
 The `codex*` and `claude-cli*` rows are **agent harnesses wrapped around a model**, not raw
 completions — seven models across two vendors (Claude Haiku 4.5, Sonnet 5, Opus 5 and Fable
 5.1; GPT `gpt-6-astra`, `gpt-6-sol` and `gpt-6-luna`), each verified before its run to be the
-model that actually answered — and — unlike the other rows — are scored against a
-100-constraint holdout subset rather than the full 500-constraint store, for context-window and
-cost reasons; see [`docs/benchmark.md`](docs/benchmark.md) before comparing them with anything
-else in the table. Model size and vendor do not change the picture: all seven land between
-0.23 and 0.33 poison-susceptibility, and every one acts on 5 of 8 forged rules — a model can
-reason about who wrote a rule, but not recompute a hash or fetch a source.
+model that actually answered. For context-window and cost reasons they, and the local model,
+are shown only the corpus's 100-constraint holdout subset, so they are **scored against the
+oracle over those same 100 rules** (19 poison candidates rather than 30); `aegis-holdout` runs
+Aegis on the same 100 for a like-for-like row. Compare rows within one "rules" value. On that
+basis model size and vendor do not change the picture: six of the seven models act on every
+poisoned rule they are shown, `gpt-6-luna` on 15 of 19, and Aegis on none. A model can reason
+about who wrote a rule, but it cannot recompute a hash or fetch a source. Up to v0.1.5 these
+rows were scored against all 500 rules, which counted rules the models never saw as resisted
+poison and understated their susceptibility (0.23–0.33); see [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Why not OPA/Gatekeeper?
 

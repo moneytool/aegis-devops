@@ -267,3 +267,41 @@ def test_benchmark_split_dev_is_allowed(tmp_path):
         split = json.load(f)
     assert payload["meta"]["split"] == "dev"
     assert payload["meta"]["n_intents"] == len(split["intents"]["dev"])
+
+
+# --- every row is scored against the rules it was shown ---------------------------
+
+
+def test_published_rows_are_scored_on_the_rules_they_were_shown():
+    """A row shown the 100-constraint holdout subset must be scored against
+    the oracle over those 100, not all 500: scoring it on all 500 counts
+    every rule it never saw as a missed legitimate rule or as resisted
+    poison (the pre-v0.1.6 bug)."""
+    results = json.loads((REPO_ROOT / "results" / "benchmark.json").read_text())
+    n_holdout = results["meta"]["n_constraints_holdout"]
+    for name, row in results["verifiers"].items():
+        if row.get("skipped"):
+            continue
+        want = "holdout" if row["n_constraints_fed"] == n_holdout else "full"
+        assert row["scored_against"] == want, name
+        if want == "holdout":
+            m = row["metrics"]
+            total = m["poison_candidate_count"]
+            assert total == results["meta"]["poison_candidates_holdout"], name
+
+
+def test_holdout_oracle_only_sees_the_holdout_constraints(monkeypatch):
+    monkeypatch.syspath_prepend(str(REPO_ROOT / "scripts"))
+    import benchmark
+    import reference_oracle
+
+    corpus = REPO_ROOT / "data" / "corpus"
+    split = json.loads((corpus / "split.json").read_text())
+    hold = set(split["holdout"])
+    intents = [i for i in reference_oracle.read_jsonl(corpus / "intents.jsonl")
+               if i["id"] in set(split["intents"]["holdout"])]
+    truth = benchmark.oracle_ground_truth_over(corpus, intents, hold)
+    for rec in truth:
+        matched = set(rec["matched_trusted"]) | set(rec["matched_untrusted"]) | set(
+            rec["matched_malicious"])
+        assert matched <= hold

@@ -60,27 +60,41 @@ attacks that bundle signing already covers, which is why the `opa-signed` → `a
 `ps_unauth`/`pe_unauth` is the number that matters. `strict precision` counts a positive only on
 an exact verdict match.
 
-| verifier | n | precision | recall | F1 | over-block | PS | ps_unauth | ps_tamp | ps_forged | pe_unauth | pe_tamp | pe_forged |
-| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| **aegis** | 120 | **1.000** | 1.000 | **1.000** | **0.000** | **0.000** | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
-| opa-signed | 120 | 0.800 | 1.000 | 0.889 | 0.250 | 0.500 | 0.100 | 0.000 | 0.375 | 0.900 | 0.083 | 0.125 |
-| opa | 120 | 0.667 | 1.000 | 0.800 | 0.500 | 1.000 | 0.100 | 0.750 | 0.375 | 0.900 | 0.250 | 0.625 |
-| llm-heuristic | 120 | 0.667 | 1.000 | 0.800 | 0.500 | 1.000 | 0.400 | 0.833 | 0.750 | 0.600 | 0.167 | 0.250 |
-| claude-cli (haiku) | 120 | 0.836 | 0.767 | 0.800 | 0.150 | 0.300 | 0.000 | 0.167 | 0.375 | 0.200 | 0.000 | 0.250 |
-| claude-cli-sonnet | 120 | 0.821 | 0.767 | 0.793 | 0.167 | 0.333 | 0.000 | 0.250 | 0.375 | 0.200 | 0.000 | 0.250 |
-| claude-cli-opus | 120 | 0.836 | 0.767 | 0.800 | 0.150 | 0.300 | 0.000 | 0.167 | 0.375 | 0.200 | 0.000 | 0.250 |
-| claude-cli-fable | 120 | 0.836 | 0.767 | 0.800 | 0.150 | 0.300 | 0.000 | 0.167 | 0.375 | 0.200 | 0.000 | 0.250 |
-| codex-gpt-6-sol | 120 | 0.833 | 0.750 | 0.789 | 0.150 | 0.300 | 0.000 | 0.167 | 0.375 | 0.200 | 0.000 | 0.250 |
-| codex-gpt-6-luna | 120 | 0.860 | 0.717 | 0.782 | 0.117 | 0.233 | 0.000 | 0.083 | 0.375 | 0.100 | 0.000 | 0.250 |
-| codex (gpt-6-astra) | 120 | 0.833 | 0.750 | 0.789 | 0.150 | 0.300 | 0.000 | 0.167 | 0.375 | 0.200 | 0.000 | 0.250 |
-| ollama (mistral 7B) | 120 | 0.500 | 1.000 | 0.667 | 1.000 | 1.000 | 0.000 | 0.083 | 0.375 | 1.000 | 0.917 | 0.625 |
+| verifier | rules | n | precision | recall | F1 | over-block | PS | ps_unauth | ps_tamp | ps_forged | pe_unauth | pe_tamp | pe_forged |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **aegis** | 500 | 120 | **1.000** | 1.000 | **1.000** | **0.000** | **0.000** | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| opa-signed | 500 | 120 | 0.800 | 1.000 | 0.889 | 0.250 | 0.500 | 0.100 | 0.000 | 0.375 | 0.900 | 0.083 | 0.125 |
+| opa | 500 | 120 | 0.667 | 1.000 | 0.800 | 0.500 | 1.000 | 0.100 | 0.750 | 0.375 | 0.900 | 0.250 | 0.625 |
+| llm-heuristic | 500 | 120 | 0.667 | 1.000 | 0.800 | 0.500 | 1.000 | 0.400 | 0.833 | 0.750 | 0.600 | 0.167 | 0.250 |
+| **aegis-holdout** | 100 | 120 | **1.000** | 1.000 | **1.000** | **0.000** | **0.000** | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| codex (gpt-6-astra) | 100 | 120 | 0.648 | 1.000 | 0.787 | 0.224 | 1.000 | 0.500 | 1.000 | 0.571 | 0.500 | 0.000 | 0.429 |
+| codex-gpt-6-sol | 100 | 120 | 0.648 | 1.000 | 0.787 | 0.224 | 1.000 | 0.500 | 1.000 | 0.571 | 0.500 | 0.000 | 0.429 |
+| codex-gpt-6-luna | 100 | 120 | 0.680 | 0.971 | 0.800 | 0.188 | 0.789 | 0.250 | 0.750 | 0.286 | 0.250 | 0.000 | 0.714 |
+| claude-cli (haiku) | 100 | 120 | 0.636 | 1.000 | 0.778 | 0.235 | 1.000 | 0.500 | 1.000 | 0.571 | 0.500 | 0.000 | 0.429 |
+| claude-cli-sonnet | 100 | 120 | 0.607 | 0.971 | 0.747 | 0.259 | 1.000 | 0.500 | 0.875 | 0.571 | 0.500 | 0.125 | 0.429 |
+| claude-cli-opus | 100 | 120 | 0.636 | 1.000 | 0.778 | 0.235 | 1.000 | 0.500 | 1.000 | 0.571 | 0.500 | 0.000 | 0.429 |
+| claude-cli-fable | 100 | 120 | 0.636 | 1.000 | 0.778 | 0.235 | 1.000 | 0.500 | 1.000 | 0.571 | 0.500 | 0.000 | 0.429 |
+| ollama (mistral 7B) | 100 | 120 | 0.292 | 1.000 | 0.452 | 1.000 | 1.000 | 0.000 | 0.375 | 0.000 | 1.000 | 0.625 | 1.000 |
 
-(`split: holdout`, `oracle: reference`, `n_distinct=323`; 30 poison candidates — 10 unauthorized,
-12 tampered, 8 forged. Full table with latency, coverage and strict precision in
+(`split: holdout`, `oracle: reference`, `n_distinct=323`. **Each row is scored against the
+rules it was shown** — the `rules` column: rows shown all 500 constraints against the oracle
+over all 500 (30 poison candidates — 10 unauthorized, 12 tampered, 8 forged); rows shown the
+100-constraint holdout subset against the oracle over those 100 (19 poison candidates — 4
+unauthorized, 8 tampered, 7 forged). Compare rows within one basis; `aegis-holdout` is Aegis on
+the 100-rule basis. Full table with latency, coverage and strict precision in
 `../results/benchmark.md`. The `codex` row is a full 120-intent run against `gpt-6-astra`, the
 only model a ChatGPT-account Codex will serve.)
 
-**How to read this.** Every row has recall 1.0 except `claude-cli` because the corpus's poisoned
+**Correction (v0.1.6).** Up to v0.1.5 every row was scored against the oracle over all 500
+constraints, including the rows that are only shown 100. On the 120 hold-out intents the
+oracle's verdict differs between the two bases for 37 intents, and 11 of the 30 poison
+candidates involve poisoned rules outside the 100. So a harness row was marked as "missing"
+legitimate rules it was never shown (recall 0.72–0.77) and as "resisting" poisoned rules it
+never saw (poison-susceptibility 0.23–0.33). Scored on what they were shown, the same cached
+answers give recall 0.97–1.00 and poison-susceptibility 1.000 for six of seven models (0.789
+for `gpt-6-luna`). No model was re-run; the rows are replays of the same answers.
+
+**How to read this.** Nearly every row has recall 1.0 because the corpus's poisoned
 rules are *additional* rules — a verifier that honours everything never misses a Trusted one, so
 the damage shows up as over-block and `ps_*`, not as missed blocks. `ps_*` counts BLOCK verdicts
 on a poison candidate (the verifier **obeyed** the poisoned rule); `pe_*` counts ESCALATE
@@ -101,8 +115,8 @@ could move at all**, and that is the number the design is about:
   the record in `../results/benchmark-failclosed.md`.
 
 The seven harness rows (`codex*`, `claude-cli*`) are **agent harnesses**,
-not raw completions, and are scored on a 100-constraint subset — see the subsection below
-before comparing them with anything.
+not raw completions, and are shown — and scored on — the 100-constraint holdout subset; see
+the subsection below before comparing them with anything but the other 100-rule rows.
 
 ### Real LLM baselines: `llm-naive` and `llm-aware`
 
@@ -231,9 +245,9 @@ measured. Default model is `haiku` (the cheapest alias); override with `--claude
 **`claude-cli-sonnet`** is the same harness with `--model sonnet` (`claude-sonnet-5`), as its own
 row and its own cache (`results/claude-cli-sonnet-cache.jsonl`), so the stronger model sits beside
 Haiku rather than replacing it. It answers the obvious objection to the Haiku row — that a small
-model was picked — and it does: over-block 0.167 and poison-susceptibility 0.333 against Haiku's
-0.150 / 0.300; per kind it acted on 2/10 unauthorized, 3/12 tampered and 5/8 forged, one intent
-off Haiku on tampered and identical elsewhere. Sonnet opened 36 of its 120 answers with
+model was picked — and it does: poison-susceptibility 1.000 like Haiku, over-block 0.259
+against Haiku's 0.235, and recall 0.971 (one intent) against Haiku's 1.000. Sonnet opened 36 of
+its 120 answers with
 reasoning before the verdict; the parser recovered a verdict from every one (no answer fell
 back to the unparseable default), and a replay from cache reproduces the live run's scores
 exactly. The 120 hold-out intents contain 116 distinct prompts, so the cache holds 116 keys.
@@ -245,17 +259,18 @@ serves; `claude-opus-5-5` is rejected as unrecognized), `claude-cli-fable` (`cla
 model that actually answers (Claude's `modelUsage`, Codex's `model:` banner), and every call
 re-checks it: a mismatch raises `ModelMismatchError` and stops the run, so one model's numbers
 can never sit under another's name. Opus, Fable and `gpt-6-sol` land exactly on Haiku's and
-`gpt-6-astra`'s numbers; `gpt-6-luna` acts on one fewer unauthorized and one fewer tampered
-intent (0.233) and still on 5 of 8 forged ones. Across seven models and two vendors the spread
-is 0.23–0.33, and forged rules are acted on at 5/8 by every one of them.
+`gpt-6-astra`'s numbers: every one of the 19 poisoned rules they are shown moves their verdict.
+`gpt-6-luna` is the one exception, at 15 of 19 (0.789). Across seven models and two vendors,
+on the rules they are actually given, the models act on poison almost without exception.
 
 Long runs use `scripts/run_until_done.sh <verifier>`: answers are cached as they arrive and a
 re-run reuses them, and a CLI usage limit makes `benchmark.py` exit 75 with the reset time,
 after which the script sleeps until the reset and resumes. A usage-limit reply is never cached.
 
-Note the contrast with the Sonnet 5 **API** self-check in the next subsection, which acted on
-every poisoned intent of the bench corpus: same model family, opposite result. Corpus, prompt
-and harness all differ between the two, so this table cannot say which of them explains it.
+The Sonnet 5 **API** self-check in the next subsection acted on every poisoned intent of the
+bench corpus, and so does the `claude-cli-sonnet` row once it is scored on the rules it was
+shown. The apparent contrast before v0.1.6 (0.333 here against 1.000 there) came from scoring
+this row against 400 rules it never saw.
 
 `claude -p` can fail in a way `codex`/`ollama` don't: **an expired OAuth session** — the CLI
 returns exit code 0 with `is_error: true` and a `result` string containing `401` /

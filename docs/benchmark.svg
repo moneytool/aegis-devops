@@ -2,7 +2,7 @@
 <title>Aegis benchmark: over-block, poison-susceptibility, and unauthorized rules acted on</title>
 <rect width="1000" height="580" fill="#ffffff"/>
 <text x="500.0" y="30" text-anchor="middle" font-size="18" font-weight="700" fill="#1a202c">Benchmark — Aegis vs. baselines (lower is better)</text>
-<text x="500.0" y="50" text-anchor="middle" font-size="11.5" fill="#718096">holdout split, oracle: reference, n=120 intents, n_distinct=323 of 500 constraints</text>
+<text x="500.0" y="50" text-anchor="middle" font-size="11.5" fill="#718096">holdout split, oracle: reference, n=120 intents, n_distinct=323 of 500 constraints; * shown and scored on the 100-constraint holdout subset</text>
 <line x1="150" y1="400" x2="960" y2="400" stroke="#2d3748" stroke-width="1.5"/>
 <line x1="150" y1="110" x2="150" y2="400" stroke="#2d3748" stroke-width="1.5"/>
 <text x="140" y="404.0" text-anchor="end" font-size="10.5" fill="#4a5568">0%</text>
@@ -15,63 +15,68 @@
 <text x="140" y="114.0" text-anchor="end" font-size="10.5" fill="#4a5568">100%</text>
 <line x1="150" y1="110.0" x2="960" y2="110.0" stroke="#e2e8f0" stroke-width="1"/>
 <text x="285.0" y="426" text-anchor="middle" font-size="12.5" font-weight="700" fill="#2d3748">over-block rate</text>
-<rect x="179.7" y="398" width="16.5" height="2" fill="#2f855a"/>
-<rect x="198.8" y="356.5" width="16.5" height="43.5" fill="#3182ce"/>
-<rect x="218.0" y="356.5" width="16.5" height="43.5" fill="#805ad5"/>
-<rect x="237.1" y="366.2" width="16.5" height="33.8" fill="#b794f4"/>
-<rect x="256.3" y="356.5" width="16.5" height="43.5" fill="#63b3ed"/>
-<rect x="275.4" y="351.7" width="16.5" height="48.3" fill="#2b6cb0"/>
-<rect x="294.6" y="356.5" width="16.5" height="43.5" fill="#1a365d"/>
-<rect x="313.7" y="356.5" width="16.5" height="43.5" fill="#2c7a7b"/>
-<rect x="332.9" y="327.5" width="16.5" height="72.5" fill="#d69e2e"/>
-<rect x="352.0" y="255.0" width="16.5" height="145.0" fill="#dd6b20"/>
-<rect x="371.2" y="110.0" width="16.5" height="290.0" fill="#c53030"/>
+<rect x="179.7" y="398" width="15.1" height="2" fill="#2f855a"/>
+<rect x="197.2" y="398" width="15.1" height="2" fill="#68d391"/>
+<rect x="214.8" y="335.2" width="15.1" height="64.8" fill="#3182ce"/>
+<rect x="232.3" y="335.2" width="15.1" height="64.8" fill="#805ad5"/>
+<rect x="249.9" y="345.4" width="15.1" height="54.6" fill="#b794f4"/>
+<rect x="267.4" y="331.8" width="15.1" height="68.2" fill="#63b3ed"/>
+<rect x="285.0" y="324.9" width="15.1" height="75.1" fill="#2b6cb0"/>
+<rect x="302.6" y="331.8" width="15.1" height="68.2" fill="#1a365d"/>
+<rect x="320.1" y="331.8" width="15.1" height="68.2" fill="#2c7a7b"/>
+<rect x="337.6" y="327.5" width="15.1" height="72.5" fill="#d69e2e"/>
+<rect x="355.2" y="255.0" width="15.1" height="145.0" fill="#dd6b20"/>
+<rect x="372.8" y="110.0" width="15.1" height="290.0" fill="#c53030"/>
 <text x="555.0" y="426" text-anchor="middle" font-size="12.5" font-weight="700" fill="#2d3748">poison-susceptibility</text>
-<rect x="449.7" y="398" width="16.5" height="2" fill="#2f855a"/>
-<rect x="468.8" y="313.0" width="16.5" height="87.0" fill="#3182ce"/>
-<rect x="488.0" y="313.0" width="16.5" height="87.0" fill="#805ad5"/>
-<rect x="507.1" y="332.3" width="16.5" height="67.7" fill="#b794f4"/>
-<rect x="526.3" y="313.0" width="16.5" height="87.0" fill="#63b3ed"/>
-<rect x="545.4" y="303.3" width="16.5" height="96.7" fill="#2b6cb0"/>
-<rect x="564.6" y="313.0" width="16.5" height="87.0" fill="#1a365d"/>
-<rect x="583.7" y="313.0" width="16.5" height="87.0" fill="#2c7a7b"/>
-<rect x="602.9" y="255.0" width="16.5" height="145.0" fill="#d69e2e"/>
-<rect x="622.0" y="110.0" width="16.5" height="290.0" fill="#dd6b20"/>
-<rect x="641.2" y="110.0" width="16.5" height="290.0" fill="#c53030"/>
+<rect x="449.7" y="398" width="15.1" height="2" fill="#2f855a"/>
+<rect x="467.2" y="398" width="15.1" height="2" fill="#68d391"/>
+<rect x="484.8" y="110.0" width="15.1" height="290.0" fill="#3182ce"/>
+<rect x="502.4" y="110.0" width="15.1" height="290.0" fill="#805ad5"/>
+<rect x="519.9" y="171.1" width="15.1" height="228.9" fill="#b794f4"/>
+<rect x="537.5" y="110.0" width="15.1" height="290.0" fill="#63b3ed"/>
+<rect x="555.0" y="110.0" width="15.1" height="290.0" fill="#2b6cb0"/>
+<rect x="572.5" y="110.0" width="15.1" height="290.0" fill="#1a365d"/>
+<rect x="590.1" y="110.0" width="15.1" height="290.0" fill="#2c7a7b"/>
+<rect x="607.6" y="255.0" width="15.1" height="145.0" fill="#d69e2e"/>
+<rect x="625.2" y="110.0" width="15.1" height="290.0" fill="#dd6b20"/>
+<rect x="642.8" y="110.0" width="15.1" height="290.0" fill="#c53030"/>
 <text x="825.0" y="426" text-anchor="middle" font-size="12.5" font-weight="700" fill="#2d3748">acted on an unauthorized rule</text>
-<rect x="719.7" y="398" width="16.5" height="2" fill="#2f855a"/>
-<rect x="738.8" y="342.0" width="16.5" height="58.0" fill="#3182ce"/>
-<rect x="758.0" y="342.0" width="16.5" height="58.0" fill="#805ad5"/>
-<rect x="777.1" y="371.0" width="16.5" height="29.0" fill="#b794f4"/>
-<rect x="796.3" y="342.0" width="16.5" height="58.0" fill="#63b3ed"/>
-<rect x="815.4" y="342.0" width="16.5" height="58.0" fill="#2b6cb0"/>
-<rect x="834.6" y="342.0" width="16.5" height="58.0" fill="#1a365d"/>
-<rect x="853.7" y="342.0" width="16.5" height="58.0" fill="#2c7a7b"/>
-<rect x="872.9" y="110.0" width="16.5" height="290.0" fill="#d69e2e"/>
-<rect x="892.0" y="110.0" width="16.5" height="290.0" fill="#dd6b20"/>
-<rect x="911.2" y="110.0" width="16.5" height="290.0" fill="#c53030"/>
+<rect x="719.7" y="398" width="15.1" height="2" fill="#2f855a"/>
+<rect x="737.2" y="398" width="15.1" height="2" fill="#68d391"/>
+<rect x="754.8" y="110.0" width="15.1" height="290.0" fill="#3182ce"/>
+<rect x="772.4" y="110.0" width="15.1" height="290.0" fill="#805ad5"/>
+<rect x="789.9" y="255.0" width="15.1" height="145.0" fill="#b794f4"/>
+<rect x="807.5" y="110.0" width="15.1" height="290.0" fill="#63b3ed"/>
+<rect x="825.0" y="110.0" width="15.1" height="290.0" fill="#2b6cb0"/>
+<rect x="842.6" y="110.0" width="15.1" height="290.0" fill="#1a365d"/>
+<rect x="860.1" y="110.0" width="15.1" height="290.0" fill="#2c7a7b"/>
+<rect x="877.7" y="110.0" width="15.1" height="290.0" fill="#d69e2e"/>
+<rect x="895.2" y="110.0" width="15.1" height="290.0" fill="#dd6b20"/>
+<rect x="912.8" y="110.0" width="15.1" height="290.0" fill="#c53030"/>
 <rect x="150" y="449" width="11" height="11" fill="#2f855a"/>
-<text x="166" y="458" font-size="11" fill="#4a5568">aegis</text>
-<rect x="203.0" y="449" width="11" height="11" fill="#3182ce"/>
-<text x="219.0" y="458" font-size="11" fill="#4a5568">codex (gpt-6-astra)</text>
-<rect x="342.8" y="449" width="11" height="11" fill="#805ad5"/>
-<text x="358.8" y="458" font-size="11" fill="#4a5568">codex (gpt-6-sol)</text>
-<rect x="470.20000000000005" y="449" width="11" height="11" fill="#b794f4"/>
-<text x="486.20000000000005" y="458" font-size="11" fill="#4a5568">codex (gpt-6-luna)</text>
-<rect x="603.8000000000001" y="449" width="11" height="11" fill="#63b3ed"/>
-<text x="619.8000000000001" y="458" font-size="11" fill="#4a5568">claude-cli (haiku 4.5)</text>
-<rect x="762.2" y="449" width="11" height="11" fill="#2b6cb0"/>
-<text x="778.2" y="458" font-size="11" fill="#4a5568">claude-cli (sonnet 5)</text>
-<rect x="150" y="469" width="11" height="11" fill="#1a365d"/>
-<text x="166" y="478" font-size="11" fill="#4a5568">claude-cli (opus 5)</text>
-<rect x="289.8" y="469" width="11" height="11" fill="#2c7a7b"/>
-<text x="305.8" y="478" font-size="11" fill="#4a5568">claude-cli (fable 5.1)</text>
-<rect x="448.20000000000005" y="469" width="11" height="11" fill="#d69e2e"/>
-<text x="464.20000000000005" y="478" font-size="11" fill="#4a5568">opa-signed</text>
-<rect x="532.2" y="469" width="11" height="11" fill="#dd6b20"/>
-<text x="548.2" y="478" font-size="11" fill="#4a5568">opa</text>
-<rect x="572.8000000000001" y="469" width="11" height="11" fill="#c53030"/>
-<text x="588.8000000000001" y="478" font-size="11" fill="#4a5568">ollama (mistral 7B)</text>
-<text x="150" y="504" font-size="10.5" fill="#718096">Rightmost group = ps_unauth + pe_unauth: the share of unauthorized-principal rules that moved a verdict at all.</text>
-<text x="150" y="520" font-size="10.5" fill="#718096">codex and claude-cli are agent harnesses scored on a 100-constraint subset, not raw completions.</text>
+<text x="166" y="458" font-size="11" fill="#4a5568">aegis (500 rules)</text>
+<rect x="277.4" y="449" width="11" height="11" fill="#68d391"/>
+<text x="293.4" y="458" font-size="11" fill="#4a5568">aegis (100 rules)</text>
+<rect x="404.79999999999995" y="449" width="11" height="11" fill="#3182ce"/>
+<text x="420.79999999999995" y="458" font-size="11" fill="#4a5568">codex (gpt-6-astra)*</text>
+<rect x="550.8" y="449" width="11" height="11" fill="#805ad5"/>
+<text x="566.8" y="458" font-size="11" fill="#4a5568">codex (gpt-6-sol)*</text>
+<rect x="684.4" y="449" width="11" height="11" fill="#b794f4"/>
+<text x="700.4" y="458" font-size="11" fill="#4a5568">codex (gpt-6-luna)*</text>
+<rect x="150" y="469" width="11" height="11" fill="#63b3ed"/>
+<text x="166" y="478" font-size="11" fill="#4a5568">claude-cli (haiku 4.5)*</text>
+<rect x="314.6" y="469" width="11" height="11" fill="#2b6cb0"/>
+<text x="330.6" y="478" font-size="11" fill="#4a5568">claude-cli (sonnet 5)*</text>
+<rect x="473.0" y="469" width="11" height="11" fill="#1a365d"/>
+<text x="489.0" y="478" font-size="11" fill="#4a5568">claude-cli (opus 5)*</text>
+<rect x="619.0" y="469" width="11" height="11" fill="#2c7a7b"/>
+<text x="635.0" y="478" font-size="11" fill="#4a5568">claude-cli (fable 5.1)*</text>
+<rect x="783.6" y="469" width="11" height="11" fill="#d69e2e"/>
+<text x="799.6" y="478" font-size="11" fill="#4a5568">opa-signed</text>
+<rect x="867.6" y="469" width="11" height="11" fill="#dd6b20"/>
+<text x="883.6" y="478" font-size="11" fill="#4a5568">opa</text>
+<rect x="150" y="489" width="11" height="11" fill="#c53030"/>
+<text x="166" y="498" font-size="11" fill="#4a5568">ollama (mistral 7B)*</text>
+<text x="150" y="524" font-size="10.5" fill="#718096">Rightmost group = ps_unauth + pe_unauth: the share of unauthorized-principal rules that moved a verdict at all.</text>
+<text x="150" y="540" font-size="10.5" fill="#718096">codex and claude-cli are agent harnesses scored on a 100-constraint subset, not raw completions.</text>
 </svg>
