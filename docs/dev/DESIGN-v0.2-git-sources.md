@@ -188,6 +188,14 @@ config are attacker-influenced input:
   but belt and braces.
 - `GIT_TERMINAL_PROMPT=0`, no network commands, `--no-replace-objects` (replace refs could swap
   the object a SHA resolves to), `GIT_NO_LAZY_FETCH=1` for partial clones.
+- **History must be the objects' history.** Shallow clones and grafts change which parents Git
+  reports for a commit — in a depth-1 clone the tip commit has "no parent", so every inherited
+  file looks added by it — and the commit-graph is an unverified cache of parents. So: a
+  shallow or grafted clone is refused at load (a configuration error), `core.commitGraph=false`,
+  and the "did this commit touch the rule" check reads the tree and parent from the raw signed
+  commit object and diffs trees, never relying on Git's view of ancestry. (Found in review of
+  the first implementation: a real `git clone --depth 1` attributed a developer's unsigned rule
+  to the admin who signed the next, unrelated commit.)
 - Arguments are passed as an argv list, never through a shell; paths are passed after `--`.
 
 Feasibility check (2026-09-27, Git 2.52, throwaway repo, SSH ed25519 keys): with the overrides
@@ -231,6 +239,8 @@ New quarantine reasons: `unsigned-source`, `unknown-signer`, `commit-does-not-to
 | Keep using a rule after it was removed upstream | n/a | stopped once the clone is fetched (`superseded`); a stale clone is warned about |
 | Forge the committer name/email | n/a | irrelevant: only the signature counts |
 | Rewrite history / force-push | n/a | irrelevant for the cited commit (SHA-pinned); a force-push that drops it makes the rule `superseded` or `unknown` |
+| Shallow clone, grafts or a doctored commit-graph making an unrelated signed commit look like the rule's author | n/a | stopped: shallow/grafted clones are refused, commit-graph is off, parents are read from the commit object |
+| Cite `git:` in a deployment with no Git configuration, hoping it is not checked | n/a | stopped: a `git:` citation with no Git configuration is always `unknown-repo` |
 | Steal an admin's signing key | — | **not stopped**: that is the new root of trust. Mitigate with hardware keys and key expiry |
 | Agent runs with access to a human's SSH/GPG agent | — | **not stopped**: the agent can sign as that human. Warn when agent sockets are present (§3) |
 | Edit `signers.yaml` | — | needs the operator's config-dir write access and the shared key (until step 2) |

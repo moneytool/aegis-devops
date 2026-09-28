@@ -266,6 +266,9 @@ class _Git:
             f"safe.directory={repo}",
             "core.hooksPath=" + os.devnull,
             "core.fsmonitor=false",
+            # the commit-graph is a cache of parents that git does not check
+            # against the objects; ancestry must come from the objects
+            "core.commitGraph=false",
             "gpg.format=ssh",
             f"gpg.ssh.program={ssh_keygen}",
             f"gpg.ssh.allowedSignersFile={allowed_signers}",
@@ -337,6 +340,16 @@ class GitSourceFetcher:
                 raise ValueError(
                     f"repos.yaml: {rid}: {cfg.path} is not a git clone with ref {cfg.ref}"
                 ) from exc
+            # shallow clones and grafts rewrite what git reports as a commit's
+            # parents (a depth-1 clone makes every inherited file look "added"
+            # by the tip commit), which would misattribute rules
+            if git.run("rev-parse", "--is-shallow-repository").strip() == "true":
+                raise ValueError(f"repos.yaml: {rid}: {cfg.path} is a shallow clone; git "
+                                 "sources need full history (git fetch --unshallow)")
+            grafts = git.run("rev-parse", "--git-path", "info/grafts").strip()
+            if (cfg.path / grafts if not os.path.isabs(grafts) else Path(grafts)).exists():
+                raise ValueError(f"repos.yaml: {rid}: {cfg.path} uses grafts ({grafts}); "
+                                 "they rewrite history and are not supported")
             age = now - newest
             if max_source_age is not None and age > max_source_age:
                 self._stale.add(rid)
@@ -355,6 +368,22 @@ class GitSourceFetcher:
                     f"{var} is set: if the agent this gates can use a signing key in that "
                     "agent, it can sign as that key's principal"
                 )
+
+    @staticmethod
+    def _commit_header(git: _Git, sha: str) -> tuple[str, list[str]]:
+        """``(tree, parents)`` parsed from the raw commit object."""
+        tree, parents = "", []
+        for line in git.run("cat-file", "commit", sha).split("\n"):
+            if not line:
+                break  # end of headers
+            key, _, value = line.partition(" ")
+            if key == "tree":
+                tree = value
+            elif key == "parent":
+                parents.append(value)
+        if not _SHA_RE.fullmatch(tree) or not all(_SHA_RE.fullmatch(p) for p in parents):
+            raise SourceRejected("unknown-commit", f"{sha}: unreadable commit header")
+        return tree, parents
 
     @staticmethod
     def _is_ancestor(git: _Git, sha: str, ref: str) -> bool:
@@ -400,14 +429,20 @@ class GitSourceFetcher:
         if status != "G" or signer not in set(self.signers.values()):
             raise SourceRejected("unknown-signer", f"{ref.sha} status {status}")
 
-        # 2. the commit added or changed the rule's file (first-parent diff)
-        parents = git.run("rev-list", "--parents", "-n", "1", ref.sha).split()[1:]
+        # 2. the commit added or changed the rule's file (first-parent diff).
+        #    Tree and parents are read from the signed commit object itself,
+        #    and the diff compares trees, so nothing that rewrites git's view
+        #    of history (shallow boundaries, grafts, commit-graph) can make an
+        #    unrelated signed commit look like the one that added the rule.
+        tree, parents = self._commit_header(git, ref.sha)
         if parents:
-            touched = git.run("diff-tree", "--no-commit-id", "--name-only", "-r",
-                              parents[0], ref.sha, "--", ref.path).split("\n")
+            if git.run("cat-file", "-t", parents[0], check=False).strip() != "commit":
+                raise SourceRejected("unknown-commit", f"parent {parents[0]} of {ref.sha}")
+            parent_tree, _ = self._commit_header(git, parents[0])
+            touched = git.run("diff-tree", "-r", "--name-only", parent_tree, tree,
+                              "--", ref.path).split("\n")
         else:
-            touched = git.run("diff-tree", "--root", "--no-commit-id", "--name-only", "-r",
-                              ref.sha, "--", ref.path).split("\n")
+            touched = git.run("ls-tree", "-r", "--name-only", tree, "--", ref.path).split("\n")
         if ref.path not in touched:
             raise SourceRejected("commit-does-not-touch-source", ref.path)
 

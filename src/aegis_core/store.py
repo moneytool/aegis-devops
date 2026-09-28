@@ -69,8 +69,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
+from aegis_core.gitsource import GIT_PREFIX, SourceNotChecked, SourceRejected
 from aegis_core.gitsource import REASON_MESSAGES as GIT_REASON_MESSAGES
-from aegis_core.gitsource import SourceNotChecked, SourceRejected
 from aegis_core.intent import InfrastructureIntent
 from aegis_core.provenance import (
     CachingSourceFetcher,
@@ -1009,6 +1009,12 @@ class ConstraintStore:
             constraint = _constraint_from_dict(entry)
             if not constraint.verify_integrity():
                 store._quarantine(constraint, "tampered", "provenance hash mismatch")
+                continue
+            if caching_fetcher is None and constraint.source_ref.startswith(GIT_PREFIX):
+                # a git citation is only ever trusted after its signature is
+                # verified; with no git configuration it cannot be
+                store._quarantine(constraint, "unknown-repo", _SOURCE_FAILURE_MESSAGES[
+                    "unknown-repo"])
                 continue
             if caching_fetcher is not None:
                 failure = _source_failure_reason(constraint, caching_fetcher, store.warnings)

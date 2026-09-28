@@ -459,3 +459,70 @@ def test_git_failure_quarantines_one_rule_instead_of_failing_the_load(repo, tmp_
     monkeypatch.setattr(gs._Git, "run", boom)
     store = load(tmp_path, [constraint_for(ref(sha, path), "admin")], f)
     assert reasons(store) == {"r1": "git-error"}
+
+
+# --- review findings (PR #10): rewritten history and missing configuration ---------
+
+
+def _unsigned_rule_then_empty_admin_commit(repo):
+    path = repo.write_rule("r1")
+    repo.commit("dev adds r1 unsigned", None)
+    admin = repo.commit("admin, unrelated", "admin", allow_empty=True)
+    return path, admin
+
+
+def test_shallow_clone_is_refused(repo, tmp_path):
+    path, admin = _unsigned_rule_then_empty_admin_commit(repo)
+    shallow = tmp_path / "shallow"
+    repo.git("clone", "-q", "--depth", "1", f"file://{repo.path}", str(shallow), cwd=tmp_path)
+    with pytest.raises(ValueError, match="shallow"):
+        GitSourceFetcher({"policy": RepoConfig("policy", shallow, "refs/heads/main")},
+                         signers(repo, admin="admin"))
+
+
+def test_grafts_are_refused(repo, tmp_path):
+    path, admin = _unsigned_rule_then_empty_admin_commit(repo)
+    grafts = repo.path / ".git" / "info" / "grafts"
+    grafts.parent.mkdir(exist_ok=True)
+    grafts.write_text(admin + "\n")  # pretend the admin commit is a root
+    with pytest.raises(ValueError, match="graft"):
+        fetcher(repo, signers(repo, admin="admin"))
+
+
+def test_git_citation_without_git_configuration_is_rejected(repo, tmp_path):
+    path = repo.write_rule("r1")
+    sha = repo.commit("mallory", "mallory")
+    cpath = tmp_path / "constraints.yaml"
+    cpath.write_text(yaml.safe_dump(
+        {"constraints": [constraint_for(ref(sha, path), "admin")]}, sort_keys=False))
+    store = ConstraintStore.load(cpath, AUTHORITY, insecure=True)  # no fetcher at all
+    assert reasons(store) == {"r1": "unknown-repo"}
+
+
+def test_cli_git_citation_without_repos_yaml_is_not_trusted(repo, tmp_path, capsys):
+    conf = _cli_setup(repo, tmp_path, "mallory")
+    (conf / "repos.yaml").unlink()
+    code, line = _check(conf, capsys)
+    assert line["decision"]["verdict"] == "ALLOW"
+    assert line["decision"]["discarded"] == [{"id": "r1", "reason": "unknown-repo"}]
+
+
+def test_git_citation_with_only_file_sources_is_unknown_repo(repo, tmp_path, capsys):
+    conf = _cli_setup(repo, tmp_path, "admin")
+    (conf / "repos.yaml").unlink()
+    (conf / "sources").mkdir()
+    import json as _json
+
+    # back the file-sourced rule so the store keeps one trusted constraint
+    (conf / "sources" / "jira-1.json").write_text(_json.dumps(
+        {**RULE, "resource_pattern": "namespace/*", "principal": "admin",
+         "source_ref": "jira-1"}))
+    from aegis_core.cli import main
+
+    main(["check", "kubectl", "--config-dir", str(conf), "--insecure",
+          "--plan-constraints", "", "--environments", "", "--max-quarantine-ratio", "1",
+          "--", "kubectl", "delete", "node", "worker-1"])
+    import json
+
+    line = json.loads(capsys.readouterr().out.splitlines()[0])
+    assert {"id": "r1", "reason": "unknown-repo"} in line["decision"]["discarded"]

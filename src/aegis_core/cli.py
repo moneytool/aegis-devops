@@ -895,7 +895,10 @@ def _evaluate(intents: list[InfrastructureIntent], args: argparse.Namespace) -> 
     sources = _default_sources(args)
     fetcher = FileSourceFetcher(sources, **load) if sources else None
     git_fetcher = _git_source_fetcher(args, load)
-    if git_fetcher is not None:
+    if fetcher is not None or git_fetcher is not None:
+        # always dispatch, so a git: citation is never handed to the file
+        # fetcher and is rejected as unknown-repo when git is not configured
+        # (with no fetcher at all, ConstraintStore.load rejects it itself)
         fetcher = DispatchingSourceFetcher(fetcher, git_fetcher)
     store = _load_or_data_error(
         lambda: ConstraintStore.load(

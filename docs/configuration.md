@@ -183,7 +183,10 @@ cited version (`superseded`, which is how a rule is revoked). The usual `forged`
 the files it brings in.
 
 Git runs with an environment built from scratch and with overrides for every signature
-setting, so a repository's own `.git/config` cannot choose which keys are trusted. The store
+setting, so a repository's own `.git/config` cannot choose which keys are trusted. The clones
+must have full history: a shallow clone or one using grafts is refused at load, because both
+change which parents Git reports for a commit. A `git:` citation in a deployment without a
+`repos.yaml` is never trusted (`unknown-repo`). The store
 warns when a clone's tracked ref has no commit newer than 24 hours (revocations upstream are
 not visible until you fetch); `--max-source-age HOURS` quarantines that repository's rules
 instead.
