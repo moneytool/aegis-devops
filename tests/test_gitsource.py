@@ -327,8 +327,13 @@ def test_configuration_errors_fail_the_load(repo, tmp_path):
     gpg = tmp_path / "gpg.yaml"
     gpg.write_text(yaml.safe_dump({"signers": [
         {"principal": "admin", "keys": [{"type": "gpg", "fingerprint": "ABCD"}]}]}))
-    with pytest.raises(ValueError, match="only 'type: ssh'"):
+    with pytest.raises(ValueError, match="40-hex"):
         load_signers(gpg, insecure=True)
+    other = tmp_path / "x509.yaml"
+    other.write_text(yaml.safe_dump({"signers": [
+        {"principal": "admin", "keys": [{"type": "x509", "key": "..."}]}]}))
+    with pytest.raises(ValueError, match="'ssh' or 'gpg'"):
+        load_signers(other, insecure=True)
     repos = tmp_path / "repos.yaml"
     repos.write_text(yaml.safe_dump({"repos": {"policy": {"path": str(repo.path),
                                                           "ref": "main"}}}))
@@ -569,3 +574,117 @@ def test_init_writes_inert_git_examples(tmp_path, capsys):
     assert (target / "signers.example.yaml").exists()
     assert not (target / "repos.yaml").exists()  # examples are never loaded
     assert "aegis sources" in capsys.readouterr().out
+
+
+# --- OpenPGP signatures -------------------------------------------------------------
+
+GPG = shutil.which("gpg")
+needs_gpg = pytest.mark.skipif(GPG is None, reason="needs gpg")
+
+
+class GpgKey:
+    """A throwaway OpenPGP key in its own GNUPGHOME."""
+
+    def __init__(self, root: Path, name: str, *, expire: str = "0"):
+        self.home = root / f"gnupg-{name}"
+        self.home.mkdir(mode=0o700)
+        self.env = {**os.environ, "GNUPGHOME": str(self.home)}
+        subprocess.run([GPG, "--batch", "--passphrase", "", "--quick-gen-key",
+                        f"{name} <{name}@example.com>", "ed25519", "sign", expire],
+                       env=self.env, check=True, capture_output=True)
+        colons = subprocess.run([GPG, "--with-colons", "--fingerprint", "--list-keys"],
+                                env=self.env, check=True, capture_output=True,
+                                text=True).stdout
+        self.fpr = next(line.split(":")[9] for line in colons.splitlines()
+                        if line.startswith("fpr:"))
+        self.armored = subprocess.run([GPG, "--armor", "--export", self.fpr], env=self.env,
+                                      check=True, capture_output=True, text=True).stdout
+
+    def commit(self, repo: Repo, message: str) -> str:
+        env = {**repo.env, "GNUPGHOME": str(self.home)}
+        subprocess.run(["git", "-c", "user.name=g", "-c", "user.email=g@example.com",
+                        "-c", "gpg.format=openpgp", "-c", f"user.signingkey={self.fpr}",
+                        "commit", "-q", "-S", "-m", message], cwd=repo.path, env=env,
+                       check=True, capture_output=True)
+        return repo.git("rev-parse", "HEAD")
+
+
+def gpg_signers(*pairs):
+    from aegis_core.gitsource import Signers
+
+    out = Signers()
+    for key, principal in pairs:
+        out.gpg[key.fpr.upper()] = principal
+        out.gpg_keys.append(key.armored)
+    return out
+
+
+@needs_gpg
+def test_gpg_signed_commit_backs_the_rule(repo, tmp_path):
+    alice = GpgKey(tmp_path, "alice")
+    path = repo.write_rule("r1")
+    sha = alice.commit(repo, "alice adds r1")
+    f = fetcher(repo, gpg_signers((alice, "admin")))
+    store = load(tmp_path, [constraint_for(ref(sha, path), "admin")], f)
+    assert list(store.constraints) == ["r1"]
+
+
+@needs_gpg
+def test_gpg_key_not_in_signers_is_unknown(repo, tmp_path):
+    alice, mallory = GpgKey(tmp_path, "alice"), GpgKey(tmp_path, "mallory")
+    path = repo.write_rule("r1")
+    sha = mallory.commit(repo, "mallory adds r1")
+    store = load(tmp_path, [constraint_for(ref(sha, path), "admin")],
+                 fetcher(repo, gpg_signers((alice, "admin"))))
+    assert reasons(store) == {"r1": "unknown-signer"}
+
+
+@needs_gpg
+def test_gpg_signer_mapped_to_another_principal(repo, tmp_path):
+    dev = GpgKey(tmp_path, "dev")
+    path = repo.write_rule("r1")
+    sha = dev.commit(repo, "dev adds r1")
+    store = load(tmp_path, [constraint_for(ref(sha, path), "admin")],
+                 fetcher(repo, gpg_signers((dev, "developer"))))
+    assert reasons(store) == {"r1": "principal-mismatch"}
+
+
+@needs_gpg
+def test_gpg_key_block_must_match_its_fingerprint(repo, tmp_path):
+    from aegis_core.gitsource import Signers
+
+    alice, mallory = GpgKey(tmp_path, "alice"), GpgKey(tmp_path, "mallory")
+    # declares alice's fingerprint but ships mallory's key
+    bad = Signers(gpg={alice.fpr.upper(): "admin"}, gpg_keys=[mallory.armored])
+    with pytest.raises(ValueError, match="do not match"):
+        fetcher(repo, bad)
+
+
+@needs_gpg
+def test_ssh_and_gpg_signers_side_by_side(repo, tmp_path):
+    alice = GpgKey(tmp_path, "alice")
+    sig = gpg_signers((alice, "admin"))
+    sig.ssh.update(signers(repo, bob="sre_lead"))
+    p1 = repo.write_rule("r1")
+    s1 = alice.commit(repo, "alice, gpg")
+    p2 = repo.write_rule("r2", {**RULE, "rule_text": "second", "constraint_class": "scaling"})
+    s2 = repo.commit("bob, ssh", "bob")
+    store = load(tmp_path, [
+        constraint_for(ref(s1, p1), "admin"),
+        constraint_for(ref(s2, p2), "sre_lead", cid="r2", rule_text="second",
+                       constraint_class="scaling"),
+    ], fetcher(repo, sig))
+    assert sorted(store.constraints) == ["r1", "r2"]
+
+
+@needs_gpg
+def test_repository_config_cannot_swap_the_gpg_program(repo, tmp_path):
+    mallory = GpgKey(tmp_path, "mallory")
+    alice = GpgKey(tmp_path, "alice")
+    path = repo.write_rule("r1")
+    sha = mallory.commit(repo, "mallory")
+    repo.git("config", "gpg.program", "/usr/bin/true")
+    repo.git("config", "gpg.openpgp.program", "/usr/bin/true")
+    store = load(tmp_path, [constraint_for(ref(sha, path), "admin")],
+                 fetcher(repo, gpg_signers((alice, "admin"))))
+    assert reasons(store) == {"r1": "unknown-signer"}

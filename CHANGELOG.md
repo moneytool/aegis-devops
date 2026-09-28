@@ -20,6 +20,10 @@ any release may change behaviour.
 ## [Unreleased]
 
 ### Added
+- **OpenPGP (GPG) signatures for Git sources**, alongside SSH. A GPG signer is listed with its
+  primary fingerprint and armored public key; Aegis verifies against a private keyring holding
+  exactly those keys (a mismatch is a load error), so neither the user's keyring nor the
+  repository's config can add trusted keys. Expired and revoked keys do not verify.
 - `aegis sources`: one line per constraint with its source transport (`git`, `file`,
   `unchecked`), the verified principal, or the quarantine reason; exits 1 if any rule is
   quarantined.
