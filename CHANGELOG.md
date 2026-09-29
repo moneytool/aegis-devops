@@ -5,7 +5,12 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while the major version is 0,
 any release may change behaviour.
 
-## [Unreleased]
+## [0.3.1] — 2026-09-29
+
+The Kubernetes server-side layer: the policy compiled to ValidatingAdmissionPolicies scoped to
+agent identities, verified on a kind cluster against the client-side verdicts, and an identity
+audit that reports the RBAC escapes admission cannot see. Also a fix to how the aws parser names
+resources. Preview: see `docs/server-side.md`.
 
 ### Added
 - **Preview:** `aegis compile kubernetes --cluster <name> --out DIR`: the verified snapshot as
@@ -394,6 +399,7 @@ See "Project status" in the README and [`docs/dev/PLAN.md`](docs/dev/PLAN.md) §
 rather than real connectors, signing uses a shared secret, and a principal is a signed name
 rather than a bound identity.
 
+[0.3.1]: https://github.com/moneytool/aegis-devops/releases/tag/v0.3.1
 [0.3.0]: https://github.com/moneytool/aegis-devops/releases/tag/v0.3.0
 [0.2.1]: https://github.com/moneytool/aegis-devops/releases/tag/v0.2.1
 [0.2.0]: https://github.com/moneytool/aegis-devops/releases/tag/v0.2.0
