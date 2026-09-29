@@ -445,10 +445,30 @@ for the clouds.
   `request.name`, `request.namespace`, `object`/`oldObject` — so the diff-derived actions of
   §5.3 (scale, set-image, cordon, restart), eviction-as-delete, `serviceAccountName` guardrails
   and the namespace cascade are all expressible. `validationActions: [Deny, Audit]`.
-- **What does not**: recurring time windows (the admission CEL environment is not believed to
-  expose the current time — **to verify**; reported `not enforced` until confirmed), rate
-  limits, anything that needs the full engine at request time. Those stay client-side or wait
-  for the webhook.
+- **What does not**: recurring time windows, rate limits, anything that needs the full engine
+  at request time. Those stay client-side or wait for the webhook. **Time, checked
+  2026-09-28:** the ValidatingAdmissionPolicy CEL environment has no clock. Its variables are
+  `object`, `oldObject`, `request`, `params`, `namespaceObject`, `authorizer` and `variables`
+  (none carries a request time), and neither standard CEL nor any Kubernetes CEL library
+  (strings, lists, regex, URL, IP/CIDR, authorizer, quantity, semver, format) provides a
+  current-time function — CEL's `timestamp()` / `duration()` only operate on values supplied
+  to them. (Sources: kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/,
+  kubernetes.io/docs/reference/using-api/cel/.) Server-set object timestamps such as
+  `metadata.creationTimestamp` are not a substitute: they exist only for some operations
+  (a DELETE carries the object's *original* creation time) and are not a clock. So time windows
+  are `not enforced` by the VAP target, by design; the `kind` CI job (§8) adds a test that a
+  policy using a clock function is rejected by the API server, to catch a future change.
+
+**Verified live, 2026-09-28** (a local `kind` cluster, Kubernetes v1.37.0):
+
+| Claim in this design | Result |
+|---|---|
+| VAP has no clock | Confirmed. `now()` and `time.now()` → `undeclared reference to 'now'`; `request.requestTime` and `request.time` → `undefined field`; all rejected when the policy is created. A plain expression was accepted as a control. |
+| Identity scoping via `matchConditions` on `request.userInfo.username` | Confirmed. A policy scoped to `system:serviceaccount:agents:claude` denied that account's `delete namespace` with the Aegis message; the same delete by an admin succeeded. |
+| Admission policies cannot protect admission-policy objects; RBAC must (§4.3, §6.6) | Confirmed. A VAP denying DELETE of `validatingadmissionpolicies`/`…bindings` for everyone did **not** stop the agent deleting its own binding; five seconds later (after propagation) the agent deleted the namespace. |
+| `deletecollection` is admitted per item, and `request.name` is empty (§5.3) | Confirmed. The collection DELETE was evaluated per item with `request.name` empty (the error names `"Unknown"`) and the item's name in `oldObject.metadata.name`. The compiler must read the name from `oldObject` for DELETE. |
+| A collection delete is not atomic (§5.3) | Confirmed, and it stops at the first denial: with only `cm2` denied, `cm1` was deleted, `cm2` refused, and `cm3` left untouched. |
+| `kubectl delete … --all` | Sends one DELETE per object (not the collection API); each was evaluated and denied separately. |
 - **Self-protection**: the compiled bindings and policies are themselves cluster objects;
   agents must not be able to write `validatingadmissionpolicies`/`…bindings` (RBAC, §4.3), and
   `aegis audit-identity` checks it. Like webhook configurations, these objects are not

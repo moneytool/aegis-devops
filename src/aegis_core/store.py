@@ -666,6 +666,12 @@ def time_window_unresolved(
     return _scope_matches(c.scope, intent)
 
 
+# Returned by _source_failure_reason when no fetcher applies to a reference:
+# the constraint is kept (as with no fetcher at all) but has no source
+# verification to show for it -- see ConstraintStore.source_verified.
+_SOURCE_UNCHECKED = "\x00unchecked"
+
+
 def _source_failure_reason(
     constraint: Constraint, fetcher: SourceFetcher, warnings: list[str] | None = None
 ) -> str | None:
@@ -686,8 +692,8 @@ def _source_failure_reason(
         return verify_source_reason(constraint, fetcher, warnings)
     except SourceRejected as exc:  # a git citation: the reason is specific
         return exc.reason
-    except SourceNotChecked:  # no fetcher for this kind of reference
-        return None
+    except SourceNotChecked:  # no fetcher for this kind of reference: not a
+        return _SOURCE_UNCHECKED  # failure, but not evidence either
     except (json.JSONDecodeError, TypeError):
         return "invalid-source"
     except (FileNotFoundError, KeyError, ValueError):
@@ -709,6 +715,74 @@ _SOURCE_FAILURE_MESSAGES = {
     "invalid-source": "source file is not readable JSON (bad content or wrong shape)",
     **GIT_REASON_MESSAGES,
 }
+
+
+def _canonical(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+
+
+@dataclass(frozen=True)
+class VerifiedSnapshot:
+    """An immutable, detached view of the constraints that may vote. Every
+    field is a tuple of strings/tuples; :attr:`constraints` builds fresh
+    ``Constraint`` objects from the stored records on each access, so no
+    caller can change what the snapshot (and its digest) describes. See
+    :meth:`ConstraintStore.verified_snapshot`."""
+
+    records: tuple[str, ...]
+    excluded_pairs: tuple[tuple[str, str], ...]
+    authority: tuple[tuple[str, tuple[str, ...]], ...]
+    input_pairs: tuple[tuple[str, str], ...]
+    settings: tuple[tuple[str, str], ...]
+    aegis_version: str
+    digest: str
+
+    @classmethod
+    def _build(cls, *, records, excluded, authority, inputs, settings, aegis_version):
+        digest = cls._digest(records, excluded, authority, inputs, settings, aegis_version)
+        return cls(records, excluded, authority, inputs, settings, aegis_version, digest)
+
+    @staticmethod
+    def _digest(records, excluded, authority, inputs, settings, aegis_version) -> str:
+        payload = {
+            "aegis_version": aegis_version,
+            "authority": [[p, list(c)] for p, c in authority],
+            "constraints": list(records),
+            "excluded": [list(e) for e in excluded],
+            "inputs": [list(i) for i in inputs],
+            "settings": [list(x) for x in settings],
+        }
+        return hashlib.sha256(_canonical(payload).encode()).hexdigest()
+
+    def verify(self) -> bool:
+        """Whether :attr:`digest` still matches the snapshot's contents."""
+        return self.digest == self._digest(
+            self.records, self.excluded_pairs, self.authority, self.input_pairs,
+            self.settings, self.aegis_version,
+        )
+
+    @property
+    def constraints(self) -> tuple[Constraint, ...]:
+        """Fresh copies, rebuilt from the records on every access."""
+        return tuple(_constraint_from_dict(json.loads(r)) for r in self.records)
+
+    @property
+    def excluded(self) -> tuple[dict[str, str], ...]:
+        return tuple({"id": i, "reason": r} for i, r in self.excluded_pairs)
+
+    @property
+    def inputs(self) -> dict[str, str]:
+        return dict(self.input_pairs)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "digest": self.digest,
+            "aegis_version": self.aegis_version,
+            "verified": [json.loads(r)["id"] for r in self.records],
+            "excluded": [dict(e) for e in self.excluded],
+            "inputs": dict(self.input_pairs),
+            "settings": dict(self.settings),
+        }
 
 
 # REVIEW-4 T2.3: process-wide LRU for ConstraintStore.load_cached, keyed by
@@ -808,6 +882,11 @@ class ConstraintStore:
         # from a fresh probe by `load()`; a store built directly (as most
         # unit tests do) assumes it's available, matching prior behaviour.
         self.tzdata_available: bool = True
+        # ids of constraints whose cited source was actually fetched and
+        # found to back them (file or git) -- evidence a verified snapshot
+        # requires; a constraint loaded with no applicable fetcher is not in
+        # here (docs/dev/DESIGN-v0.3-server-side.md §3.1)
+        self.source_verified: set[str] = set()
 
     @property
     def health(self) -> StoreHealth:
@@ -823,6 +902,55 @@ class ConstraintStore:
     def is_authorized(self, principal: str, constraint_class: str) -> bool:
         """Whether ``principal`` may assert constraints of ``constraint_class``."""
         return constraint_class in self.authority_map.get(principal, set())
+
+    def verified_snapshot(
+        self,
+        inputs: dict[str, str] | None = None,
+        *,
+        require_source_evidence: bool = True,
+    ) -> VerifiedSnapshot:
+        """The constraints that may vote, frozen and detached from this store:
+        those loaded **and**, now, intact, authorized, and (with
+        ``require_source_evidence``, the default) source-verified at load --
+        a signed constraint with a self-consistent hash is not proof that its
+        cited source backs it. Everything else is in ``excluded`` with its
+        reason: the load-time quarantine, ``tampered``, ``unauthorized``,
+        ``source-unverified``.
+
+        The snapshot keeps canonical JSON records, not this store's objects:
+        later changes to the store or to objects handed out by the snapshot
+        cannot change what it holds, and :meth:`VerifiedSnapshot.verify`
+        recomputes the digest from those records. ``inputs`` maps a name to
+        the sha256 of every other file that shapes decisions; store settings
+        that change evaluation (``default_tz``, tzdata availability) are
+        included. (``docs/dev/DESIGN-v0.3-server-side.md`` §3.1.)"""
+        from aegis_core import __version__
+
+        records: list[str] = []
+        excluded = [(q["id"], q["reason"]) for q in self.quarantined]
+        for c in sorted(self.constraints.values(), key=lambda c: c.id):
+            if not c.verify_integrity():
+                excluded.append((c.id, "tampered"))
+            elif not self.is_authorized(c.principal, c.constraint_class):
+                excluded.append((c.id, "unauthorized"))
+            elif require_source_evidence and c.id not in self.source_verified:
+                excluded.append((c.id, "source-unverified"))
+            else:
+                records.append(_canonical(_constraint_to_dict(c)))
+        settings = {
+            "default_tz": self.default_tz or "",
+            "tzdata_available": "true" if self.tzdata_available else "false",
+        }
+        return VerifiedSnapshot._build(
+            records=tuple(records),
+            excluded=tuple(sorted(excluded)),
+            authority=tuple(
+                (p, tuple(sorted(cls))) for p, cls in sorted(self.authority_map.items())
+            ),
+            inputs=tuple(sorted((inputs or {}).items())),
+            settings=tuple(sorted(settings.items())),
+            aegis_version=__version__,
+        )
 
     def _quarantine(self, constraint: Constraint, reason: str, message: str) -> None:
         self.quarantined.append({"id": constraint.id, "reason": reason})
@@ -1018,7 +1146,9 @@ class ConstraintStore:
                 continue
             if caching_fetcher is not None:
                 failure = _source_failure_reason(constraint, caching_fetcher, store.warnings)
-                if failure is not None:
+                if failure is None:
+                    store.source_verified.add(constraint.id)
+                elif failure != _SOURCE_UNCHECKED:
                     store._quarantine(constraint, failure, _SOURCE_FAILURE_MESSAGES[failure])
                     continue
             store.constraints[constraint.id] = constraint
@@ -1071,7 +1201,12 @@ class ConstraintStore:
         for constraint_id in list(self.constraints.keys()):
             constraint = self.constraints[constraint_id]
             failure = _source_failure_reason(constraint, caching_fetcher, self.warnings)
-            if failure is not None:
+            if failure is None:
+                self.source_verified.add(constraint_id)
+            elif failure == _SOURCE_UNCHECKED:
+                continue
+            else:
+                self.source_verified.discard(constraint_id)
                 newly_quarantined.append({"id": constraint_id, "reason": failure})
                 self._quarantine(constraint, failure, _SOURCE_FAILURE_MESSAGES[failure])
                 del self.constraints[constraint_id]

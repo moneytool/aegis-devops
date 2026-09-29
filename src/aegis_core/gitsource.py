@@ -417,6 +417,8 @@ class GitSourceFetcher:
             for rid, cfg in repos.items()
         }
         self._stale: set[str] = set()
+        # the commit each tracked ref points at: part of a snapshot's inputs
+        self.ref_heads: dict[str, str] = {}
         self._principals: dict[str, str] = {}
         now = time.time() if now is None else now
         for rid, cfg in repos.items():
@@ -424,6 +426,7 @@ class GitSourceFetcher:
             try:
                 git.run("rev-parse", "--verify", "--quiet", cfg.ref + "^{commit}")
                 newest = int(git.run("log", "-1", "--format=%ct", cfg.ref).strip())
+                self.ref_heads[rid] = git.run("rev-parse", cfg.ref + "^{commit}").strip()
             except (subprocess.CalledProcessError, ValueError, OSError) as exc:
                 raise ValueError(
                     f"repos.yaml: {rid}: {cfg.path} is not a git clone with ref {cfg.ref}"

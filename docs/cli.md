@@ -125,6 +125,40 @@ never fails open. It runs the `aegis` in the venv next to it (`AEGIS_BIN` overri
   {"type": "command", "command": "/path/to/aegis-devops/examples/claude-code-hook.sh"}]}]}}
 ```
 
+### Verified snapshot
+
+`aegis snapshot` loads and verifies the policy as `aegis check` does and prints what may
+actually vote:
+
+```bash
+aegis snapshot --pretty
+```
+
+```
+SNAPSHOT eac55f5b2b2163b6…
+  aegis 0.2.1; verified=30 excluded=0
+  input: environments 9d970db5…
+  input: plan_constraints c2f595cd…
+  input: sources_manifest 2fbfa3b2…
+```
+
+`verified` counts constraints that are loaded **and**, at this moment, intact, authorized
+(authority is otherwise checked per decision) and **source-verified at load** — a signed
+constraint with a self-consistent hash is not proof that its cited source backs it. `excluded`
+lists everything else with its reason (tampered, forged, unauthorized, `source-unverified`,
+invalid, …). The digest covers every input — the verified constraints, the authority map, the
+environment and plan-constraint maps, the sources manifest, `repos.yaml`/`signers.yaml`/
+`agents.yaml` when present, the commit each Git source ref points at, store settings that change
+evaluation (the default time zone, tzdata availability) and the Aegis version — so anything
+built from the policy can be traced to exactly this state.
+
+It refuses `--insecure`, `--sources ''`, and any decision-shaping file that does not verify: the
+environment and plan-constraint maps are loaded through their loaders (signature and shape),
+`agents.yaml` must be signed. The snapshot is detached from the loaded store: it keeps canonical
+records and hands out fresh copies, so nothing can change what it describes after the fact.
+Without `--pretty` it prints one JSON object. `aegis sources` is the per-constraint view of the
+same load.
+
 ## Compound commands
 
 Agent frameworks hand over a shell *string*, not an argv. `aegis check command -- "<string>"`
