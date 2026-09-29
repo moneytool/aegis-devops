@@ -434,3 +434,34 @@ def test_package_ships_the_action_map():
     assert Path("src/aegis_core/compile/actions/aws.yaml").exists()
     pyproject = Path("pyproject.toml").read_text()
     assert "compile/actions/*" in pyproject
+
+
+def test_agents_only_without_agent_roles_denies_all_assume_and_pass(tmp_path):
+    """Review of #17: listing only a user (or source identities) used to emit
+    no AssumeRole/PassRole guard, so the agent could assume an unlisted role."""
+    user = f"arn:aws:iam::{ACCOUNT}:user/coding-agent"
+    model = _model(tmp_path, mode="agents-only", trusted=None,
+                   agents=[{"platform": "aws", "kind": "user", "id": user}])
+    r = _compile(tmp_path, model=model)
+    admin = f"arn:aws:iam::{ACCOUNT}:role/Admin"
+    assert _denied(r, "sts:AssumeRole", admin, principal=user)
+    assert _denied(r, "iam:PassRole", admin, principal=user)
+    assert not _denied(r, "sts:AssumeRole", admin, principal=BREAK_GLASS)
+
+
+def test_full_arn_identifiers_are_used_as_arns(tmp_path):
+    """Review of #17: --secret-id (and many others) take a full ARN; the CLI
+    keeps it in the resource, so the compiled deny must use it as the ARN."""
+    secret = f"arn:aws:secretsmanager:us-east-1:{ACCOUNT}:secret:prod-db-Ab12Cd"
+    intents = from_aws_multi(["aws", "secretsmanager", "delete-secret", "--secret-id", secret])
+    r = _compile(tmp_path, _rule("s", intents[0].resource, ["delete"]),
+                 _rule("lg", f"logs/log-group/arn:aws:logs:us-east-1:{ACCOUNT}:log-group:app",
+                       ["delete"]),
+                 _rule("other", "secretsmanager/secret/arn:aws:s3:::bucket", ["delete"]))
+    assert _denied(r, "secretsmanager:DeleteSecret", secret)
+    assert not _denied(r, "secretsmanager:DeleteSecret", secret.replace("prod-db", "dev-db"))
+    assert _rule_cov(r, "s")["status"] == "exact"
+    assert _denied(r, "logs:DeleteLogGroup", f"arn:aws:logs:us-east-1:{ACCOUNT}:log-group:app:*")
+    other = _rule_cov(r, "other")
+    assert other["status"] == "not-enforced" and "not an ARN of this service" in \
+        other["not_enforced"][0]

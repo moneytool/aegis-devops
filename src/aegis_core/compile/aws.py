@@ -211,6 +211,17 @@ def _arn_glob(name: str) -> tuple[str, bool]:
     return "".join(out), widened
 
 
+def _arn_form(template: str, arn: str) -> str:
+    """The ARN a grant needs when the rule names the resource by full ARN:
+    the given ARN plus whatever the template adds after ``{name}`` (``/*`` for
+    S3 objects, ``:*`` for log streams) -- except Secrets Manager's random
+    ``-??????`` suffix, which a full secret ARN already carries."""
+    if "{name}" not in template:
+        return arn
+    suffix = template.split("{name}", 1)[1]
+    return arn if suffix == "-??????" else arn + suffix
+
+
 @dataclass
 class _Rule:
     c: Constraint
@@ -323,6 +334,15 @@ def _compile_rule(c: Constraint, target: AwsTarget, amap: dict[str, TypeMap]) ->
             rule.not_enforced.append(f"{tm.type}: the CLI names this type by ARN; "
                                      f"{name!r} is not an ARN")
             continue
+        if arn_name.startswith("arn:") and tm.names != "wildcard-only":
+            # many APIs take a name or a full ARN (e.g. --secret-id), and the
+            # CLI keeps whichever was typed (review of #17)
+            prefixes = {f"arn:{target.partition}:{a.split(':')[2]}:" for gs in tm.grants.values()
+                        for g in gs for a in g.arns if a.startswith("arn:")}
+            if not any(arn_name.startswith(pfx) for pfx in prefixes):
+                rule.not_enforced.append(f"{tm.type}: {name!r} is not an ARN of this "
+                                         f"service in partition {target.partition}")
+                continue
         if tm.names == "cli-missing" and arn_name != "*":
             rule.notes.append(f"{tm.type}: the client-side parser does not extract a name "
                               f"for this type, so the CLI check never matches {name!r}; the "
@@ -350,8 +370,8 @@ def _compile_rule(c: Constraint, target: AwsTarget, amap: dict[str, TypeMap]) ->
                     # blocks it whoever owns the resource (and statements that
                     # share a condition can then merge exactly)
                     arns = ("*",)
-                elif tm.names == "arn":
-                    arns = (arn_name,)
+                elif arn_name.startswith("arn:"):
+                    arns = tuple(_arn_form(a, arn_name) for a in g.arns)
                 else:
                     arns = tuple(a.replace("{partition}", target.partition)
                                  .replace("{account}", target.account)
@@ -433,14 +453,15 @@ def _self_protection(model: IdentityModel) -> list[tuple[str, dict[str, Any], st
                         "agents cannot mint credentials for, or change, a trusted user"))
     else:
         agent_roles = sorted(i.id for i in model.agents_for("aws") if i.kind == "role")
-        if agent_roles:
-            out.append(("assume-non-agent-role", {"Action": ["sts:AssumeRole"],
-                                                  "NotResource": agent_roles},
-                        "agents-only: every unlisted role is exempt, so agents may assume "
-                        "only agent roles"))
-            out.append(("pass-non-agent-role", {"Action": ["iam:PassRole"],
-                                                "NotResource": agent_roles},
-                        "agents-only: agents may pass only agent roles to services"))
+        # every unlisted role is exempt: agents may assume or pass only agent
+        # roles, and none at all when no agent role is listed (review of #17)
+        target = {"NotResource": agent_roles} if agent_roles else {"Resource": "*"}
+        out.append(("assume-non-agent-role", {"Action": ["sts:AssumeRole"], **target},
+                    "agents-only: every unlisted role is exempt, so agents may assume only "
+                    "agent roles" + ("" if agent_roles else " (none are listed)")))
+        out.append(("pass-non-agent-role", {"Action": ["iam:PassRole"], **target},
+                    "agents-only: agents may pass only agent roles to services"
+                    + ("" if agent_roles else " (none are listed)")))
         out.append(("new-credentials", {"Action": list(_NEW_CREDENTIALS), "Resource": "*"},
                     "agents-only: a new user or key is unlisted, hence exempt"))
     if exempt_si:
