@@ -465,3 +465,34 @@ def test_full_arn_identifiers_are_used_as_arns(tmp_path):
     other = _rule_cov(r, "other")
     assert other["status"] == "not-enforced" and "not an ARN of this service" in \
         other["not_enforced"][0]
+
+
+@pytest.mark.parametrize("command, iam, arn", [
+    (f"aws cloudformation delete-stack --stack-name arn:aws:cloudformation:us-east-1:{ACCOUNT}:"
+     "stack/prod/1234abcd", "cloudformation:DeleteStack",
+     f"arn:aws:cloudformation:us-east-1:{ACCOUNT}:stack/prod/1234abcd"),
+    (f"aws secretsmanager delete-secret --secret-id arn:aws:secretsmanager:us-east-1:{ACCOUNT}:"
+     "secret:prod-db-Ab12Cd", "secretsmanager:DeleteSecret",
+     f"arn:aws:secretsmanager:us-east-1:{ACCOUNT}:secret:prod-db-Ab12Cd"),
+    ("aws eks delete-nodegroup --cluster-name c --nodegroup-name "
+     f"arn:aws:eks:us-east-1:{ACCOUNT}:nodegroup/c/ng/5a1b-2c3d", "eks:DeleteNodegroup",
+     f"arn:aws:eks:us-east-1:{ACCOUNT}:nodegroup/c/ng/5a1b-2c3d"),
+])
+def test_complete_arns_are_used_verbatim(tmp_path, command, iam, arn):
+    """Review of #17: a full ARN that already carries the resource's own
+    identity suffix must not get the template's suffix appended."""
+    rtype = "/".join(from_aws_multi(shlex.split(command))[0].resource.split("/", 2)[:2])
+    r = _compile(tmp_path, _rule("full", f"{rtype}/{arn}", ["delete"]))
+    assert _denied(r, iam, arn)
+    assert not _denied(r, iam, arn.replace("prod", "dev").replace("/ng/", "/other/"))
+
+
+def test_related_resources_still_get_their_suffix(tmp_path):
+    r = _compile(tmp_path, _rule("b", "s3/bucket/arn:aws:s3:::prod-data", ["delete"]),
+                 _rule("partial", f"cloudformation/stack/arn:aws:cloudformation:*:{ACCOUNT}:"
+                                  "stack/prod-*", ["delete"]))
+    assert _denied(r, "s3:DeleteBucket", "arn:aws:s3:::prod-data")
+    assert _denied(r, "s3:DeleteObject", "arn:aws:s3:::prod-data/k")  # {name}/* appended
+    # an ARN glob without the stack id still gets /* to match the full stack ARN
+    assert _denied(r, "cloudformation:DeleteStack",
+                   f"arn:aws:cloudformation:us-east-1:{ACCOUNT}:stack/prod-web/99ff")

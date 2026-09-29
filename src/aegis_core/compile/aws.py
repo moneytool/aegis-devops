@@ -211,15 +211,22 @@ def _arn_glob(name: str) -> tuple[str, bool]:
     return "".join(out), widened
 
 
-def _arn_form(template: str, arn: str) -> str:
-    """The ARN a grant needs when the rule names the resource by full ARN:
-    the given ARN plus whatever the template adds after ``{name}`` (``/*`` for
-    S3 objects, ``:*`` for log streams) -- except Secrets Manager's random
-    ``-??????`` suffix, which a full secret ARN already carries."""
+def _arn_form(template: str, arn: str, partition: str) -> str:
+    """The ARN a grant needs when the rule names the resource by full ARN.
+
+    A full ARN that already has the shape the template describes (the
+    resource's own identity, e.g. a stack ARN with its ``/<stack-id>``, a
+    secret ARN with its random suffix) is used as it is. Otherwise the grant
+    is for a related resource under it -- S3 objects in a bucket
+    (``{name}/*``), log streams in a log group (``{name}:*``) -- and the
+    template's suffix is appended (review of #17)."""
     if "{name}" not in template:
         return arn
-    suffix = template.split("{name}", 1)[1]
-    return arn if suffix == "-??????" else arn + suffix
+    shape = (template.replace("{partition}", partition).replace("{account}", "*")
+             .replace("{name}", "*"))
+    if fnmatch.fnmatchcase(arn, shape.replace("[", "[[]")):
+        return arn
+    return arn + template.split("{name}", 1)[1]
 
 
 @dataclass
@@ -371,7 +378,7 @@ def _compile_rule(c: Constraint, target: AwsTarget, amap: dict[str, TypeMap]) ->
                     # share a condition can then merge exactly)
                     arns = ("*",)
                 elif arn_name.startswith("arn:"):
-                    arns = tuple(_arn_form(a, arn_name) for a in g.arns)
+                    arns = tuple(_arn_form(a, arn_name, target.partition) for a in g.arns)
                 else:
                     arns = tuple(a.replace("{partition}", target.partition)
                                  .replace("{account}", target.account)
