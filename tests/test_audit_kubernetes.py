@@ -170,3 +170,96 @@ def test_every_escape_check_is_reported(tmp_path, check):
     r = audit(inv, _model(tmp_path))
     assert [(f["identity"], f["kind"]) for f in r.findings] == [
         ("serviceaccount/agents:narrow", check)]
+
+
+# --- collector (review of #22) -------------------------------------------------------------
+
+import subprocess  # noqa: E402
+
+from aegis_core import audit_kubernetes as ak  # noqa: E402
+
+
+def _proc(stdout, rc=0, stderr=""):
+    return subprocess.CompletedProcess([], rc, stdout, stderr)
+
+
+def test_a_failed_access_review_is_an_error_not_a_no(monkeypatch):
+    monkeypatch.setattr(ak, "_run", lambda ctx, *a: _proc("", 1, 'Error from server '
+                        '(Forbidden): users "x" is forbidden: cannot impersonate'))
+    with pytest.raises(ak.InventoryError, match="SubjectAccessReview failed"):
+        ak.can_i(None, ["impersonate", "users"])
+    monkeypatch.setattr(ak, "_run", lambda ctx, *a: _proc("no\n", 1))
+    assert ak.can_i(None, ["impersonate", "users"]) is False
+    monkeypatch.setattr(ak, "_run", lambda ctx, *a: _proc("yes\n", 0))
+    assert ak.can_i(None, ["impersonate", "users"]) is True
+
+
+def test_probes_cover_updates_names_and_namespaces(tmp_path):
+    model = _model(tmp_path, trusted=[
+        {"platform": "kubernetes", "kind": "user", "id": "alice@example.com"},
+        {"platform": "kubernetes", "kind": "serviceaccount",
+         "id": "argocd:argocd-application-controller"}])
+    probes = {(c, " ".join(a)) for c, a, _t in ak._probes(model, ["agents", "argocd", "prod"])}
+    for verb in ("update", "patch", "delete"):
+        assert ("write-admission-policies",
+                f"{verb} validatingadmissionpolicies.admissionregistration.k8s.io") in probes
+        assert ("write-admission-policies",
+                f"{verb} validatingadmissionpolicybindings.admissionregistration.k8s.io") in probes
+        assert ("write-webhooks",
+                f"{verb} mutatingwebhookconfigurations.admissionregistration.k8s.io") in probes
+    assert ("impersonate-groups", "impersonate groups/aegis:break-glass") in probes
+    assert ("impersonate-groups", "impersonate groups/system:masters") in probes
+    assert ("impersonate-users", "impersonate users/alice@example.com") in probes
+    assert ("impersonate-serviceaccounts", "impersonate serviceaccounts -n prod") in probes
+    assert ("impersonate-serviceaccounts",
+            "impersonate serviceaccounts/argocd-application-controller -n argocd") in probes
+
+
+def _collect(monkeypatch, tmp_path, grants):
+    """collect_inventory against a fake cluster: one agent ServiceAccount,
+    granted exactly the can-i argument strings in ``grants``."""
+    objects = {
+        "serviceaccounts": {"items": [
+            {"metadata": {"namespace": "agents", "name": "coder"}},
+            {"metadata": {"namespace": "argocd", "name": "argocd-application-controller"}}]},
+        "clusterrolebindings": {"items": [
+            {"metadata": {"name": "bg"}, "roleRef": {"name": "cluster-admin"},
+             "subjects": [{"kind": "Group", "name": "aegis:break-glass"}]}]},
+        "rolebindings": {"items": []},
+        "pods": {"items": []},
+    }
+    monkeypatch.setattr(ak, "_kubectl", lambda ctx, *a: json.dumps(objects[a[1]]))
+
+    def fake_can_i(ctx, args):
+        asked = " ".join(args[:args.index("--as")])
+        return asked in grants and "system:serviceaccount:agents:coder" in args
+    monkeypatch.setattr(ak, "can_i", fake_can_i)
+    model = _model(tmp_path)
+    return ak.audit(ak.collect_inventory(None, model), model)
+
+
+@pytest.mark.parametrize("grant, check, target", [
+    ("update validatingadmissionpolicybindings.admissionregistration.k8s.io",
+     "write-admission-policies", "update validatingadmissionpolicybindings"),
+    ("patch validatingadmissionpolicies.admissionregistration.k8s.io",
+     "write-admission-policies", "patch validatingadmissionpolicies"),
+    ("impersonate groups/aegis:break-glass", "impersonate-groups", "group aegis:break-glass"),
+    ("impersonate serviceaccounts -n argocd", "impersonate-serviceaccounts",
+     "any ServiceAccount in argocd"),
+    ("impersonate serviceaccounts/argocd-application-controller -n argocd",
+     "impersonate-serviceaccounts", "ServiceAccount argocd:argocd-application-controller"),
+])
+def test_update_only_named_and_cross_namespace_grants_are_found(monkeypatch, tmp_path, grant,
+                                                                 check, target):
+    """Review of #22: a delete-only check missed update/patch, and an unnamed,
+    current-namespace impersonation check missed resourceNames and
+    RoleBinding grants in other namespaces."""
+    r = _collect(monkeypatch, tmp_path, {grant})
+    assert [(f["identity"], f["kind"]) for f in r.findings] == [
+        ("serviceaccount/agents:coder", check)]
+    assert target in r.findings[0]["detail"]
+
+
+def test_collector_with_no_grants_is_clean(monkeypatch, tmp_path):
+    r = _collect(monkeypatch, tmp_path, set())
+    assert r.findings == [] and "serviceaccount/agents:coder" in _ids(r.would_restrict)

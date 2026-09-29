@@ -26,30 +26,28 @@ from typing import Any
 
 from aegis_core.identity import IdentityModel
 
-# (id, verb, resource, why) -- each asked as a SubjectAccessReview
-ESCAPE_CHECKS: tuple[tuple[str, str, str, str], ...] = (
-    ("impersonate-users", "impersonate", "users",
-     "can act as any user (kubectl --as); admission then sees that user"),
-    ("impersonate-groups", "impersonate", "groups", "can claim any group, break-glass included"),
-    ("impersonate-serviceaccounts", "impersonate", "serviceaccounts",
-     "can act as any ServiceAccount"),
-    ("write-admission-policies", "delete",
-     "validatingadmissionpolicies.admissionregistration.k8s.io",
-     "can delete the compiled policies, which admission cannot protect"),
-    ("write-admission-bindings", "delete",
-     "validatingadmissionpolicybindings.admissionregistration.k8s.io",
-     "can delete the compiled bindings, which admission cannot protect"),
-    ("write-webhooks", "delete",
-     "validatingwebhookconfigurations.admissionregistration.k8s.io",
-     "can remove admission webhooks"),
-    ("escalate-roles", "escalate", "clusterroles.rbac.authorization.k8s.io",
-     "can grant itself permissions it does not hold"),
-    ("bind-roles", "bind", "clusterroles.rbac.authorization.k8s.io",
-     "can bind any cluster role, cluster-admin included"),
-    ("write-clusterrolebindings", "create",
-     "clusterrolebindings.rbac.authorization.k8s.io",
-     "can bind itself (or a group it can claim) to a cluster role"),
+# (id, why). Each check is asked as several SubjectAccessReviews (see
+# _probes): by name where RBAC can grant by name (resourceNames), per
+# namespace where a RoleBinding can grant it, and for every write verb that
+# disables a control (review of #22).
+ESCAPE_CHECKS: tuple[tuple[str, str], ...] = (
+    ("impersonate-users", "can act as another user (kubectl --as), a trusted or break-glass "
+                          "one included; admission then sees that user"),
+    ("impersonate-groups", "can claim another group, break-glass included"),
+    ("impersonate-serviceaccounts", "can act as another ServiceAccount"),
+    ("impersonate-uids", "can claim another identity's UID"),
+    ("write-admission-policies", "can update, patch or delete ValidatingAdmissionPolicies or "
+                                 "their bindings (make a rule always pass, or Deny into Warn), "
+                                 "which admission cannot protect"),
+    ("write-webhooks", "can update, patch or delete admission webhook configurations"),
+    ("create-mutating-admission", "can create a mutating webhook or mutating admission policy "
+                                  "that rewrites requests before validation"),
+    ("escalate-roles", "can grant itself permissions it does not hold (escalate)"),
+    ("bind-roles", "can bind any cluster role, cluster-admin included"),
+    ("write-clusterrolebindings", "can create or change cluster role bindings"),
 )
+_ADM = "admissionregistration.k8s.io"
+_RBAC = "rbac.authorization.k8s.io"
 _SA_PREFIX = "system:serviceaccount:"
 # every identity (or every ServiceAccount) carries these; agents.yaml refuses
 # to trust them, so they are not identities to review
@@ -79,15 +77,74 @@ def _sa_groups(namespace: str) -> list[str]:
 # --- collection ------------------------------------------------------------------------------
 
 
-def _kubectl(context: str | None, *args: str) -> str:
+def _run(context: str | None, *args: str) -> subprocess.CompletedProcess:
     argv = ["kubectl", *(["--context", context] if context else []), *args]
     try:
-        proc = subprocess.run(argv, capture_output=True, text=True, check=False)
+        return subprocess.run(argv, capture_output=True, text=True, check=False)
     except FileNotFoundError:
         raise InventoryError("kubectl is not on PATH (or pass --inventory FILE)") from None
-    if proc.returncode != 0 and "auth" not in args[:1]:
+
+
+def _kubectl(context: str | None, *args: str) -> str:
+    proc = _run(context, *args)
+    if proc.returncode != 0:
         raise InventoryError(f"kubectl {' '.join(args)} failed: {proc.stderr.strip()[:300]}")
     return proc.stdout
+
+
+def can_i(context: str | None, args: list[str]) -> bool:
+    """One SubjectAccessReview. ``kubectl auth can-i`` exits non-zero for
+    "no" too, so only an explicit yes/no answer counts: a failed review (no
+    right to impersonate for it, no SubjectAccessReview access, an API error)
+    is an error, never a quiet "no" (review of #22)."""
+    proc = _run(context, "auth", "can-i", *args)
+    lines = proc.stdout.strip().splitlines()
+    answer = lines[-1].strip() if lines else ""
+    if answer == "yes":
+        return True
+    if answer == "no":
+        return False
+    raise InventoryError(f"SubjectAccessReview failed (kubectl auth can-i {' '.join(args)}): "
+                         f"{(proc.stderr or proc.stdout).strip()[:300] or 'no answer'}")
+
+
+def _probes(model: IdentityModel, namespaces: list[str]) -> list[tuple[str, list[str], str]]:
+    """``(check, can-i arguments, target description)`` for every escape
+    check."""
+    exempt = model.exempt("kubernetes")
+    users = sorted({i.id for i in exempt if i.kind == "user"})
+    groups = sorted({i.id for i in exempt if i.kind == "group"} | {"system:masters"})
+    sas = sorted({i.id for i in exempt if i.kind == "serviceaccount"})
+    out: list[tuple[str, list[str], str]] = [
+        ("impersonate-users", ["impersonate", "users"], "any user"),
+        ("impersonate-groups", ["impersonate", "groups"], "any group"),
+        ("impersonate-uids", ["impersonate", "uids"], "any uid"),
+    ]
+    out += [("impersonate-users", ["impersonate", f"users/{u}"], f"user {u}") for u in users]
+    out += [("impersonate-groups", ["impersonate", f"groups/{g}"], f"group {g}") for g in groups]
+    for ns in sorted(set(namespaces)):
+        out.append(("impersonate-serviceaccounts", ["impersonate", "serviceaccounts", "-n", ns],
+                    f"any ServiceAccount in {ns}"))
+    for sa in sas:
+        ns, name = sa.split(":", 1)
+        out.append(("impersonate-serviceaccounts",
+                    ["impersonate", f"serviceaccounts/{name}", "-n", ns],
+                    f"ServiceAccount {sa}"))
+    for res in ("validatingadmissionpolicies", "validatingadmissionpolicybindings"):
+        for verb in ("update", "patch", "delete"):
+            out.append(("write-admission-policies", [verb, f"{res}.{_ADM}"], f"{verb} {res}"))
+    for res in ("validatingwebhookconfigurations", "mutatingwebhookconfigurations"):
+        for verb in ("update", "patch", "delete"):
+            out.append(("write-webhooks", [verb, f"{res}.{_ADM}"], f"{verb} {res}"))
+    for res in ("mutatingwebhookconfigurations", "mutatingadmissionpolicies",
+                "mutatingadmissionpolicybindings"):
+        out.append(("create-mutating-admission", ["create", f"{res}.{_ADM}"], f"create {res}"))
+    out.append(("escalate-roles", ["escalate", f"clusterroles.{_RBAC}"], "escalate clusterroles"))
+    out.append(("bind-roles", ["bind", f"clusterroles.{_RBAC}"], "bind clusterroles"))
+    for verb in ("create", "update", "patch"):
+        out.append(("write-clusterrolebindings", [verb, f"clusterrolebindings.{_RBAC}"],
+                    f"{verb} clusterrolebindings"))
+    return out
 
 
 def _identities(sas: list[dict], bindings: list[dict]) -> list[dict[str, Any]]:
@@ -134,19 +191,23 @@ def collect_inventory(context: str | None, model: IdentityModel) -> dict[str, An
     inventory = {"serviceaccounts": sas, "bindings": bindings, "pod_serviceaccounts": pod_sas,
                  "access": {}}
     restricted = [i for i in _identities(sas, bindings) if _restricted(model, i)]
+    probes = _probes(model, [s["namespace"] for s in sas])
 
     def ask(job):
-        ident, (check, verb, resource, _why) = job
-        args = ["auth", "can-i", verb, resource, "--as", ident["username"]]
+        ident, (check, args, target) = job
+        who = ["--as", ident["username"]]
         for g in ident["groups"]:
-            args += ["--as-group", g]
-        answer = _kubectl(context, *args).strip().splitlines()
-        return f"{ident['kind']}:{ident['id']}", check, bool(answer) and answer[-1] == "yes"
+            who += ["--as-group", g]
+        return f"{ident['kind']}:{ident['id']}", check, target, can_i(context, [*args, *who])
 
-    jobs = [(i, c) for i in restricted for c in ESCAPE_CHECKS]
+    jobs = [(i, p) for i in restricted for p in probes]
+    for ident in restricted:
+        inventory["access"][f"{ident['kind']}:{ident['id']}"] = {
+            c[0]: [] for c in ESCAPE_CHECKS}
     with ThreadPoolExecutor(max_workers=8) as pool:
-        for key, check, allowed in pool.map(ask, jobs):
-            inventory["access"].setdefault(key, {})[check] = allowed
+        for key, check, target, allowed in pool.map(ask, jobs):
+            if allowed:
+                inventory["access"][key][check].append(target)
     return inventory
 
 
@@ -218,11 +279,14 @@ def audit(inventory: dict[str, Any], model: IdentityModel, context: str = "") ->
         if _restricted(model, ident):
             result.would_restrict.append(row)
             granted = access.get(f"{ident['kind']}:{ident['id']}", {})
-            for check, _verb, _res, why in ESCAPE_CHECKS:
-                if granted.get(check):
+            for check, why in ESCAPE_CHECKS:
+                targets = granted.get(check)
+                if targets:
+                    detail = why + (f" ({', '.join(targets)})" if isinstance(targets, list)
+                                    else "")
                     result.findings.append({
                         "identity": f"{ident['kind']}/{ident['id']}", "kind": check,
-                        "severity": "high", "detail": why,
+                        "severity": "high", "detail": detail,
                         "why": "an identity the compiled policies restrict; admission cannot "
                                "see or stop this, so RBAC must not grant it"})
         else:

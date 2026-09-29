@@ -249,10 +249,15 @@ copy saved with `--save-inventory`):
 - **missing** (a problem): a listed ServiceAccount that does not exist, or a break-glass user or
   group no binding grants anything.
 - **findings** (problems): an identity the policies restrict that RBAC still lets impersonate
-  users, groups or ServiceAccounts, delete ValidatingAdmissionPolicies, their bindings or webhook
-  configurations, or escalate, bind or write cluster role bindings. Admission cannot see
-  impersonation or protect admission objects, so RBAC is the only control there. Each is asked
-  as the identity with the groups it really carries.
+  users, groups, ServiceAccounts or UIDs; update, patch or delete ValidatingAdmissionPolicies,
+  their bindings or webhook configurations; create mutating webhooks or policies; or escalate,
+  bind or write cluster role bindings. Admission cannot see impersonation or protect admission
+  objects, so RBAC is the only control there. Each is asked as the identity with the groups it
+  really carries, by name for every trusted and break-glass user, group and ServiceAccount
+  (RBAC can grant impersonation by `resourceNames`), and per namespace for ServiceAccounts (a
+  RoleBinding grants it in one namespace). Note that the built-in `edit` and `admin` roles
+  include impersonating ServiceAccounts in their namespace. A review that fails (no right to
+  run it) is an error, never a "no".
 
 ## Compound commands
 
