@@ -305,14 +305,38 @@ def test_excluded_constraints_are_listed_and_never_compiled(tmp_path):
     r = compile_aws(snap, _model(tmp_path), AwsTarget(account=ACCOUNT))
     assert r.coverage["excluded"] == [{"id": "forged-rule", "reason": "forged"},
                                       {"id": "x", "reason": "unauthorized"}]
-    assert all(v.startswith("self-protection:") for v in r.manifest["statements"].values())
+    assert all(o.startswith("self-protection:")
+               for v in r.manifest["statements"].values() for o in v)
 
 
 # --- limits, output, determinism -----------------------------------------------------------
 
 
-def test_policies_split_to_fit_and_fail_loudly(tmp_path):
+def test_statements_merge_exactly(tmp_path):
+    """Same resources pool actions, same actions pool resources; no action is
+    ever paired with a resource it was not compiled for."""
     rules = [_rule(f"r{i:02}", f"dynamodb/table/t{i:02}-*", ["delete"]) for i in range(40)]
+    r = _compile(tmp_path, *rules)
+    (st,) = [s for p in r.policies for s in p["Statement"] if "dynamodb:DeleteTable" in s["Action"]]
+    assert st["Action"] == ["dynamodb:DeleteTable"] and len(st["Resource"]) == 40
+    assert r.manifest["statements"][st["Sid"]] == [f"rule:r{i:02}" for i in range(40)]
+    both = _compile(tmp_path, _rule("a", "s3/bucket/x", ["delete"]),
+                    _rule("b", "dynamodb/table/y", ["delete"]))
+    assert not _denied(both, "dynamodb:DeleteTable", "arn:aws:s3:::x")
+    assert not _denied(both, "s3:DeleteBucket",
+                       f"arn:aws:dynamodb:us-east-1:{ACCOUNT}:table/y")
+
+
+def test_rules_covering_every_name_deny_the_action_outright(tmp_path):
+    r = _compile(tmp_path, _rule("all", "ecr/repository/*", ["delete"]))
+    assert _denied(r, "ecr:DeleteRepository", "arn:aws:ecr:us-east-1:999999999999:repository/x")
+
+
+def test_policies_split_to_fit_and_fail_loudly(tmp_path):
+    amap = load_action_map()
+    types = [t for t, tm in sorted(amap.items())
+             if "delete" in tm.grants and tm.names in ("name", "cli-missing")]
+    rules = [_rule(f"r{i:02}", f"{t}/n{i:02}-*", ["delete"]) for i, t in enumerate(types)]
     r = _compile(tmp_path, *rules)
     assert len(r.policies) > 1
     assert all(p["chars"] <= 5120 for p in r.manifest["policies"])
@@ -336,7 +360,8 @@ def test_output_is_deterministic_and_self_describing(tmp_path):
     assert one.files == two.files
     m = one.manifest
     assert m["snapshot_digest"] and m["policy_description"].startswith("Aegis policy ")
-    assert set(m["statements"].values()) >= {"rule:a", "rule:b"}
+    owners = {o for v in m["statements"].values() for o in v}
+    assert owners >= {"rule:a", "rule:b"}
     assert all(re.fullmatch(r"Aegis\d+", sid) for sid in m["statements"])
     for p in m["policies"]:
         assert len(one.files[p["file"]]) - 1 <= 5120

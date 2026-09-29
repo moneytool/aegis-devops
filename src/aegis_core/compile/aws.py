@@ -222,8 +222,8 @@ class _Rule:
     same_effect: list[str] = field(default_factory=list)
     verified: bool = True
     statements: list[str] = field(default_factory=list)
-    # arns tuple -> iam actions, for statement building
-    groups: dict[tuple[str, ...], set[str]] = field(default_factory=dict)
+    # (arns, regional) -> iam actions, for statement building
+    groups: dict[tuple[tuple[str, ...], bool], set[str]] = field(default_factory=dict)
     regions: list[str] | None = None
     reason: str | None = None  # not-applicable reason
 
@@ -345,14 +345,19 @@ def _compile_rule(c: Constraint, target: AwsTarget, amap: dict[str, TypeMap]) ->
                 rule.verified = False
             iam: list[str] = []
             for g in grants:
-                if tm.names == "arn" and arn_name != "*":
+                if arn_name == "*":
+                    # every name: the action is denied outright, as the CLI
+                    # blocks it whoever owns the resource (and statements that
+                    # share a condition can then merge exactly)
+                    arns = ("*",)
+                elif tm.names == "arn":
                     arns = (arn_name,)
                 else:
                     arns = tuple(a.replace("{partition}", target.partition)
                                  .replace("{account}", target.account)
                                  .replace("{name}", arn_name) for a in g.arns)
                 arns = tuple(dict.fromkeys(arns))
-                rule.groups.setdefault(arns, set()).update(g.iam)
+                rule.groups.setdefault((arns, tm.regional), set()).update(g.iam)
                 iam.extend(g.iam)
             rule.enforced.append({"type": tm.type, "action": verb, "name": arn_name,
                                   "iam": sorted(set(iam))})
@@ -448,6 +453,28 @@ def _self_protection(model: IdentityModel) -> list[tuple[str, dict[str, Any], st
     return out
 
 
+def _merge(protos: list[tuple[list[str], dict[str, Any], dict[str, Any]]]
+           ) -> list[tuple[list[str], dict[str, Any], dict[str, Any]]]:
+    """Exact merges only: statements with the same extra condition and the
+    same resources pool their actions; then those with the same actions
+    pool their resources. (Action x resource cross products that were not
+    in the input are never created.)"""
+    def by(key_field: str, pool_field: str, items):
+        out: dict[str, tuple[list[str], dict[str, Any], dict[str, Any]]] = {}
+        for owners, body, extra in items:
+            key = canonical_json([extra, body[key_field]])
+            if key in out:
+                o_owners, o_body, _ = out[key]
+                o_owners.extend(o for o in owners if o not in o_owners)
+                o_body[pool_field] = sorted(set(o_body[pool_field]) | set(body[pool_field]))
+            else:
+                out[key] = (list(owners), {**body, pool_field: sorted(set(body[pool_field]))},
+                            extra)
+        return list(out.values())
+
+    return by("Action", "Resource", by("Resource", "Action", protos))
+
+
 # --- packing -----------------------------------------------------------------------------
 
 
@@ -489,37 +516,44 @@ def compile_aws(
 ) -> CompileResult:
     amap = action_map if action_map is not None else load_action_map()
     conditions = _principal_conditions(model)
-    statements: list[dict[str, Any]] = []
-    sid_map: dict[str, str] = {}
 
-    def emit(owner: str, body: dict[str, Any], extra: dict[str, Any] | None = None) -> list[str]:
-        sids = []
+    # Statement bodies before identity conditions: (owners, body, extra condition).
+    protos: list[tuple[list[str], dict[str, Any], dict[str, Any]]] = []
+    self_protection = []
+    for name, body, why in _self_protection(model):
+        protos.append(([f"self-protection:{name}"], body, {}))
+        self_protection.append({"name": name, "why": why, "mapping": "unverified"})
+
+    compiled = []
+    rule_protos: list[tuple[list[str], dict[str, Any], dict[str, Any]]] = []
+    for c in snapshot.constraints:
+        rule = _compile_rule(c, target, amap)
+        compiled.append(rule)
+        for (arns, regional), iam in sorted(rule.groups.items()):
+            extra = ({"StringLike": {"aws:RequestedRegion": rule.regions}}
+                     if rule.regions and regional else {})
+            rule_protos.append(([f"rule:{c.id}"], {"Action": sorted(iam),
+                                                   "Resource": list(arns)}, extra))
+    protos += _merge(rule_protos)
+
+    statements: list[dict[str, Any]] = []
+    sid_map: dict[str, list[str]] = {}
+    sids_by_owner: dict[str, list[str]] = {}
+    for owners, body, extra in protos:
         for cond in conditions:
             sid = f"Aegis{len(statements) + 1}"
             merged = {k: dict(v) for k, v in cond.items()}
-            for op, kv in (extra or {}).items():
+            for op, kv in extra.items():
                 merged.setdefault(op, {}).update(kv)
             statements.append({"Sid": sid, "Effect": "Deny", **body, "Condition": merged})
-            sid_map[sid] = owner
-            sids.append(sid)
-        return sids
-
-    self_protection = []
-    for name, body, why in _self_protection(model):
-        sids = emit(f"self-protection:{name}", body)
-        self_protection.append({"name": name, "why": why, "statements": sids,
-                                "mapping": "unverified"})
-
+            sid_map[sid] = owners
+            for owner in owners:
+                sids_by_owner.setdefault(owner, []).append(sid)
+    for sp in self_protection:
+        sp["statements"] = sids_by_owner[f"self-protection:{sp['name']}"]
     rules = []
-    for c in snapshot.constraints:
-        rule = _compile_rule(c, target, amap)
-        region = ({"StringLike": {"aws:RequestedRegion": rule.regions}}
-                  if rule.regions else None)
-        for arns, iam in sorted(rule.groups.items()):
-            body = {"Action": sorted(iam), "Resource": list(arns)}
-            regional = all(amap[e["type"]].regional for e in rule.enforced
-                           if set(e["iam"]) & iam)
-            rule.statements += emit(f"rule:{c.id}", body, region if regional else None)
+    for rule in compiled:
+        rule.statements = sids_by_owner.get(f"rule:{rule.c.id}", [])
         rules.append(rule.to_dict())
 
     packed = _pack(statements, target)
@@ -566,7 +600,7 @@ def compile_aws(
         "identity_model_sha256": identity_sha256,
         "policy_description": f"Aegis policy {digest[:16]} (aegis {snapshot.aegis_version})",
         "policies": policies,
-        "statements": dict(sorted(sid_map.items(), key=lambda kv: int(kv[0][5:]))),
+        "statements": {sid: sid_map[sid] for sid in sorted(sid_map, key=lambda k: int(k[5:]))},
         "files": sorted(files),
     }
     manifest["output_digest"] = sha256_text(canonical_json(

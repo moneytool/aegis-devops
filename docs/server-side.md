@@ -55,7 +55,7 @@ environment).
 | `scope.env`, `scope.account` | compiled per account | exact |
 | `scope.region` | `aws:RequestedRegion` | exact; over-enforced for global services (IAM, Route 53, Organizations) |
 | other scope keys (`profile`, parameters) | dropped | over-enforced: the deny applies more widely |
-| resource name patterns | ARN globs | exact for `*`/`?`; a `[...]` class becomes `?` (over-enforced) |
+| resource name patterns | ARN globs; a rule covering every name denies the action on any resource | exact for `*`/`?`; a `[...]` class becomes `?` (over-enforced). "Any resource" includes another account's resources reached cross-account, which the CLI blocks too |
 | recurring `time_window`, `rate_limit` | none | not enforced: stays client-side |
 | a resource type or action not in the action map | none | not enforced — never widened |
 | rules for other providers | none | not applicable |
@@ -96,7 +96,10 @@ build/aegis-aws/
   scp-1.json               once it says enforce
 ```
 
-SCP files are minified and each fits the 5,120-character limit; statements are split across up
+Statements merge exactly — same resources pool their actions, same actions pool their
+resources, never creating an action/resource pair that was not compiled — so the identity
+condition is repeated as little as possible. SCP files are minified and each fits the
+5,120-character limit; statements are split across up
 to `--max-policies` SCPs (default 4, since one of the five a target can hold is usually
 `FullAWSAccess`). If the policy cannot fit, the compile fails rather than drop anything.
 Statement ids are `Aegis1`, `Aegis2`, … (AWS allows only alphanumerics); `manifest.json` maps each

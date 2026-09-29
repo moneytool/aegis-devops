@@ -48,8 +48,10 @@ any release may change behaviour.
   not covered; `manifest.json` carries the snapshot digest and a Sid → rule map. Output is
   split to the 5,120-character SCP limit and fails loudly if it cannot fit; `--check DIR`
   reports drift. With `enforcement: report-only` the SCPs go under `report-only/` and are not
-  deployable. Every mapping is **unverified** until a sandbox acceptance run. Guide:
-  `docs/server-side.md`.
+  deployable. Statements merge exactly (same resources pool actions, same actions pool
+  resources); a rule covering every name of a type denies the action on any resource.
+  Every mapping is **unverified** until a sandbox acceptance run
+  (`scripts/aws_acceptance.py` builds that run's policy). Guide: `docs/server-side.md`.
 
 ## [0.2.1] — 2026-09-28
 
