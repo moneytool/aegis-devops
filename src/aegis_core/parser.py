@@ -614,15 +614,24 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
     # the verb, so it is taken from the post-verb tokens *before* the leading
     # global options are merged back in -- otherwise "kubectl -n prod rollout
     # restart x" would read "-n" as the subcommand.
+    # kubectl also accepts global options *between* the verb and its
+    # subcommand ("kubectl rollout --as admin restart x"), so those are
+    # consumed the same way as leading ones and kept for the flag walker.
     subverb = None
-    if verb == "rollout":
+    if verb in ("rollout", "set"):
         if not after_verb:
-            raise ValueError(f"kubectl rollout requires a subcommand: {argv!r}")
-        subverb, *after_verb = after_verb
-    elif verb == "set":
-        if not after_verb or after_verb[0] != "image":
-            raise ValueError(f"unsupported 'kubectl set' invocation: {argv!r}")
-        after_verb = after_verb[1:]
+            raise ValueError(f"kubectl {verb} requires a subcommand: {argv!r}")
+        between, sub_rest = _split_leading_globals(
+            after_verb,
+            value_flags=_KUBECTL_GLOBAL_VALUE_FLAGS,
+            bool_flags=_KUBECTL_GLOBAL_BOOL_FLAGS,
+            tool="kubectl",
+        )
+        subverb, after_verb = sub_rest[0], between + sub_rest[1:]
+        if verb == "set":
+            if subverb != "image":
+                raise ValueError(f"unsupported 'kubectl set' invocation: {argv!r}")
+            subverb = None
 
     # Global options are parsed by the same flag walker as post-verb flags,
     # so "-n prod delete x" and "delete x -n prod" produce identical intents.

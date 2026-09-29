@@ -2546,6 +2546,17 @@ def test_kubectl_impersonation_is_recorded_not_dropped():
      "kubectl set image deploy/web app=x:2 -n prod"),
     ("kubectl --as=admin set image deploy/web app=x:2",
      "kubectl set image deploy/web app=x:2 --as=admin"),
+    # re-review of #13: globals between the verb and its subcommand
+    ("kubectl rollout --as admin restart deploy/web",
+     "kubectl rollout restart deploy/web --as admin"),
+    ("kubectl rollout --as=admin restart deploy/web",
+     "kubectl rollout restart deploy/web --as=admin"),
+    ("kubectl rollout -n prod --as-group=ops restart deploy/web",
+     "kubectl rollout restart deploy/web -n prod --as-group=ops"),
+    ("kubectl set --as=admin image deploy/web app=x:2",
+     "kubectl set image deploy/web app=x:2 --as=admin"),
+    ("kubectl -n prod set --as admin image deploy/web app=x:2",
+     "kubectl set image deploy/web app=x:2 -n prod --as admin"),
 ])
 def test_leading_globals_before_a_subcommand_verb(leading, trailing):
     """Review of #13: for rollout/set the subcommand was taken from the
@@ -2559,3 +2570,16 @@ def test_leading_globals_before_a_subcommand_verb(leading, trailing):
 
     assert shape(leading) == shape(trailing)
     assert not any(a.startswith("rollout--") for a, *_ in shape(leading))
+
+
+@pytest.mark.parametrize("argv", [
+    "kubectl rollout --bogus restart deploy/web",  # unknown option before the subcommand
+    "kubectl rollout --as",                        # option without its value
+    "kubectl rollout --as admin",                  # no subcommand after the options
+    "kubectl set --as admin rollout deploy/web",   # not "set image"
+])
+def test_unparseable_options_before_a_subcommand_fail_closed(argv):
+    from aegis_core.parser import from_argv
+
+    with pytest.raises(ValueError):
+        from_argv(argv.split())

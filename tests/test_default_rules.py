@@ -149,6 +149,9 @@ def test_kubectl_without_impersonation_is_unaffected(capsys):
     "kubectl --as admin rollout restart deploy/web",
     "kubectl --as=admin rollout restart deploy/web",
     "kubectl --as=admin set image deploy/web app=x:2",
+    "kubectl rollout --as admin restart deploy/web",
+    "kubectl rollout --as=admin restart deploy/web",
+    "kubectl set --as=admin image deploy/web app=x:2",
 ])
 def test_impersonation_before_a_subcommand_verb_is_blocked(command, capsys):
     code, verdicts = _verdicts(command, capsys)

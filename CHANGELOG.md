@@ -39,7 +39,10 @@ any release may change behaviour.
   `kubectl -n prod rollout restart deploy/web` became the action `rollout--n` on `prod/*`
   (losing the namespace, so a namespace-scoped rollout rule missed it), and
   `kubectl --as admin rollout restart …` escaped the impersonation rule. The subcommand is now
-  taken before global options are merged, so leading and trailing options parse identically.
+  taken before global options are merged, and global options between the verb and its
+  subcommand (`kubectl rollout --as admin restart …`, which kubectl accepts) are consumed the
+  same way, so every placement parses identically. An unrecognised option there still fails
+  closed.
 
 ### Changed
 - kubectl `--as` / `--as-group` / `--as-uid` are no longer dropped: they are recorded in
