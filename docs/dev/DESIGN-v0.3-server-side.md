@@ -415,6 +415,13 @@ self-protection block denying changes to them. Limits handled by splitting: mana
 6,144 characters, 10 managed policies per role by default, SCP 5,120 characters and 5 SCPs per
 target.
 
+Implemented as a preview in `aegis_core.compile.aws` (`aegis compile aws`, guide in
+`docs/server-side.md`): statements carry the `agents.yaml` principal condition, and in
+`deny-by-default` the self-protection block adds `sts:SetSourceIdentity` (an agent session
+without a source identity could otherwise take on an exempt one) and
+`organizations:LeaveOrganization`. The permissions-boundary fallback and `--verify-live` are not
+built yet; every mapping is unverified until the sandbox acceptance run.
+
 **GCP (second).** An IAM **deny policy** with `deniedPrincipals` from `agents.yaml`,
 `deniedPermissions` in the deny-specific form (`cloudresourcemanager.googleapis.com/projects.delete`,
 not `resourcemanager.projects.delete`) and only permissions GCP supports in deny policies.

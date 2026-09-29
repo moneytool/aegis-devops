@@ -36,6 +36,20 @@ any release may change behaviour.
   break-glass identity. `aegis snapshot` now loads `agents.yaml` through this loader instead
   of only checking its signature, and carries its warnings. `aegis init` ships
   `agents.example.yaml`, which never becomes active on its own.
+- **Preview:** `aegis compile aws --account <id> --out DIR`: the verified snapshot as AWS Service
+  Control Policies scoped to agent identities from `agents.yaml` (design §6.5). Explicit Deny
+  statements on the IAM actions and ARNs from a new action map
+  (`src/aegis_core/compile/actions/aws.yaml`, keyed by what the CLI parser produces), with
+  `scope.env`/`account` compiled per account from `environments.yaml` and `scope.region` as
+  `aws:RequestedRegion`. A self-protection block stops agents assuming, passing or modifying
+  exempt roles, minting credentials for exempt users, setting an exempt source identity and
+  leaving the organization. `coverage.json`/`.md` accounts for every constraint (exact,
+  over-enforced, partial, not enforced, not applicable, excluded) with same-effect actions
+  not covered; `manifest.json` carries the snapshot digest and a Sid → rule map. Output is
+  split to the 5,120-character SCP limit and fails loudly if it cannot fit; `--check DIR`
+  reports drift. With `enforcement: report-only` the SCPs go under `report-only/` and are not
+  deployable. Every mapping is **unverified** until a sandbox acceptance run. Guide:
+  `docs/server-side.md`.
 
 ## [0.2.1] — 2026-09-28
 
