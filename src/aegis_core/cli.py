@@ -502,6 +502,34 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_common_options(snapshot_parser)
     _add_agents_option(snapshot_parser)
 
+    compile_parser = subparsers.add_parser(
+        "compile",
+        help="Compile the verified snapshot to server-side policy (design v0.3 §6); writes "
+        "policy files, coverage.json/.md and manifest.json",
+    )
+    compile_sub = compile_parser.add_subparsers(dest="target", required=True)
+    aws_parser = compile_sub.add_parser(
+        "aws",
+        help="AWS Service Control Policies scoped to agent identities (agents.yaml), for "
+        "one member account",
+    )
+    _add_common_options(aws_parser)
+    _add_agents_option(aws_parser)
+    aws_parser.add_argument("--account", required=True,
+                            help="12-digit id of the member account the SCPs attach to; its "
+                            "environment comes from environments.yaml")
+    out_group = aws_parser.add_mutually_exclusive_group(required=True)
+    out_group.add_argument("--out", metavar="DIR", help="write the output here")
+    out_group.add_argument("--check", metavar="DIR",
+                           help="exit 1 if DIR differs from a fresh compile (drift check)")
+    aws_parser.add_argument("--partition", default="aws", choices=("aws", "aws-cn", "aws-us-gov"))
+    aws_parser.add_argument("--escalate", default="deny", choices=("deny", "omit"),
+                            help="ESCALATE rules: 'deny' (default; clouds cannot ask) or "
+                            "'omit' (left client-only, reported as not enforced)")
+    aws_parser.add_argument("--max-policies", type=int, default=4,
+                            help="SCPs available on the target (default 4: five may attach, "
+                            "one is usually FullAWSAccess)")
+
     audit_parser = subparsers.add_parser(
         "audit-identity",
         help="Read-only: check agents.yaml against the identities that exist on a platform "
@@ -1353,21 +1381,72 @@ def _run_agents(args: argparse.Namespace) -> int:
     return 1 if model.warnings else 0
 
 
-def _run_snapshot(args: argparse.Namespace) -> int:
-    """``aegis snapshot``: the verified snapshot as JSON (``--pretty`` for a
-    summary). Refuses to produce one from policy that was not signature-
-    checked, since server-side artifacts are built from it."""
+def _build_snapshot(args: argparse.Namespace):
+    """The verified snapshot from signed policy only (shared by ``snapshot``
+    and ``compile``). Returns ``(store, snapshot, authority_map, load)``."""
     if args.insecure:
-        raise UsageError("snapshot: refusing --insecure; a snapshot must come from signed policy")
+        raise UsageError(f"{args.command}: refusing --insecure; a snapshot must come from "
+                         "signed policy")
     if args.sources == "":
-        raise UsageError("snapshot: refusing --sources ''; a snapshot needs source verification "
-                         "(rules without it are excluded as source-unverified)")
+        raise UsageError(f"{args.command}: refusing --sources ''; a snapshot needs source "
+                         "verification (rules without it are excluded as source-unverified)")
     store, authority_map, load, fetcher = _load_policy(args)
     store.warnings.extend(_verify_snapshot_inputs(args, authority_map, load))
     unsigned = [w for w in store.warnings if w.startswith("unsigned:")]
     if unsigned:
-        raise DataError(f"snapshot: policy is not signed ({unsigned[0]})")
-    snap = store.verified_snapshot(inputs=_snapshot_inputs(args, fetcher))
+        raise DataError(f"{args.command}: policy is not signed ({unsigned[0]})")
+    return store, store.verified_snapshot(inputs=_snapshot_inputs(args, fetcher)), \
+        authority_map, load
+
+
+def _run_compile_aws(args: argparse.Namespace) -> int:
+    """``aegis compile aws``: SCPs, coverage and manifest for one account."""
+    from aegis_core.compile import CompileError, check_outputs, write_outputs
+    from aegis_core.compile.aws import AwsTarget, compile_aws
+
+    store, snap, authority_map, load = _build_snapshot(args)
+    path = _agents_path(args)
+    if not os.path.exists(path):
+        raise DataError(f"compile: no {path}; server-side policy needs the identity model "
+                        "(copy agents.example.yaml, see docs/configuration.md)")
+    model = _load_or_data_error(
+        lambda: load_identity_model(path, authority_map=authority_map, **load), path, "agents")
+    env = None
+    if args.environments:
+        env_map = _load_or_data_error(lambda: load_environment_map(args.environments, **load),
+                                      args.environments, "environments")
+        env = env_map.aws_accounts.get(args.account)
+    try:
+        target = AwsTarget(account=args.account, env=env, partition=args.partition,
+                           escalate=args.escalate, max_policies=args.max_policies)
+        result = compile_aws(snap, model, target, identity_sha256=_sha256_file(path))
+    except CompileError as exc:
+        raise DataError(f"compile: {exc}") from None
+    if args.check:
+        drift = check_outputs(args.check, result.files)
+        for line in drift:
+            print(f"drift: {line}")
+        if not drift:
+            print(f"aegis: {args.check} matches the current policy "
+                  f"(snapshot {snap.digest[:16]})")
+        return 1 if drift else 0
+    write_outputs(args.out, result.files)
+    summary = ", ".join(f"{k}={v}" for k, v in result.coverage["summary"].items())
+    print(f"aegis: wrote {len(result.policies)} SCP(s) for account {args.account} to "
+          f"{args.out} (snapshot {snap.digest[:16]}; {summary})")
+    if not result.deployable:
+        print("aegis: agents.yaml is report-only: the SCPs are under report-only/ and are not "
+              "for attaching; review coverage.md, then set enforcement: enforce")
+    for w in [*store.warnings, *(f"agents: {w}" for w in model.warnings)]:
+        print(f"  warning: {w}")
+    return 0
+
+
+def _run_snapshot(args: argparse.Namespace) -> int:
+    """``aegis snapshot``: the verified snapshot as JSON (``--pretty`` for a
+    summary). Refuses to produce one from policy that was not signature-
+    checked, since server-side artifacts are built from it."""
+    store, snap, _authority_map, _load = _build_snapshot(args)
     doc = {**snap.to_dict(), "warnings": list(store.warnings)}
     if args.pretty:
         print(f"SNAPSHOT {snap.digest}")
@@ -1406,6 +1485,8 @@ def _run(argv: list[str]) -> int:
         return _run_snapshot(args)
     if args.command == "agents":
         return _run_agents(args)
+    if args.command == "compile":
+        return _run_compile_aws(args)
     if args.command == "audit-identity":
         return _run_audit_aws(args)
     if args.command == "hook":

@@ -1,0 +1,542 @@
+[
+  {
+    "action": "autoscaling:DeleteAutoScalingGroup",
+    "evidence": "live+simulator",
+    "type": "autoscaling/auto-scaling-group",
+    "verified": true
+  },
+  {
+    "action": "autoscaling:SetDesiredCapacity",
+    "evidence": "live+simulator",
+    "type": "autoscaling/auto-scaling-group",
+    "verified": true
+  },
+  {
+    "action": "autoscaling:UpdateAutoScalingGroup",
+    "evidence": "live+simulator",
+    "type": "autoscaling/auto-scaling-group",
+    "verified": true
+  },
+  {
+    "action": "cloudformation:CreateStack",
+    "evidence": "simulator",
+    "type": "cloudformation/stack",
+    "verified": true
+  },
+  {
+    "action": "cloudformation:DeleteStack",
+    "evidence": "live",
+    "type": "cloudformation/stack",
+    "verified": true
+  },
+  {
+    "action": "cloudformation:UpdateStack",
+    "evidence": "live+simulator",
+    "type": "cloudformation/stack",
+    "verified": true
+  },
+  {
+    "action": "dynamodb:DeleteTable",
+    "evidence": "live+simulator",
+    "type": "dynamodb/table",
+    "verified": true
+  },
+  {
+    "action": "dynamodb:UpdateTable",
+    "evidence": "live+simulator",
+    "type": "dynamodb/table",
+    "verified": true
+  },
+  {
+    "action": "ec2:RebootInstances",
+    "evidence": "live+simulator",
+    "type": "ec2/instance",
+    "verified": true
+  },
+  {
+    "action": "ec2:RunInstances",
+    "evidence": "live+simulator",
+    "type": "ec2/instance",
+    "verified": true
+  },
+  {
+    "action": "ec2:StartInstances",
+    "evidence": "live+simulator",
+    "type": "ec2/instance",
+    "verified": true
+  },
+  {
+    "action": "ec2:StopInstances",
+    "evidence": "live+simulator",
+    "type": "ec2/instance",
+    "verified": true
+  },
+  {
+    "action": "ec2:TerminateInstances",
+    "evidence": "live+simulator",
+    "type": "ec2/instance",
+    "verified": true
+  },
+  {
+    "action": "ec2:ModifyInstanceAttribute",
+    "evidence": "live",
+    "type": "ec2/instance-attribute",
+    "verified": true
+  },
+  {
+    "action": "ec2:DeleteSecurityGroup",
+    "evidence": "live+simulator",
+    "type": "ec2/security-group",
+    "verified": true
+  },
+  {
+    "action": "ec2:DeleteSnapshot",
+    "evidence": "live",
+    "type": "ec2/snapshot",
+    "verified": true
+  },
+  {
+    "action": "ec2:DeleteVolume",
+    "evidence": "live+simulator",
+    "type": "ec2/volume",
+    "verified": true
+  },
+  {
+    "action": "ec2:DetachVolume",
+    "evidence": "live+simulator",
+    "type": "ec2/volume",
+    "verified": true
+  },
+  {
+    "action": "ec2:DeleteVpc",
+    "evidence": "live",
+    "type": "ec2/vpc",
+    "verified": true
+  },
+  {
+    "action": "ecr:DeleteRepository",
+    "evidence": "live+simulator",
+    "type": "ecr/repository",
+    "verified": true
+  },
+  {
+    "action": "ecs:DeleteCluster",
+    "evidence": "live+simulator",
+    "type": "ecs/cluster",
+    "verified": true
+  },
+  {
+    "action": "ecs:DeleteService",
+    "evidence": "live+simulator",
+    "type": "ecs/service",
+    "verified": true
+  },
+  {
+    "action": "ecs:UpdateService",
+    "evidence": "live+simulator",
+    "type": "ecs/service",
+    "verified": true
+  },
+  {
+    "action": "elasticfilesystem:DeleteFileSystem",
+    "evidence": "live+simulator",
+    "type": "efs/file-system",
+    "verified": true
+  },
+  {
+    "action": "eks:DeleteCluster",
+    "evidence": "live+simulator",
+    "type": "eks/cluster",
+    "verified": true
+  },
+  {
+    "action": "eks:UpdateClusterConfig",
+    "evidence": "live+simulator",
+    "type": "eks/cluster",
+    "verified": true
+  },
+  {
+    "action": "eks:UpdateClusterVersion",
+    "evidence": "live+simulator",
+    "type": "eks/cluster",
+    "verified": true
+  },
+  {
+    "action": "eks:DeleteNodegroup",
+    "evidence": "live+simulator",
+    "type": "eks/nodegroup",
+    "verified": true
+  },
+  {
+    "action": "eks:UpdateNodegroupConfig",
+    "evidence": "live+simulator",
+    "type": "eks/nodegroup",
+    "verified": true
+  },
+  {
+    "action": "eks:UpdateNodegroupVersion",
+    "evidence": "live+simulator",
+    "type": "eks/nodegroup",
+    "verified": true
+  },
+  {
+    "action": "elasticache:DeleteCacheCluster",
+    "evidence": "live+simulator",
+    "type": "elasticache/cache-cluster",
+    "verified": true
+  },
+  {
+    "action": "elasticloadbalancing:DeleteLoadBalancer",
+    "evidence": "live",
+    "type": "elbv2/load-balancer",
+    "verified": true
+  },
+  {
+    "action": "iam:CreateAccessKey",
+    "evidence": "live+simulator",
+    "type": "iam/access-key",
+    "verified": true
+  },
+  {
+    "action": "iam:DeleteAccessKey",
+    "evidence": "live+simulator",
+    "type": "iam/access-key",
+    "verified": true
+  },
+  {
+    "action": "iam:UpdateAccessKey",
+    "evidence": "live+simulator",
+    "type": "iam/access-key",
+    "verified": true
+  },
+  {
+    "action": "iam:UpdateAssumeRolePolicy",
+    "evidence": "live+simulator",
+    "type": "iam/assume-role-policy",
+    "verified": true
+  },
+  {
+    "action": "iam:CreateLoginProfile",
+    "evidence": "simulator",
+    "type": "iam/login-profile",
+    "verified": true
+  },
+  {
+    "action": "iam:DeleteLoginProfile",
+    "evidence": "live+simulator",
+    "type": "iam/login-profile",
+    "verified": true
+  },
+  {
+    "action": "iam:UpdateLoginProfile",
+    "evidence": "live+simulator",
+    "type": "iam/login-profile",
+    "verified": true
+  },
+  {
+    "action": "iam:CreateRole",
+    "evidence": "live",
+    "type": "iam/role",
+    "verified": true
+  },
+  {
+    "action": "iam:DeleteRole",
+    "evidence": "live+simulator",
+    "type": "iam/role",
+    "verified": true
+  },
+  {
+    "action": "iam:UpdateRole",
+    "evidence": "live+simulator",
+    "type": "iam/role",
+    "verified": true
+  },
+  {
+    "action": "iam:UpdateRoleDescription",
+    "evidence": "live+simulator",
+    "type": "iam/role",
+    "verified": true
+  },
+  {
+    "action": "iam:AttachRolePolicy",
+    "evidence": "live+simulator",
+    "type": "iam/role-policy",
+    "verified": true
+  },
+  {
+    "action": "iam:DeleteRolePolicy",
+    "evidence": "live+simulator",
+    "type": "iam/role-policy",
+    "verified": true
+  },
+  {
+    "action": "iam:DetachRolePolicy",
+    "evidence": "live+simulator",
+    "type": "iam/role-policy",
+    "verified": true
+  },
+  {
+    "action": "iam:PutRolePolicy",
+    "evidence": "live+simulator",
+    "type": "iam/role-policy",
+    "verified": true
+  },
+  {
+    "action": "iam:CreateUser",
+    "evidence": "live",
+    "type": "iam/user",
+    "verified": true
+  },
+  {
+    "action": "iam:DeleteUser",
+    "evidence": "live+simulator",
+    "type": "iam/user",
+    "verified": true
+  },
+  {
+    "action": "iam:AttachUserPolicy",
+    "evidence": "live+simulator",
+    "type": "iam/user-policy",
+    "verified": true
+  },
+  {
+    "action": "iam:DeleteUserPolicy",
+    "evidence": "live+simulator",
+    "type": "iam/user-policy",
+    "verified": true
+  },
+  {
+    "action": "iam:DetachUserPolicy",
+    "evidence": "live+simulator",
+    "type": "iam/user-policy",
+    "verified": true
+  },
+  {
+    "action": "iam:PutUserPolicy",
+    "evidence": "live+simulator",
+    "type": "iam/user-policy",
+    "verified": true
+  },
+  {
+    "action": "kms:DisableKey",
+    "evidence": "live+simulator",
+    "type": "kms/key",
+    "verified": true
+  },
+  {
+    "action": "kms:ScheduleKeyDeletion",
+    "evidence": "live+simulator",
+    "type": "kms/key-deletion",
+    "verified": true
+  },
+  {
+    "action": "lambda:CreateFunction",
+    "evidence": "simulator",
+    "type": "lambda/function",
+    "verified": true
+  },
+  {
+    "action": "lambda:DeleteFunction",
+    "evidence": "live+simulator",
+    "type": "lambda/function",
+    "verified": true
+  },
+  {
+    "action": "lambda:UpdateFunctionCode",
+    "evidence": "live+simulator",
+    "type": "lambda/function-code",
+    "verified": true
+  },
+  {
+    "action": "lambda:UpdateFunctionConfiguration",
+    "evidence": "live+simulator",
+    "type": "lambda/function-configuration",
+    "verified": true
+  },
+  {
+    "action": "logs:DeleteLogGroup",
+    "evidence": "live+simulator",
+    "type": "logs/log-group",
+    "verified": true
+  },
+  {
+    "action": "organizations:LeaveOrganization",
+    "evidence": "simulator",
+    "type": "organizations/organization",
+    "verified": true
+  },
+  {
+    "action": "rds:DeleteDBCluster",
+    "evidence": "live+simulator",
+    "type": "rds/db-cluster",
+    "verified": true
+  },
+  {
+    "action": "rds:ModifyDBCluster",
+    "evidence": "live+simulator",
+    "type": "rds/db-cluster",
+    "verified": true
+  },
+  {
+    "action": "rds:DeleteDBClusterSnapshot",
+    "evidence": "live+simulator",
+    "type": "rds/db-cluster-snapshot",
+    "verified": true
+  },
+  {
+    "action": "rds:DeleteDBInstance",
+    "evidence": "live+simulator",
+    "type": "rds/db-instance",
+    "verified": true
+  },
+  {
+    "action": "rds:ModifyDBInstance",
+    "evidence": "live+simulator",
+    "type": "rds/db-instance",
+    "verified": true
+  },
+  {
+    "action": "rds:RebootDBInstance",
+    "evidence": "live+simulator",
+    "type": "rds/db-instance",
+    "verified": true
+  },
+  {
+    "action": "rds:StartDBInstance",
+    "evidence": "live+simulator",
+    "type": "rds/db-instance",
+    "verified": true
+  },
+  {
+    "action": "rds:StopDBInstance",
+    "evidence": "live+simulator",
+    "type": "rds/db-instance",
+    "verified": true
+  },
+  {
+    "action": "rds:DeleteDBSnapshot",
+    "evidence": "live+simulator",
+    "type": "rds/db-snapshot",
+    "verified": true
+  },
+  {
+    "action": "route53:DeleteHostedZone",
+    "evidence": "live+simulator",
+    "type": "route53/hosted-zone",
+    "verified": true
+  },
+  {
+    "action": "s3:CreateBucket",
+    "evidence": "live",
+    "type": "s3/bucket",
+    "verified": true
+  },
+  {
+    "action": "s3:DeleteBucket",
+    "evidence": "live+simulator",
+    "type": "s3/bucket",
+    "verified": true
+  },
+  {
+    "action": "s3:DeleteObject",
+    "evidence": "live+simulator",
+    "type": "s3/bucket",
+    "verified": true
+  },
+  {
+    "action": "s3:DeleteObjectVersion",
+    "evidence": "live+simulator",
+    "type": "s3/bucket",
+    "verified": true
+  },
+  {
+    "action": "s3:PutBucketAcl",
+    "evidence": "live+simulator",
+    "type": "s3/bucket",
+    "verified": true
+  },
+  {
+    "action": "s3:PutBucketPolicy",
+    "evidence": "live+simulator",
+    "type": "s3/bucket",
+    "verified": true
+  },
+  {
+    "action": "s3:PutBucketPublicAccessBlock",
+    "evidence": "live+simulator",
+    "type": "s3/bucket",
+    "verified": true
+  },
+  {
+    "action": "s3:PutBucketVersioning",
+    "evidence": "live+simulator",
+    "type": "s3/bucket",
+    "verified": true
+  },
+  {
+    "action": "s3:PutEncryptionConfiguration",
+    "evidence": "live+simulator",
+    "type": "s3/bucket",
+    "verified": true
+  },
+  {
+    "action": "s3:PutLifecycleConfiguration",
+    "evidence": "live+simulator",
+    "type": "s3/bucket",
+    "verified": true
+  },
+  {
+    "action": "s3:PutObject",
+    "evidence": "live+simulator",
+    "type": "s3/bucket",
+    "verified": true
+  },
+  {
+    "action": "s3:DeleteObject",
+    "evidence": "live+simulator",
+    "type": "s3/object",
+    "verified": true
+  },
+  {
+    "action": "s3:DeleteObjectVersion",
+    "evidence": "live+simulator",
+    "type": "s3/object",
+    "verified": true
+  },
+  {
+    "action": "s3:PutObject",
+    "evidence": "live+simulator",
+    "type": "s3/object",
+    "verified": true
+  },
+  {
+    "action": "secretsmanager:DeleteSecret",
+    "evidence": "live+simulator",
+    "type": "secretsmanager/secret",
+    "verified": true
+  },
+  {
+    "action": "secretsmanager:UpdateSecret",
+    "evidence": "live+simulator",
+    "type": "secretsmanager/secret",
+    "verified": true
+  },
+  {
+    "action": "secretsmanager:PutSecretValue",
+    "evidence": "live+simulator",
+    "type": "secretsmanager/secret-value",
+    "verified": true
+  },
+  {
+    "action": "sns:DeleteTopic",
+    "evidence": "live",
+    "type": "sns/topic",
+    "verified": true
+  },
+  {
+    "action": "sqs:DeleteQueue",
+    "evidence": "live+simulator",
+    "type": "sqs/queue",
+    "verified": true
+  }
+]
