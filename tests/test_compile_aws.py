@@ -72,11 +72,15 @@ def _denied(result, action, resource, principal=AGENT, **kw):
 # --- the action map ---------------------------------------------------------------
 
 
-def test_action_map_is_well_formed_and_entirely_unverified():
+def test_action_map_is_well_formed_and_verified():
     amap = load_action_map()
     assert len(amap) > 30
+    evidence = json.loads(Path("docs/dev/aws-acceptance/report.json").read_text())
+    verified = {(r["type"], r["action"]) for r in evidence if r["verified"]}
     for tm in amap.values():
-        assert tm.verified is False  # until the sandbox acceptance run
+        actions = {a for gs in tm.grants.values() for g in gs for a in g.iam}
+        # verified: true only with acceptance evidence for every IAM action
+        assert tm.verified == all((tm.type, a) in verified for a in actions), tm.type
         for grants in tm.grants.values():
             for g in grants:
                 assert all(re.fullmatch(r"[a-z0-9-]+:[A-Za-z0-9]+", a) for a in g.iam), g
@@ -167,7 +171,10 @@ def test_self_protection_closes_the_aws_identity_escapes(tmp_path):
     assert _denied(r, "iam:PassRole", BREAK_GLASS)
     assert _denied(r, "iam:UpdateAssumeRolePolicy", DEPLOY)
     assert not _denied(r, "sts:AssumeRole", "arn:aws:iam::1:role/another-agent-role")
-    assert _denied(r, "sts:SetSourceIdentity", "*")
+    # only an exempt value: an agent session passing on its own source identity
+    # while chaining roles must keep working (sandbox acceptance finding)
+    assert _denied(r, "sts:SetSourceIdentity", "*", requested_source_identity="alice")
+    assert not _denied(r, "sts:SetSourceIdentity", "*", requested_source_identity="agent-7")
     assert _denied(r, "organizations:LeaveOrganization", "*")
     # the operators themselves are not restricted by it
     assert not _denied(r, "sts:AssumeRole", DEPLOY, principal=BREAK_GLASS)
@@ -204,7 +211,7 @@ def test_example_rules_compile_with_honest_statuses(tmp_path):
         _rule("k8s", "node/*", ["delete"], provider="kubernetes"),
     )
     ec2 = _rule_cov(r, "ec2-us-east-1")
-    assert ec2["status"] == "exact" and ec2["mapping"] == "unverified"
+    assert ec2["status"] == "exact" and ec2["mapping"] == "verified"
     arn = f"arn:aws:ec2:us-east-1:{ACCOUNT}:instance/i-1"
     assert _denied(r, "ec2:TerminateInstances", arn, region="us-east-1")
     assert not _denied(r, "ec2:TerminateInstances", arn, region="eu-west-1")

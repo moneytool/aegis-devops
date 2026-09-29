@@ -50,8 +50,12 @@ any release may change behaviour.
   reports drift. With `enforcement: report-only` the SCPs go under `report-only/` and are not
   deployable. Statements merge exactly (same resources pool actions, same actions pool
   resources); a rule covering every name of a type denies the action on any resource.
-  Every mapping is **unverified** until a sandbox acceptance run
-  (`scripts/aws_acceptance.py` builds that run's policy). Guide: `docs/server-side.md`.
+  Every mapping was **verified** in a sandbox AWS Organization on 2026-09-28 (live calls
+  and the IAM policy simulator, as agent, trusted, break-glass and path-qualified SSO
+  roles; `scripts/aws_acceptance.py`, evidence in `docs/dev/aws-acceptance/`). The run
+  found that denying `sts:SetSourceIdentity` outright also broke role chaining for agent
+  sessions that carry a source identity; the self-protection statement now denies only
+  exempt values. Guide: `docs/server-side.md`.
 
 ## [0.2.1] — 2026-09-28
 

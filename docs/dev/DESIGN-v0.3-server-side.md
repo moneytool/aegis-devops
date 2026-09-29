@@ -417,10 +417,11 @@ target.
 
 Implemented as a preview in `aegis_core.compile.aws` (`aegis compile aws`, guide in
 `docs/server-side.md`): statements carry the `agents.yaml` principal condition, and in
-`deny-by-default` the self-protection block adds `sts:SetSourceIdentity` (an agent session
-without a source identity could otherwise take on an exempt one) and
-`organizations:LeaveOrganization`. The permissions-boundary fallback and `--verify-live` are not
-built yet; every mapping is unverified until the sandbox acceptance run.
+`deny-by-default` the self-protection block adds a deny on setting an exempt source identity
+(`sts:SetSourceIdentity` with `StringEquals sts:SourceIdentity`; an outright deny broke role
+chaining for agent sessions that carry one) and on `organizations:LeaveOrganization`. Every
+mapping was verified in a sandbox Organization on 2026-09-28 (`docs/dev/aws-acceptance/`). The
+permissions-boundary fallback and `--verify-live` are not built yet.
 
 **GCP (second).** An IAM **deny policy** with `deniedPrincipals` from `agents.yaml`,
 `deniedPermissions` in the deny-specific form (`cloudresourcemanager.googleapis.com/projects.delete`,

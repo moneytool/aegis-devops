@@ -22,6 +22,13 @@
 #              listed in the coverage report when the rule does not block it
 #   verified   false until a sandbox acceptance run confirms the mapping; the
 #              coverage report says "unverified" for every rule that uses it
+#
+# Acceptance run 2026-09-28 (scripts/aws_acceptance.py; evidence in
+# docs/dev/aws-acceptance/): every IAM action below, compiled into SCPs attached
+# to a sandbox member account, was denied to the agent identity and allowed to
+# trusted, break-glass and path-qualified SSO roles -- by live calls where AWS
+# authorizes before looking the resource up, and by the IAM policy simulator
+# (which applies SCPs) for every action. A new entry starts at verified: false.
 version: 1
 types:
   ec2/instance:
@@ -35,37 +42,37 @@ types:
     same_effect:
       delete:
         - "ec2:ModifyInstanceAttribute: clearing termination protection or setting instance-initiated shutdown to terminate, then shutting down from inside"
-    verified: false
+    verified: true
   ec2/instance-attribute:
     arn: "arn:{partition}:ec2:*:{account}:instance/{name}"
     actions:
       update: [ec2:ModifyInstanceAttribute]
-    verified: false
+    verified: true
   ec2/volume:
     arn: "arn:{partition}:ec2:*:{account}:volume/{name}"
     names: cli-missing
     actions:
       delete: [ec2:DeleteVolume]
       detach: [ec2:DetachVolume]
-    verified: false
+    verified: true
   ec2/snapshot:
     arn: "arn:{partition}:ec2:*::snapshot/{name}"
     names: cli-missing
     actions:
       delete: [ec2:DeleteSnapshot]
-    verified: false
+    verified: true
   ec2/vpc:
     arn: "arn:{partition}:ec2:*:{account}:vpc/{name}"
     names: cli-missing
     actions:
       delete: [ec2:DeleteVpc]
-    verified: false
+    verified: true
   ec2/security-group:
     arn: "arn:{partition}:ec2:*:{account}:security-group/{name}"
     names: cli-missing
     actions:
       delete: [ec2:DeleteSecurityGroup]
-    verified: false
+    verified: true
   s3/bucket:
     arn: "arn:{partition}:s3:::{name}"
     actions:
@@ -86,13 +93,13 @@ types:
       delete:
         - "s3:PutLifecycleConfiguration: an expiration rule deletes every object (blocked only if the rule also blocks put)"
         - "s3:PutBucketPolicy: a deny-all bucket policy locks everyone out (blocked only if the rule also blocks put)"
-    verified: false
+    verified: true
   s3/object:
     arn: "arn:{partition}:s3:::{name}"
     actions:
       delete: [s3:DeleteObject, s3:DeleteObjectVersion]
       put: [s3:PutObject]
-    verified: false
+    verified: true
   rds/db-instance:
     arn: "arn:{partition}:rds:*:{account}:db:{name}"
     actions:
@@ -104,26 +111,26 @@ types:
     same_effect:
       delete:
         - "rds:ModifyDBInstance: BackupRetentionPeriod=0 deletes the automated backups (blocked only if the rule also blocks update)"
-    verified: false
+    verified: true
   rds/db-cluster:
     arn: "arn:{partition}:rds:*:{account}:cluster:{name}"
     names: cli-missing
     actions:
       delete: [rds:DeleteDBCluster]
       update: [rds:ModifyDBCluster]
-    verified: false
+    verified: true
   rds/db-snapshot:
     arn: "arn:{partition}:rds:*:{account}:snapshot:{name}"
     names: cli-missing
     actions:
       delete: [rds:DeleteDBSnapshot]
-    verified: false
+    verified: true
   rds/db-cluster-snapshot:
     arn: "arn:{partition}:rds:*:{account}:cluster-snapshot:{name}"
     names: cli-missing
     actions:
       delete: [rds:DeleteDBClusterSnapshot]
-    verified: false
+    verified: true
   dynamodb/table:
     arn: "arn:{partition}:dynamodb:*:{account}:table/{name}"
     actions:
@@ -132,21 +139,21 @@ types:
     same_effect:
       delete:
         - "dynamodb:DeleteItem / BatchWriteItem: emptying the table item by item"
-    verified: false
+    verified: true
   eks/cluster:
     arn: "arn:{partition}:eks:*:{account}:cluster/{name}"
     names: cli-missing
     actions:
       delete: [eks:DeleteCluster]
       update: [eks:UpdateClusterConfig, eks:UpdateClusterVersion]
-    verified: false
+    verified: true
   eks/nodegroup:
     arn: "arn:{partition}:eks:*:{account}:nodegroup/*/{name}/*"
     names: cli-missing
     actions:
       delete: [eks:DeleteNodegroup]
       update: [eks:UpdateNodegroupConfig, eks:UpdateNodegroupVersion]
-    verified: false
+    verified: true
   iam/role:
     arn: ["arn:{partition}:iam::{account}:role/{name}",
           "arn:{partition}:iam::{account}:role/*/{name}"]
@@ -155,7 +162,7 @@ types:
       delete: [iam:DeleteRole]
       create: [iam:CreateRole]
       update: [iam:UpdateRole, iam:UpdateRoleDescription]
-    verified: false
+    verified: true
   iam/role-policy:
     arn: ["arn:{partition}:iam::{account}:role/{name}",
           "arn:{partition}:iam::{account}:role/*/{name}"]
@@ -164,14 +171,14 @@ types:
       update: [iam:AttachRolePolicy, iam:PutRolePolicy]
       detach: [iam:DetachRolePolicy]
       delete: [iam:DeleteRolePolicy]
-    verified: false
+    verified: true
   iam/assume-role-policy:
     arn: ["arn:{partition}:iam::{account}:role/{name}",
           "arn:{partition}:iam::{account}:role/*/{name}"]
     regional: false
     actions:
       update: [iam:UpdateAssumeRolePolicy]
-    verified: false
+    verified: true
   iam/user:
     arn: ["arn:{partition}:iam::{account}:user/{name}",
           "arn:{partition}:iam::{account}:user/*/{name}"]
@@ -179,7 +186,7 @@ types:
     actions:
       delete: [iam:DeleteUser]
       create: [iam:CreateUser]
-    verified: false
+    verified: true
   iam/user-policy:
     arn: ["arn:{partition}:iam::{account}:user/{name}",
           "arn:{partition}:iam::{account}:user/*/{name}"]
@@ -188,7 +195,7 @@ types:
       update: [iam:AttachUserPolicy, iam:PutUserPolicy]
       detach: [iam:DetachUserPolicy]
       delete: [iam:DeleteUserPolicy]
-    verified: false
+    verified: true
   iam/access-key:
     arn: ["arn:{partition}:iam::{account}:user/{name}",
           "arn:{partition}:iam::{account}:user/*/{name}"]
@@ -196,7 +203,7 @@ types:
     actions:
       update: [iam:CreateAccessKey, iam:UpdateAccessKey]
       delete: [iam:DeleteAccessKey]
-    verified: false
+    verified: true
   iam/login-profile:
     arn: ["arn:{partition}:iam::{account}:user/{name}",
           "arn:{partition}:iam::{account}:user/*/{name}"]
@@ -204,23 +211,23 @@ types:
     actions:
       update: [iam:CreateLoginProfile, iam:UpdateLoginProfile]
       delete: [iam:DeleteLoginProfile]
-    verified: false
+    verified: true
   lambda/function:
     arn: "arn:{partition}:lambda:*:{account}:function:{name}"
     actions:
       delete: [lambda:DeleteFunction]
       create: [lambda:CreateFunction]
-    verified: false
+    verified: true
   lambda/function-code:
     arn: "arn:{partition}:lambda:*:{account}:function:{name}"
     actions:
       update: [lambda:UpdateFunctionCode]
-    verified: false
+    verified: true
   lambda/function-configuration:
     arn: "arn:{partition}:lambda:*:{account}:function:{name}"
     actions:
       update: [lambda:UpdateFunctionConfiguration]
-    verified: false
+    verified: true
   cloudformation/stack:
     arn: "arn:{partition}:cloudformation:*:{account}:stack/{name}/*"
     actions:
@@ -230,12 +237,12 @@ types:
     same_effect:
       delete:
         - "cloudformation:UpdateStack / ExecuteChangeSet: removing resources from the template deletes them (UpdateStack blocked only if the rule also blocks update)"
-    verified: false
+    verified: true
   kms/key:
     arn: "arn:{partition}:kms:*:{account}:key/{name}"
     actions:
       disable: [kms:DisableKey]
-    verified: false
+    verified: true
   kms/key-deletion:
     arn: "arn:{partition}:kms:*:{account}:key/{name}"
     actions:
@@ -243,90 +250,90 @@ types:
     same_effect:
       schedule:
         - "kms:DisableKey: makes everything encrypted under the key unreadable until re-enabled"
-    verified: false
+    verified: true
   secretsmanager/secret:
     arn: "arn:{partition}:secretsmanager:*:{account}:secret:{name}-??????"
     actions:
       delete: [secretsmanager:DeleteSecret]
       update: [secretsmanager:UpdateSecret]
-    verified: false
+    verified: true
   secretsmanager/secret-value:
     arn: "arn:{partition}:secretsmanager:*:{account}:secret:{name}-??????"
     actions:
       put: [secretsmanager:PutSecretValue]
-    verified: false
+    verified: true
   logs/log-group:
     arn: ["arn:{partition}:logs:*:{account}:log-group:{name}",
           "arn:{partition}:logs:*:{account}:log-group:{name}:*"]
     names: cli-missing
     actions:
       delete: [logs:DeleteLogGroup]
-    verified: false
+    verified: true
   ecr/repository:
     arn: "arn:{partition}:ecr:*:{account}:repository/{name}"
     actions:
       delete: [ecr:DeleteRepository]
-    verified: false
+    verified: true
   autoscaling/auto-scaling-group:
     arn: "arn:{partition}:autoscaling:*:{account}:autoScalingGroup:*:autoScalingGroupName/{name}"
     actions:
       delete: [autoscaling:DeleteAutoScalingGroup]
       scale: [autoscaling:SetDesiredCapacity, autoscaling:UpdateAutoScalingGroup]
       update: [autoscaling:UpdateAutoScalingGroup]
-    verified: false
+    verified: true
   ecs/cluster:
     arn: "arn:{partition}:ecs:*:{account}:cluster/{name}"
     actions:
       delete: [ecs:DeleteCluster]
-    verified: false
+    verified: true
   ecs/service:
     arn: "arn:{partition}:ecs:*:{account}:service/*/{name}"
     names: cli-missing
     actions:
       delete: [ecs:DeleteService]
       update: [ecs:UpdateService]
-    verified: false
+    verified: true
   elbv2/load-balancer:
     arn: "arn:{partition}:elasticloadbalancing:*:{account}:loadbalancer/*"
     names: arn
     actions:
       delete: [elasticloadbalancing:DeleteLoadBalancer]
-    verified: false
+    verified: true
   route53/hosted-zone:
     arn: "arn:{partition}:route53:::hostedzone/{name}"
     regional: false
     names: cli-missing
     actions:
       delete: [route53:DeleteHostedZone]
-    verified: false
+    verified: true
   efs/file-system:
     arn: "arn:{partition}:elasticfilesystem:*:{account}:file-system/{name}"
     names: cli-missing
     actions:
       delete: [elasticfilesystem:DeleteFileSystem]
-    verified: false
+    verified: true
   sns/topic:
     arn: "arn:{partition}:sns:*:{account}:*"
     names: arn
     actions:
       delete: [sns:DeleteTopic]
-    verified: false
+    verified: true
   sqs/queue:
     arn: "arn:{partition}:sqs:*:{account}:*"
     names: wildcard-only
     actions:
       delete: [sqs:DeleteQueue]
-    verified: false
+    verified: true
   elasticache/cache-cluster:
     arn: "arn:{partition}:elasticache:*:{account}:cluster:{name}"
     names: cli-missing
     actions:
       delete: [elasticache:DeleteCacheCluster]
-    verified: false
+    verified: true
   organizations/organization:
     arn: "*"
     regional: false
     names: wildcard-only
     actions:
       leave: [organizations:LeaveOrganization]
-    verified: false
+    verified: true

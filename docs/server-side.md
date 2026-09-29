@@ -7,10 +7,12 @@ platform's own controls, so the platform refuses the call whatever the client.
 
 ← back to the [README](../README.md) · design: [`dev/DESIGN-v0.3-server-side.md`](dev/DESIGN-v0.3-server-side.md)
 
-> **Status: preview.** `aegis compile aws` is implemented and tested offline. Every action
-> mapping is marked **unverified** until it has passed an acceptance run in a sandbox AWS
-> Organization; the coverage report says so per rule. Do not attach the output to accounts that
-> matter until then.
+> **Status: preview.** `aegis compile aws` is implemented, and every action mapping was verified
+> on 2026-09-28 in a sandbox AWS Organization: compiled SCPs denied each mapped action to an agent
+> identity and allowed it to trusted, break-glass and path-qualified SSO roles, by live calls and
+> the IAM policy simulator ([`dev/aws-acceptance/`](dev/aws-acceptance/README.md)). A mapping
+> added later starts unverified, and the coverage report says so per rule. `aegis audit-identity`
+> and the report-only review it supports are not built yet.
 
 ## How it fits together
 
@@ -74,7 +76,7 @@ escaping the policy (design §4.3). In `deny-by-default`:
 - no `sts:AssumeRole` into a trusted or break-glass role, and no `iam:PassRole` of one;
 - no changes to a trusted role's trust or permissions (e.g. to let the agent assume it), and no
   new credentials for a trusted user;
-- no `sts:SetSourceIdentity` when a source identity is exempt;
+- no setting an exempt source identity on a session (`sts:SetSourceIdentity` with that value);
 - no `organizations:LeaveOrganization` (an account outside the organization sheds its SCPs).
 
 `agents-only` instead restricts agents to assuming and passing agent roles, and to creating no

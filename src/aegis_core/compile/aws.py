@@ -408,13 +408,14 @@ def _principal_conditions(model: IdentityModel) -> list[dict[str, Any]]:
     return variants
 
 
-def _self_protection(model: IdentityModel) -> list[tuple[str, dict[str, Any], str]]:
-    """``(name, statement body without Sid/Condition, why)`` per §4.3 (AWS)."""
+def _self_protection(model: IdentityModel) -> list[tuple[str, dict[str, Any], str, dict]]:
+    """``(name, statement body without Sid/Condition, why, extra condition)``
+    per §4.3 (AWS)."""
     exempt = model.exempt("aws")
     roles = sorted(i.id for i in exempt if i.kind == "role")
     users = sorted(i.id for i in exempt if i.kind == "user")
-    has_si = any(i.kind == "source-identity" for i in exempt)
-    out = []
+    exempt_si = sorted(i.id for i in exempt if i.kind == "source-identity")
+    out: list[tuple] = []
     if model.mode == "deny-by-default":
         if roles:
             out.append(("assume-exempt-role", {"Action": ["sts:AssumeRole"], "Resource": roles},
@@ -442,11 +443,16 @@ def _self_protection(model: IdentityModel) -> list[tuple[str, dict[str, Any], st
                         "agents-only: agents may pass only agent roles to services"))
         out.append(("new-credentials", {"Action": list(_NEW_CREDENTIALS), "Resource": "*"},
                     "agents-only: a new user or key is unlisted, hence exempt"))
-    if has_si:
+    if exempt_si:
+        # Only the exempt values: denying sts:SetSourceIdentity outright also
+        # stops an agent whose session already carries a source identity from
+        # assuming any role, since passing it on counts as setting it (found
+        # in the sandbox acceptance run).
         out.append(("set-source-identity", {"Action": ["sts:SetSourceIdentity"],
                                             "Resource": "*"},
-                    "a source identity is exempt, so agents cannot set one (a session's "
-                    "source identity persists through role chaining without it)"))
+                    "agents cannot set an exempt source identity on a session (AWS "
+                    "itself refuses to change one that is already set)",
+                    {"StringEquals": {"sts:SourceIdentity": exempt_si}}))
     out.append(("leave-organization", {"Action": ["organizations:LeaveOrganization"],
                                        "Resource": "*"},
                 "an account that leaves the organization sheds its SCPs"))
@@ -520,8 +526,8 @@ def compile_aws(
     # Statement bodies before identity conditions: (owners, body, extra condition).
     protos: list[tuple[list[str], dict[str, Any], dict[str, Any]]] = []
     self_protection = []
-    for name, body, why in _self_protection(model):
-        protos.append(([f"self-protection:{name}"], body, {}))
+    for name, body, why, *extra in _self_protection(model):
+        protos.append(([f"self-protection:{name}"], body, extra[0] if extra else {}))
         self_protection.append({"name": name, "why": why, "mapping": "unverified"})
 
     compiled = []
@@ -694,12 +700,13 @@ def denying_statements(
     principal_arn: str,
     source_identity: str | None = None,
     region: str = "us-east-1",
+    requested_source_identity: str | None = None,
 ) -> list[str]:
     """The Sids of every compiled Deny that matches this request. A model of
     the subset of IAM evaluation the compiler emits, for tests and dry runs;
     the IAM policy simulator and a sandbox run are the ground truth."""
     context = {"aws:PrincipalArn": principal_arn, "aws:SourceIdentity": source_identity,
-               "aws:RequestedRegion": region}
+               "aws:RequestedRegion": region, "sts:SourceIdentity": requested_source_identity}
     hits = []
     for policy in policies:
         for st in policy["Statement"]:

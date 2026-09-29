@@ -300,6 +300,13 @@ PROBES: list[tuple[str, str, str, str]] = [
      f"aegis-test-trusted --policy-document file://{TRUST}", "", "deny-only"),
 ]
 
+# An "allowed" answer proves the call passed authorization only when AWS
+# evaluates permissions before looking the resource up; these do (dry runs,
+# and not-found errors from services observed to deny first in the sandbox).
+# Anything else that comes back "allowed" for an identity that should have
+# been denied is inconclusive, and the simulator decides.
+CONCLUSIVE_ALLOWED = ("DryRunOperation", "ok")
+
 DENIED_CODES = ("AccessDenied", "AccessDeniedException", "UnauthorizedOperation",
                 "AuthorizationError", "AuthorizationErrorException", "UnauthorizedException")
 
@@ -371,10 +378,14 @@ def probe(args: argparse.Namespace) -> int:
                 "--output", "json", "--cli-read-timeout", "20"]
         proc = subprocess.run(argv, env=envs[name], capture_output=True, text=True)
         outcome, code = _classify(proc.returncode, proc.stderr)
+        if action == "sts:SetSourceIdentity" and "-si" in name and code == "ValidationError":
+            outcome = "rejected"  # AWS never lets a session change its source identity
         scp = "service control policy" in proc.stderr
+        ok = outcome in ("denied", "rejected") if expect_denied else outcome == "allowed"
         return {"action": action, "identity": name, "region": region, "outcome": outcome,
                 "code": code, "scp_named": scp, "expected": "denied" if expect_denied
-                else "allowed", "pass": (outcome == "denied") == expect_denied,
+                else "allowed", "pass": ok, "conclusive": outcome != "allowed"
+                or code in CONCLUSIVE_ALLOWED or not attached,
                 "stderr": proc.stderr.strip()[:400]}
 
     with ThreadPoolExecutor(max_workers=8) as pool:
@@ -392,6 +403,128 @@ def probe(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def _sim_resource(template: str, rtype: str, account: str, region: str, name: str) -> str:
+    if template == "*":
+        return "*"
+    arn = template.replace("{partition}", "aws").replace("{account}", account)
+    arn = arn.replace("{name}", name)
+    if arn.startswith("arn:aws:") and arn.split(":")[3] == "*":
+        parts = arn.split(":")
+        parts[3] = region
+        arn = ":".join(parts)
+    return arn.replace("??????", "AbCdEf").replace("/*/", "/probe/").rstrip("*") + (
+        "probe" if arn.endswith("*") else "")
+
+
+def simulate(args: argparse.Namespace) -> int:
+    """The IAM policy simulator (which applies SCPs, reported in
+    OrganizationsDecisionDetail) for every mapped action, as every probe
+    identity, on a concrete resource ARN."""
+    import subprocess
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    acct, role = args.account, f"arn:aws:iam::{args.account}:role/"
+    identities = {
+        "agent": (role + "aegis-test-agent", None, True),
+        "agent+untrusted-si": (role + "aegis-test-agent", "aegis-test-mallory", True),
+        "agent+trusted-si": (role + "aegis-test-agent", "aegis-test-human", False),
+        "trusted": (role + "aegis-test-trusted", None, False),
+        "breakglass": (role + "aegis-test-breakglass", None, False),
+        "admin-sso": (args.admin_role_arn, None, False),
+    }
+    cases = []  # (action, type, resource, region, control)
+    amap = load_action_map()
+    # an action another acceptance rule denies everywhere has no negative control
+    elsewhere = {rtype: {a for t, tm in amap.items() if t != rtype
+                         for gs in tm.grants.values() for g in gs for a in g.iam}
+                 for rtype in amap}
+    for rtype, tm in sorted(amap.items()):
+        for grants in tm.grants.values():
+            for g in grants:
+                for action in g.iam:
+                    region = REGION_CASE[1] if rtype == REGION_CASE[0] else "us-east-1"
+                    name = "aegis-prod-probe" if rtype == NAME_CASE[0] else "aegis-probe"
+                    arn = _sim_resource(g.arns[0], rtype, acct, region, name)
+                    cases.append((action, rtype, arn, region, False))
+                    if rtype == REGION_CASE[0]:
+                        cases.append((action, rtype, _sim_resource(
+                            g.arns[0], rtype, acct, "us-east-1", name), "us-east-1", True))
+                    if rtype == NAME_CASE[0] and action not in elsewhere[rtype]:
+                        cases.append((action, rtype, _sim_resource(
+                            g.arns[0], rtype, acct, region, "aegis-dev-probe"), region, True))
+    env = {"AWS_PAGER": "", "AWS_PROFILE": args.profile, "PATH": "/usr/bin:/bin:/opt/homebrew/bin"}
+
+    def run(job):
+        (action, rtype, arn, region, control), (name, (src, si, restricted)) = job
+        ctx = [f"ContextKeyName=aws:RequestedRegion,ContextKeyValues={region},"
+               "ContextKeyType=string"]
+        if si:
+            ctx.append(f"ContextKeyName=aws:SourceIdentity,ContextKeyValues={si},"
+                       "ContextKeyType=string")
+        argv = ["aws", "iam", "simulate-principal-policy", "--policy-source-arn", src,
+                "--action-names", action, "--resource-arns", arn, "--context-entries", *ctx,
+                "--query", "EvaluationResults[0].[EvalDecision,"
+                "OrganizationsDecisionDetail.AllowedByOrganizations]", "--output", "json"]
+        for attempt in range(8):
+            proc = subprocess.run(argv, env=env, capture_output=True, text=True)
+            if proc.returncode == 0 or "Throttling" not in proc.stderr:
+                break
+            time.sleep(2 ** attempt * 0.5)
+        decision, by_org = json.loads(proc.stdout) if proc.returncode == 0 else ("error", None)
+        denied = by_org is False
+        expect = restricted and not control
+        return {"action": action, "type": rtype, "resource": arn, "region": region,
+                "identity": name, "decision": decision, "allowed_by_organizations": by_org,
+                "expected": "denied" if expect else "allowed", "pass": denied == expect,
+                "error": proc.stderr.strip()[:300]}
+
+    jobs = [(c, i) for c in cases for i in identities.items()]
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(run, jobs))
+    path = Path(args.out) / "simulate.json"
+    path.write_text(pretty_json(results))
+    failed = [r for r in results if not r["pass"]]
+    print(f"simulate: {len(results)} cases, {len(results) - len(failed)} as expected, "
+          f"{len(failed)} not -> {path}")
+    for r in failed:
+        print(f"  UNEXPECTED {r['action']:<42} {r['identity']:<20} {r['decision']:<14} "
+              f"org={r['allowed_by_organizations']} {r['resource']} {r['error'][:80]}")
+    return 1 if failed else 0
+
+
+def report(args: argparse.Namespace) -> int:
+    """Per mapping (type, IAM action): live evidence where the probe was
+    conclusive, the simulator otherwise; verified only if every identity
+    behaved as expected in the evidence used."""
+    out = Path(args.out)
+    live = json.loads((out / "probe-attached.json").read_text())
+    sim = json.loads((out / "simulate.json").read_text())
+    rows = []
+    for rtype, tm in sorted(load_action_map().items()):
+        actions = sorted({a for gs in tm.grants.values() for g in gs for a in g.iam})
+        for action in actions:
+            lv = [r for r in live if r["action"].split("@")[0] == action]
+            sm = [r for r in sim if r["action"] == action and r["type"] == rtype]
+            live_ok = bool(lv) and all(r["pass"] for r in lv if r["conclusive"])
+            live_conclusive = bool(lv) and all(r["conclusive"] for r in lv)
+            sim_ok = bool(sm) and all(r["pass"] for r in sm)
+            if live_conclusive:
+                evidence, ok = "live", live_ok and sim_ok
+            else:
+                evidence, ok = ("simulator" if not lv else "live+simulator"), sim_ok and (
+                    not lv or live_ok)
+            rows.append({"type": rtype, "action": action, "evidence": evidence,
+                         "verified": ok})
+    (out / "report.json").write_text(pretty_json(rows))
+    bad = [r for r in rows if not r["verified"]]
+    print(f"report: {len(rows)} mappings, {len(rows) - len(bad)} verified -> "
+          f"{out / 'report.json'}")
+    for r in bad:
+        print(f"  NOT VERIFIED {r['type']:<32} {r['action']:<40} ({r['evidence']})")
+    return 1 if bad else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -405,8 +538,16 @@ def main(argv: list[str] | None = None) -> int:
     pr.add_argument("--profile", required=True, help="the sandbox admin profile")
     pr.add_argument("--phase", choices=("baseline", "attached"), required=True)
     pr.add_argument("--out", default="build/aws-acceptance")
+    sm = sub.add_parser("simulate", help="the IAM policy simulator for every mapped action")
+    sm.add_argument("--account", required=True)
+    sm.add_argument("--profile", required=True)
+    sm.add_argument("--admin-role-arn", required=True)
+    sm.add_argument("--out", default="build/aws-acceptance")
+    rp = sub.add_parser("report", help="combine probe-attached.json and simulate.json")
+    rp.add_argument("--out", default="build/aws-acceptance")
     args = ap.parse_args(argv)
-    return build(args) if args.cmd == "build" else probe(args)
+    return {"build": build, "probe": probe, "simulate": simulate, "report": report}[
+        args.cmd](args)
 
 
 if __name__ == "__main__":
