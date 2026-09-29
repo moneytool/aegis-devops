@@ -22,6 +22,15 @@ any release may change behaviour.
   coverage report, manifest and `--check` as the AWS target. Verified on kind (Kubernetes 1.36.1)
   with `scripts/kube_acceptance.py`: 66 of 66 runs as expected; the client and the cluster agreed
   on every shared case and differed only where coverage says so (`docs/dev/kube-acceptance/`).
+- `aegis audit-identity kubernetes [--context CTX]`: read-only review of a cluster against
+  `agents.yaml` — every ServiceAccount and RBAC-bound user or group the compiled policies would
+  restrict (with bindings and pod counts; control plane and universal groups left out), missing
+  ServiceAccounts, a break-glass subject no binding grants anything, and escape permissions an
+  identity the policies restrict still holds (impersonation; deleting admission policies,
+  bindings or webhooks; RBAC escalate/bind/cluster-role-binding writes), asked as
+  SubjectAccessReviews with the groups each identity carries. `--save-inventory` and
+  `--inventory` for offline review. Run against the kind cluster: it flagged the cluster-admin
+  test agent and an untrusted `system:masters`, and nothing for an `edit`-only agent.
 
 ### Fixed
 - **aws CLI resource names.** For 17 operations the parser lost the name of the resource acted
