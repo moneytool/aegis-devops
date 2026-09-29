@@ -278,11 +278,14 @@ trusted:                    # deny-by-default: everything not listed here is an 
 | `github` | `oidc-subject` | the OIDC `sub` claim a cloud trust policy matches |
 
 Load errors, never guesses: an unknown field, platform or kind; a malformed `id`; wildcards
-(`*`, `?`); the same identity listed twice (case-insensitively for ARNs and emails, and a
+(`*`, `?`); the same identity listed twice (for ARNs and emails, entries differing only in
+case count as the same, since the platform keeps those names unique that way; matching itself
+is exact, as AWS ARN conditions are, so write ARNs exactly as IAM shows them; and a
 ServiceAccount under both spellings); an `agents:` list in deny-by-default or `trusted:` in
 agents-only; and a trusted or break-glass Kubernetes group that every identity carries
 (`system:authenticated`, `system:unauthenticated`, `system:serviceaccounts`), which would exempt
-every agent. Warnings:
+every agent. A break-glass GitHub subject that is not bound to a workflow or protected
+environment (below) is a load error too: break-glass is the strongest exemption. Warnings:
 
 - `workflow-unbound` — a trusted GitHub subject scoped only to a repository and ref
   (`repo:org/app:ref:refs/heads/main`). Every job in that repository presents it, an agent's

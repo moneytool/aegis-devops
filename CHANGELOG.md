@@ -27,7 +27,9 @@ any release may change behaviour.
   never restricted; `enforcement` starts at `report-only`. Identities are typed per platform
   (Kubernetes user/group/ServiceAccount, AWS role/user/SourceIdentity, GCP service
   account/user/group, GitHub OIDC subject) and validated; wildcards, duplicates, assumed-role
-  session ARNs and groups every identity carries (`system:authenticated`, …) are load errors.
+  session ARNs, groups every identity carries (`system:authenticated`, …) and a break-glass
+  GitHub subject not bound to a workflow are load errors. Matching is exact, as AWS ARN
+  conditions are (a mis-cased ARN never exempts).
   The file is signed and its `principal` must hold the new `identity` class in
   `authority.yaml` (the example grants it to `admin`). Warnings: a trusted GitHub subject that
   is not bound to a workflow or protected environment (`workflow-unbound`), a platform with no

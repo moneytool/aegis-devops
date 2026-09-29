@@ -91,8 +91,7 @@ def test_agents_only_restricts_only_the_listed_agents(tmp_path):
     ])
     assert model.is_agent("kubernetes", [("user", "system:serviceaccount:aegis-agents:coder")])
     assert not model.is_agent("kubernetes", [("user", "anyone-else")])
-    # case-insensitive at AWS, so matching is too
-    assert model.is_agent("aws", [("role", "arn:aws:iam::111122223333:role/agent")])
+    assert model.is_agent("aws", [("role", "arn:aws:iam::111122223333:role/Agent")])
     assert [str(i) for i in model.agents_for("aws")] == [
         "aws/role arn:aws:iam::111122223333:role/Agent"]
 
@@ -200,7 +199,7 @@ def test_universal_groups_may_not_be_break_glass_either(tmp_path):
 def test_a_duplicate_identity_is_a_load_error_not_a_guess(tmp_path):
     msg = _error(tmp_path, trusted=[{"platform": "kubernetes", "kind": "group",
                                      "id": "aegis:break-glass"}])
-    assert "listed twice (break_glass and trusted)" in msg
+    assert "listed twice (break_glass and trusted;" in msg
     msg = _error(tmp_path, trusted=[
         {"platform": "aws", "kind": "role", "id": "arn:aws:iam::111122223333:role/Deploy"},
         {"platform": "aws", "kind": "role", "id": "arn:aws:iam::111122223333:role/DEPLOY"}])
@@ -319,3 +318,30 @@ def test_agents_cli_explicit_path(policy_dir, capsys):
     sign_file(other, key)
     code, out = _cli(["agents", "--config-dir", str(d), "--agents", str(other)], capsys)
     assert code == 0 and json.loads(out.out)["path"] == str(other)
+
+
+def test_arn_matching_is_case_sensitive_like_the_compiled_policy(tmp_path):
+    """Review of #16: ARN condition operators are case-sensitive, so a
+    mis-cased entry must not exempt (or restrict) what an artifact would not."""
+    model = _load(tmp_path, trusted=[
+        {"platform": "aws", "kind": "role", "id": "arn:aws:iam::111122223333:role/deploy"},
+        {"platform": "aws", "kind": "user", "id": "arn:aws:iam::111122223333:user/ops"}])
+    assert model.is_agent("aws", [("role", "arn:aws:iam::111122223333:role/Deploy")])
+    assert model.is_agent("aws", [("user", "arn:aws:iam::111122223333:user/OPS")])
+    assert not model.is_agent("aws", [("role", "arn:aws:iam::111122223333:role/deploy")])
+    only = _load(tmp_path, mode="agents-only", agents=[
+        {"platform": "aws", "kind": "role", "id": "arn:aws:iam::111122223333:role/agent"}])
+    assert not only.is_agent("aws", [("role", "arn:aws:iam::111122223333:role/Agent")])
+
+
+def test_workflow_unbound_break_glass_subject_is_rejected(tmp_path):
+    """Review of #16: break-glass is the strongest exemption, so a
+    repository/ref-scoped GitHub subject there is a load error, not silence."""
+    msg = _error(tmp_path, break_glass=[
+        *BREAK_GLASS,
+        {"platform": "github", "kind": "oidc-subject", "id": "repo:org/app:ref:refs/heads/main"}])
+    assert "break_glass" in msg and "repository/ref" in msg
+    model = _load(tmp_path, break_glass=[
+        *BREAK_GLASS,
+        {"platform": "github", "kind": "oidc-subject", "id": "repo:org/app:environment:prod"}])
+    assert model.warnings == ()

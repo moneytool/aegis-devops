@@ -65,6 +65,10 @@ _K8S_UNIVERSAL_GROUPS = frozenset(
 _GITHUB_BOUND_MARKERS = ("job_workflow_ref:", ":environment:")
 
 
+def _workflow_bound(subject: str) -> bool:
+    return any(m in subject for m in _GITHUB_BOUND_MARKERS)
+
+
 def _check_k8s_user(value: str) -> str | None:
     return None if _TOKEN_RE.fullmatch(value) else "not a Kubernetes user name"
 
@@ -104,9 +108,12 @@ def _check_github_subject(value: str) -> str | None:
     return None
 
 
-# platform -> kind -> validator. Kinds whose values are case-insensitive at
-# the platform (IAM names, email addresses) are compared case-insensitively
-# when looking for duplicates.
+# platform -> kind -> validator. Kinds whose names are unique case-
+# insensitively at the platform (IAM names, email addresses) are compared
+# case-insensitively when looking for duplicates only: two entries that
+# differ only in case cannot both exist, so one is a mistake. Matching stays
+# exact, as the compiled artifacts match (AWS ARN condition operators are
+# case-sensitive).
 KINDS: dict[str, dict[str, Any]] = {
     "kubernetes": {"user": _check_k8s_user, "group": _check_k8s_user,
                    "serviceaccount": _check_k8s_sa},
@@ -131,6 +138,12 @@ class Identity:
 
     @property
     def key(self) -> tuple[str, str, str]:
+        """Exact identity, for matching: what a compiled policy compares."""
+        return (self.platform, self.kind, self.id)
+
+    @property
+    def duplicate_key(self) -> tuple[str, str, str]:
+        """Identity as the platform keeps it unique, for duplicate checks."""
         ident = self.id.lower() if (self.platform, self.kind) in _CASE_INSENSITIVE else self.id
         return (self.platform, self.kind, ident)
 
@@ -351,10 +364,11 @@ def load_identity_model(
     for section, pool in (("break_glass", break_glass), ("trusted", trusted),
                           ("agents", agents)):
         for ident in pool:
-            if ident.key in seen:
-                raise ValueError(f"{path}: {ident} is listed twice ({seen[ident.key]} and "
-                                 f"{section})")
-            seen[ident.key] = section
+            dup = ident.duplicate_key
+            if dup in seen:
+                raise ValueError(f"{path}: {ident} is listed twice ({seen[dup]} and "
+                                 f"{section}; names differing only in case count as one)")
+            seen[dup] = section
 
     for ident in (*break_glass, *trusted):
         if (ident.platform, ident.kind) == ("kubernetes", "group") and (
@@ -363,9 +377,14 @@ def load_identity_model(
             raise ValueError(f"{path}: {ident}: every identity carries this group, so "
                              "exempting it would exempt every agent")
 
+    for ident in break_glass:
+        if ident.platform == "github" and not _workflow_bound(ident.id):
+            raise ValueError(
+                f"{path}: break_glass: {ident.id} is scoped to a repository/ref, so any job "
+                "in that repository (an agent's included) would present the strongest "
+                "exemption; bind it with job_workflow_ref or a protected environment")
     for ident in trusted:
-        if ident.platform == "github" and not any(m in ident.id
-                                                  for m in _GITHUB_BOUND_MARKERS):
+        if ident.platform == "github" and not _workflow_bound(ident.id):
             warnings.append(
                 f"workflow-unbound: {ident.id} is scoped to a repository/ref, so any job "
                 "in that repository (an agent's included) presents it; bind it with "
