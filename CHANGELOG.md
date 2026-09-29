@@ -5,7 +5,11 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while the major version is 0,
 any release may change behaviour.
 
-## [Unreleased]
+## [0.3.0] — 2026-09-28
+
+The first server-side layer: the policy compiled to AWS Service Control Policies scoped to agent
+identities, so an agent that calls the AWS API directly (an SDK, a script, a found credential) is
+refused by AWS itself, not only by the client hook. Preview: see `docs/server-side.md`.
 
 ### Added
 - `ConstraintStore.verified_snapshot()` and `aegis snapshot`: the constraints that may vote —
@@ -350,6 +354,7 @@ See "Project status" in the README and [`docs/dev/PLAN.md`](docs/dev/PLAN.md) §
 rather than real connectors, signing uses a shared secret, and a principal is a signed name
 rather than a bound identity.
 
+[0.3.0]: https://github.com/moneytool/aegis-devops/releases/tag/v0.3.0
 [0.2.1]: https://github.com/moneytool/aegis-devops/releases/tag/v0.2.1
 [0.2.0]: https://github.com/moneytool/aegis-devops/releases/tag/v0.2.0
 [0.1.7]: https://github.com/moneytool/aegis-devops/releases/tag/v0.1.7
