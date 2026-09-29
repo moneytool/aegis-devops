@@ -120,6 +120,16 @@ class AegisInterceptor:
         self.fail_closed = fail_closed
         self.on_untrusted_match = on_untrusted_match
 
+    def _untrusted_reason(self, c: Constraint) -> str | None:
+        """``"tampered"`` / ``"unauthorized"`` if this constraint may not
+        vote, else ``None`` (re-checked per decision; see REVIEW-4 L4
+        below)."""
+        if not c.verify_integrity():
+            return "tampered"
+        if not self.store.is_authorized(c.principal, c.constraint_class):
+            return "unauthorized"
+        return None
+
     def intercept(self, intent: InfrastructureIntent, now: datetime | None = None) -> Decision:
         """Evaluates an intent and returns a Decision.
 
@@ -167,12 +177,22 @@ class AegisInterceptor:
         notes: list[str] = []
         fail_closed = False
         verified = []
-        for c in env_unresolved:
+        # An unresolved condition only fails closed on behalf of a constraint
+        # that could vote: a tampered or unauthorized one is discarded here
+        # exactly as it is when it matches outright (below), so it cannot
+        # force ESCALATE just because the intent's environment or time zone
+        # could not be resolved.
+        for c, label in [*((c, "env-unresolved") for c in env_unresolved),
+                         *((c, "time-window-unresolved") for c in time_window_unresolved)]:
+            reason = self._untrusted_reason(c)
+            if reason is not None:
+                discarded.append({"id": c.id, "reason": reason})
+                if c.effect in _ENFORCING_EFFECTS and self.on_untrusted_match == "escalate":
+                    fail_closed = True
+                    notes.append(f"fail-closed: {c.id} ({reason})")
+                continue
             fail_closed = True
-            notes.append(f"env-unresolved: {c.id}")
-        for c in time_window_unresolved:
-            fail_closed = True
-            notes.append(f"time-window-unresolved: {c.id}")
+            notes.append(f"{label}: {c.id}")
         if unknown_target:
             fail_closed = True
             notes.append("unknown-target")
@@ -193,11 +213,7 @@ class AegisInterceptor:
             # rule, not per loaded rule -- see get_matching_constraints'
             # index), so we pay it on every decision instead of trusting a
             # verification result that may be stale by the time it matters.
-            reason = None
-            if not c.verify_integrity():
-                reason = "tampered"
-            elif not self.store.is_authorized(c.principal, c.constraint_class):
-                reason = "unauthorized"
+            reason = self._untrusted_reason(c)
             if reason is not None:
                 discarded.append({"id": c.id, "reason": reason})
                 if c.effect in _ENFORCING_EFFECTS and self.on_untrusted_match == "escalate":

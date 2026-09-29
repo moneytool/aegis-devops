@@ -460,7 +460,7 @@ def test_example_constraints_load_with_zero_quarantined():
 
     store = ConstraintStore.load(CONSTRAINTS, authority_map=load_authority_map(AUTHORITY))
     assert store.quarantined == []
-    assert len(store.constraints) == 29
+    assert len(store.constraints) == 30
 
 
 def test_tofu_plan_is_gated_by_the_same_terraform_rule(capsys, tmp_path):
@@ -680,7 +680,7 @@ def test_sources_flag_quarantines_forged_constraints_with_no_vote_by_default(cap
     )
     assert {"id": "no-scale-prod-peak", "reason": "forged"} in plan["quarantined_at_load"]
     assert {"id": "no-scale-prod-peak", "reason": "forged"} in plan["store_health"]["quarantined"]
-    assert lines[0]["store_health"]["loaded"] == 28
+    assert lines[0]["store_health"]["loaded"] == 29
 
 
 def test_sources_flag_forged_constraint_escalates_under_on_untrusted_match_escalate(
@@ -708,7 +708,7 @@ def test_sources_flag_forged_constraint_escalates_under_on_untrusted_match_escal
     assert "fail-closed: no-scale-prod-peak (forged)" in lines[0]["decision"]["notes"]
     assert {"id": "no-scale-prod-peak", "reason": "forged"} in plan["quarantined_at_load"]
     assert {"id": "no-scale-prod-peak", "reason": "forged"} in plan["store_health"]["quarantined"]
-    assert lines[0]["store_health"]["loaded"] == 28
+    assert lines[0]["store_health"]["loaded"] == 29
 
 
 def test_ledger_flag_records_allowed_actions(capsys, tmp_path):
@@ -874,7 +874,7 @@ def test_store_health_is_on_every_per_intent_line_and_the_plan_summary(capsys, m
     )
     assert code == 0
     health = lines[0]["store_health"]
-    assert health["loaded"] == 29
+    assert health["loaded"] == 30
     assert health["quarantined"] == []
     assert health["principals"] == 3
     assert len(health["constraints_sha256"]) == 64
@@ -890,7 +890,7 @@ def test_pretty_output_ends_with_store_line(capsys):
     )
     out = capsys.readouterr().out
     assert code == 0
-    assert out.strip().splitlines()[-1] == "STORE: loaded=29 quarantined=0 principals=3"
+    assert out.strip().splitlines()[-1] == "STORE: loaded=30 quarantined=0 principals=3"
 
 
 def test_single_bit_flip_allows_by_default_but_reports_quarantine(capsys, tmp_path):
@@ -919,7 +919,7 @@ def test_single_bit_flip_allows_by_default_but_reports_quarantine(capsys, tmp_pa
     assert decision["notes"] == []
     health = lines[0]["store_health"]
     assert health["quarantined"] == [{"id": "no-delete-nodes", "reason": "tampered"}]
-    assert health["loaded"] == 28
+    assert health["loaded"] == 29
     assert "aegis: WARNING Quarantined constraint no-delete-nodes" in err
 
 
@@ -939,7 +939,7 @@ def test_single_bit_flip_escalates_under_on_untrusted_match_escalate(capsys, tmp
     assert "fail-closed: no-delete-nodes (tampered)" in decision["notes"]
     health = lines[0]["store_health"]
     assert health["quarantined"] == [{"id": "no-delete-nodes", "reason": "tampered"}]
-    assert health["loaded"] == 28
+    assert health["loaded"] == 29
     assert "aegis: WARNING Quarantined constraint no-delete-nodes" in err
 
 
@@ -952,7 +952,7 @@ def test_single_bit_flip_pretty_lists_quarantined_ids_but_allows_by_default(caps
     )
     out = capsys.readouterr().out
     assert code == 0
-    assert "STORE: loaded=28 quarantined=1 principals=3" in out
+    assert "STORE: loaded=29 quarantined=1 principals=3" in out
     assert "  quarantined: no-delete-nodes (tampered)" in out
     assert "note: fail-closed:" not in out
 
@@ -968,7 +968,7 @@ def test_single_bit_flip_pretty_lists_quarantined_ids_and_escalates_under_escala
     )
     out = capsys.readouterr().out
     assert code == 2
-    assert "STORE: loaded=28 quarantined=1 principals=3" in out
+    assert "STORE: loaded=29 quarantined=1 principals=3" in out
     assert "  quarantined: no-delete-nodes (tampered)" in out
     assert "note: fail-closed: no-delete-nodes (tampered)" in out
 

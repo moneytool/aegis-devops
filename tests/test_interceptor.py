@@ -779,3 +779,62 @@ def test_resource_pattern_matches_module_stripped_terraform_alias():
     bare = InfrastructureIntent(resource="module.app.aws_db_instance.main", action="delete",
                                 provider="terraform")
     assert interceptor.intercept(bare, now=NOW).verdict == "ALLOW"
+
+
+# --- v0.2.1: unresolved conditions only fail closed for rules that may vote -----
+# (council review of the v0.3 design, gpt-6-astra P0-2: an unauthorized or
+# tampered rule could force ESCALATE through the env-/time-window-unresolved
+# paths, which ran before any integrity or authority check.)
+
+
+def _env_rule(**overrides):
+    fields = dict(id="prod-only", actions={"delete"}, resource_pattern="*",
+                  scope={"env": "prod"}, constraint_class="deletion", principal="admin")
+    fields.update(overrides)
+    return make_constraint(**fields)
+
+
+_UNRESOLVED_ENV_INTENT = InfrastructureIntent(
+    resource="pod/x", action="delete", provider="kubernetes", metadata={"namespace": "prod"})
+
+
+def test_unauthorized_rule_cannot_force_escalate_through_env_unresolved():
+    rule = _env_rule(principal="developer")  # developer may not assert deletion
+    decision = AegisInterceptor(_store_with(rule)).intercept(_UNRESOLVED_ENV_INTENT, now=NOW)
+    assert decision.verdict == "ALLOW"
+    assert decision.notes == []
+    assert decision.discarded == [{"id": "prod-only", "reason": "unauthorized"}]
+
+
+def test_tampered_rule_cannot_force_escalate_through_env_unresolved():
+    rule = _env_rule()
+    rule.effect = "ESCALATE"  # mutated after its hash was computed
+    decision = AegisInterceptor(_store_with(rule)).intercept(_UNRESOLVED_ENV_INTENT, now=NOW)
+    assert decision.verdict == "ALLOW"
+    assert decision.discarded == [{"id": "prod-only", "reason": "tampered"}]
+
+
+def test_unauthorized_env_rule_escalates_only_under_escalate_mode():
+    rule = _env_rule(principal="developer")
+    decision = AegisInterceptor(_store_with(rule), on_untrusted_match="escalate").intercept(
+        _UNRESOLVED_ENV_INTENT, now=NOW)
+    assert decision.verdict == "ESCALATE"
+    assert decision.notes == ["fail-closed: prod-only (unauthorized)"]
+
+
+def test_authorized_env_rule_still_escalates_when_env_is_unresolved():
+    decision = AegisInterceptor(_store_with(_env_rule())).intercept(
+        _UNRESOLVED_ENV_INTENT, now=NOW)
+    assert (decision.verdict, decision.notes) == ("ESCALATE", ["env-unresolved: prod-only"])
+
+
+def test_unauthorized_rule_cannot_force_escalate_through_time_window_unresolved():
+    rule = make_constraint(
+        id="peak-hours", actions={"scale"}, principal="developer", constraint_class="scaling",
+        time_window={"days": ["Mon"], "start": "09:00", "end": "17:00", "tz": "America/New_York"},
+    )
+    store = _store_with(rule)
+    store.tzdata_available = False
+    decision = AegisInterceptor(store).intercept(SCALE_INTENT, now=NOW)
+    assert decision.verdict == "ALLOW"
+    assert decision.discarded == [{"id": "peak-hours", "reason": "unauthorized"}]
