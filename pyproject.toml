@@ -7,6 +7,7 @@ name = "aegis-devops"
 license = "Apache-2.0"
 dynamic = ["version"]
 description = "Provenance-backed, authority-aware policy verifier for agentic DevOps actions."
+authors = [{ name = "Vamshidher Reddy Jannapu Reddy" }]
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
