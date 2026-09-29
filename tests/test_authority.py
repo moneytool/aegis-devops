@@ -20,7 +20,7 @@ def test_load_authority_map_from_yaml(tmp_path):
 
 def test_example_authority_file_loads():
     authority_map = load_authority_map("data/authority.example.yaml")
-    assert authority_map["admin"] == {"scaling", "deletion", "configuration"}
+    assert authority_map["admin"] == {"scaling", "deletion", "configuration", "identity"}
     assert authority_map["sre_lead"] == {"scaling", "configuration"}
     assert authority_map["developer"] == {"configuration"}
 
@@ -72,7 +72,7 @@ def test_example_authority_file_verifies_under_example_key():
 
     key = load_key("file:data/example-signing.key")
     authority_map = load_authority_map("data/authority.example.yaml", key=key)
-    assert authority_map["admin"] == {"scaling", "deletion", "configuration"}
+    assert authority_map["admin"] == {"scaling", "deletion", "configuration", "identity"}
     assert authority_map.warnings == []
 
 

@@ -154,10 +154,37 @@ built from the policy can be traced to exactly this state.
 
 It refuses `--insecure`, `--sources ''`, and any decision-shaping file that does not verify: the
 environment and plan-constraint maps are loaded through their loaders (signature and shape),
-`agents.yaml` must be signed. The snapshot is detached from the loaded store: it keeps canonical
+`agents.yaml` through the identity-model loader (below). The snapshot is detached from the loaded store: it keeps canonical
 records and hands out fresh copies, so nothing can change what it describes after the fact.
 Without `--pretty` it prints one JSON object. `aegis sources` is the per-constraint view of the
 same load.
+
+### Identity model
+
+`aegis agents` verifies `agents.yaml` (signature, shape, and that its `principal` holds the
+`identity` class) and prints the identity model server-side enforcement is compiled for:
+
+```bash
+aegis agents --pretty
+```
+
+```
+AGENTS /home/me/.config/aegis/agents.yaml
+  mode=deny-by-default enforcement=report-only principal=admin
+  kubernetes:
+    break-glass  group            aegis:break-glass
+    trusted      group            platform-admins
+    trusted      serviceaccount   argocd:argocd-application-controller
+    (every other identity is treated as an agent)
+  aws:
+    break-glass  role             arn:aws:iam::111122223333:role/BreakGlass
+    trusted      role             arn:aws:iam::111122223333:role/Deploy
+    (every other identity is treated as an agent)
+```
+
+Exit 0, 1 when the model has a warning (`workflow-unbound`, `no-break-glass`), 65 when it does
+not verify, 66 when there is no `agents.yaml` (`--agents PATH` points elsewhere). Without
+`--pretty` it prints one JSON object. See [Configuration](configuration.md#agentsyaml-identity-model).
 
 ## Compound commands
 
