@@ -35,6 +35,11 @@ any release may change behaviour.
   need updating (see `docs/constraints.md`).
 - `kubectl drain … --ignore-daemonsets` (and `--delete-emptydir-data`, `--disable-eviction`)
   was rejected as malformed.
+- A global option before `rollout` or `set image` was read as the subcommand:
+  `kubectl -n prod rollout restart deploy/web` became the action `rollout--n` on `prod/*`
+  (losing the namespace, so a namespace-scoped rollout rule missed it), and
+  `kubectl --as admin rollout restart …` escaped the impersonation rule. The subcommand is now
+  taken before global options are merged, so leading and trailing options parse identically.
 
 ### Changed
 - kubectl `--as` / `--as-group` / `--as-uid` are no longer dropped: they are recorded in

@@ -143,3 +143,14 @@ def test_kubectl_without_impersonation_is_unaffected(capsys):
     code, verdicts = _verdicts("kubectl get pods", capsys)
     assert code == 0
     assert all(v == "ALLOW" for v, _ in verdicts)
+
+
+@pytest.mark.parametrize("command", [
+    "kubectl --as admin rollout restart deploy/web",
+    "kubectl --as=admin rollout restart deploy/web",
+    "kubectl --as=admin set image deploy/web app=x:2",
+])
+def test_impersonation_before_a_subcommand_verb_is_blocked(command, capsys):
+    code, verdicts = _verdicts(command, capsys)
+    assert ("BLOCK", ["block-kubectl-impersonation"]) in verdicts
+    assert code == 3

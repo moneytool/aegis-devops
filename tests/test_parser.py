@@ -2535,3 +2535,27 @@ def test_kubectl_impersonation_is_recorded_not_dropped():
     leading = from_argv("kubectl --as admin delete node w1".split())
     assert [(i.action, i.resource) for i in leading] == [
         ("delete", "node/w1"), ("impersonate", "user/admin")]
+
+
+@pytest.mark.parametrize("leading, trailing", [
+    ("kubectl -n prod rollout restart deploy/web", "kubectl rollout restart deploy/web -n prod"),
+    ("kubectl --as admin rollout restart deploy/web",
+     "kubectl rollout restart deploy/web --as admin"),
+    ("kubectl --as=admin rollout undo deploy/web", "kubectl rollout undo deploy/web --as=admin"),
+    ("kubectl -n prod set image deploy/web app=x:2",
+     "kubectl set image deploy/web app=x:2 -n prod"),
+    ("kubectl --as=admin set image deploy/web app=x:2",
+     "kubectl set image deploy/web app=x:2 --as=admin"),
+])
+def test_leading_globals_before_a_subcommand_verb(leading, trailing):
+    """Review of #13: for rollout/set the subcommand was taken from the
+    merged token list, so a leading global ("-n", "--as") became the
+    subcommand and the impersonation / namespace was lost."""
+    from aegis_core.parser import from_argv
+
+    def shape(argv):
+        return [(i.action, i.resource, i.metadata, i.params.get("impersonate"))
+                for i in from_argv(argv.split())]
+
+    assert shape(leading) == shape(trailing)
+    assert not any(a.startswith("rollout--") for a, *_ in shape(leading))

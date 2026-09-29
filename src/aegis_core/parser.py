@@ -608,19 +608,25 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
         tool="kubectl",
     )
     verb = rest[0]
-    # Global options are parsed by the same flag walker as post-verb flags,
-    # so "-n prod delete x" and "delete x -n prod" produce identical intents.
-    tokens = leading + rest[1:]
+    after_verb = rest[1:]
 
+    # A subcommand ("rollout restart", "set image") is the token right after
+    # the verb, so it is taken from the post-verb tokens *before* the leading
+    # global options are merged back in -- otherwise "kubectl -n prod rollout
+    # restart x" would read "-n" as the subcommand.
     subverb = None
     if verb == "rollout":
-        if not tokens:
+        if not after_verb:
             raise ValueError(f"kubectl rollout requires a subcommand: {argv!r}")
-        subverb, *tokens = tokens
+        subverb, *after_verb = after_verb
     elif verb == "set":
-        if not tokens or tokens[0] != "image":
+        if not after_verb or after_verb[0] != "image":
             raise ValueError(f"unsupported 'kubectl set' invocation: {argv!r}")
-        tokens = tokens[1:]
+        after_verb = after_verb[1:]
+
+    # Global options are parsed by the same flag walker as post-verb flags,
+    # so "-n prod delete x" and "delete x -n prod" produce identical intents.
+    tokens = leading + after_verb
 
     metadata, params, positional, manifest_value, command = _parse_flags(tokens)
     if command is not None:
