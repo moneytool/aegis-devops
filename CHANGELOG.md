@@ -17,7 +17,11 @@ any release may change behaviour.
   unchanged). Gemini CLI reads an extension's hooks from `hooks/hooks.json` at the root, where
   the Claude plugin's hooks used to be.
 
-## [Unreleased]
+## [0.2.1] — 2026-09-28
+
+Fixes found by the council review of the v0.3 server-side design
+(`docs/dev/DESIGN-v0.3-server-side.md`, now in the repository with the reviews). Security
+relevant: upgrade if you rely on the default `discard` behaviour or on kubectl rules.
 
 ### Fixed
 - **An untrustworthy rule could force ESCALATE through an unresolved condition.** When an
@@ -289,6 +293,7 @@ See "Project status" in the README and [`docs/dev/PLAN.md`](docs/dev/PLAN.md) §
 rather than real connectors, signing uses a shared secret, and a principal is a signed name
 rather than a bound identity.
 
+[0.2.1]: https://github.com/moneytool/aegis-devops/releases/tag/v0.2.1
 [0.2.0]: https://github.com/moneytool/aegis-devops/releases/tag/v0.2.0
 [0.1.7]: https://github.com/moneytool/aegis-devops/releases/tag/v0.1.7
 [0.1.6]: https://github.com/moneytool/aegis-devops/releases/tag/v0.1.6
