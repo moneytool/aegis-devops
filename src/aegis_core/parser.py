@@ -1030,6 +1030,38 @@ _AWS_SINGLE_ID_FLAGS = {
     "secret-id",
 }
 
+# The flag that names the target resource, per (service, kind), for
+# operations whose identifier flag is not one of _AWS_SINGLE_ID_FLAGS or is
+# preceded by a parent's (--cluster-name before --nodegroup-name). Without
+# it the name was lost ("*") or the parent's name was used, so a
+# name-specific rule never matched on the client while the compiled AWS
+# policy enforced it.
+_AWS_TARGET_FLAGS = {
+    ("ec2", "volume"): "volume-id",
+    ("ec2", "snapshot"): "snapshot-id",
+    ("ec2", "vpc"): "vpc-id",
+    ("ec2", "subnet"): "subnet-id",
+    ("ec2", "security-group"): "group-id",
+    ("ec2", "internet-gateway"): "internet-gateway-id",
+    ("ec2", "nat-gateway"): "nat-gateway-id",
+    ("ec2", "image"): "image-id",
+    ("ec2", "key-pair"): "key-name",
+    ("rds", "db-cluster"): "db-cluster-identifier",
+    ("rds", "db-snapshot"): "db-snapshot-identifier",
+    ("rds", "db-cluster-snapshot"): "db-cluster-snapshot-identifier",
+    ("eks", "cluster"): "name",
+    ("eks", "nodegroup"): "nodegroup-name",
+    ("eks", "addon"): "addon-name",
+    ("eks", "fargate-profile"): "fargate-profile-name",
+    ("ecs", "service"): "service",
+    ("logs", "log-group"): "log-group-name",
+    ("logs", "log-stream"): "log-stream-name",
+    ("route53", "hosted-zone"): "id",
+    ("efs", "file-system"): "file-system-id",
+    ("elasticache", "cache-cluster"): "cache-cluster-id",
+    ("elasticache", "replication-group"): "replication-group-id",
+}
+
 _AWS_S3_VERB_MAP = {
     "rm": "delete",
     "rb": "delete",
@@ -1256,6 +1288,13 @@ def from_aws_multi(argv: list[str]) -> list[InfrastructureIntent]:
         action = "update"
         params["privilege"] = True
 
+    target_flag = _AWS_TARGET_FLAGS.get((service, kind))
+    if not multi_ids and target_flag and isinstance(params.get(target_flag), str):
+        # the target's own flag wins; a parent id taken from a generic flag
+        # (--cluster, --cluster-name) is kept as a parameter
+        if id_value is not None:
+            params.setdefault("parent", id_value)
+        id_value = params[target_flag]
     names = multi_ids if multi_ids else [id_value]
     resources = [_aws_resource(service, kind, n) for n in names]
     return [
