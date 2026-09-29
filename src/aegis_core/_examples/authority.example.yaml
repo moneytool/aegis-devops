@@ -5,6 +5,7 @@ principals:
     - scaling
     - deletion
     - configuration
+    - identity       # may change agents.yaml, the identity model
   sre_lead:
     - scaling
     - configuration

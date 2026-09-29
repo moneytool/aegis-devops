@@ -212,7 +212,7 @@ def test_snapshot_rejects_an_edited_unsigned_auxiliary_file(policy_dir, capsys, 
 
 def test_snapshot_requires_a_signed_agents_file(policy_dir, capsys):
     d, key = policy_dir
-    (d / "agents.yaml").write_text("trusted: []\n")
+    (d / "agents.yaml").write_text((d / "agents.example.yaml").read_text())
     code, _, out = _cli(["snapshot", "--config-dir", str(d)], capsys)
     assert code == 65
     from aegis_core.signing import sign_file
@@ -220,6 +220,34 @@ def test_snapshot_requires_a_signed_agents_file(policy_dir, capsys):
     sign_file(d / "agents.yaml", key)
     code, doc, _ = _cli(["snapshot", "--config-dir", str(d)], capsys)
     assert code == 0 and "agents" in doc["inputs"]
+
+
+def test_snapshot_rejects_an_invalid_identity_model(policy_dir, capsys):
+    """agents.yaml is parsed, not just signature-checked: a signed file whose
+    principal lacks the identity class cannot stand in a snapshot."""
+    d, key = policy_dir
+    from aegis_core.signing import sign_file
+
+    text = (d / "agents.example.yaml").read_text().replace("principal: admin",
+                                                           "principal: sre_lead")
+    (d / "agents.yaml").write_text(text)
+    sign_file(d / "agents.yaml", key)
+    code, _, out = _cli(["snapshot", "--config-dir", str(d)], capsys)
+    assert code == 65 and "identity" in out.err
+
+
+def test_snapshot_carries_identity_model_warnings(policy_dir, capsys):
+    d, key = policy_dir
+    from aegis_core.signing import sign_file
+
+    text = (d / "agents.example.yaml").read_text().replace(
+        "job_workflow_ref:example-org/app/.github/workflows/deploy.yml@refs/heads/main",
+        "ref:refs/heads/main")
+    (d / "agents.yaml").write_text(text)
+    sign_file(d / "agents.yaml", key)
+    code, doc, _ = _cli(["snapshot", "--config-dir", str(d)], capsys)
+    assert code == 0
+    assert any(w.startswith("agents: workflow-unbound:") for w in doc["warnings"])
 
 
 def test_snapshot_refuses_disabled_sources_and_excludes_unchecked_rules(policy_dir, capsys):

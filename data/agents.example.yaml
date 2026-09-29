@@ -1,0 +1,41 @@
+# The identity model for server-side enforcement (docs/configuration.md#agentsyaml-identity-model).
+# Server-side layers see which identity made an API call, not who typed a command,
+# so compiled policies apply to agent identities and this file says which those are.
+# Copy to agents.yaml, replace every identity with your own, sign it with `aegis sign`,
+# then check it with: aegis agents --pretty
+version: 1
+principal: admin                 # must hold the 'identity' class in authority.yaml
+mode: deny-by-default            # every identity not listed below is treated as an agent
+enforcement: report-only         # switch to 'enforce' only after reviewing
+                                 # `aegis audit-identity --would-restrict`
+
+# Never restricted, in either mode. Keep one per platform you compile for.
+break_glass:
+  - platform: kubernetes
+    kind: group
+    id: aegis:break-glass
+  - platform: aws
+    kind: role
+    id: "arn:aws:iam::111122223333:role/BreakGlass"
+
+# People, CI and controllers that are not agents. Anything unlisted is restricted
+# by the compiled policy, which in practice means its destructive actions.
+trusted:
+  - platform: kubernetes
+    kind: group
+    id: platform-admins
+  - platform: kubernetes
+    kind: serviceaccount
+    id: "argocd:argocd-application-controller"
+    note: applies reviewed changes only; agents must not push to the branch it syncs
+  - platform: aws
+    kind: role
+    id: "arn:aws:iam::111122223333:role/Deploy"
+  - platform: aws
+    kind: source-identity
+    id: alice@example.com
+  - platform: github
+    kind: oidc-subject
+    # bound to one reusable workflow at a protected ref, so an agent job in the same
+    # repository cannot present it (a plain repo:<org>/<repo>:ref:... subject can)
+    id: "repo:example-org/app:job_workflow_ref:example-org/app/.github/workflows/deploy.yml@refs/heads/main"

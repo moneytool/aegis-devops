@@ -8,18 +8,6 @@ any release may change behaviour.
 ## [Unreleased]
 
 ### Added
-- The repository is a Gemini CLI extension (`gemini-extension.json`, `hooks/hooks.json`):
-  `gemini extensions install https://github.com/moneytool/aegis-devops`.
-
-### Changed
-- The Claude Code plugin moved to `plugins/claude/` (the marketplace entry points there, so
-  `claude plugin marketplace add moneytool/aegis-devops` and the install command are
-  unchanged). Gemini CLI reads an extension's hooks from `hooks/hooks.json` at the root, where
-  the Claude plugin's hooks used to be.
-
-## [Unreleased]
-
-### Added
 - `ConstraintStore.verified_snapshot()` and `aegis snapshot`: the constraints that may vote —
   loaded **and** passing integrity and authority now (authority is otherwise checked only per
   decision) — frozen, with every excluded constraint and its reason, and one sha256 digest over
@@ -32,6 +20,20 @@ any release may change behaviour.
   base for the v0.3 compilers (`docs/dev/DESIGN-v0.3-server-side.md` §3.1). `aegis snapshot`
   refuses `--insecure`, `--sources ''`, and any environment / plan-constraint / `agents.yaml`
   file that does not verify.
+- `agents.yaml` and `aegis agents`: the identity model server-side enforcement is compiled for
+  (design §4). **Deny-by-default** is the default mode: the file names the trusted identities
+  (people, CI roles, controllers) and every other identity counts as an agent; `mode:
+  agents-only` lists agents instead. At least one **break-glass** identity is required and is
+  never restricted; `enforcement` starts at `report-only`. Identities are typed per platform
+  (Kubernetes user/group/ServiceAccount, AWS role/user/SourceIdentity, GCP service
+  account/user/group, GitHub OIDC subject) and validated; wildcards, duplicates, assumed-role
+  session ARNs and groups every identity carries (`system:authenticated`, …) are load errors.
+  The file is signed and its `principal` must hold the new `identity` class in
+  `authority.yaml` (the example grants it to `admin`). Warnings: a trusted GitHub subject that
+  is not bound to a workflow or protected environment (`workflow-unbound`), a platform with no
+  break-glass identity. `aegis snapshot` now loads `agents.yaml` through this loader instead
+  of only checking its signature, and carries its warnings. `aegis init` ships
+  `agents.example.yaml`, which never becomes active on its own.
 
 ## [0.2.1] — 2026-09-28
 
@@ -141,6 +143,14 @@ A correction to the published benchmark. No change to how a decision is made.
   like-for-like row on that basis (0 of 19 poison candidates acted on, over-block 0.000).
 - Tests that every published row is scored on the basis it was shown, and that the holdout
   oracle only ever sees the holdout constraints.
+- The repository is a Gemini CLI extension (`gemini-extension.json`, `hooks/hooks.json`):
+  `gemini extensions install https://github.com/moneytool/aegis-devops`.
+
+### Changed
+- The Claude Code plugin moved to `plugins/claude/` (the marketplace entry points there, so
+  `claude plugin marketplace add moneytool/aegis-devops` and the install command are
+  unchanged). Gemini CLI reads an extension's hooks from `hooks/hooks.json` at the root, where
+  the Claude plugin's hooks used to be.
 
 ## [0.1.5] — 2026-09-27
 

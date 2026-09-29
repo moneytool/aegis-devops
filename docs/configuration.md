@@ -1,6 +1,7 @@
 # Configuration
 
-Config directory discovery, signing, source verification, and rate limits/ledger.
+Config directory discovery, signing, source verification, the identity model (`agents.yaml`),
+and rate limits/ledger.
 
 ← back to the [README](../README.md)
 
@@ -230,6 +231,69 @@ signers:
 
 Design and threat model:
 [`dev/DESIGN-v0.2-git-sources.md`](dev/DESIGN-v0.2-git-sources.md).
+
+## agents.yaml (identity model)
+
+Server-side enforcement (compiled cloud policies, Kubernetes admission; see
+[`dev/DESIGN-v0.3-server-side.md`](dev/DESIGN-v0.3-server-side.md) §4) sees which identity made
+an API call, not who typed the command. So compiled policies apply to **agent identities**, and
+`agents.yaml`, next to `constraints.yaml`, is the one place that says which those are. Compilers
+generate their principal lists and Kubernetes `matchConditions` from it; nothing is written by
+hand. The local hook and `aegis check` do not read it.
+
+```yaml
+version: 1
+principal: admin            # must hold the 'identity' class in authority.yaml
+mode: deny-by-default       # default; or agents-only
+enforcement: report-only    # default; 'enforce' after reviewing the report-only run
+break_glass:                # never restricted; at least one, one per platform you compile for
+  - {platform: kubernetes, kind: group, id: "aegis:break-glass"}
+  - {platform: aws, kind: role, id: "arn:aws:iam::111122223333:role/BreakGlass"}
+trusted:                    # deny-by-default: everything not listed here is an agent
+  - {platform: kubernetes, kind: group, id: platform-admins}
+  - {platform: kubernetes, kind: serviceaccount, id: "argocd:argocd-application-controller"}
+  - {platform: aws, kind: role, id: "arn:aws:iam::111122223333:role/Deploy"}
+  - {platform: github, kind: oidc-subject,
+     id: "repo:example-org/app:job_workflow_ref:example-org/app/.github/workflows/deploy.yml@refs/heads/main"}
+```
+
+- **Deny-by-default is the default.** Listing agents fails open for the agent nobody listed,
+  which is the case server-side enforcement exists for. So the file lists what is *not* an
+  agent, and an unlisted identity is restricted — only from what the policy blocks, in practice
+  destructive actions. `mode: agents-only` with an `agents:` list is the opt-out.
+- **Break-glass** identities are never restricted, in either mode. At least one is required, and
+  a compiler refuses a platform with none.
+- **Report first.** `enforcement` starts at `report-only`: compiled artifacts audit or warn
+  instead of deny. Switch to `enforce` (a signed change like any other) after `aegis
+  audit-identity --would-restrict` has shown which existing identities the policy would restrict
+  and the legitimate ones — backup jobs, cleanup functions, controllers — are in `trusted`.
+- **Who may change it.** The file is signed, and its `principal` must hold the `identity` class
+  in `authority.yaml`, so changing who is trusted is a policy change of its own kind.
+
+| platform | kinds | `id` |
+|---|---|---|
+| `kubernetes` | `user`, `group`, `serviceaccount` | user or group name; a ServiceAccount as `<namespace>:<name>` (`system:serviceaccount:<ns>:<name>` as a user is read as that ServiceAccount) |
+| `aws` | `role`, `user`, `source-identity` | role or user ARN (not an assumed-role session ARN, which changes per session); `sts` SourceIdentity |
+| `gcp` | `serviceaccount`, `user`, `group` | email address |
+| `github` | `oidc-subject` | the OIDC `sub` claim a cloud trust policy matches |
+
+Load errors, never guesses: an unknown field, platform or kind; a malformed `id`; wildcards
+(`*`, `?`); the same identity listed twice (case-insensitively for ARNs and emails, and a
+ServiceAccount under both spellings); an `agents:` list in deny-by-default or `trusted:` in
+agents-only; and a trusted or break-glass Kubernetes group that every identity carries
+(`system:authenticated`, `system:unauthenticated`, `system:serviceaccounts`), which would exempt
+every agent. Warnings:
+
+- `workflow-unbound` — a trusted GitHub subject scoped only to a repository and ref
+  (`repo:org/app:ref:refs/heads/main`). Every job in that repository presents it, an agent's
+  job included, so a deploy role trusting it can be assumed by the agent directly. Bind it to a
+  reusable workflow (`job_workflow_ref`, via GitHub's OIDC subject customisation) or to a
+  protected environment with required reviewers (`…:environment:<name>`).
+- `no-break-glass` — a platform with listed identities but no break-glass identity.
+
+Check it with `aegis agents --pretty` (exit 1 on any warning); `aegis snapshot` loads it the same
+way and includes its hash and warnings. `aegis init` writes `agents.example.yaml`, which never
+takes effect on its own: copy it to `agents.yaml` and sign it.
 
 ## Rate limits & ledger
 

@@ -106,6 +106,7 @@ from aegis_core.gitsource import (
     load_repos,
     load_signers,
 )
+from aegis_core.identity import AGENTS_FILE, load_identity_model
 from aegis_core.intent import InfrastructureIntent
 from aegis_core.interceptor import AegisInterceptor, Decision
 from aegis_core.ledger import DecisionLedger, JsonlLedger, SqliteLedger, parse_window
@@ -253,6 +254,15 @@ def _add_key_options(subparser: argparse.ArgumentParser) -> None:
         metavar="SOURCE",
         help="signing key: env:VAR | file:PATH | hex (default: $AEGIS_SIGNING_KEY, then "
         "<dir of --constraints>/example-signing.key if present)",
+    )
+
+
+def _add_agents_option(subparser: argparse.ArgumentParser) -> None:
+    subparser.add_argument(
+        "--agents",
+        default=None,
+        metavar="PATH",
+        help="agents.yaml, the identity model (default: <dir of --constraints>/agents.yaml)",
     )
 
 
@@ -490,6 +500,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "unsigned policy",
     )
     _add_common_options(snapshot_parser)
+    _add_agents_option(snapshot_parser)
+
+    agents_parser = subparsers.add_parser(
+        "agents",
+        help="Verify agents.yaml (the identity model server-side enforcement is compiled "
+        "for) and print it: mode, enforcement, break-glass, trusted or agent identities, "
+        "warnings; exit 1 on any identity-model warning",
+    )
+    _add_common_options(agents_parser)
+    _add_agents_option(agents_parser)
 
     sources_parser = subparsers.add_parser(
         "sources",
@@ -1107,6 +1127,11 @@ def _run_init(args: argparse.Namespace) -> int:
         "signers.example.yaml to repos.yaml / signers.yaml (see docs/configuration.md), then "
         "check them with: aegis sources --pretty"
     )
+    print(
+        "  5. Before compiling server-side policy: copy agents.example.yaml to agents.yaml, "
+        "list your break-glass and trusted identities, sign it, then check it with: "
+        "aegis agents --pretty"
+    )
     return 0
 
 
@@ -1169,7 +1194,7 @@ def _snapshot_inputs(args: argparse.Namespace, fetcher) -> dict[str, str]:
         ("plan_constraints", args.plan_constraints),
         ("repos", args.repos or os.path.join(base, REPOS_FILE)),
         ("signers", args.signers or os.path.join(base, SIGNERS_FILE)),
-        ("agents", os.path.join(base, "agents.yaml")),
+        ("agents", _agents_path(args)),
     ):
         if path and os.path.exists(path):
             inputs[name] = _sha256_file(path)
@@ -1183,7 +1208,7 @@ def _snapshot_inputs(args: argparse.Namespace, fetcher) -> dict[str, str]:
     return inputs
 
 
-def _verify_snapshot_inputs(args: argparse.Namespace, authority_map, load: dict) -> None:
+def _verify_snapshot_inputs(args: argparse.Namespace, authority_map, load: dict) -> list[str]:
     """Every decision-shaping file besides the constraints and authority map
     must verify (signature and shape) before its hash may stand in a
     snapshot. The loaders enforce the signature with the resolved key; a
@@ -1198,14 +1223,63 @@ def _verify_snapshot_inputs(args: argparse.Namespace, authority_map, load: dict)
             lambda: PlanConstraintStore.load(args.plan_constraints, authority_map=authority_map,
                                              **load),
             args.plan_constraints, "plan constraints")
-    base = os.path.dirname(os.path.abspath(args.constraints))
-    agents = os.path.join(base, "agents.yaml")
-    if os.path.exists(agents):  # parsed by the v0.3 identity model; signature-checked now
-        signing.require_signature(agents, load["key"])
-        if not isinstance(yaml.safe_load(Path(agents).read_text()), dict):
-            raise DataError(f"{agents}: must be a mapping")
+    warnings: list[str] = []
+    agents = _agents_path(args)
+    if os.path.exists(agents):
+        model = _load_or_data_error(
+            lambda: load_identity_model(agents, authority_map=authority_map, **load),
+            agents, "agents")
+        warnings.extend(f"agents: {w}" for w in model.warnings)
+    elif getattr(args, "agents", None):
+        raise FileNotFoundError(2, "No such file or directory", args.agents)
     # repos.yaml / signers.yaml were loaded (and signature-checked) by
     # _git_source_fetcher when present
+    return warnings
+
+
+def _agents_path(args: argparse.Namespace) -> str:
+    explicit = getattr(args, "agents", None)
+    if explicit:
+        return explicit
+    return os.path.join(os.path.dirname(os.path.abspath(args.constraints)), AGENTS_FILE)
+
+
+def _run_agents(args: argparse.Namespace) -> int:
+    """``aegis agents``: verify ``agents.yaml`` (signature, shape, the
+    principal's ``identity`` class) and print the identity model."""
+    _resolve_config_paths(args)
+    path = _agents_path(args)
+    if not os.path.exists(path):
+        raise FileNotFoundError(2, "No such file or directory", path)
+    key_warnings: list[str] = []
+    key, insecure = _resolve_key(args, key_warnings)
+    load = {"key": key, "insecure": insecure}
+    authority_map = _load_or_data_error(
+        lambda: load_authority_map(args.authority, **load), args.authority, "authority")
+    model = _load_or_data_error(
+        lambda: load_identity_model(path, authority_map=authority_map, **load), path, "agents")
+    warnings = [*key_warnings, *authority_map.warnings, *model.warnings]
+    if args.pretty:
+        print(f"AGENTS {model.path}")
+        print(f"  mode={model.mode} enforcement={model.enforcement} "
+              f"principal={model.principal}")
+        for platform in model.platforms:
+            print(f"  {platform}:")
+            for ident in model.break_glass:
+                if ident.platform == platform:
+                    print(f"    break-glass  {ident.kind:<16} {ident.id}")
+            listed = model.trusted if model.mode == "deny-by-default" else model.agents
+            label = "trusted" if model.mode == "deny-by-default" else "agent"
+            for ident in listed:
+                if ident.platform == platform:
+                    print(f"    {label:<12} {ident.kind:<16} {ident.id}")
+            if model.mode == "deny-by-default":
+                print("    (every other identity is treated as an agent)")
+        for w in warnings:
+            print(f"  warning: {w}")
+    else:
+        print(json.dumps({**model.to_dict(), "warnings": warnings}, sort_keys=True))
+    return 1 if model.warnings else 0
 
 
 def _run_snapshot(args: argparse.Namespace) -> int:
@@ -1218,7 +1292,7 @@ def _run_snapshot(args: argparse.Namespace) -> int:
         raise UsageError("snapshot: refusing --sources ''; a snapshot needs source verification "
                          "(rules without it are excluded as source-unverified)")
     store, authority_map, load, fetcher = _load_policy(args)
-    _verify_snapshot_inputs(args, authority_map, load)
+    store.warnings.extend(_verify_snapshot_inputs(args, authority_map, load))
     unsigned = [w for w in store.warnings if w.startswith("unsigned:")]
     if unsigned:
         raise DataError(f"snapshot: policy is not signed ({unsigned[0]})")
@@ -1259,6 +1333,8 @@ def _run(argv: list[str]) -> int:
         return _run_sources(args)
     if args.command == "snapshot":
         return _run_snapshot(args)
+    if args.command == "agents":
+        return _run_agents(args)
     if args.command == "hook":
         return hook_module.main_hook(
             args.agent,
