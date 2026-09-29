@@ -458,6 +458,17 @@ for the clouds.
   (a DELETE carries the object's *original* creation time) and are not a clock. So time windows
   are `not enforced` by the VAP target, by design; the `kind` CI job (§8) adds a test that a
   policy using a clock function is rejected by the API server, to catch a future change.
+
+**Verified live, 2026-09-28** (a local `kind` cluster, Kubernetes v1.37.0):
+
+| Claim in this design | Result |
+|---|---|
+| VAP has no clock | Confirmed. `now()` and `time.now()` → `undeclared reference to 'now'`; `request.requestTime` and `request.time` → `undefined field`; all rejected when the policy is created. A plain expression was accepted as a control. |
+| Identity scoping via `matchConditions` on `request.userInfo.username` | Confirmed. A policy scoped to `system:serviceaccount:agents:claude` denied that account's `delete namespace` with the Aegis message; the same delete by an admin succeeded. |
+| Admission policies cannot protect admission-policy objects; RBAC must (§4.3, §6.6) | Confirmed. A VAP denying DELETE of `validatingadmissionpolicies`/`…bindings` for everyone did **not** stop the agent deleting its own binding; five seconds later (after propagation) the agent deleted the namespace. |
+| `deletecollection` is admitted per item, and `request.name` is empty (§5.3) | Confirmed. The collection DELETE was evaluated per item with `request.name` empty (the error names `"Unknown"`) and the item's name in `oldObject.metadata.name`. The compiler must read the name from `oldObject` for DELETE. |
+| A collection delete is not atomic (§5.3) | Confirmed, and it stops at the first denial: with only `cm2` denied, `cm1` was deleted, `cm2` refused, and `cm3` left untouched. |
+| `kubectl delete … --all` | Sends one DELETE per object (not the collection API); each was evaluated and denied separately. |
 - **Self-protection**: the compiled bindings and policies are themselves cluster objects;
   agents must not be able to write `validatingadmissionpolicies`/`…bindings` (RBAC, §4.3), and
   `aegis audit-identity` checks it. Like webhook configurations, these objects are not
