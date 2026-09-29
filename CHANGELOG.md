@@ -19,7 +19,7 @@ any release may change behaviour.
   `aegis-guardrails` policy stops agents minting tokens for other ServiceAccounts or running pods
   as another ServiceAccount. Report-only compiles `[Warn, Audit]`, enforce `[Deny, Audit]`. Same
   coverage report, manifest and `--check` as the AWS target. Verified on kind (Kubernetes 1.36.1)
-  with `scripts/kube_acceptance.py`: 54 of 54 runs as expected, and the client and the cluster
+  with `scripts/kube_acceptance.py`: 63 of 63 runs as expected, and the client and the cluster
   agreed on every shared case (`docs/dev/kube-acceptance/`).
 
 ## [0.3.0] — 2026-09-28

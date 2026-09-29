@@ -65,8 +65,11 @@ RULES = [
     _rule("app-config", "configmap/ap*", ["delete", "update", "patch"],
           scope={"namespace": "staging"}),
     _rule("no-exec", "pod/*", ["exec"]),
-    _rule("deploy-changes", "deployment/*", ["scale", "set-image", "rollout-restart"],
-          effect="ESCALATE"),
+    _rule("deploy-changes", "deployment/*",
+          ["scale", "set-image", "rollout-restart", "rollout-undo"], effect="ESCALATE"),
+    # a namespace scope must never match a cluster-scoped request (review of #20)
+    _rule("namespaced-priorityclass", "priorityclass/*", ["create"],
+          scope={"namespace": "*"}),
     _rule("no-staging-pod-deletes", "pod/*", ["delete"], scope={"namespace": "staging"}),
 ]
 
@@ -94,6 +97,14 @@ CASES = [
      "pause=registry.k8s.io/pause:3.9 --dry-run=server", "deny", "identical"),
     ("rollout restart (ESCALATE)", "-n staging rollout restart deploy/web", "deny",
      "identical"),
+    # after the admin's restart above, the previous revision differs only in a
+    # template annotation (review of #20)
+    ("rollout undo of a restart (ESCALATE)", "-n staging rollout undo deploy/web "
+     "--dry-run=server", "deny", "identical"),
+    ("set image, init container only", "-n staging set image deploy/web-init "
+     "init=registry.k8s.io/pause:3.9 --dry-run=server", "deny", "identical"),
+    ("create priorityclass, namespace '*' rule", "create priorityclass aegis-probe --value=1 "
+     "--dry-run=server", "allow", "identical"),
     ("label deployment", "-n staging label deploy web aegis=probe --overwrite --dry-run=server",
      "allow", "control"),
     ("exec into pod", "-n prod exec web -- /no-such-binary", "deny", "identical"),
@@ -137,6 +148,11 @@ def _setup(context: str) -> str:
     k("-n", "prod", "create", "configmap", "app", "--from-literal=a=b")
     k("-n", "staging", "create", "deployment", "web", "--image=registry.k8s.io/pause:3.10")
     k("-n", "prod", "run", "web", "--image=registry.k8s.io/pause:3.10")
+    k("-n", "staging", "create", "deployment", "web-init", "--image=registry.k8s.io/pause:3.10")
+    k("-n", "staging", "patch", "deploy", "web-init", "--type=json", "-p", json.dumps([
+        {"op": "add", "path": "/spec/template/spec/initContainers", "value": [
+            {"name": "init", "image": "registry.k8s.io/pause:3.10",
+             "command": ["/pause", "-v"]}]}]))
     k("-n", "staging", "wait", "--for=condition=Available", "deploy/web", "--timeout=120s")
     k("-n", "prod", "wait", "--for=condition=Ready", "pod/web", "--timeout=120s")
     out = k("get", "nodes", "-o", "jsonpath={.items[0].metadata.name}")

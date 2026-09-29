@@ -298,3 +298,30 @@ def test_cli_compile_kubernetes(tmp_path, monkeypatch, capsys):
 
 def _cov_status(cov, rule_id):
     return next(r["status"] for r in cov["rules"] if r["id"] == rule_id)
+
+
+
+def test_set_image_covers_init_containers(tmp_path):
+    """Review of #20: kubectl set image also updates init containers."""
+    expr = _expr(_compile(tmp_path, _rule("i", "deployment/*", ["set-image"])), "i")
+    assert "has(object.spec.template.spec.initContainers)" in expr
+    assert "oldObject.spec.template.spec.initContainers.map(c, c.image)" in expr
+
+
+def test_rollout_undo_compares_the_whole_template(tmp_path):
+    """Review of #20: an annotation-only revision rolled back must match."""
+    expr = _expr(_compile(tmp_path, _rule("u", "deployment/*", ["rollout-undo"])), "u")
+    assert "object.spec.template != oldObject.spec.template" in expr
+    cov = _cov(_compile(tmp_path, _rule("c", "cronjob/*", ["rollout-undo"])), "c")
+    assert cov["status"] == "not-enforced"
+
+
+@pytest.mark.parametrize("namespace", ["*", "prod"])
+def test_namespace_scope_never_matches_cluster_scoped_requests(tmp_path, namespace):
+    """Review of #20: the client never matches a namespace scope when the
+    intent has no namespace; a cluster-scoped request has namespace ''."""
+    r = _compile(tmp_path, _rule("n", "node/*", ["delete"], scope={"namespace": namespace}),
+                 _rule("all", "*/*", ["delete"], scope={"namespace": namespace}))
+    n = _cov(r, "n")
+    assert n["status"] == "not-enforced" and "cluster-scoped" in n["not_enforced"][0]
+    assert "variables.ns != ''" in _expr(r, "all")

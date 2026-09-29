@@ -278,8 +278,11 @@ def clauses_for(verb: str, kind: str, flags: frozenset[str]) -> tuple[list[Claus
         if tpl is None:
             return [], f"{kind} has no containers"
         old = _template(flags, "oldObject")
-        return [Clause("UPDATE", "", f"{tpl}.containers.map(c, c.image) != "
-                                     f"{old}.containers.map(c, c.image)")], None
+        # kubectl set image updates init containers too (review of #20)
+        images = ("({t}.containers.map(c, c.image) + (has({t}.initContainers) ? "
+                  "{t}.initContainers.map(c, c.image) : []))")
+        return [Clause("UPDATE", "", f"{images.format(t=tpl)} != "
+                                     f"{images.format(t=old)}")], None
     if verb == "rollout-restart":
         new, old = _template_meta(flags, "object"), _template_meta(flags, "oldObject")
         if new is None:
@@ -289,9 +292,12 @@ def clauses_for(verb: str, kind: str, flags: frozenset[str]) -> tuple[list[Claus
         return [Clause("UPDATE", "", pick.format(m=new, k=key) + " != "
                        + pick.format(m=old, k=key))], None
     if verb == "rollout-undo":
-        new, old = _template(flags, "object"), _template(flags, "oldObject")
-        if new is None or "pod" in flags:
+        # the whole pod template, metadata included: a revision (a rollout
+        # restart's, for one) can differ only in template annotations
+        new, old = _template_meta(flags, "object"), _template_meta(flags, "oldObject")
+        if new is None or "jobtemplate" in flags:
             return [], f"{kind} has no rollout history"
+        new, old = new.removesuffix(".metadata"), old.removesuffix(".metadata")
         return [Clause("UPDATE", "", f"{new} != {old}")], None
     if verb in ("cordon", "uncordon", "drain"):
         if kind != "node":
@@ -430,6 +436,12 @@ def _compile_rule(c: Constraint, target: KubernetesTarget) -> _Rule:
     disjuncts: list[str] = []
     rules_by_group: dict[tuple[str, str], set[str]] = {}
     for kind, group, resource, namespaced, flags in kinds:
+        if rule.namespaces and not namespaced and kind != "*":
+            # the client never matches a namespace scope without a namespace,
+            # and a cluster-scoped request has none (review of #20)
+            rule.not_enforced.append(f"{kind} is cluster-scoped: a namespace-scoped rule "
+                                     "cannot match it at admission")
+            continue
         if "unadmitted" in flags:
             rule.not_enforced.append(f"{kind}: never admitted; RBAC is the control")
             continue
@@ -467,9 +479,6 @@ def _compile_rule(c: Constraint, target: KubernetesTarget) -> _Rule:
                 rule.not_enforced.append("node: a drain's pod evictions are not tied to the "
                                          "node at admission (only its cordon is); a pod delete "
                                          "rule covers evictions")
-        if rule.namespaces and not namespaced and kind != "*":
-            rule.notes.append(f"{kind} is cluster-scoped: the namespace scope never matches it "
-                              "at admission")
 
     # the namespace cascade: `kubectl delete ns x` is also a delete of */* in x,
     # so a namespace-scoped rule covering */* deletes also denies deleting x
@@ -498,7 +507,8 @@ def _compile_rule(c: Constraint, target: KubernetesTarget) -> _Rule:
         if rule.namespaces:
             ns = " || ".join(f"variables.ns.matches({_cel(glob_to_re2(n))})"
                              for n in rule.namespaces)
-            body = f"({ns}) && ({body})"
+            # a cluster-scoped request has namespace '', which `*` would match
+            body = f"variables.ns != '' && ({ns}) && ({body})"
         match.append(f"({body})")
     if cascade:
         match.append(cascade)

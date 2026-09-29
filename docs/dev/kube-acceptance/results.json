@@ -274,6 +274,75 @@
     "pass": true
   },
   {
+    "case": "rollout undo of a restart (ESCALATE)",
+    "identity": "agent",
+    "server": "deny",
+    "expected": "deny",
+    "pass": true,
+    "client": "deny",
+    "parity": true
+  },
+  {
+    "case": "rollout undo of a restart (ESCALATE)",
+    "identity": "admin",
+    "server": "allow",
+    "expected": "allow",
+    "pass": true
+  },
+  {
+    "case": "rollout undo of a restart (ESCALATE)",
+    "identity": "break-glass",
+    "server": "allow",
+    "expected": "allow",
+    "pass": true
+  },
+  {
+    "case": "set image, init container only",
+    "identity": "agent",
+    "server": "deny",
+    "expected": "deny",
+    "pass": true,
+    "client": "deny",
+    "parity": true
+  },
+  {
+    "case": "set image, init container only",
+    "identity": "admin",
+    "server": "allow",
+    "expected": "allow",
+    "pass": true
+  },
+  {
+    "case": "set image, init container only",
+    "identity": "break-glass",
+    "server": "allow",
+    "expected": "allow",
+    "pass": true
+  },
+  {
+    "case": "create priorityclass, namespace '*' rule",
+    "identity": "agent",
+    "server": "allow",
+    "expected": "allow",
+    "pass": true,
+    "client": "allow",
+    "parity": true
+  },
+  {
+    "case": "create priorityclass, namespace '*' rule",
+    "identity": "admin",
+    "server": "allow",
+    "expected": "allow",
+    "pass": true
+  },
+  {
+    "case": "create priorityclass, namespace '*' rule",
+    "identity": "break-glass",
+    "server": "allow",
+    "expected": "allow",
+    "pass": true
+  },
+  {
     "case": "label deployment",
     "identity": "agent",
     "server": "allow",

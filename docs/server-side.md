@@ -156,11 +156,11 @@ CD, Flux) in `trusted`.
 | `create`, `run` | CREATE (an object created with `generateName` has no name yet, so a name-specific rule does not match it) | exact |
 | `update`, `patch`, `edit`, `replace` | UPDATE — all the same request at the API | exact |
 | `scale` | the `scale` subresource, or an UPDATE that changes `spec.replicas` | exact |
-| `set-image`, `rollout-restart`, `rollout-undo`, `cordon`, `taint`, `label`, `annotate` | an UPDATE whose old and new objects differ in that field | exact (`rollout-undo`: any pod-template change) |
+| `set-image`, `rollout-restart`, `rollout-undo`, `cordon`, `taint`, `label`, `annotate` | an UPDATE whose old and new objects differ in that field (images: containers and init containers) | exact (`rollout-undo`: any pod-template change, metadata included) |
 | `drain` | its cordon; its pod evictions are not tied to the node at admission | partial — add a pod `delete` rule |
 | `exec`, `attach`, `port-forward` | CONNECT on the pod subresource | exact |
 | `delete` on `*/*` scoped to a namespace | also DELETE of that namespace (the client parser emits the same cascade) | exact |
-| `scope.namespace` | `request.namespace` | exact; never matches cluster-scoped kinds |
+| `scope.namespace` | `request.namespace`, which must be non-empty | exact; a cluster-scoped kind has no namespace, so it is not enforced there (the client never matches it either) |
 | `scope.env` / `cluster` / `context` | compiled per cluster | exact |
 | other scope keys | dropped | over-enforced |
 | name and namespace globs | RE2 regular expressions | exact |
@@ -189,8 +189,8 @@ enforce` compiles `[Deny, Audit]`. `--check DIR` reports drift, as for AWS.
 
 ### Verified
 
-`scripts/kube_acceptance.py` applies a compiled policy to a local kind cluster and runs 18 cases
+`scripts/kube_acceptance.py` applies a compiled policy to a local kind cluster and runs 21 cases
 as an agent ServiceAccount, the admin and a break-glass identity, comparing the agent's result
-with the client-side verdict for the same kubectl command. On Kubernetes 1.36.1: 54 of 54 as
+with the client-side verdict for the same kubectl command. On Kubernetes 1.36.1: 63 of 63 as
 expected, and the two layers agreed on every case that exists on both
 ([`dev/kube-acceptance/`](dev/kube-acceptance/README.md)).
