@@ -5,6 +5,23 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while the major version is 0,
 any release may change behaviour.
 
+## [Unreleased]
+
+### Added
+- **Preview:** `aegis compile kubernetes --cluster <name> --out DIR`: the verified snapshot as
+  Kubernetes ValidatingAdmissionPolicies (one policy and binding per rule) scoped to agents by
+  `matchConditions` generated from `agents.yaml`, with the control plane always exempt in
+  deny-by-default. Deletes (including evictions, and `delete --all`, admitted per item), creates,
+  every update spelling, scale (subresource or `spec.replicas`), set-image, rollout-restart,
+  cordon, taint, label and annotate (old/new object diffs), exec/attach/port-forward (CONNECT),
+  and the namespace cascade compile; name and namespace globs become RE2. Time windows (no
+  clock at admission), rate limits, reads and impersonation are reported not enforced. An
+  `aegis-guardrails` policy stops agents minting tokens for other ServiceAccounts or running pods
+  as another ServiceAccount. Report-only compiles `[Warn, Audit]`, enforce `[Deny, Audit]`. Same
+  coverage report, manifest and `--check` as the AWS target. Verified on kind (Kubernetes 1.36.1)
+  with `scripts/kube_acceptance.py`: 54 of 54 runs as expected, and the client and the cluster
+  agreed on every shared case (`docs/dev/kube-acceptance/`).
+
 ## [0.3.0] — 2026-09-28
 
 The first server-side layer: the policy compiled to AWS Service Control Policies scoped to agent

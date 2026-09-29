@@ -491,6 +491,14 @@ for the clouds.
 - **Limits**: CEL cost budgets per expression; the compiler splits rules across policies and
   fails loudly if an expression exceeds the budget.
 
+Implemented as a preview in `aegis_core.compile.kubernetes` (`aegis compile kubernetes`, guide in
+`docs/server-side.md`), one policy per rule (so the cost budget applies per rule). Two findings
+from building it: in `deny-by-default` the control plane must always be exempt (otherwise a
+pod-delete rule stops the ReplicaSet controller), and `request.subResource`/`name`/`namespace`
+are absent rather than empty when unset, so they are read through guarded variables (a direct
+read errors, and `failurePolicy: Fail` turns the error into a deny). Acceptance on kind:
+`docs/dev/kube-acceptance/`.
+
 ## 7. Terraform / OpenTofu and Git
 
 - **Plan gate**: a GitHub Actions example that runs

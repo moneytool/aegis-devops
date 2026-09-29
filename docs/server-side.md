@@ -124,3 +124,73 @@ aegis compile aws --account 123456789012 --check build/aegis-aws
 
 exits 1 and names every file that is missing, different or stale. Run it in CI next to the
 committed output so a policy change without a recompile fails the build.
+
+## Kubernetes: ValidatingAdmissionPolicy
+
+```bash
+aegis compile kubernetes --cluster prod-us-east --out build/aegis-k8s
+kubectl apply -f build/aegis-k8s/policies.yaml
+```
+
+The API server evaluates **ValidatingAdmissionPolicies** itself (CEL, GA since Kubernetes
+1.30): there is no webhook to run and no policy key in the cluster. Each compiled rule becomes
+one policy and one binding, labelled `app.kubernetes.io/managed-by: aegis`. Every policy carries
+a `matchConditions` expression generated from `agents.yaml`, so it applies only to agents, and
+fails closed (`failurePolicy: Fail`).
+
+`--cluster` is the cluster or kube context name; its environment comes from `environments.yaml`
+(`kubernetes.clusters`, then `contexts`), so an `env: prod` rule compiles only into the prod
+cluster's policies.
+
+**The control plane is always exempt in `deny-by-default`**: `system:*` users other than
+ServiceAccounts (the controller manager, scheduler, kubelets), `system:nodes` and kube-system
+ServiceAccounts. Restricting them would stop the ReplicaSet controller replacing pods or the
+namespace controller emptying a namespace you meant to delete. List your own controllers (Argo
+CD, Flux) in `trusted`.
+
+### What compiles
+
+| Rule | At admission | Coverage |
+|---|---|---|
+| `delete` | DELETE; for pods also the eviction a `kubectl drain` sends. The name comes from `request.name`, else the object's — a `delete --all` is admitted per item with an empty `request.name` | exact |
+| `create`, `run` | CREATE (an object created with `generateName` has no name yet, so a name-specific rule does not match it) | exact |
+| `update`, `patch`, `edit`, `replace` | UPDATE — all the same request at the API | exact |
+| `scale` | the `scale` subresource, or an UPDATE that changes `spec.replicas` | exact |
+| `set-image`, `rollout-restart`, `rollout-undo`, `cordon`, `taint`, `label`, `annotate` | an UPDATE whose old and new objects differ in that field | exact (`rollout-undo`: any pod-template change) |
+| `drain` | its cordon; its pod evictions are not tied to the node at admission | partial — add a pod `delete` rule |
+| `exec`, `attach`, `port-forward` | CONNECT on the pod subresource | exact |
+| `delete` on `*/*` scoped to a namespace | also DELETE of that namespace (the client parser emits the same cascade) | exact |
+| `scope.namespace` | `request.namespace` | exact; never matches cluster-scoped kinds |
+| `scope.env` / `cluster` / `context` | compiled per cluster | exact |
+| other scope keys | dropped | over-enforced |
+| name and namespace globs | RE2 regular expressions | exact |
+| a kind that is not built in (a CRD) | that resource name in any API group | over-enforced |
+| `ESCALATE` | Deny (admission cannot ask) | over-enforced; `--escalate omit` leaves it client-only |
+| reads, `logs`, impersonation, time windows, rate limits | never admitted, or no clock at admission | not enforced |
+
+### Guardrails
+
+A policy named `aegis-guardrails` stops the identity escapes admission can see: agents cannot
+mint a token for another ServiceAccount (`serviceaccounts/token`), and pods or pod templates
+they create or update must run as the agent's own ServiceAccount (or `default` for an agent that
+is not a ServiceAccount).
+
+Admission cannot protect the policies themselves — ValidatingAdmissionPolicies, their bindings
+and webhook configurations are never admitted (verified on kind) — so agents must have no RBAC
+write access to `admissionregistration.k8s.io`, and no `impersonate` verb (impersonation happens
+before admission, which then sees the impersonated identity). Both are listed in every coverage
+report under "not enforced by this layer".
+
+### Report first, then enforce
+
+With `enforcement: report-only` the bindings use `validationActions: [Warn, Audit]`: agents see a
+warning and the audit log records it, but nothing is denied. After review, `enforcement:
+enforce` compiles `[Deny, Audit]`. `--check DIR` reports drift, as for AWS.
+
+### Verified
+
+`scripts/kube_acceptance.py` applies a compiled policy to a local kind cluster and runs 18 cases
+as an agent ServiceAccount, the admin and a break-glass identity, comparing the agent's result
+with the client-side verdict for the same kubectl command. On Kubernetes 1.36.1: 54 of 54 as
+expected, and the two layers agreed on every case that exists on both
+([`dev/kube-acceptance/`](dev/kube-acceptance/README.md)).
