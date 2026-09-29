@@ -2583,3 +2583,57 @@ def test_unparseable_options_before_a_subcommand_fail_closed(argv):
 
     with pytest.raises(ValueError):
         from_argv(argv.split())
+
+
+@pytest.mark.parametrize("argv, resource, parent", [
+    ("aws ec2 delete-volume --volume-id vol-1", "ec2/volume/vol-1", None),
+    ("aws ec2 delete-snapshot --snapshot-id snap-1", "ec2/snapshot/snap-1", None),
+    ("aws ec2 delete-vpc --vpc-id vpc-1", "ec2/vpc/vpc-1", None),
+    ("aws ec2 delete-security-group --group-id sg-1", "ec2/security-group/sg-1", None),
+    ("aws ec2 delete-security-group --group-name web", "ec2/security-group/web", None),
+    ("aws rds delete-db-cluster --db-cluster-identifier c1", "rds/db-cluster/c1", None),
+    ("aws rds delete-db-snapshot --db-snapshot-identifier s1", "rds/db-snapshot/s1", None),
+    ("aws rds delete-db-cluster-snapshot --db-cluster-snapshot-identifier s1",
+     "rds/db-cluster-snapshot/s1", None),
+    ("aws eks delete-cluster --name c", "eks/cluster/c", None),
+    ("aws eks delete-nodegroup --cluster-name c --nodegroup-name ng", "eks/nodegroup/ng", "c"),
+    ("aws eks delete-nodegroup --nodegroup-name ng --cluster-name c", "eks/nodegroup/ng", "c"),
+    ("aws ecs delete-service --cluster c --service s", "ecs/service/s", "c"),
+    ("aws ecs delete-cluster --cluster c", "ecs/cluster/c", None),
+    ("aws logs delete-log-group --log-group-name g", "logs/log-group/g", None),
+    ("aws route53 delete-hosted-zone --id Z1", "route53/hosted-zone/Z1", None),
+    ("aws efs delete-file-system --file-system-id fs-1", "efs/file-system/fs-1", None),
+    ("aws elasticache delete-cache-cluster --cache-cluster-id c", "elasticache/cache-cluster/c",
+     None),
+    # unchanged: the generic identifier flags
+    ("aws rds delete-db-instance --db-instance-identifier db1", "rds/db-instance/db1", None),
+    ("aws dynamodb delete-table --table-name t", "dynamodb/table/t", None),
+])
+def test_aws_target_names_come_from_the_resources_own_flag(argv, resource, parent):
+    """The name of the resource an operation acts on, not '*' and not its
+    parent's: a name-specific rule must match on the client as it does in the
+    compiled AWS policy."""
+    import shlex
+
+    (intent,) = from_aws_multi(shlex.split(argv))
+    assert intent.resource == resource
+    assert intent.params.get("parent") == parent
+
+
+
+@pytest.mark.parametrize("argv, resource", [
+    ("aws logs delete-log-group --log-group-name 123", "logs/log-group/123"),
+    ("aws logs delete-log-group --log-group-name 001", "logs/log-group/001"),
+    ("aws logs delete-log-group --log-group-name nan", "logs/log-group/nan"),
+    ("aws eks delete-cluster --name 123", "eks/cluster/123"),
+    ("aws ecs delete-service --cluster prod --service 123", "ecs/service/123"),
+    ("aws rds delete-db-cluster --db-cluster-identifier inf", "rds/db-cluster/inf"),
+    ("aws ec2 delete-volume --volume-id=007", "ec2/volume/007"),
+])
+def test_aws_numeric_looking_names_stay_strings(argv, resource):
+    """Review of #19: names are never coerced to numbers (leading zeroes and
+    'nan'/'inf' included), so name-specific rules still match."""
+    import shlex
+
+    (intent,) = from_aws_multi(shlex.split(argv))
+    assert intent.resource == resource

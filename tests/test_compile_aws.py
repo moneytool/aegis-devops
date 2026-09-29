@@ -294,11 +294,50 @@ def test_global_service_region_scope_is_over_enforced(tmp_path):
     assert _denied(r, "iam:DeleteRole", f"arn:aws:iam::{ACCOUNT}:role/x", region="eu-west-1")
 
 
-def test_cli_missing_names_are_noted_and_wildcard_only_types_refuse_names(tmp_path):
-    r = _compile(tmp_path, _rule("vol", "ec2/volume/vol-prod-*", ["delete"]),
-                 _rule("q", "sqs/queue/orders", ["delete"]))
-    assert "never matches" in _rule_cov(r, "vol")["notes"][0]
+def test_wildcard_only_types_refuse_names(tmp_path):
+    r = _compile(tmp_path, _rule("q", "sqs/queue/orders", ["delete"]))
     assert _rule_cov(r, "q")["status"] == "not-enforced"
+
+
+def test_cli_missing_names_are_noted(tmp_path):
+    import dataclasses
+
+    amap = load_action_map()
+    amap["ec2/volume"] = dataclasses.replace(amap["ec2/volume"], names="cli-missing")
+    snap = _snap(_rule("vol", "ec2/volume/vol-prod-*", ["delete"]))
+    r = compile_aws(snap, _model(tmp_path), AwsTarget(account=ACCOUNT), amap)
+    assert "never matches" in _rule_cov(r, "vol")["notes"][0]
+
+
+@pytest.mark.parametrize("command, iam, arn", [
+    ("aws ec2 delete-volume --volume-id prod1", "ec2:DeleteVolume",
+     f"arn:aws:ec2:us-east-1:{ACCOUNT}:volume/prod1"),
+    ("aws rds delete-db-cluster --db-cluster-identifier prod1 --skip-final-snapshot",
+     "rds:DeleteDBCluster", f"arn:aws:rds:us-east-1:{ACCOUNT}:cluster:prod1"),
+    ("aws eks delete-nodegroup --cluster-name c --nodegroup-name prod1", "eks:DeleteNodegroup",
+     f"arn:aws:eks:us-east-1:{ACCOUNT}:nodegroup/c/prod1/0a1b"),
+    ("aws ecs delete-service --cluster c --service prod1", "ecs:DeleteService",
+     f"arn:aws:ecs:us-east-1:{ACCOUNT}:service/c/prod1"),
+    ("aws logs delete-log-group --log-group-name prod1", "logs:DeleteLogGroup",
+     f"arn:aws:logs:us-east-1:{ACCOUNT}:log-group:prod1"),
+    ("aws route53 delete-hosted-zone --id prod1", "route53:DeleteHostedZone",
+     "arn:aws:route53:::hostedzone/prod1"),
+])
+def test_named_rules_match_on_the_client_and_in_the_scp(tmp_path, command, iam, arn):
+    """CLI/compile parity for name-specific rules: the rule written for the
+    parser's resource both matches that intent and compiles to a deny on
+    exactly that resource."""
+    from aegis_core.store import resource_matches
+
+    intent = from_aws_multi(shlex.split(command))[0]
+    assert intent.resource.endswith("/prod1")
+    rule = _rule("named", intent.resource, [intent.action])
+    assert resource_matches(rule.resource_pattern, intent)
+    r = _compile(tmp_path, rule)
+    cov = _rule_cov(r, "named")
+    assert cov["status"] == "exact" and "notes" not in cov
+    assert _denied(r, iam, arn)
+    assert not _denied(r, iam, arn.replace("prod1", "prod2"))
 
 
 def test_same_effect_actions_are_reported(tmp_path):

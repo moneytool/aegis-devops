@@ -50,26 +50,22 @@ types:
     verified: true
   ec2/volume:
     arn: "arn:{partition}:ec2:*:{account}:volume/{name}"
-    names: cli-missing
     actions:
       delete: [ec2:DeleteVolume]
       detach: [ec2:DetachVolume]
     verified: true
   ec2/snapshot:
     arn: "arn:{partition}:ec2:*::snapshot/{name}"
-    names: cli-missing
     actions:
       delete: [ec2:DeleteSnapshot]
     verified: true
   ec2/vpc:
     arn: "arn:{partition}:ec2:*:{account}:vpc/{name}"
-    names: cli-missing
     actions:
       delete: [ec2:DeleteVpc]
     verified: true
   ec2/security-group:
     arn: "arn:{partition}:ec2:*:{account}:security-group/{name}"
-    names: cli-missing
     actions:
       delete: [ec2:DeleteSecurityGroup]
     verified: true
@@ -114,20 +110,17 @@ types:
     verified: true
   rds/db-cluster:
     arn: "arn:{partition}:rds:*:{account}:cluster:{name}"
-    names: cli-missing
     actions:
       delete: [rds:DeleteDBCluster]
       update: [rds:ModifyDBCluster]
     verified: true
   rds/db-snapshot:
     arn: "arn:{partition}:rds:*:{account}:snapshot:{name}"
-    names: cli-missing
     actions:
       delete: [rds:DeleteDBSnapshot]
     verified: true
   rds/db-cluster-snapshot:
     arn: "arn:{partition}:rds:*:{account}:cluster-snapshot:{name}"
-    names: cli-missing
     actions:
       delete: [rds:DeleteDBClusterSnapshot]
     verified: true
@@ -142,14 +135,12 @@ types:
     verified: true
   eks/cluster:
     arn: "arn:{partition}:eks:*:{account}:cluster/{name}"
-    names: cli-missing
     actions:
       delete: [eks:DeleteCluster]
       update: [eks:UpdateClusterConfig, eks:UpdateClusterVersion]
     verified: true
   eks/nodegroup:
     arn: "arn:{partition}:eks:*:{account}:nodegroup/*/{name}/*"
-    names: cli-missing
     actions:
       delete: [eks:DeleteNodegroup]
       update: [eks:UpdateNodegroupConfig, eks:UpdateNodegroupVersion]
@@ -265,7 +256,6 @@ types:
   logs/log-group:
     arn: ["arn:{partition}:logs:*:{account}:log-group:{name}",
           "arn:{partition}:logs:*:{account}:log-group:{name}:*"]
-    names: cli-missing
     actions:
       delete: [logs:DeleteLogGroup]
     verified: true
@@ -288,7 +278,6 @@ types:
     verified: true
   ecs/service:
     arn: "arn:{partition}:ecs:*:{account}:service/*/{name}"
-    names: cli-missing
     actions:
       delete: [ecs:DeleteService]
       update: [ecs:UpdateService]
@@ -302,13 +291,11 @@ types:
   route53/hosted-zone:
     arn: "arn:{partition}:route53:::hostedzone/{name}"
     regional: false
-    names: cli-missing
     actions:
       delete: [route53:DeleteHostedZone]
     verified: true
   efs/file-system:
     arn: "arn:{partition}:elasticfilesystem:*:{account}:file-system/{name}"
-    names: cli-missing
     actions:
       delete: [elasticfilesystem:DeleteFileSystem]
     verified: true
@@ -326,7 +313,6 @@ types:
     verified: true
   elasticache/cache-cluster:
     arn: "arn:{partition}:elasticache:*:{account}:cluster:{name}"
-    names: cli-missing
     actions:
       delete: [elasticache:DeleteCacheCluster]
     verified: true
