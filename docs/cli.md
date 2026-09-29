@@ -237,6 +237,28 @@ AUDIT aws account 701331084529 (deny-by-default, report-only)
 
 Exit 0, 1 on a problem, 65 if `agents.yaml` does not verify, 66 if it is missing.
 
+`aegis audit-identity kubernetes [--context CTX]` does the same for a cluster, read-only (`get`
+and SubjectAccessReviews through `kubectl` with your credentials; `--inventory FILE` reads a
+copy saved with `--save-inventory`):
+
+- **would restrict**: every ServiceAccount, and every user and group named in an RBAC binding
+  (the API has no user objects), that the compiled policies would restrict, with its bindings
+  and how many pods run as it. The control plane is always exempt, as in the compiler, and groups
+  every identity carries (`system:authenticated`, `system:serviceaccounts`) are not listed.
+  `system:masters`, the API server's kubelet client and node bootstrap tokens carry a hint.
+- **missing** (a problem): a listed ServiceAccount that does not exist, or a break-glass user or
+  group no binding grants anything.
+- **findings** (problems): an identity the policies restrict that RBAC still lets impersonate
+  users, groups, ServiceAccounts or UIDs; update, patch or delete ValidatingAdmissionPolicies,
+  their bindings or webhook configurations; create mutating webhooks or policies; or escalate,
+  bind or write cluster role bindings. Admission cannot see impersonation or protect admission
+  objects, so RBAC is the only control there. Each is asked as the identity with the groups it
+  really carries, by name for every trusted and break-glass user, group and ServiceAccount
+  (RBAC can grant impersonation by `resourceNames`), and per namespace for ServiceAccounts (a
+  RoleBinding grants it in one namespace). Note that the built-in `edit` and `admin` roles
+  include impersonating ServiceAccounts in their namespace. A review that fails (no right to
+  run it) is an error, never a "no".
+
 ## Compound commands
 
 Agent frameworks hand over a shell *string*, not an argv. `aegis check command -- "<string>"`

@@ -181,6 +181,8 @@ and webhook configurations are never admitted (verified on kind) — so agents m
 write access to `admissionregistration.k8s.io`, and no `impersonate` verb (impersonation happens
 before admission, which then sees the impersonated identity). Both are listed in every coverage
 report under "not enforced by this layer".
+`aegis audit-identity kubernetes` asks the API server which identities the policies restrict
+still hold those permissions ([CLI: Identity audit](cli.md#identity-audit)).
 
 ### Report first, then enforce
 

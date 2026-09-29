@@ -497,7 +497,8 @@ from building it: in `deny-by-default` the control plane must always be exempt (
 pod-delete rule stops the ReplicaSet controller), and `request.subResource`/`name`/`namespace`
 are absent rather than empty when unset, so they are read through guarded variables (a direct
 read errors, and `failurePolicy: Fail` turns the error into a deny). Acceptance on kind:
-`docs/dev/kube-acceptance/`.
+`docs/dev/kube-acceptance/`. `aegis audit-identity kubernetes` (`aegis_core.audit_kubernetes`) reports
+the escape verbs agent identities still hold, as SubjectAccessReviews (§4.3 (c)).
 
 ## 7. Terraform / OpenTofu and Git
 

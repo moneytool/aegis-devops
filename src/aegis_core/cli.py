@@ -564,6 +564,19 @@ def _build_parser() -> argparse.ArgumentParser:
                            "output instead of calling AWS")
     audit_aws.add_argument("--would-restrict", action="store_true",
                            help="print only the identities the compiled policy would restrict")
+    audit_kube = audit_sub.add_parser(
+        "kubernetes", help="a cluster's ServiceAccounts, RBAC subjects and escape permissions")
+    _add_common_options(audit_kube)
+    _add_agents_option(audit_kube)
+    audit_kube.add_argument("--context", dest="kube_context", default=None,
+                            help="kube context to read (read-only: get and SubjectAccessReviews)")
+    audit_kube.add_argument("--inventory", default=None, metavar="FILE",
+                            help="use a saved inventory (JSON) instead of calling the cluster")
+    audit_kube.add_argument("--save-inventory", default=None, metavar="FILE",
+                            help="also write the collected inventory here")
+    audit_kube.add_argument("--would-restrict", action="store_true",
+                            help="print only the identities the compiled policies would "
+                            "restrict")
 
     agents_parser = subparsers.add_parser(
         "agents",
@@ -1360,6 +1373,53 @@ def _run_audit_aws(args: argparse.Namespace) -> int:
     return 1 if result.problems else 0
 
 
+def _run_audit_kubernetes(args: argparse.Namespace) -> int:
+    """``aegis audit-identity kubernetes``: read-only; exit 1 on a problem."""
+    from aegis_core.audit_kubernetes import InventoryError, audit, collect_inventory
+
+    model, warnings = _load_identity(args)
+    try:
+        if args.inventory:
+            inventory = json.loads(Path(args.inventory).read_text())
+        else:
+            inventory = collect_inventory(args.kube_context, model)
+            if args.save_inventory:
+                Path(args.save_inventory).write_text(json.dumps(inventory, indent=2) + "\n")
+        result = audit(inventory, model, args.kube_context or "")
+    except InventoryError as exc:
+        raise DataError(f"audit-identity: {exc}") from None
+    doc = result.to_dict()
+    if args.would_restrict:
+        doc = {"context": result.context, "would_restrict": result.would_restrict}
+    if not args.pretty:
+        print(json.dumps({**doc, "warnings": warnings}, sort_keys=True))
+        return 1 if result.problems else 0
+    print(f"AUDIT kubernetes {result.context or '(current context)'} "
+          f"({result.mode}, {result.enforcement})")
+    print(f"  would restrict ({len(result.would_restrict)}):")
+    for r in result.would_restrict:
+        pods = f", {r['pods']} pod(s)" if r.get("pods") else ""
+        roles = f"{len(r['bindings'])} binding(s)" if r["bindings"] else "no bindings"
+        hint = f"  <- {r['hint']}" if r.get("hint") else ""
+        print(f"    {r['kind']:<14} {r['id']}  ({roles}{pods}){hint}")
+    if not args.would_restrict:
+        print(f"  exempt ({len(result.exempt)}):")
+        for r in result.exempt:
+            print(f"    {r['kind']:<14} {r['id']}")
+        print(f"  control plane, always exempt: {result.control_plane}")
+        for m in result.missing:
+            print(f"  MISSING {m['listed_as']}: {m['identity']} ({m['detail']})")
+        by_identity: dict[str, list[str]] = {}
+        for f in result.findings:
+            by_identity.setdefault(f["identity"], []).append(f["kind"])
+        for identity, kinds in by_identity.items():
+            print(f"  PROBLEM {identity} can: {', '.join(kinds)} (admission cannot see or stop "
+                  "these; RBAC must not grant them to an identity the policies restrict)")
+    for w in warnings:
+        print(f"  warning: {w}")
+    return 1 if result.problems else 0
+
+
 def _run_agents(args: argparse.Namespace) -> int:
     """``aegis agents``: verify ``agents.yaml`` (signature, shape, the
     principal's ``identity`` class) and print the identity model."""
@@ -1568,6 +1628,8 @@ def _run(argv: list[str]) -> int:
             return _run_compile_kubernetes(args)
         return _run_compile_aws(args)
     if args.command == "audit-identity":
+        if args.target == "kubernetes":
+            return _run_audit_kubernetes(args)
         return _run_audit_aws(args)
     if args.command == "hook":
         return hook_module.main_hook(
