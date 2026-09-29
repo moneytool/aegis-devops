@@ -131,7 +131,25 @@ Each platform gives agents credentials that nothing else holds:
 | AWS | a dedicated IAM role per agent (or per agent class) | `aws:PrincipalArn` (the role ARN, not the session) and **`aws:SourceIdentity`**, which is set when the agent session starts and cannot be changed by later role assumptions |
 | GCP | a dedicated service account | `deniedPrincipals: principal://iam.googleapis.com/projects/-/serviceAccounts/<email>` |
 | Azure | a dedicated managed identity or service principal | see §6.4 — Azure cannot scope a real deny to an identity |
-| CI that runs an agent (e.g. a coding agent in GitHub Actions) | that workflow's own federated identity, separate from the release/deploy workflow's | GitHub OIDC `sub` claim (repo, workflow, ref) in the cloud's trust policy |
+| CI that runs an agent (e.g. a coding agent in GitHub Actions) | that workflow's own federated identity, separate from the release/deploy workflow's | a **workflow-bound** OIDC subject in the cloud's trust policy — see below |
+
+**GitHub OIDC is not workflow-bound by default.** The default `sub` claim of a GitHub Actions
+OIDC token identifies the repository plus the branch, environment or pull-request context — not
+the workflow file. An agent job and a deploy job in the same repository on the same ref present
+the *same* subject, so a deploy role trusting `repo:org/app:ref:refs/heads/main` can be assumed
+by the agent job directly with `AssumeRoleWithWebIdentity` (denying `sts:AssumeRole` into
+non-agent roles does not cover that path). So:
+
+- deploy and other non-agent roles must trust a **customised subject that includes the
+  workflow** — GitHub's OIDC subject customisation with `job_workflow_ref`, pinned to a reusable
+  deploy workflow at a protected ref — or another protected issuance boundary (a GitHub
+  environment with required reviewers, trusted as `…:environment:<name>`);
+- agent jobs get their own role whose trust names *their* workflow;
+- `aegis audit-identity` flags any role whose trust policy accepts a repository/ref-only subject
+  as `workflow-unbound`.
+
+(Reference: GitHub Actions OIDC reference, subject claims and customisation —
+https://docs.github.com/en/actions/reference/security/oidc.)
 
 `agents.yaml` (signed, operator-held, its own constraint class in `authority.yaml`) is the
 single source of this list. The webhook's `matchConditions` and the compiler's principal
@@ -276,9 +294,15 @@ Audit annotations are prefixed by the API server with the webhook name
   atomic reference update across worker threads.
 - **Rollback protection**: a bundle carries a monotonically increasing version; an older
   version is refused even if validly signed.
-- **Freeze protection**: if no bundle newer than the running one has verified for longer than
-  `--max-policy-age`, readiness turns false and an alert fires — an attacker who can make every
-  new bundle fail verification cannot keep an old policy running forever.
+- **Freeze protection, enforced per request**: once the running snapshot is older than
+  `--max-policy-age` (no newer bundle has verified), **every AdmissionReview is rejected by the
+  handler itself without evaluating the expired snapshot** (`allowed: false`, reason
+  `policy-expired`). Readiness turning false and an alert are *additional* signals, not the
+  mechanism: a failed readiness probe only changes endpoint routing and leaves the container and
+  its HTTPS listener running, so requests on connections established before expiry, or routed
+  before endpoints propagate, would otherwise still be answered from the stale snapshot. An
+  attacker who can make every new bundle fail verification therefore cannot keep an old policy
+  deciding past the limit. (Kubernetes probes: https://kubernetes.io/docs/concepts/workloads/pods/probes/.)
 - A revocation (a rule removed or an authority withdrawn) that arrives in a *valid* newer
   bundle takes effect on swap; "keep the last good snapshot" applies only when the new bundle
   is unusable, and is bounded by the same age limit.
@@ -289,7 +313,7 @@ Audit annotations are prefixed by the API server with the webhook name
 |---|---|
 | Webhook unreachable / times out (`timeoutSeconds: 5`) | `failurePolicy: Fail` → **agent** writes denied; humans and controllers unaffected (scoped by `matchConditions`) |
 | No usable snapshot at startup | not Ready → same as unreachable |
-| Unusable new bundle | keep serving the current snapshot until `--max-policy-age`, then not Ready |
+| Unusable new bundle | keep serving the current snapshot until `--max-policy-age`; after that the handler rejects every request (`policy-expired`) and readiness turns false |
 | Request the registry cannot map | deny with reason `unmappable` (the request came from an agent) |
 
 Break-glass: the `ValidatingWebhookConfiguration` is owned by the platform team; deleting it
@@ -457,7 +481,8 @@ for the clouds.
   the chart and checks: an agent ServiceAccount's `delete node` is denied and an admin's is
   not; `deletecollection` is per item; an agent cannot delete the webhook configuration or
   create a Pod under another ServiceAccount (RBAC + guardrail rules); reload with a valid,
-  an invalid, an older (rollback) and a stale bundle.
+  an invalid, an older (rollback) and a stale bundle — including a request delivered over a
+  connection established *before* the snapshot expired, which must be rejected.
 - **Compiler**: golden files per target; an offline evaluator for emitted AWS/GCP policies
   (consistency, not a claim of truth); size-limit splitting; every non-enforceable construct
   appears in coverage; a sandbox acceptance run per mapping before it is marked `exact`.
@@ -465,7 +490,8 @@ for the clouds.
   appear in any compiled output and never change a webhook decision; unresolved-condition
   paths included (§3.2).
 - **Identity**: `aegis audit-identity` against a `kind` cluster with a deliberately
-  over-privileged agent reports each escape verb.
+  over-privileged agent reports each escape verb; against an AWS trust-policy fixture it flags a
+  deploy role that accepts a repository/ref-only GitHub OIDC subject (`workflow-unbound`).
 
 ## 9. Threats: what each layer stops
 
@@ -569,3 +595,8 @@ the identity it constrained. Findings raised by more than one reviewer are marke
 | Parity must use equivalence classes; self-written evaluator is not proof (Astra P1-26, Fable P2-22) | §8 |
 | ValidatingAdmissionPolicy as an in-API-server alternative (Opus P3-22) | §5.8, question 3 |
 | Phasing: compile AWS first; fix existing bugs first; public-key signing before the webhook (×3) | §10 |
+
+Review of revision 3 (PR #14): GitHub OIDC default subjects are repository/ref-scoped, not
+workflow-scoped — deploy roles must trust a workflow-bound subject and `audit-identity` flags
+the rest (§4.1); the snapshot age limit is enforced by the handler on every request, not only by
+readiness (§5.5, §5.6, §8).
