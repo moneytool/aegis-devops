@@ -33,7 +33,10 @@ Codex, GitHub Copilot (CLI and VS Code), Cursor and OpenCode:
 (see [Coding agents](docs/agents.md)). It only acts in projects with a `.aegis/` policy, and
 only blocks what that policy blocks. It also works as a CI step
 (`aegis check terraform plan.json --exit-style ci`) and as a Python library; see
-[Quick start](#quick-start).
+[Quick start](#quick-start). In GitHub Actions, the
+[Aegis-DevOps Plan Check](https://github.com/marketplace/actions/aegis-devops-plan-check) Action
+checks a Terraform or OpenTofu plan and comments the verdict on the pull request:
+`uses: moneytool/aegis-devops-action@v1` with `plan: plan.json`.
 
 ## What it does
 
