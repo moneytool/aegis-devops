@@ -475,6 +475,13 @@ def _compile_rule(c: Constraint, target: KubernetesTarget) -> _Rule:
                 requests.append(f"{cl.operation} {res}")
             disjuncts.append("(" + " || ".join(parts) + ")")
             rule.enforced.append({"kind": kind, "action": verb, "requests": requests})
+            if verb == "rollout-undo":
+                # admission sees the resulting template UPDATE, not the kubectl
+                # verb that caused it (review of #20)
+                rule.over.append(f"{kind} rollout-undo: admission cannot tell an undo from any "
+                                 "other pod-template change, so every template change by an "
+                                 "agent is denied (rollout restart, set image, apply of a "
+                                 "changed template)")
             if verb == "drain":
                 rule.not_enforced.append("node: a drain's pod evictions are not tied to the "
                                          "node at admission (only its cordon is); a pod delete "

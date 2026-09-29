@@ -156,7 +156,8 @@ CD, Flux) in `trusted`.
 | `create`, `run` | CREATE (an object created with `generateName` has no name yet, so a name-specific rule does not match it) | exact |
 | `update`, `patch`, `edit`, `replace` | UPDATE — all the same request at the API | exact |
 | `scale` | the `scale` subresource, or an UPDATE that changes `spec.replicas` | exact |
-| `set-image`, `rollout-restart`, `rollout-undo`, `cordon`, `taint`, `label`, `annotate` | an UPDATE whose old and new objects differ in that field (images: containers and init containers) | exact (`rollout-undo`: any pod-template change, metadata included) |
+| `set-image`, `rollout-restart`, `cordon`, `taint`, `label`, `annotate` | an UPDATE whose old and new objects differ in that field (images: containers and init containers) | exact |
+| `rollout-undo` | an UPDATE that changes the pod template (metadata included) | over-enforced: admission cannot tell an undo from any other template change, so a restart, `set image` or `apply` of a changed template is denied too |
 | `drain` | its cordon; its pod evictions are not tied to the node at admission | partial — add a pod `delete` rule |
 | `exec`, `attach`, `port-forward` | CONNECT on the pod subresource | exact |
 | `delete` on `*/*` scoped to a namespace | also DELETE of that namespace (the client parser emits the same cascade) | exact |
@@ -189,8 +190,9 @@ enforce` compiles `[Deny, Audit]`. `--check DIR` reports drift, as for AWS.
 
 ### Verified
 
-`scripts/kube_acceptance.py` applies a compiled policy to a local kind cluster and runs 21 cases
+`scripts/kube_acceptance.py` applies a compiled policy to a local kind cluster and runs 22 cases
 as an agent ServiceAccount, the admin and a break-glass identity, comparing the agent's result
-with the client-side verdict for the same kubectl command. On Kubernetes 1.36.1: 63 of 63 as
-expected, and the two layers agreed on every case that exists on both
+with the client-side verdict for the same kubectl command. On Kubernetes 1.36.1: 66 of 66 as
+expected; the two layers agreed on every case that exists on both, and differed only where the
+coverage report says so (`rollout-undo`)
 ([`dev/kube-acceptance/`](dev/kube-acceptance/README.md)).

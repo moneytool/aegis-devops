@@ -12,15 +12,16 @@ any release may change behaviour.
   Kubernetes ValidatingAdmissionPolicies (one policy and binding per rule) scoped to agents by
   `matchConditions` generated from `agents.yaml`, with the control plane always exempt in
   deny-by-default. Deletes (including evictions, and `delete --all`, admitted per item), creates,
-  every update spelling, scale (subresource or `spec.replicas`), set-image, rollout-restart,
-  cordon, taint, label and annotate (old/new object diffs), exec/attach/port-forward (CONNECT),
+  every update spelling, scale (subresource or `spec.replicas`), set-image (init containers
+  included), rollout-restart, cordon, taint, label and annotate (old/new object diffs), rollout-undo
+  (any pod-template change: over-enforced, as admission cannot tell an undo from a restart), exec/attach/port-forward (CONNECT),
   and the namespace cascade compile; name and namespace globs become RE2. Time windows (no
   clock at admission), rate limits, reads and impersonation are reported not enforced. An
   `aegis-guardrails` policy stops agents minting tokens for other ServiceAccounts or running pods
   as another ServiceAccount. Report-only compiles `[Warn, Audit]`, enforce `[Deny, Audit]`. Same
   coverage report, manifest and `--check` as the AWS target. Verified on kind (Kubernetes 1.36.1)
-  with `scripts/kube_acceptance.py`: 63 of 63 runs as expected, and the client and the cluster
-  agreed on every shared case (`docs/dev/kube-acceptance/`).
+  with `scripts/kube_acceptance.py`: 66 of 66 runs as expected; the client and the cluster agreed
+  on every shared case and differed only where coverage says so (`docs/dev/kube-acceptance/`).
 
 ### Fixed
 - **aws CLI resource names.** For 17 operations the parser lost the name of the resource acted

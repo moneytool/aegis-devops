@@ -310,8 +310,13 @@ def test_set_image_covers_init_containers(tmp_path):
 
 def test_rollout_undo_compares_the_whole_template(tmp_path):
     """Review of #20: an annotation-only revision rolled back must match."""
-    expr = _expr(_compile(tmp_path, _rule("u", "deployment/*", ["rollout-undo"])), "u")
-    assert "object.spec.template != oldObject.spec.template" in expr
+    r = _compile(tmp_path, _rule("u", "deployment/*", ["rollout-undo"]))
+    assert "object.spec.template != oldObject.spec.template" in _expr(r, "u")
+    # review of #20: that also denies a restart, set image or apply of a
+    # changed template, which the client allows -- over-enforced, not exact
+    cov = _cov(r, "u")
+    assert cov["status"] == "over-enforced" and "every template change" in \
+        cov["over_enforced"][0]
     cov = _cov(_compile(tmp_path, _rule("c", "cronjob/*", ["rollout-undo"])), "c")
     assert cov["status"] == "not-enforced"
 

@@ -320,6 +320,29 @@
     "pass": true
   },
   {
+    "case": "rollout restart under an undo-only rule",
+    "identity": "agent",
+    "server": "deny",
+    "expected": "deny",
+    "pass": true,
+    "client": "allow",
+    "parity": true
+  },
+  {
+    "case": "rollout restart under an undo-only rule",
+    "identity": "admin",
+    "server": "allow",
+    "expected": "allow",
+    "pass": true
+  },
+  {
+    "case": "rollout restart under an undo-only rule",
+    "identity": "break-glass",
+    "server": "allow",
+    "expected": "allow",
+    "pass": true
+  },
+  {
     "case": "create priorityclass, namespace '*' rule",
     "identity": "agent",
     "server": "allow",

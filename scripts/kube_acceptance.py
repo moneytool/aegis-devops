@@ -66,7 +66,10 @@ RULES = [
           scope={"namespace": "staging"}),
     _rule("no-exec", "pod/*", ["exec"]),
     _rule("deploy-changes", "deployment/*",
-          ["scale", "set-image", "rollout-restart", "rollout-undo"], effect="ESCALATE"),
+          ["scale", "set-image", "rollout-restart", "rollout-undo"], effect="ESCALATE",
+          scope={"namespace": "staging"}),
+    # rollout-undo is over-enforced: it also stops a restart (review of #20)
+    _rule("qa-undo-only", "deployment/*", ["rollout-undo"], scope={"namespace": "qa"}),
     # a namespace scope must never match a cluster-scoped request (review of #20)
     _rule("namespaced-priorityclass", "priorityclass/*", ["create"],
           scope={"namespace": "*"}),
@@ -75,6 +78,7 @@ RULES = [
 
 # (name, kubectl argv after the global flags, agent expected, parity class)
 # parity: "identical" (the client and the cluster must agree for the agent),
+# "over" (documented over-enforcement: the cluster denies, the client allows),
 # "server-only" (a guardrail with no client rule), "control" (allowed for all)
 CASES = [
     ("delete node", f"delete node {NODE} --dry-run=server", "deny", "identical"),
@@ -103,6 +107,8 @@ CASES = [
      "--dry-run=server", "deny", "identical"),
     ("set image, init container only", "-n staging set image deploy/web-init "
      "init=registry.k8s.io/pause:3.9 --dry-run=server", "deny", "identical"),
+    ("rollout restart under an undo-only rule", "-n qa rollout restart deploy/web", "deny",
+     "over"),
     ("create priorityclass, namespace '*' rule", "create priorityclass aegis-probe --value=1 "
      "--dry-run=server", "allow", "identical"),
     ("label deployment", "-n staging label deploy web aegis=probe --overwrite --dry-run=server",
@@ -136,7 +142,7 @@ def _kubectl(context: str, argv: list[str], check: bool = False) -> subprocess.C
 
 def _setup(context: str) -> str:
     k = lambda *a: _kubectl(context, list(a))  # noqa: E731
-    for ns in ("agents", "prod", "staging"):
+    for ns in ("agents", "prod", "staging", "qa"):
         k("create", "ns", ns)
     k("-n", "agents", "create", "sa", "coder")
     k("create", "clusterrolebinding", "aegis-acc-coder", "--clusterrole=cluster-admin",
@@ -148,6 +154,7 @@ def _setup(context: str) -> str:
     k("-n", "prod", "create", "configmap", "app", "--from-literal=a=b")
     k("-n", "staging", "create", "deployment", "web", "--image=registry.k8s.io/pause:3.10")
     k("-n", "prod", "run", "web", "--image=registry.k8s.io/pause:3.10")
+    k("-n", "qa", "create", "deployment", "web", "--image=registry.k8s.io/pause:3.10")
     k("-n", "staging", "create", "deployment", "web-init", "--image=registry.k8s.io/pause:3.10")
     k("-n", "staging", "patch", "deploy", "web-init", "--type=json", "-p", json.dumps([
         {"op": "add", "path": "/spec/template/spec/initContainers", "value": [
@@ -225,10 +232,11 @@ def main(argv: list[str] | None = None) -> int:
             want = agent_expected if who == "agent" else "allow"
             row = {"case": name, "identity": who, "server": got, "expected": want,
                    "pass": got == want}
-            if who == "agent" and parity == "identical":
+            if who == "agent" and parity in ("identical", "over"):
                 client = _client_verdict(store, shlex.split(cmd))
                 row["client"] = client
-                row["parity"] = client == got
+                row["parity"] = (client == got) if parity == "identical" else (
+                    client == "allow" and got == "deny")
                 row["pass"] = row["pass"] and row["parity"]
             if not row["pass"]:
                 failed += 1
