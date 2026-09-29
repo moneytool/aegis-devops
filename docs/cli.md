@@ -186,6 +186,45 @@ Exit 0, 1 when the model has a warning (`workflow-unbound`, `no-break-glass`), 6
 not verify, 66 when there is no `agents.yaml` (`--agents PATH` points elsewhere). Without
 `--pretty` it prints one JSON object. See [Configuration](configuration.md#agentsyaml-identity-model).
 
+### Identity audit
+
+`aegis audit-identity aws` checks `agents.yaml` against the IAM roles and users that actually
+exist in an AWS account. It is read-only: it runs `aws iam get-account-authorization-details`
+with your credentials (`--profile`), or reads a saved copy of that output (`--inventory FILE`).
+
+```bash
+aegis audit-identity aws --profile sandbox-admin --pretty
+```
+
+```
+AUDIT aws account 701331084529 (deny-by-default, report-only)
+  would restrict (2):
+    role  arn:aws:iam::701331084529:role/coding-agent  last used 2026-09-29T03:12:50+00:00
+    role  arn:aws:iam::701331084529:role/nightly-backup  last used 2026-09-28T02:00:00+00:00
+  exempt (3):
+    role  arn:aws:iam::701331084529:role/BreakGlass
+    ...
+  service-linked, never restricted by SCPs: 5
+```
+
+- **would restrict**: every role and user a compiled policy would restrict — in `deny-by-default`,
+  everything not trusted or break-glass. This is the report-only review: add the legitimate
+  automation here (backup jobs, cleanup functions, deploy roles) to `trusted` before setting
+  `enforcement: enforce`. `--would-restrict` prints only this list. The last-used date helps tell
+  live automation from leftovers; Identity Center and `OrganizationAccountAccessRole` roles carry
+  a hint.
+- **missing** (a problem): an identity `agents.yaml` lists for this account that does not exist. A
+  mistyped break-glass role means there is no break-glass.
+- **findings**, on trust policies:
+  - `workflow-unbound`, `oidc-wildcard-subject`, `oidc-no-subject` — GitHub OIDC trust that any job
+    in a repository (or any repository) can use. On an exempt role this is a problem: an agent job
+    can assume it with `AssumeRoleWithWebIdentity`, which no SCP condition on the caller can see.
+  - `exempt-trusts-restricted`, `exempt-trusts-account` — an exempt role that a restricted identity
+    (or the whole account) may assume. The compiled self-protection block closes this once
+    enforced, so it is a problem only while `report-only`.
+
+Exit 0, 1 on a problem, 65 if `agents.yaml` does not verify, 66 if it is missing.
+
 ## Compound commands
 
 Agent frameworks hand over a shell *string*, not an argv. `aegis check command -- "<string>"`

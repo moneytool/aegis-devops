@@ -36,6 +36,15 @@ any release may change behaviour.
   break-glass identity. `aegis snapshot` now loads `agents.yaml` through this loader instead
   of only checking its signature, and carries its warnings. `aegis init` ships
   `agents.example.yaml`, which never becomes active on its own.
+- `aegis audit-identity aws`: read-only check of `agents.yaml` against the IAM roles and users
+  that exist in an account (from `aws iam get-account-authorization-details`, or a saved copy with
+  `--inventory`). Lists every identity the compiled policy would restrict (`--would-restrict`,
+  the review before `enforcement: enforce`), with last-used dates and hints for Identity Center
+  and `OrganizationAccountAccessRole` roles; exempt identities; service-linked roles (never
+  restricted by SCPs). Problems (exit 1): an identity listed for this account that does not
+  exist (a mistyped break-glass role is no break-glass), GitHub OIDC trust on an exempt role that
+  is not bound to a workflow or protected environment, has a wildcard or no subject, and — while
+  report-only — exempt roles that a restricted identity or the whole account may assume.
 
 ## [0.2.1] — 2026-09-28
 

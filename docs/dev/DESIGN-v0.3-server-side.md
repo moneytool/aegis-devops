@@ -175,7 +175,8 @@ safeguards make it safe to turn on:
 - **Break-glass.** A named group is always excluded and cannot be removed from `agents.yaml`
   without the same review as any policy change.
 
-Implemented in `aegis_core.identity` (`aegis agents`; format in `docs/configuration.md`). The
+Implemented in `aegis_core.identity` (`aegis agents`; format in `docs/configuration.md`), and
+for AWS the report-only review in `aegis_core.audit_aws` (`aegis audit-identity aws`). The
 report-first rule is the file's `enforcement` field: `report-only` (the default) makes compilers
 emit audit/warn artifacts, and `enforce` is a signed change made after the review. At least one
 break-glass identity is required, and a compiler refuses a platform with none
