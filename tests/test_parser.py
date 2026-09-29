@@ -2618,3 +2618,22 @@ def test_aws_target_names_come_from_the_resources_own_flag(argv, resource, paren
     (intent,) = from_aws_multi(shlex.split(argv))
     assert intent.resource == resource
     assert intent.params.get("parent") == parent
+
+
+
+@pytest.mark.parametrize("argv, resource", [
+    ("aws logs delete-log-group --log-group-name 123", "logs/log-group/123"),
+    ("aws logs delete-log-group --log-group-name 001", "logs/log-group/001"),
+    ("aws logs delete-log-group --log-group-name nan", "logs/log-group/nan"),
+    ("aws eks delete-cluster --name 123", "eks/cluster/123"),
+    ("aws ecs delete-service --cluster prod --service 123", "ecs/service/123"),
+    ("aws rds delete-db-cluster --db-cluster-identifier inf", "rds/db-cluster/inf"),
+    ("aws ec2 delete-volume --volume-id=007", "ec2/volume/007"),
+])
+def test_aws_numeric_looking_names_stay_strings(argv, resource):
+    """Review of #19: names are never coerced to numbers (leading zeroes and
+    'nan'/'inf' included), so name-specific rules still match."""
+    import shlex
+
+    (intent,) = from_aws_multi(shlex.split(argv))
+    assert intent.resource == resource

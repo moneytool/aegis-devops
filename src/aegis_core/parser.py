@@ -1062,6 +1062,8 @@ _AWS_TARGET_FLAGS = {
     ("elasticache", "replication-group"): "replication-group-id",
 }
 
+_AWS_TARGET_FLAG_NAMES = frozenset(_AWS_TARGET_FLAGS.values()) - _AWS_SINGLE_ID_FLAGS
+
 _AWS_S3_VERB_MAP = {
     "rm": "delete",
     "rb": "delete",
@@ -1124,6 +1126,13 @@ def _parse_aws_tokens(
                         i += 1
                         ids.append(tokens[i])
                     multi_ids = ids
+            elif key in _AWS_TARGET_FLAG_NAMES:
+                # a resource name is a string, never coerced: "001", "123",
+                # "nan" and "inf" are valid names (review of #19)
+                if val is None:
+                    i += 1
+                    val = _value_at(tokens, i, tok)
+                params[key] = val
             elif key in _AWS_SINGLE_ID_FLAGS:
                 if val is None:
                     i += 1
