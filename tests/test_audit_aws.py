@@ -132,6 +132,43 @@ def test_github_trust_problems(condition, kind):
     assert f["kind"] == kind
 
 
+@pytest.mark.parametrize("condition, kind", [
+    # review of #18: negated / optional / vacuous operators never bind
+    ({"StringNotEquals": {"token.actions.githubusercontent.com:sub":
+                          "repo:acme/app:environment:prod"}}, "oidc-unsafe-condition"),
+    ({"StringLikeIfExists": {"token.actions.githubusercontent.com:sub":
+                             "repo:acme/app:environment:prod"}}, "oidc-unsafe-condition"),
+    ({"ForAllValues:StringEquals": {"token.actions.githubusercontent.com:sub":
+                                    "repo:acme/app:environment:prod"}},
+     "oidc-unsafe-condition"),
+    ({"Null": {"token.actions.githubusercontent.com:sub": "false"}}, "oidc-unsafe-condition"),
+    # review of #18: wildcard bindings expand past the protected boundary
+    ({"StringLike": {"token.actions.githubusercontent.com:sub":
+                     "repo:acme/app:environment:*"}}, "wildcard-binding"),
+    ({"StringLike": {"token.actions.githubusercontent.com:sub":
+                     "repo:acme/app:job_workflow_ref:acme/app/.github/workflows/*"
+                     "@refs/heads/main"}}, "wildcard-binding"),
+    ({"StringLike": {"token.actions.githubusercontent.com:sub":
+                     "repo:acme/app:job_workflow_ref:acme/app/.github/workflows/deploy.yml"
+                     "@refs/heads/*"}}, "wildcard-binding"),
+    ({"StringLike": {"token.actions.githubusercontent.com:sub": "repo:acme/app:ref:main",
+                     "token.actions.githubusercontent.com:environment": "prod*"}},
+     "wildcard-binding"),
+])
+def test_unsafe_operators_and_wildcard_bindings_are_findings(condition, kind):
+    kinds = [f["kind"] for f in github_trust_findings(_trust(_github(condition)))]
+    assert kind in kinds
+
+
+def test_negated_binding_on_an_exempt_role_is_a_problem(tmp_path):
+    trust = _trust(_github({"StringNotEquals": {
+        "token.actions.githubusercontent.com:sub": "repo:acme/app:environment:prod"}}))
+    r = audit(_inventory(_role("BreakGlass"), _role("Deploy", trust), BASE[2]),
+              _model(tmp_path))
+    assert [f["severity"] for f in r.findings if f["role"] == ROLE + "Deploy"] == ["high"]
+    assert r.problems
+
+
 @pytest.mark.parametrize("condition", [
     {"StringEquals": {"token.actions.githubusercontent.com:sub":
                       "repo:acme/app:environment:prod"}},
@@ -202,3 +239,15 @@ def test_cli_audit_from_a_saved_inventory(tmp_path, monkeypatch, capsys):
     (d / "agents.yaml").unlink()
     assert main(["audit-identity", "aws", "--config-dir", str(d), "--inventory",
                  str(inv)]) == 66
+
+
+def test_negated_extra_condition_next_to_a_precise_binding_is_fine():
+    """Conditions are ANDed: excluding a value on top of a precise required
+    binding only narrows it."""
+    condition = {
+        "StringEquals": {"token.actions.githubusercontent.com:sub":
+                         "repo:acme/app:environment:prod"},
+        "StringNotEquals": {"token.actions.githubusercontent.com:sub":
+                            "repo:acme/app:environment:staging"},
+    }
+    assert github_trust_findings(_trust(_github(condition))) == []
