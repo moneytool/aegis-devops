@@ -11,8 +11,7 @@ platform's own controls, so the platform refuses the call whatever the client.
 > on 2026-09-28 in a sandbox AWS Organization: compiled SCPs denied each mapped action to an agent
 > identity and allowed it to trusted, break-glass and path-qualified SSO roles, by live calls and
 > the IAM policy simulator ([`dev/aws-acceptance/`](dev/aws-acceptance/README.md)). A mapping
-> added later starts unverified, and the coverage report says so per rule. `aegis audit-identity`
-> and the report-only review it supports are not built yet.
+> added later starts unverified, and the coverage report says so per rule.
 
 ## How it fits together
 
@@ -112,7 +111,8 @@ the SCP's description when you attach it.
 
 With `enforcement: report-only` (the default) the policies land under `report-only/` and the
 manifest says `"deployable": false`. Review `coverage.md`, find every existing identity the
-policy would restrict (`aegis audit-identity --would-restrict`, planned for v0.3.0) and add the
+policy would restrict (`aegis audit-identity aws --would-restrict`, see
+[CLI: Identity audit](cli.md#identity-audit)) and add the
 legitimate ones — backup jobs, cleanup functions, deploy roles — to `trusted`. Then set
 `enforcement: enforce` in `agents.yaml`, sign it, and compile again.
 

@@ -530,6 +530,24 @@ def _build_parser() -> argparse.ArgumentParser:
                             help="SCPs available on the target (default 4: five may attach, "
                             "one is usually FullAWSAccess)")
 
+    audit_parser = subparsers.add_parser(
+        "audit-identity",
+        help="Read-only: check agents.yaml against the identities that exist on a platform "
+        "(who the compiled policy would restrict, missing break-glass, trust-policy escapes)",
+    )
+    audit_sub = audit_parser.add_subparsers(dest="target", required=True)
+    audit_aws = audit_sub.add_parser("aws", help="an AWS account's IAM roles and users")
+    _add_common_options(audit_aws)
+    _add_agents_option(audit_aws)
+    audit_aws.add_argument("--profile", default=None,
+                           help="aws CLI profile for the read-only inventory "
+                           "(iam:GetAccountAuthorizationDetails)")
+    audit_aws.add_argument("--inventory", default=None, metavar="FILE",
+                           help="use a saved 'aws iam get-account-authorization-details' "
+                           "output instead of calling AWS")
+    audit_aws.add_argument("--would-restrict", action="store_true",
+                           help="print only the identities the compiled policy would restrict")
+
     agents_parser = subparsers.add_parser(
         "agents",
         help="Verify agents.yaml (the identity model server-side enforcement is compiled "
@@ -1272,6 +1290,59 @@ def _agents_path(args: argparse.Namespace) -> str:
     return os.path.join(os.path.dirname(os.path.abspath(args.constraints)), AGENTS_FILE)
 
 
+def _load_identity(args: argparse.Namespace):
+    """``(model, warnings)`` from agents.yaml, verified like ``aegis agents``."""
+    _resolve_config_paths(args)
+    path = _agents_path(args)
+    if not os.path.exists(path):
+        raise FileNotFoundError(2, "No such file or directory", path)
+    key_warnings: list[str] = []
+    key, insecure = _resolve_key(args, key_warnings)
+    load = {"key": key, "insecure": insecure}
+    authority_map = _load_or_data_error(
+        lambda: load_authority_map(args.authority, **load), args.authority, "authority")
+    model = _load_or_data_error(
+        lambda: load_identity_model(path, authority_map=authority_map, **load), path, "agents")
+    return model, [*key_warnings, *authority_map.warnings, *model.warnings]
+
+
+def _run_audit_aws(args: argparse.Namespace) -> int:
+    """``aegis audit-identity aws``: read-only; exit 1 on a problem."""
+    from aegis_core.audit_aws import InventoryError, audit, collect_inventory
+
+    model, warnings = _load_identity(args)
+    try:
+        inventory = (json.loads(Path(args.inventory).read_text()) if args.inventory
+                     else collect_inventory(args.profile))
+        result = audit(inventory, model)
+    except InventoryError as exc:
+        raise DataError(f"audit-identity: {exc}") from None
+    doc = result.to_dict()
+    if args.would_restrict:
+        doc = {"account": result.account, "would_restrict": result.would_restrict}
+    if not args.pretty:
+        print(json.dumps({**doc, "warnings": warnings}, sort_keys=True))
+        return 1 if result.problems else 0
+    print(f"AUDIT aws account {result.account} ({result.mode}, {result.enforcement})")
+    print(f"  would restrict ({len(result.would_restrict)}):")
+    for r in result.would_restrict:
+        hint = f"  <- {r['hint']}" if r.get("hint") else ""
+        print(f"    {r['kind']:<5} {r['arn']}  last used {r['last_used'] or 'never'}{hint}")
+    if not args.would_restrict:
+        print(f"  exempt ({len(result.exempt)}):")
+        for r in result.exempt:
+            print(f"    {r['kind']:<5} {r['arn']}")
+        print(f"  service-linked, never restricted by SCPs: {len(result.service_linked)}")
+        for m in result.missing:
+            print(f"  MISSING {m['listed_as']}: {m['arn']} ({m['detail']})")
+        for f in result.findings:
+            label = "PROBLEM" if f["severity"] == "high" else "note"
+            print(f"  {label} {f['kind']}: {f['role']}: {f['detail']} ({f['why']})")
+    for w in warnings:
+        print(f"  warning: {w}")
+    return 1 if result.problems else 0
+
+
 def _run_agents(args: argparse.Namespace) -> int:
     """``aegis agents``: verify ``agents.yaml`` (signature, shape, the
     principal's ``identity`` class) and print the identity model."""
@@ -1416,6 +1487,8 @@ def _run(argv: list[str]) -> int:
         return _run_agents(args)
     if args.command == "compile":
         return _run_compile_aws(args)
+    if args.command == "audit-identity":
+        return _run_audit_aws(args)
     if args.command == "hook":
         return hook_module.main_hook(
             args.agent,

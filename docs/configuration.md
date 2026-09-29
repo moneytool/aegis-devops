@@ -265,8 +265,9 @@ trusted:                    # deny-by-default: everything not listed here is an 
   a compiler refuses a platform with none.
 - **Report first.** `enforcement` starts at `report-only`: compiled artifacts audit or warn
   instead of deny. Switch to `enforce` (a signed change like any other) after `aegis
-  audit-identity --would-restrict` has shown which existing identities the policy would restrict
-  and the legitimate ones — backup jobs, cleanup functions, controllers — are in `trusted`.
+  audit-identity aws --would-restrict` has shown which existing identities the policy would
+  restrict and the legitimate ones — backup jobs, cleanup functions, controllers — are in
+  `trusted` ([CLI: Identity audit](cli.md#identity-audit)).
 - **Who may change it.** The file is signed, and its `principal` must hold the `identity` class
   in `authority.yaml`, so changing who is trusted is a policy change of its own kind.
 
