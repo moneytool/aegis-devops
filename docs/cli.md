@@ -186,6 +186,14 @@ Exit 0, 1 when the model has a warning (`workflow-unbound`, `no-break-glass`), 6
 not verify, 66 when there is no `agents.yaml` (`--agents PATH` points elsewhere). Without
 `--pretty` it prints one JSON object. See [Configuration](configuration.md#agentsyaml-identity-model).
 
+### Server-side compile (preview)
+
+`aegis compile aws --account <12-digit id> --out DIR` compiles the verified snapshot to AWS
+Service Control Policies scoped to the agent identities in `agents.yaml`; `--check DIR` exits 1
+on drift. It refuses `--insecure` and unsigned policy like `aegis snapshot`, and needs
+`agents.yaml`. Options: `--partition`, `--escalate deny|omit`, `--max-policies`. See
+[Server-side enforcement](server-side.md).
+
 ## Compound commands
 
 Agent frameworks hand over a shell *string*, not an argv. `aegis check command -- "<string>"`

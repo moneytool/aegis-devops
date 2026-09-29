@@ -241,7 +241,8 @@ of anything you care about.
 | [`docs/agents.md`](docs/agents.md) | Claude Code, Codex, Copilot, VS Code and Cursor: install, what gets blocked |
 | [`docs/cli.md`](docs/cli.md) | Exit codes, store health, the Claude Code hook, argv forms, compound commands, dry runs, library usage |
 | [`docs/constraints.md`](docs/constraints.md) | Writing constraints, metadata vocabulary, authority policy, environment mapping |
-| [`docs/configuration.md`](docs/configuration.md) | Configuration/config-dir discovery, signing, source verification, rate limits & ledger |
+| [`docs/configuration.md`](docs/configuration.md) | Configuration/config-dir discovery, signing, source verification, the identity model (`agents.yaml`), rate limits & ledger |
+| [`docs/server-side.md`](docs/server-side.md) | Preview: compiling the policy to AWS Service Control Policies scoped to agent identities |
 | [`docs/benchmark.md`](docs/benchmark.md) | Benchmark methodology, full results table, real LLM baselines, agent-harness baselines, corpus, adversarial suite |
 | [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) | Adding a new parser or tool |
 | [`docs/dev/PLAN.md`](docs/dev/PLAN.md) | Design plan and open gaps |
