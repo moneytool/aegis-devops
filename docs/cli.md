@@ -194,6 +194,10 @@ on drift. It refuses `--insecure` and unsigned policy like `aegis snapshot`, and
 `agents.yaml`. Options: `--partition`, `--escalate deny|omit`, `--max-policies`. See
 [Server-side enforcement](server-side.md).
 
+`aegis compile kubernetes --cluster <name> --out DIR` compiles it to Kubernetes
+ValidatingAdmissionPolicies (`policies.yaml`, for `kubectl apply -f`) scoped to the same
+agents, with the same coverage report, manifest and `--check DIR`; `--escalate deny|omit`.
+
 ### Identity audit
 
 `aegis audit-identity aws` checks `agents.yaml` against the IAM roles and users that actually

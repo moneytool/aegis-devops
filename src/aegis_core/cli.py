@@ -529,6 +529,23 @@ def _build_parser() -> argparse.ArgumentParser:
     aws_parser.add_argument("--max-policies", type=int, default=4,
                             help="SCPs available on the target (default 4: five may attach, "
                             "one is usually FullAWSAccess)")
+    kube_parser = compile_sub.add_parser(
+        "kubernetes",
+        help="Kubernetes ValidatingAdmissionPolicies scoped to agent identities (agents.yaml), "
+        "for one cluster",
+    )
+    _add_common_options(kube_parser)
+    _add_agents_option(kube_parser)
+    kube_parser.add_argument("--cluster", required=True,
+                             help="the cluster (or kube context) name; its environment comes "
+                             "from environments.yaml (kubernetes.clusters / contexts)")
+    kube_out = kube_parser.add_mutually_exclusive_group(required=True)
+    kube_out.add_argument("--out", metavar="DIR", help="write the output here")
+    kube_out.add_argument("--check", metavar="DIR",
+                          help="exit 1 if DIR differs from a fresh compile (drift check)")
+    kube_parser.add_argument("--escalate", default="deny", choices=("deny", "omit"),
+                             help="ESCALATE rules: 'deny' (default; admission cannot ask) or "
+                             "'omit' (left client-only, reported as not enforced)")
 
     audit_parser = subparsers.add_parser(
         "audit-identity",
@@ -1399,6 +1416,67 @@ def _build_snapshot(args: argparse.Namespace):
         authority_map, load
 
 
+def _compile_inputs(args: argparse.Namespace):
+    """``(store, snapshot, model, env_map, identity path)`` for a compile."""
+    store, snap, authority_map, load = _build_snapshot(args)
+    path = _agents_path(args)
+    if not os.path.exists(path):
+        raise DataError(f"compile: no {path}; server-side policy needs the identity model "
+                        "(copy agents.example.yaml, see docs/configuration.md)")
+    model = _load_or_data_error(
+        lambda: load_identity_model(path, authority_map=authority_map, **load), path, "agents")
+    env_map = None
+    if args.environments:
+        env_map = _load_or_data_error(lambda: load_environment_map(args.environments, **load),
+                                      args.environments, "environments")
+    return store, snap, model, env_map, path
+
+
+def _write_or_check(args: argparse.Namespace, result, snap) -> int | None:
+    from aegis_core.compile import check_outputs, write_outputs
+
+    if args.check:
+        drift = check_outputs(args.check, result.files)
+        for line in drift:
+            print(f"drift: {line}")
+        if not drift:
+            print(f"aegis: {args.check} matches the current policy "
+                  f"(snapshot {snap.digest[:16]})")
+        return 1 if drift else 0
+    write_outputs(args.out, result.files)
+    return None
+
+
+def _run_compile_kubernetes(args: argparse.Namespace) -> int:
+    """``aegis compile kubernetes``: ValidatingAdmissionPolicies for one cluster."""
+    from aegis_core.compile import CompileError
+    from aegis_core.compile.kubernetes import KubernetesTarget, compile_kubernetes
+
+    store, snap, model, env_map, path = _compile_inputs(args)
+    env = None
+    if env_map is not None:
+        env = (env_map.kubernetes_clusters.get(args.cluster)
+               or env_map.kubernetes_contexts.get(args.cluster))
+    try:
+        result = compile_kubernetes(snap, model,
+                                    KubernetesTarget(cluster=args.cluster, env=env,
+                                                     escalate=args.escalate),
+                                    identity_sha256=_sha256_file(path))
+    except (CompileError, ValueError) as exc:
+        raise DataError(f"compile: {exc}") from None
+    checked = _write_or_check(args, result, snap)
+    if checked is not None:
+        return checked
+    summary = ", ".join(f"{k}={v}" for k, v in result.coverage["summary"].items())
+    print(f"aegis: wrote {len(result.manifest['policies'])} ValidatingAdmissionPolicies for "
+          f"cluster {args.cluster} to {args.out} (snapshot {snap.digest[:16]}; {summary})")
+    if model.enforcement != "enforce":
+        print("aegis: agents.yaml is report-only: bindings warn and audit instead of denying")
+    for w in [*store.warnings, *(f"agents: {w}" for w in model.warnings)]:
+        print(f"  warning: {w}")
+    return 0
+
+
 def _run_compile_aws(args: argparse.Namespace) -> int:
     """``aegis compile aws``: SCPs, coverage and manifest for one account."""
     from aegis_core.compile import CompileError, check_outputs, write_outputs
@@ -1486,6 +1564,8 @@ def _run(argv: list[str]) -> int:
     if args.command == "agents":
         return _run_agents(args)
     if args.command == "compile":
+        if args.target == "kubernetes":
+            return _run_compile_kubernetes(args)
         return _run_compile_aws(args)
     if args.command == "audit-identity":
         return _run_audit_aws(args)
