@@ -125,6 +125,32 @@ never fails open. It runs the `aegis` in the venv next to it (`AEGIS_BIN` overri
   {"type": "command", "command": "/path/to/aegis-devops/examples/claude-code-hook.sh"}]}]}}
 ```
 
+### Verified snapshot
+
+`aegis snapshot` loads and verifies the policy as `aegis check` does and prints what may
+actually vote:
+
+```bash
+aegis snapshot --pretty
+```
+
+```
+SNAPSHOT eac55f5b2b2163b6…
+  aegis 0.2.1; verified=30 excluded=0
+  input: environments 9d970db5…
+  input: plan_constraints c2f595cd…
+  input: sources_manifest 2fbfa3b2…
+```
+
+`verified` counts constraints that are loaded **and** pass integrity and authority checks at
+this moment (authority is otherwise checked per decision); `excluded` lists everything else with
+its reason (tampered, forged, unauthorized, invalid, …). The digest covers every input — the
+verified constraints, the authority map, the environment and plan-constraint maps, the sources
+manifest, `repos.yaml`/`signers.yaml`/`agents.yaml` when present, the commit each Git source
+ref points at, and the Aegis version — so anything built from the policy can be traced to
+exactly this state. It refuses `--insecure` and unsigned policy. Without `--pretty` it prints
+one JSON object. `aegis sources` is the per-constraint view of the same load.
+
 ## Compound commands
 
 Agent frameworks hand over a shell *string*, not an argv. `aegis check command -- "<string>"`

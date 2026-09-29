@@ -727,3 +727,24 @@ def test_sources_report_keeps_a_duplicate_id_quarantine(repo, tmp_path, capsys):
     assert sorted(r["status"] for r in r1) == ["ok", "quarantined"]
     assert [r["reason"] for r in r1 if r["status"] == "quarantined"] == [
         "invalid: duplicate id"]
+
+
+def test_snapshot_records_each_tracked_git_ref(repo, tmp_path, capsys):
+    import json
+
+    from aegis_core.cli import main
+
+    conf = _cli_setup(repo, tmp_path, "admin")
+    # aegis snapshot refuses unsigned policy, so sign the test policy files
+    from aegis_core.signing import load_key, sign_file
+
+    key = load_key("file:data/example-signing.key")
+    for name in ("constraints.yaml", "authority.yaml", "repos.yaml", "signers.yaml"):
+        sign_file(conf / name, key)
+    code = main(["snapshot", "--config-dir", str(conf), "--key", key.hex(), "--sources", "",
+                 "--plan-constraints", "", "--environments", ""])
+    doc = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert doc["inputs"]["git:policy"] == repo.git("rev-parse", "main")
+    assert {"repos", "signers"} <= set(doc["inputs"])
+    assert "r1" in doc["verified"]

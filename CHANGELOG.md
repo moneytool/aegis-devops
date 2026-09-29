@@ -17,6 +17,17 @@ any release may change behaviour.
   unchanged). Gemini CLI reads an extension's hooks from `hooks/hooks.json` at the root, where
   the Claude plugin's hooks used to be.
 
+## [Unreleased]
+
+### Added
+- `ConstraintStore.verified_snapshot()` and `aegis snapshot`: the constraints that may vote —
+  loaded **and** passing integrity and authority now (authority is otherwise checked only per
+  decision) — frozen, with every excluded constraint and its reason, and one sha256 digest over
+  all inputs (constraints, authority map, environment and plan-constraint maps, sources
+  manifest, repos/signers/agents files, the commit each Git source ref points at, the Aegis
+  version). The base for the v0.3 compilers (`docs/dev/DESIGN-v0.3-server-side.md` §3.1).
+  `aegis snapshot` refuses `--insecure` and unsigned policy.
+
 ## [0.2.1] — 2026-09-28
 
 Fixes found by the council review of the v0.3 server-side design

@@ -711,6 +711,28 @@ _SOURCE_FAILURE_MESSAGES = {
 }
 
 
+@dataclass(frozen=True)
+class VerifiedSnapshot:
+    """An immutable view of the constraints that may vote, the ones that
+    may not (with reasons), and a digest over everything that shaped them.
+    See :meth:`ConstraintStore.verified_snapshot`."""
+
+    constraints: tuple[Constraint, ...]
+    excluded: tuple[dict[str, str], ...]
+    digest: str
+    inputs: dict[str, str]
+    aegis_version: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "digest": self.digest,
+            "aegis_version": self.aegis_version,
+            "verified": [c.id for c in self.constraints],
+            "excluded": [dict(e) for e in self.excluded],
+            "inputs": dict(self.inputs),
+        }
+
+
 # REVIEW-4 T2.3: process-wide LRU for ConstraintStore.load_cached, keyed by
 # (path, mtime_ns, size). Module-level (not per-instance) so unrelated
 # callers in the same process share the benefit.
@@ -823,6 +845,51 @@ class ConstraintStore:
     def is_authorized(self, principal: str, constraint_class: str) -> bool:
         """Whether ``principal`` may assert constraints of ``constraint_class``."""
         return constraint_class in self.authority_map.get(principal, set())
+
+    def verified_snapshot(self, inputs: dict[str, str] | None = None) -> VerifiedSnapshot:
+        """The constraints that may vote, frozen: those loaded **and** passing
+        integrity and authority *now* (authority is otherwise only checked
+        per decision, in the interceptor, so a loaded constraint is not yet
+        a trusted one). Everything else is listed in ``excluded`` with its
+        reason: the load-time quarantine plus anything unauthorized or
+        tampered at snapshot time.
+
+        ``inputs`` maps a name to the sha256 of every other file that shapes
+        decisions (environment map, signers, repos with their resolved
+        refs, agents list, ...); they are folded into ``digest``, which is
+        what server-side artifacts and decision logs record so a decision or
+        a compiled policy can be traced to exactly the policy it came from.
+        (``docs/dev/DESIGN-v0.3-server-side.md`` §3.1.)"""
+        from aegis_core import __version__
+
+        verified: list[Constraint] = []
+        excluded = [dict(q) for q in self.quarantined]
+        for c in sorted(self.constraints.values(), key=lambda c: c.id):
+            if not c.verify_integrity():
+                excluded.append({"id": c.id, "reason": "tampered"})
+            elif not self.is_authorized(c.principal, c.constraint_class):
+                excluded.append({"id": c.id, "reason": "unauthorized"})
+            else:
+                verified.append(c)
+        excluded.sort(key=lambda e: (e["id"], e["reason"]))
+        inputs = dict(sorted((inputs or {}).items()))
+        payload = {
+            "aegis_version": __version__,
+            "authority": {p: sorted(cls) for p, cls in sorted(self.authority_map.items())},
+            "constraints": [_constraint_to_dict(c) for c in verified],
+            "excluded": excluded,
+            "inputs": inputs,
+        }
+        digest = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
+        ).hexdigest()
+        return VerifiedSnapshot(
+            constraints=tuple(verified),
+            excluded=tuple(excluded),
+            digest=digest,
+            inputs=inputs,
+            aegis_version=__version__,
+        )
 
     def _quarantine(self, constraint: Constraint, reason: str, message: str) -> None:
         self.quarantined.append({"id": constraint.id, "reason": reason})

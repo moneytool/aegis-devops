@@ -77,12 +77,14 @@ intents produced by the command.
 """
 
 import argparse
+import hashlib
 import json
 import logging
 import os
 import sys
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import yaml
 
@@ -480,6 +482,14 @@ def _build_parser() -> argparse.ArgumentParser:
     keygen_parser.add_argument(
         "--out", default="aegis-signing.key", help="path to write the key to"
     )
+
+    snapshot_parser = subparsers.add_parser(
+        "snapshot",
+        help="Verify the policy and print its verified snapshot: the constraints that may "
+        "vote, those excluded (with reasons) and one digest over every input; refuses "
+        "unsigned policy",
+    )
+    _add_common_options(snapshot_parser)
 
     sources_parser = subparsers.add_parser(
         "sources",
@@ -1145,6 +1155,61 @@ def _run_sources(args: argparse.Namespace) -> int:
     return 1 if store.health.quarantined else 0
 
 
+def _sha256_file(path: str) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _snapshot_inputs(args: argparse.Namespace, fetcher) -> dict[str, str]:
+    """sha256 of every file besides the constraints and authority map that
+    shapes a decision, plus the commit each Git source ref points at."""
+    base = os.path.dirname(os.path.abspath(args.constraints))
+    inputs: dict[str, str] = {}
+    for name, path in (
+        ("environments", args.environments),
+        ("plan_constraints", args.plan_constraints),
+        ("repos", args.repos or os.path.join(base, REPOS_FILE)),
+        ("signers", args.signers or os.path.join(base, SIGNERS_FILE)),
+        ("agents", os.path.join(base, "agents.yaml")),
+    ):
+        if path and os.path.exists(path):
+            inputs[name] = _sha256_file(path)
+    sources = _default_sources(args)
+    manifest = os.path.join(sources, "AEGIS-MANIFEST.sig") if sources else None
+    if manifest and os.path.exists(manifest):
+        inputs["sources_manifest"] = _sha256_file(manifest)
+    git = getattr(fetcher, "git_fetcher", None)
+    for repo, head in sorted((getattr(git, "ref_heads", None) or {}).items()):
+        inputs[f"git:{repo}"] = head
+    return inputs
+
+
+def _run_snapshot(args: argparse.Namespace) -> int:
+    """``aegis snapshot``: the verified snapshot as JSON (``--pretty`` for a
+    summary). Refuses to produce one from policy that was not signature-
+    checked, since server-side artifacts are built from it."""
+    if args.insecure:
+        raise UsageError("snapshot: refusing --insecure; a snapshot must come from signed policy")
+    store, _authority, _load, fetcher = _load_policy(args)
+    unsigned = [w for w in store.warnings if w.startswith("unsigned:")]
+    if unsigned:
+        raise DataError(f"snapshot: policy is not signed ({unsigned[0]})")
+    snap = store.verified_snapshot(inputs=_snapshot_inputs(args, fetcher))
+    doc = {**snap.to_dict(), "warnings": list(store.warnings)}
+    if args.pretty:
+        print(f"SNAPSHOT {snap.digest}")
+        print(f"  aegis {snap.aegis_version}; verified={len(snap.constraints)} "
+              f"excluded={len(snap.excluded)}")
+        for e in snap.excluded:
+            print(f"  excluded: {e['id']} ({e['reason']})")
+        for name, value in snap.inputs.items():
+            print(f"  input: {name} {value}")
+        for w in store.warnings:
+            print(f"  warning: {w}")
+    else:
+        print(json.dumps(doc, sort_keys=True))
+    return 0
+
+
 def _run_keygen(args: argparse.Namespace) -> int:
     path = config_module.generate_signing_key(args.out)
     print(f"aegis: wrote signing key to {path}")
@@ -1163,6 +1228,8 @@ def _run(argv: list[str]) -> int:
         return _run_keygen(args)
     if args.command == "sources":
         return _run_sources(args)
+    if args.command == "snapshot":
+        return _run_snapshot(args)
     if args.command == "hook":
         return hook_module.main_hook(
             args.agent,
