@@ -22,6 +22,18 @@ any release may change behaviour.
   with `scripts/kube_acceptance.py`: 63 of 63 runs as expected, and the client and the cluster
   agreed on every shared case (`docs/dev/kube-acceptance/`).
 
+### Fixed
+- **aws CLI resource names.** For 17 operations the parser lost the name of the resource acted
+  on (`ec2 delete-volume --volume-id vol-1` became `ec2/volume/*`) or took its parent's
+  (`eks delete-nodegroup --cluster-name c --nodegroup-name ng` became `eks/nodegroup/c`, likewise
+  `ecs delete-service`). A rule written for one named resource never matched on the client,
+  while `aegis compile aws` enforced it. The resource's own flag now names it (EC2 volumes,
+  snapshots, VPCs, subnets, security groups by id, gateways, images, key pairs; RDS clusters and
+  snapshots; EKS clusters, node groups, add-ons, Fargate profiles; ECS services; log groups and
+  streams; Route 53 hosted zones; EFS file systems; ElastiCache clusters and replication groups),
+  and a parent taken from `--cluster`/`--cluster-name` is kept as `params.parent`. Rules on the
+  `*` forms still match; name-specific rules now apply on the client as in the compiled policy.
+
 ## [0.3.0] — 2026-09-28
 
 The first server-side layer: the policy compiled to AWS Service Control Policies scoped to agent
