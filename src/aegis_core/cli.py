@@ -1183,13 +1183,42 @@ def _snapshot_inputs(args: argparse.Namespace, fetcher) -> dict[str, str]:
     return inputs
 
 
+def _verify_snapshot_inputs(args: argparse.Namespace, authority_map, load: dict) -> None:
+    """Every decision-shaping file besides the constraints and authority map
+    must verify (signature and shape) before its hash may stand in a
+    snapshot. The loaders enforce the signature with the resolved key; a
+    file that fails raises, which is the right outcome for a snapshot."""
+    if load.get("key") is None:
+        raise DataError("snapshot: no signing key resolved; cannot verify the policy files")
+    if args.environments:
+        _load_or_data_error(lambda: load_environment_map(args.environments, **load),
+                            args.environments, "environments")
+    if args.plan_constraints:
+        _load_or_data_error(
+            lambda: PlanConstraintStore.load(args.plan_constraints, authority_map=authority_map,
+                                             **load),
+            args.plan_constraints, "plan constraints")
+    base = os.path.dirname(os.path.abspath(args.constraints))
+    agents = os.path.join(base, "agents.yaml")
+    if os.path.exists(agents):  # parsed by the v0.3 identity model; signature-checked now
+        signing.require_signature(agents, load["key"])
+        if not isinstance(yaml.safe_load(Path(agents).read_text()), dict):
+            raise DataError(f"{agents}: must be a mapping")
+    # repos.yaml / signers.yaml were loaded (and signature-checked) by
+    # _git_source_fetcher when present
+
+
 def _run_snapshot(args: argparse.Namespace) -> int:
     """``aegis snapshot``: the verified snapshot as JSON (``--pretty`` for a
     summary). Refuses to produce one from policy that was not signature-
     checked, since server-side artifacts are built from it."""
     if args.insecure:
         raise UsageError("snapshot: refusing --insecure; a snapshot must come from signed policy")
-    store, _authority, _load, fetcher = _load_policy(args)
+    if args.sources == "":
+        raise UsageError("snapshot: refusing --sources ''; a snapshot needs source verification "
+                         "(rules without it are excluded as source-unverified)")
+    store, authority_map, load, fetcher = _load_policy(args)
+    _verify_snapshot_inputs(args, authority_map, load)
     unsigned = [w for w in store.warnings if w.startswith("unsigned:")]
     if unsigned:
         raise DataError(f"snapshot: policy is not signed ({unsigned[0]})")

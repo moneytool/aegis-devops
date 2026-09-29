@@ -25,8 +25,13 @@ any release may change behaviour.
   decision) — frozen, with every excluded constraint and its reason, and one sha256 digest over
   all inputs (constraints, authority map, environment and plan-constraint maps, sources
   manifest, repos/signers/agents files, the commit each Git source ref points at, the Aegis
-  version). The base for the v0.3 compilers (`docs/dev/DESIGN-v0.3-server-side.md` §3.1).
-  `aegis snapshot` refuses `--insecure` and unsigned policy.
+  version, and store settings such as the default time zone). A constraint also needs **source
+  evidence** — its cited source fetched and verified at load (new `ConstraintStore.source_verified`)
+  — or it is excluded as `source-unverified`. The snapshot is detached and deeply immutable
+  (canonical records; `constraints` returns fresh copies; `verify()` recomputes the digest). The
+  base for the v0.3 compilers (`docs/dev/DESIGN-v0.3-server-side.md` §3.1). `aegis snapshot`
+  refuses `--insecure`, `--sources ''`, and any environment / plan-constraint / `agents.yaml`
+  file that does not verify.
 
 ## [0.2.1] — 2026-09-28
 

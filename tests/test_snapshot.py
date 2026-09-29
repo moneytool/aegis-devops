@@ -12,10 +12,12 @@ from tests.test_interceptor import make_constraint
 AUTHORITY = {"admin": {"deletion", "scaling"}, "sre_lead": {"scaling"}}
 
 
-def _store(*constraints, authority=AUTHORITY):
+def _store(*constraints, authority=AUTHORITY, source_verified=True):
     store = ConstraintStore(authority_map={p: set(c) for p, c in authority.items()})
     for c in constraints:
         store.constraints[c.id] = c
+        if source_verified:  # as ConstraintStore.load records after a source check
+            store.source_verified.add(c.id)
     return store
 
 
@@ -50,6 +52,61 @@ def test_snapshot_is_immutable():
     assert isinstance(snap.constraints, tuple)
     with pytest.raises(dataclasses.FrozenInstanceError):
         snap.digest = "x"
+
+
+# --- review of #15 ------------------------------------------------------------------
+
+
+def test_snapshot_is_detached_from_the_store():
+    """P1: mutating the store's constraint after the snapshot must not change
+    what the snapshot holds (it used to share the objects, digest unchanged)."""
+    rule = _rule()
+    snap = _store(rule).verified_snapshot()
+    rule.effect = "ESCALATE"
+    rule.actions.add("scale")
+    [c] = snap.constraints
+    assert c.effect == "BLOCK" and c.actions == {"delete"}
+    assert snap.verify()
+
+
+def test_objects_handed_out_by_the_snapshot_cannot_change_it():
+    snap = _store(_rule()).verified_snapshot(inputs={"environments": "aa"})
+    [c] = snap.constraints
+    c.effect = "ESCALATE"
+    c.scope["namespace"] = "prod"
+    snap.inputs["environments"] = "zz"
+    snap.excluded  # read-only view
+    [again] = snap.constraints
+    assert again.effect == "BLOCK" and again.scope == {}
+    assert snap.inputs == {"environments": "aa"}
+    assert again.verify_integrity()
+    assert snap.verify()
+
+
+def test_constraints_without_source_evidence_are_excluded():
+    """P1: a signed, self-consistent constraint is not proof its source
+    backs it; without source verification at load it may not vote."""
+    snap = _store(_rule(), source_verified=False).verified_snapshot()
+    assert snap.constraints == ()
+    assert list(snap.excluded) == [{"id": "r1", "reason": "source-unverified"}]
+    # the evidence requirement can be waived only explicitly
+    loose = _store(_rule(), source_verified=False).verified_snapshot(
+        require_source_evidence=False)
+    assert [c.id for c in loose.constraints] == ["r1"]
+
+
+def test_digest_covers_store_settings():
+    """P2: default_tz changes how a time window without its own tz is
+    evaluated, so two stores that differ only in it must not share a digest."""
+    rule = _rule(time_window={"days": ["Mon"], "start": "09:00", "end": "17:00"})
+    utc, ny = _store(rule), _store(rule)
+    utc.default_tz, ny.default_tz = "UTC", "America/New_York"
+    a, b = utc.verified_snapshot(), ny.verified_snapshot()
+    assert a.digest != b.digest
+    assert a.to_dict()["settings"]["default_tz"] == "UTC"
+    no_tz = _store(rule)
+    no_tz.tzdata_available = False
+    assert no_tz.verified_snapshot().digest != _store(rule).verified_snapshot().digest
 
 
 def test_digest_is_stable_and_order_independent():
@@ -138,3 +195,42 @@ def test_snapshot_refuses_insecure(policy_dir, capsys):
     code, _, out = _cli(["snapshot", "--config-dir", str(d), "--insecure"], capsys)
     assert code == 64
     assert "refusing --insecure" in out.err
+
+
+@pytest.mark.parametrize("name", ["environments.example.yaml",
+                                  "plan_constraints.example.yaml"])
+def test_snapshot_rejects_an_edited_unsigned_auxiliary_file(policy_dir, capsys, name):
+    """P1: the environment and plan maps are decision-shaping inputs; an edit
+    without re-signing used to be hashed into a 'trusted' snapshot."""
+    d, _ = policy_dir
+    f = d / name
+    f.write_text(f.read_text() + "\n# edited, not re-signed\n")
+    code, _, out = _cli(["snapshot", "--config-dir", str(d)], capsys)
+    assert code == 65
+    assert "signature" in out.err.lower()
+
+
+def test_snapshot_requires_a_signed_agents_file(policy_dir, capsys):
+    d, key = policy_dir
+    (d / "agents.yaml").write_text("trusted: []\n")
+    code, _, out = _cli(["snapshot", "--config-dir", str(d)], capsys)
+    assert code == 65
+    from aegis_core.signing import sign_file
+
+    sign_file(d / "agents.yaml", key)
+    code, doc, _ = _cli(["snapshot", "--config-dir", str(d)], capsys)
+    assert code == 0 and "agents" in doc["inputs"]
+
+
+def test_snapshot_refuses_disabled_sources_and_excludes_unchecked_rules(policy_dir, capsys):
+    """P1: --sources '' used to list every file-sourced rule as verified."""
+    import shutil
+
+    d, _ = policy_dir
+    code, _, out = _cli(["snapshot", "--config-dir", str(d), "--sources", ""], capsys)
+    assert code == 64 and "--sources" in out.err
+    shutil.rmtree(d / "sources")  # no sources directory at all
+    code, doc, _ = _cli(["snapshot", "--config-dir", str(d)], capsys)
+    assert code == 0
+    assert doc["verified"] == []
+    assert {e["reason"] for e in doc["excluded"]} == {"source-unverified"}

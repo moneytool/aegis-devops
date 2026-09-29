@@ -741,10 +741,13 @@ def test_snapshot_records_each_tracked_git_ref(repo, tmp_path, capsys):
     key = load_key("file:data/example-signing.key")
     for name in ("constraints.yaml", "authority.yaml", "repos.yaml", "signers.yaml"):
         sign_file(conf / name, key)
-    code = main(["snapshot", "--config-dir", str(conf), "--key", key.hex(), "--sources", "",
+    code = main(["snapshot", "--config-dir", str(conf), "--key", key.hex(),
                  "--plan-constraints", "", "--environments", ""])
     doc = json.loads(capsys.readouterr().out)
     assert code == 0
     assert doc["inputs"]["git:policy"] == repo.git("rev-parse", "main")
     assert {"repos", "signers"} <= set(doc["inputs"])
-    assert "r1" in doc["verified"]
+    # the git-signed rule has source evidence; the file-sourced one (no
+    # sources/ dir) does not, so it may not vote in a snapshot
+    assert doc["verified"] == ["r1"]
+    assert doc["excluded"] == [{"id": "f1", "reason": "source-unverified"}]
