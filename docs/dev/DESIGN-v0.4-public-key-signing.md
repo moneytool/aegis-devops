@@ -1,7 +1,7 @@
 # Design: public-key signing for policy files (v0.4)
 
-Status: **draft for review**, 2026-09-29 (revision 2: review of #24 — pin location, rule
-principal binding, example keys). PLAN §9 step 2; a prerequisite of the Kubernetes
+Status: **draft for review**, 2026-09-29 (revision 3: review of #24 — pin location, rule
+principal binding, example keys; the Action's trust boundary on pull requests). PLAN §9 step 2; a prerequisite of the Kubernetes
 webhook (DESIGN-v0.3 §3.4).
 
 ## 1. Problem
@@ -192,7 +192,9 @@ cannot borrow another principal's authority.
 - `aegis compile` requires public-key signatures by default (server-side artifacts are exactly
   where a forging key must not be needed); `--allow-shared-key` overrides it, loudly.
 - `aegis check` and the agent hooks accept both, warning `shared-key signature` once per
-  process, unless `--require-public-key` (or `require-public-key` in `aegis.toml`).
+  process, unless `--require-public-key` (or `$AEGIS_REQUIRE_PUBLIC_KEY`, or a
+  `require-public-key` file beside the pin in the deployment-owned location). Strictness, like
+  the pin, is never read from the policy tree: a PR must not be able to switch it off.
 - The Action gains `trust-root` (and reads `signers.yaml` from the policy directory); with it,
   no secret is needed, so fork PRs get a real policy check. `signing-key` stays for v1 policies.
 - `aegis init` writes public-key examples: an **example** SSH key pair (clearly named, public,
@@ -204,6 +206,40 @@ cannot borrow another principal's authority.
   insecure-demo override that is printed on every run and recorded in the snapshot and
   manifests); `aegis verify` and `aegis check` accept it with a warning that this signer is
   public demo material, as they do for today's example MAC key.
+
+### 6.1 The Action and untrusted pull requests
+
+A `pull_request` workflow runs the workflow file **from the PR's merge commit** (review of #24).
+A PR, including one from a fork, can therefore edit that workflow for its own run: change the
+Action's `trust-root` input, drop the check, or print a green verdict under the same job name.
+CODEOWNERS and the main-branch ruleset stop such an edit from being *merged*, not from being
+*run*. And the PR controls more than the pin: it controls the Terraform code the plan is made
+from, so it can also hand the check a harmless-looking plan. The design therefore separates an
+advisory check on the PR from the enforcing one:
+
+1. **The enforcing check runs where the PR cannot edit it: at apply time.** The pipeline that
+   holds apply credentials runs on the protected branch after merge, from trusted workflow
+   configuration, makes the plan itself, checks *that exact plan* with the pin from its own
+   (protected) configuration and applies only if it passes (DESIGN-v0.3 §7: the apply
+   credentials must exist only in that pipeline). This is the control; nothing a PR edits reaches
+   it.
+2. **The PR check is advisory, and runs from trusted configuration when it must be trusted.**
+   For a result a maintainer relies on before merging, the Action documents the two-workflow
+   pattern: the `pull_request` workflow (no secrets, read-only token) only produces the plan JSON
+   as an artifact; a `workflow_run` workflow, defined on the default branch and so not editable
+   by the PR, downloads it, checks out the PR's policy directory at the PR head **as data**
+   (Aegis only parses YAML/JSON and verifies signatures; no PR code, script or `terraform` is
+   executed in this job), verifies with the pin from its own definition or a repository
+   variable, and reports the verdict. It holds only `contents: read`, `pull-requests: write` and
+   `statuses: write`. `pull_request_target` is not used, because it invites checking out and
+   running PR code with an elevated token.
+3. **What stays out of reach.** A PR's plan artifact is produced by PR-controlled code, so even
+   the trusted PR check can only say "this plan would pass", not "this is the plan that will be
+   applied"; hence (1). And GitHub matches required checks by name, which a PR-edited workflow in
+   the same repository can imitate. For user-owned repositories, the mitigation is to require
+   approval before *any* outside contributor's workflow runs, so a modified workflow never runs
+   unreviewed. For organisations, it is ruleset-required workflows, which run the default-branch
+   definition. The Action's README states both, and that the PR check is advisory.
 
 ## 7. Migration and downgrade
 
@@ -228,6 +264,7 @@ cannot borrow another principal's authority.
 | Downgrade to a MAC | n/a | needs the shared key; refused when public keys are required |
 | A merge replaces the trust-root pin | n/a | refused: the pin is read only from deployment-owned configuration, and a pin inside the policy tree is a load error (§5.1) |
 | A `policy`-only signer claims an admin as a rule's principal | possible (the principal is a claim) | the rule is excluded as `principal-unauthenticated` unless its principal is the file's signer or its Git commit's signer (§5.3) |
+| A fork PR edits the workflow's `trust-root` input or the check for its own run | n/a | advisory PR check only; enforcement runs at apply time from protected configuration on the exact plan applied; a trusted PR check uses `workflow_run` and treats PR content as data (§6.1) |
 | Someone signs with the public example key | accepted with a warning | `compile`, `snapshot` and `--require-public-key` refuse it without `--allow-example-keys` |
 
 ## 9. Implementation plan
@@ -236,7 +273,9 @@ cannot borrow another principal's authority.
    (`find-principals` + `verify`, reusing `gitsource`'s scrubbed-environment `ssh-keygen`
    runner); v2 detached and manifest formats; `SignatureResult(scheme, principal,
    fingerprint)` returned instead of a bool.
-2. `signers.yaml` root verification and the pin (`--trust-root`, env, `aegis.toml`).
+2. `signers.yaml` root verification and the pin, read only from `--trust-root`,
+   `$AEGIS_TRUST_ROOT` or the deployment-owned `aegis-trust/trust-root` file (§5.1), with a
+   load error for any pin inside the policy tree.
 3. Loaders take a verifier and an authority check per file class (§5.2); `agents.yaml`
    principal must equal its signer; rule principals bound to the file or commit signer (§5.3),
    with a `constraints.d/` directory form; the pin read only from deployment-owned locations
@@ -244,7 +283,8 @@ cannot borrow another principal's authority.
 4. CLI: `sign --ssh-key/--ssh-agent`, `verify` output, `trust init`, `--require-public-key`,
    compile default; snapshot fields.
 5. Examples and `aegis init` switched to v2; docs (`configuration.md` Signing section rewritten).
-6. The Action: `trust-root` input, `signing-key` optional.
+6. The Action: `trust-root` input, `signing-key` optional; a documented apply-time gate and
+   a `workflow_run` template for a trusted PR check that treats PR content as data (§6.1).
 7. Later, if the webhook image wants no OpenSSH: an optional pure-Python SSHSIG/Ed25519
    verifier (`aegis-devops[crypto]`), tested against `ssh-keygen` output.
 
