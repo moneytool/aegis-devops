@@ -5,6 +5,17 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while the major version is 0,
 any release may change behaviour.
 
+## [0.3.2] — 2026-09-29
+
+Package metadata only; no change to behaviour.
+
+### Fixed
+- PyPI listed no author: `pyproject.toml` now declares the author, as `CITATION.cff` does.
+
+### Added
+- `docs/dev/DESIGN-v0.4-public-key-signing.md`: the reviewed design for public-key (SSH)
+  signing of policy files, the next release's main change.
+
 ## [0.3.1] — 2026-09-29
 
 The Kubernetes server-side layer: the policy compiled to ValidatingAdmissionPolicies scoped to
@@ -399,6 +410,7 @@ See "Project status" in the README and [`docs/dev/PLAN.md`](docs/dev/PLAN.md) §
 rather than real connectors, signing uses a shared secret, and a principal is a signed name
 rather than a bound identity.
 
+[0.3.2]: https://github.com/moneytool/aegis-devops/releases/tag/v0.3.2
 [0.3.1]: https://github.com/moneytool/aegis-devops/releases/tag/v0.3.1
 [0.3.0]: https://github.com/moneytool/aegis-devops/releases/tag/v0.3.0
 [0.2.1]: https://github.com/moneytool/aegis-devops/releases/tag/v0.2.1
