@@ -29,6 +29,8 @@ social:
     - https://pypi.org/project/aegis-devops/
 github:
   repository_url: https://github.com/moneytool/aegis-devops
+# Design notes, council reviews and acceptance evidence stay in the repository but are
+# not published or put in the sitemap; the published docs link to them on GitHub.
 exclude:
   - "*.tape"
-  - dev/aws-acceptance/evidence.json
+  - dev
