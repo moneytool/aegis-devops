@@ -20,6 +20,9 @@ relative_links:
 titles_from_headings:
   enabled: true
   strip_title: false
+# Google Search Console ownership check (emitted by jekyll-seo-tag on every page).
+webmaster_verifications:
+  google: 4zZRo_MaoDmUuxMhkdR0dvvvv9t_i4m7PBJyIAvlH-M
 author:
   name: Vamshidher Reddy Jannapu Reddy
 social:
