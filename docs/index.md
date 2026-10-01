@@ -26,7 +26,10 @@ ticket or chat message (prompt injection, context poisoning) cannot become polic
 - **Coding agents:** a pre-tool hook for Claude Code (plugin), OpenAI Codex, GitHub Copilot
   (CLI and VS Code), Cursor, Gemini CLI (extension) and OpenCode — see [Coding agents](agents.md).
 - **CI:** the [Aegis-DevOps Plan Check](https://github.com/marketplace/actions/aegis-devops-plan-check)
-  GitHub Action checks a Terraform or OpenTofu plan on every pull request.
+  GitHub Action checks a Terraform or OpenTofu plan on every pull request. See it block a pull
+  request that deletes a production database in the
+  [demo repository](https://github.com/moneytool/aegis-devops-demo) — fork it and try your own
+  change in two minutes, no cloud account needed.
 - **Server-side (preview):** the same policy compiled to AWS Service Control Policies and
   Kubernetes ValidatingAdmissionPolicies scoped to agent identities, so the cloud or cluster
   refuses the call whatever the client — see [Server-side enforcement](server-side.md).
