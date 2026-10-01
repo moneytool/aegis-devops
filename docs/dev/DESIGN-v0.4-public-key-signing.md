@@ -1,5 +1,11 @@
 # Design: public-key signing for policy files (v0.4)
 
+> **Deferred (2026-09-29).** A council review ([`council-v0.4/`](council-v0.4/README.md)) asked for
+> revisions before implementation, and with a single maintainer and no in-cluster verifier the
+> shared-key MAC remains the accepted boundary. Resume before the Kubernetes webhook, before the
+> Action checks fork PRs without a secret, or when a second maintainer needs attribution; apply
+> the council's consensus changes first.
+
 Status: **draft for review**, 2026-09-29 (revision 3: review of #24 — pin location, rule
 principal binding, example keys; the Action's trust boundary on pull requests). PLAN §9 step 2; a prerequisite of the Kubernetes
 webhook (DESIGN-v0.3 §3.4).
