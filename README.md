@@ -36,7 +36,10 @@ only blocks what that policy blocks. It also works as a CI step
 [Quick start](#quick-start). In GitHub Actions, the
 [Aegis-DevOps Plan Check](https://github.com/marketplace/actions/aegis-devops-plan-check) Action
 checks a Terraform or OpenTofu plan and comments the verdict on the pull request:
-`uses: moneytool/aegis-devops-action@v1` with `plan: plan.json`.
+`uses: moneytool/aegis-devops-action@v1` with `plan: plan.json`. To see it block a pull request
+that deletes a production database, with no cloud account needed, try the
+[demo repository](https://github.com/moneytool/aegis-devops-demo) and its
+[example PR](https://github.com/moneytool/aegis-devops-demo/pull/1).
 
 ## What it does
 
