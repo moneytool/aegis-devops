@@ -3,7 +3,7 @@
 Ground truth, the held-out split, verifier definitions, the full results table, real LLM
 baselines, agent-harness baselines, the corpus, and the adversarial suite.
 
-← back to the [README](../README.md)
+← back to the [README](https://github.com/moneytool/aegis-devops#readme)
 
 ## Benchmark
 
@@ -164,7 +164,7 @@ oracle, intent-level holdout — see `dev/REVIEW-4.md`), a sibling harness
 (`agent-guardrail-bench@a98a8fa`) ran both `llm-naive` and `llm-aware` for real against the
 corpus as it stood at commit `a2497e4^`, importing this repo's `aegis_core.baselines.llm`
 directly. Full tables, provenance, and the replay-hit-rate verification are in
-[`../results/llm-external.md`](../results/llm-external.md); the headline number is
+[`../results/llm-external.md`](https://github.com/moneytool/aegis-devops/blob/main/results/llm-external.md); the headline number is
 **poison-susceptibility 1.000 for `llm-naive` vs. 0.883 for `llm-aware` vs. 0.000 for `aegis`**
 on the same 200 intents — a naive self-check obeys every poisoned constraint it's handed, giving
 it the authority map catches unauthorized-principal poisoning but not tampered/forged
@@ -185,7 +185,7 @@ repeatedly against an agent harness. `codex`, `ollama`, and `claude-cli` instead
 **holdout constraint split** — `data/corpus/split.json["holdout"]`, 100 constraints, distinct
 from `split.json["intents"]["holdout"]` — which renders to roughly 14,000 characters-per-4 of
 naive estimate, but see the token-count surprise below. This is also the same subset the pinned
-`claude-sonnet-5` rows in [`../results/llm-external.md`](../results/llm-external.md) were measured
+`claude-sonnet-5` rows in [`../results/llm-external.md`](https://github.com/moneytool/aegis-devops/blob/main/results/llm-external.md) were measured
 against, so these rows stay comparable to that table. The subset is threaded through explicitly
 (`scripts/benchmark.py`'s `load_holdout_constraint_subset`), never a silent default.
 

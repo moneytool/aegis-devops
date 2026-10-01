@@ -5,7 +5,7 @@ cannot stop an agent that calls a cloud API some other way: an SDK, a script it 
 credential it found. Server-side enforcement compiles the same verified policy into the
 platform's own controls, so the platform refuses the call whatever the client.
 
-← back to the [README](../README.md) · design: [`dev/DESIGN-v0.3-server-side.md`](dev/DESIGN-v0.3-server-side.md)
+← back to the [README](https://github.com/moneytool/aegis-devops#readme) · design: [`dev/DESIGN-v0.3-server-side.md`](dev/DESIGN-v0.3-server-side.md)
 
 > **Status: preview.** `aegis compile aws` is implemented, and every action mapping was verified
 > on 2026-09-28 in a sandbox AWS Organization: compiled SCPs denied each mapped action to an agent

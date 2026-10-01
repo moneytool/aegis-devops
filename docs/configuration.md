@@ -3,7 +3,7 @@
 Config directory discovery, signing, source verification, the identity model (`agents.yaml`),
 and rate limits/ledger.
 
-← back to the [README](../README.md)
+← back to the [README](https://github.com/moneytool/aegis-devops#readme)
 
 ## Configuration
 
@@ -134,7 +134,7 @@ STORE: loaded=20 quarantined=1 principals=3
 ```
 
 The same `kubectl scale ...` command against the real `data/sources` (the CLI's default) is a
-plain `BLOCK` — see the [README](../README.md)'s Quick start. Forging the source turns a
+plain `BLOCK` — see the [README](https://github.com/moneytool/aegis-devops#readme)'s Quick start. Forging the source turns a
 legitimate rule into one with no vote, which is loud rather than quiet: the action is
 allowed on the strength of the rules that remain, and the forged one is named in
 `discarded` and in the store's health. Add `--on-untrusted-match escalate` to make it
