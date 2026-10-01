@@ -2,7 +2,7 @@
 
 The constraint file format, metadata vocabulary, authority policy, and environment mapping.
 
-← back to the [README](../README.md)
+← back to the [README](https://github.com/moneytool/aegis-devops#readme)
 
 ## Writing constraints
 

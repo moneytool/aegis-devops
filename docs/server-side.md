@@ -5,12 +5,12 @@ cannot stop an agent that calls a cloud API some other way: an SDK, a script it 
 credential it found. Server-side enforcement compiles the same verified policy into the
 platform's own controls, so the platform refuses the call whatever the client.
 
-← back to the [README](../README.md) · design: [`dev/DESIGN-v0.3-server-side.md`](dev/DESIGN-v0.3-server-side.md)
+← back to the [README](https://github.com/moneytool/aegis-devops#readme) · design: [`dev/DESIGN-v0.3-server-side.md`](https://github.com/moneytool/aegis-devops/blob/main/docs/dev/DESIGN-v0.3-server-side.md)
 
 > **Status: preview.** `aegis compile aws` is implemented, and every action mapping was verified
 > on 2026-09-28 in a sandbox AWS Organization: compiled SCPs denied each mapped action to an agent
 > identity and allowed it to trusted, break-glass and path-qualified SSO roles, by live calls and
-> the IAM policy simulator ([`dev/aws-acceptance/`](dev/aws-acceptance/README.md)). A mapping
+> the IAM policy simulator ([`dev/aws-acceptance/`](https://github.com/moneytool/aegis-devops/blob/main/docs/dev/aws-acceptance/README.md)). A mapping
 > added later starts unverified, and the coverage report says so per rule.
 
 ## How it fits together
@@ -197,4 +197,4 @@ as an agent ServiceAccount, the admin and a break-glass identity, comparing the 
 with the client-side verdict for the same kubectl command. On Kubernetes 1.36.1: 66 of 66 as
 expected; the two layers agreed on every case that exists on both, and differed only where the
 coverage report says so (`rollout-undo`)
-([`dev/kube-acceptance/`](dev/kube-acceptance/README.md)).
+([`dev/kube-acceptance/`](https://github.com/moneytool/aegis-devops/blob/main/docs/dev/kube-acceptance/README.md)).

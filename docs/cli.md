@@ -3,7 +3,7 @@
 Exit codes, store health, the Claude Code hook, argv parsing, compound commands, dry runs, and
 library usage for the `aegis` CLI.
 
-← back to the [README](../README.md)
+← back to the [README](https://github.com/moneytool/aegis-devops#readme)
 
 ### Argv forms
 

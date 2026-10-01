@@ -1,0 +1,36 @@
+# GitHub Pages site (https://moneytool.github.io/aegis-devops/), built from docs/.
+title: Aegis-DevOps
+description: >-
+  Open-source guardrails for AI coding agents: blocks kubectl delete, terraform destroy and
+  DROP TABLE before they run, using signed, authority-checked policy. Hooks for Claude Code,
+  Codex, Copilot, Cursor, Gemini CLI and OpenCode; a GitHub Action; AWS and Kubernetes
+  server-side policies.
+url: https://moneytool.github.io
+baseurl: /aegis-devops
+lang: en
+theme: jekyll-theme-cayman
+plugins:
+  - jekyll-seo-tag
+  - jekyll-sitemap
+  - jekyll-relative-links
+  - jekyll-titles-from-headings
+relative_links:
+  enabled: true
+  collections: false
+titles_from_headings:
+  enabled: true
+  strip_title: false
+author:
+  name: Vamshidher Reddy Jannapu Reddy
+social:
+  name: Aegis-DevOps
+  links:
+    - https://github.com/moneytool/aegis-devops
+    - https://pypi.org/project/aegis-devops/
+github:
+  repository_url: https://github.com/moneytool/aegis-devops
+# Design notes, council reviews and acceptance evidence stay in the repository but are
+# not published or put in the sitemap; the published docs link to them on GitHub.
+exclude:
+  - "*.tape"
+  - dev
