@@ -18,6 +18,21 @@ identifiers:
     value: "10.5281/zenodo.22950337"
     description: "Concept DOI: all versions, resolves to the latest."
   - type: doi
+    value: "10.5281/zenodo.23049286"
+    description: "v0.3.2"
+  - type: doi
+    value: "10.5281/zenodo.23048261"
+    description: "v0.3.1 (Kubernetes ValidatingAdmissionPolicy compiler and identity audit)"
+  - type: doi
+    value: "10.5281/zenodo.23032341"
+    description: "v0.3.0 (AWS SCP compiler, verified in a sandbox AWS Organization)"
+  - type: doi
+    value: "10.5281/zenodo.23029134"
+    description: "v0.2.1"
+  - type: doi
+    value: "10.5281/zenodo.23005717"
+    description: "v0.2.0 (Git sources with signed commits)"
+  - type: doi
     value: "10.5281/zenodo.23005581"
     description: "v0.1.7"
   - type: doi
