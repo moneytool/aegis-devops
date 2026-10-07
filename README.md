@@ -13,33 +13,41 @@ become policy.
 
 ![Aegis-DevOps blocking an injected kubectl delete](docs/where-it-sits.gif)
 
-### Install in Claude Code
+## Try it in 60 seconds
+
+**1. Watch it block a pull request (nothing to install).** Open the demo's
+[example PR](https://github.com/moneytool/aegis-devops-demo/pull/1): it deletes a production
+database, and the failing check is Aegis blocking it, with the verdict posted as a comment. Fork
+the [demo repository](https://github.com/moneytool/aegis-devops-demo) to try your own change; no
+cloud account needed.
+
+**2. Check a command yourself:**
 
 ```bash
 pip install aegis-devops && aegis init .aegis
+aegis check command --pretty -- "kubectl delete namespace prod"   # BLOCK (exit 3)
+aegis check command --pretty -- "kubectl get pods -n prod"        # ALLOW (exit 0)
+```
+
+**3. Put it in front of your coding agent.** In the same project:
+
+```bash
 claude plugin marketplace add moneytool/aegis-devops
 claude plugin install aegis-devops@aegis-devops
 ```
 
-### Install in Gemini CLI
+Then ask Claude Code to delete the `prod` namespace: the hook blocks the command before it runs.
+Gemini CLI: `gemini extensions install https://github.com/moneytool/aegis-devops`. Codex, GitHub
+Copilot (CLI and VS Code), Cursor and OpenCode: `aegis install codex|copilot|vscode|cursor|opencode`
+(see [Coding agents](docs/agents.md)). Aegis only acts in projects with a `.aegis/` policy, and
+only blocks what that policy blocks. `aegis init` writes example rules signed with a public
+example key; replace both before relying on it ([Configuration](docs/configuration.md)).
 
-```bash
-pip install aegis-devops && aegis init .aegis
-gemini extensions install https://github.com/moneytool/aegis-devops
-```
-
-Codex, GitHub Copilot (CLI and VS Code), Cursor and OpenCode:
-`aegis install codex|copilot|vscode|cursor|opencode`
-(see [Coding agents](docs/agents.md)). It only acts in projects with a `.aegis/` policy, and
-only blocks what that policy blocks. It also works as a CI step
-(`aegis check terraform plan.json --exit-style ci`) and as a Python library; see
-[Quick start](#quick-start). In GitHub Actions, the
-[Aegis-DevOps Plan Check](https://github.com/marketplace/actions/aegis-devops-plan-check) Action
-checks a Terraform or OpenTofu plan and comments the verdict on the pull request:
-`uses: moneytool/aegis-devops-action@v1` with `plan: plan.json`. To see it block a pull request
-that deletes a production database, with no cloud account needed, try the
-[demo repository](https://github.com/moneytool/aegis-devops-demo) and its
-[example PR](https://github.com/moneytool/aegis-devops-demo/pull/1).
+In CI, the [Aegis-DevOps Plan Check](https://github.com/marketplace/actions/aegis-devops-plan-check)
+Action checks a Terraform or OpenTofu plan on every pull request
+(`uses: moneytool/aegis-devops-action@v1` with `plan: plan.json`); `aegis check terraform
+plan.json --exit-style ci` does the same in any pipeline, and Aegis also works as a Python
+library ([Quick start](#quick-start)).
 
 ## What it does
 
