@@ -34,16 +34,27 @@ ticket or chat message (prompt injection, context poisoning) cannot become polic
   Kubernetes ValidatingAdmissionPolicies scoped to agent identities, so the cloud or cluster
   refuses the call whatever the client — see [Server-side enforcement](server-side.md).
 
-## Install
+## Try it in 60 seconds
 
-```bash
-pip install aegis-devops && aegis init .aegis
-claude plugin marketplace add moneytool/aegis-devops
-claude plugin install aegis-devops@aegis-devops
-```
+1. **Watch it block a pull request, with nothing to install:** the demo's
+   [example PR](https://github.com/moneytool/aegis-devops-demo/pull/1) deletes a production
+   database and Aegis's failing check blocks it. Fork the
+   [demo repository](https://github.com/moneytool/aegis-devops-demo) to try your own change.
+2. **Check a command yourself:**
 
-Other agents: `aegis install codex|copilot|vscode|cursor|opencode`, or
-`gemini extensions install https://github.com/moneytool/aegis-devops`.
+   ```bash
+   pip install aegis-devops && aegis init .aegis
+   aegis check command --pretty -- "kubectl delete namespace prod"   # BLOCK
+   aegis check command --pretty -- "kubectl get pods -n prod"        # ALLOW
+   ```
+
+3. **Put it in front of your coding agent** (Claude Code shown; others in
+   [Coding agents](agents.md)):
+
+   ```bash
+   claude plugin marketplace add moneytool/aegis-devops
+   claude plugin install aegis-devops@aegis-devops
+   ```
 
 ## Documentation
 
