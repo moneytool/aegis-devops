@@ -8,6 +8,7 @@ guess.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -81,6 +82,8 @@ class BudgetPolicy:
 def _number(where: str, value: Any, *, integer: bool) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{where}: must be a number")
+    if not math.isfinite(value):
+        raise ValueError(f"{where}: must be a finite number")
     if integer and value != int(value):
         raise ValueError(f"{where}: must be a whole number of tokens")
     if value <= 0:
@@ -102,7 +105,7 @@ def _limit(path: Path, name: str, raw: Any, *, integer: bool,
     limit = _number(f"{where}.limit", raw["limit"], integer=integer)
     warn_at = raw.get("warn_at", DEFAULT_WARN_AT)
     if isinstance(warn_at, bool) or not isinstance(warn_at, (int, float)) or not (
-        0 < warn_at < 1
+        math.isfinite(warn_at) and 0 < warn_at < 1
     ):
         raise ValueError(f"{where}.warn_at: must be a fraction between 0 and 1 (e.g. 0.8)")
     return Limit(limit, float(warn_at)), {k: raw[k] for k in extra if k in raw}

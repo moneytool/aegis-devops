@@ -139,9 +139,17 @@ def evaluate(policy: BudgetPolicy, prices: PriceTable, snap: Snapshot) -> Verdic
         unknown.append(f"{rec.problem_total} unreadable log record(s)")
     if rec.buckets().get(UNKNOWN_DAY):
         unknown.append("usage with no recorded time (counted for the session only)")
-    if snap.project is not None and snap.project.completeness != "complete":
-        unknown.append(f"today's project total is {snap.project.completeness} "
-                       f"({snap.project.missing_sessions} session(s) without a log)")
+    if snap.project is not None:
+        pd = snap.project
+        if pd.completeness != "complete":
+            detail = (f"{pd.missing_sessions} session(s) without a log" if pd.history == "ok"
+                      else f"session inventory {pd.history}")
+            unknown.append(f"today's project total is {pd.completeness} ({detail})")
+        others = pd.unverified(exclude=rec.key)
+        if others:
+            reasons = sorted({r for rs in others.values() for r in rs})
+            unknown.append(f"{len(others)} other session(s) in the project are a lower bound "
+                           f"({', '.join(reasons)})")
     if unknown:
         if policy.on_unknown_log == "deny":
             levels.append(DENY)

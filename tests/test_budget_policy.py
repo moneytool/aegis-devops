@@ -92,7 +92,7 @@ def test_defaults(tmp_path):
     (_with(pricing={"m": {"input": 1, "output": 1, "cache_read": 1}}),
      r"missing price field\(s\) \['cache_write'\]"),
     (_with(pricing={"m": {"input": 1, "output": 1, "cache_read": 1, "cache_write": -1}}),
-     "must be a number >= 0"),
+     "must be a finite number >= 0"),
     (_with(pricing={"m": {"input": 1, "output": 1, "cache_read": 1, "cache_write": 1,
                           "batch": 1}}), "unknown price field"),
     (_with(copilot={"limit": 5}), "'premium_requests'"),
@@ -101,6 +101,31 @@ def test_defaults(tmp_path):
 def test_shape_errors_are_load_errors(tmp_path, doc, match):
     with pytest.raises(ValueError, match=match):
         _load(tmp_path, doc)
+
+
+@pytest.mark.parametrize("value", [".nan", ".inf", "-.inf"])
+def test_non_finite_numbers_are_load_errors(tmp_path, value):
+    """YAML .nan compares false with everything, so an unchecked NaN price or
+    limit would make every over-budget comparison false (review, PR #36)."""
+    base = "principal: admin\nunit: usd\n"
+    cases = [
+        (base + f"session: {{limit: {value}}}\n", "finite number"),
+        (base + f"session: {{limit: 5, warn_at: {value}}}\n", "warn_at: must be a fraction"),
+        (base + f"project_day: {{limit: {value}}}\n", "finite number"),
+        (base + f"copilot: {{premium_requests: {value}}}\n", "finite number"),
+        (base + "session: {limit: 5}\npricing:\n  m: {input: " + value
+         + ", output: 1, cache_read: 1, cache_write: 1}\n", "finite number >= 0"),
+    ]
+    for doc, match in cases:
+        with pytest.raises(ValueError, match=match):
+            _load(tmp_path, doc)
+
+
+def test_non_finite_prices_in_a_table_are_refused():
+    table = {"version": 1, "vendors": {"v": {"prefixes": ["v-"], "models": {
+        "v-a": {"input": float("nan"), "output": 1}}}}}
+    with pytest.raises(ValueError, match="finite number"):
+        PriceTable(table)
 
 
 def test_token_limits_are_whole_numbers(tmp_path):

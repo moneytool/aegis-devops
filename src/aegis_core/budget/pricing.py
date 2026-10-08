@@ -14,6 +14,7 @@ table knows, so the fallback is not an upper bound.
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -88,8 +89,10 @@ def _check_rates(where: str, entry: Any, *, require_all: bool) -> dict[str, floa
         raise ValueError(f"{where}: missing price field(s) {missing}")
     rates: dict[str, float] = {}
     for cat, value in entry.items():
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
-            raise ValueError(f"{where}.{cat}: must be a number >= 0 (USD per million tokens)")
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value) or value < 0):
+            raise ValueError(f"{where}.{cat}: must be a finite number >= 0 "
+                             "(USD per million tokens)")
         rates[cat] = float(value)
     return rates
 

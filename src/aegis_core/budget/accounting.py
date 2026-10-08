@@ -184,6 +184,17 @@ class SessionRecord:
     def usage_total(self) -> ByModel:
         return sum_by_model(*self.buckets().values())
 
+    def unverified(self) -> list[str]:
+        """Why this session's usage is only a lower bound (empty if it is not)."""
+        reasons = []
+        if self.log_missing:
+            reasons.append("log-missing")
+        if self.problem_total:
+            reasons.append("unreadable-records")
+        if self.buckets().get(UNKNOWN_DAY):
+            reasons.append("unknown-time")
+        return reasons
+
     def to_json(self) -> str:
         return json.dumps({"version": 1, **self.__dict__}, sort_keys=True)
 
@@ -203,6 +214,7 @@ class ProjectDay:
     completeness: str = "complete"   # complete | partial | unknown
     missing_sessions: int = 0
     known_sessions: int = 0
+    history: str = "ok"              # the inventory read at the last rebuild: see read_inventory
 
     def usage(self) -> ByModel:
         return sum_by_model(*(e.get("usage", {}) for e in self.entries.values()))
@@ -212,6 +224,12 @@ class ProjectDay:
         for e in self.entries.values():
             out.update(e.get("providers", {}))
         return out
+
+    def unverified(self, exclude: str | None = None) -> dict[str, list[str]]:
+        """Contributing sessions whose usage is only a lower bound, with why
+        (each entry carries its session's verification status)."""
+        return {k: list(e["unverified"]) for k, e in self.entries.items()
+                if e.get("unverified") and k != exclude}
 
     def to_json(self) -> str:
         return json.dumps({"version": 1, **self.__dict__}, sort_keys=True)
@@ -345,36 +363,76 @@ class BudgetStore:
 
     # the inventory (caller holds the project lock to write)
     @staticmethod
-    def _inventory_lines(path: Path) -> list[dict[str, Any]]:
-        out = []
+    def read_inventory(path: Path) -> tuple[list[dict[str, Any]], str]:
+        """The valid lines of an inventory file and how the read went:
+        ``ok``; ``missing`` (no file); ``unreadable`` (it exists but cannot
+        be read); ``corrupt`` (some lines are not inventory records,
+        including a truncated last line). Valid lines are returned whatever
+        the status, so surviving checkpoints are still used."""
+        if not path.exists():
+            return [], "missing"
         try:
-            with open(path) as f:
-                for line in f:
-                    with contextlib.suppress(json.JSONDecodeError):
-                        d = json.loads(line)
-                        if isinstance(d, dict):
-                            out.append(d)
+            data = path.read_bytes()
         except OSError:
-            pass
-        return out
+            return [], "unreadable"
+        out: list[dict[str, Any]] = []
+        status = "ok"
+        if data and not data.endswith(b"\n"):
+            status = "corrupt"  # a truncated last line
+        for raw in data.splitlines():
+            if not raw.strip():
+                continue
+            try:
+                d = json.loads(raw)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                status = "corrupt"
+                continue
+            if (isinstance(d, dict) and isinstance(d.get("session"), str)
+                    and d.get("event") in ("seen", "checkpoint")):
+                out.append(d)
+            else:
+                status = "corrupt"
+        return out, status
 
-    def inventory(self, root: str, day: str) -> list[dict[str, Any]] | None:
-        path = self.inventory_path(root, day)
-        return self._inventory_lines(path) if path.exists() else None
+    @classmethod
+    def _inventory_lines(cls, path: Path) -> list[dict[str, Any]]:
+        return cls.read_inventory(path)[0]
 
-    def append_inventory(self, root: str, day: str, line: dict[str, Any]) -> None:
+    def inventory(self, root: str, day: str) -> tuple[list[dict[str, Any]], str]:
+        return self.read_inventory(self.inventory_path(root, day))
+
+    def read_index(self, root: str) -> tuple[dict[str, Any] | None, str]:
+        """The project's list of days with an inventory: ``ok``, ``missing``
+        or ``corrupt`` (exists but unreadable or not the expected shape)."""
+        path = self.index_path(root)
+        if not path.exists():
+            return None, "missing"
+        d = _read_json(path)
+        if not isinstance(d, dict) or not isinstance(d.get("days"), list):
+            return None, "corrupt"
+        return d, "ok"
+
+    def append_inventory(self, root: str, day: str, line: dict[str, Any]) -> bool:
+        """Appends one line; returns False if the inventory cannot be written
+        (the caller tries again on a later hook; a rebuild then reports the
+        damaged history as unknown)."""
         path = self.inventory_path(root, day)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a") as f:
-            f.write(json.dumps(line, sort_keys=True) + "\n")
-            f.flush()
-            os.fsync(f.fileno())
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "a") as f:
+                f.write(json.dumps(line, sort_keys=True) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+        except OSError:
+            return False
         index = _read_json(self.index_path(root)) or {}
         days = set(index.get("days", []))
         if day not in days:
             days.add(day)
-            _atomic_write(self.index_path(root),
-                          json.dumps({"root": root, "days": sorted(days)}, sort_keys=True))
+            with contextlib.suppress(OSError):
+                _atomic_write(self.index_path(root),
+                              json.dumps({"root": root, "days": sorted(days)}, sort_keys=True))
+        return True
 
 
 # --- reading a session (steps 1-3 of the update protocol) --------------------------------
@@ -460,7 +518,8 @@ def update_session(store: BudgetStore, log: AgentLog, loc: Locator, zone: ZoneIn
 def _entry(rec: SessionRecord, day: str) -> dict[str, Any]:
     usage = rec.usage_on(day)
     return {"revision": rec.revision, "usage": usage,
-            "providers": {m: p for m, p in rec.providers.items() if m in usage}}
+            "providers": {m: p for m, p in rec.providers.items() if m in usage},
+            "unverified": rec.unverified()}
 
 
 # --- rebuild -------------------------------------------------------------------------
@@ -484,10 +543,10 @@ def rebuild(store: BudgetStore, logs: Mapping[str, AgentLog], root: str, day: st
             info = log.info(loc)
             if info and info.parent is None and find_project_root(info.cwd) == root:
                 candidates[key] = loc
-    inventory = store.inventory(root, day)
+    inventory, history = store.inventory(root, day)
     checkpoints: dict[str, dict[str, Any]] = {}
     in_inventory: set[str] = set()
-    for line in inventory or []:
+    for line in inventory:
         key = line.get("session")
         if not isinstance(key, str):
             continue
@@ -506,23 +565,31 @@ def rebuild(store: BudgetStore, logs: Mapping[str, AgentLog], root: str, day: st
             continue
         with store.session_lock(loc.agent, loc.session_id):
             rec = update_session(store, logs[loc.agent], loc, zone)
+        if rec.log_missing:
+            missing += 1
         if rec.log_missing and not rec.sources:
             # Neither the log nor a cached record holds this session's usage:
             # the inventory checkpoint is all that is left.
-            missing += 1
             cp = checkpoints.get(key)
             if cp:
                 incoming[key] = {"revision": int(cp.get("revision", 0)),
-                                 "usage": cp.get("usage", {}), "providers": {}}
+                                 "usage": cp.get("usage", {}), "providers": {},
+                                 "unverified": ["log-missing", "from-checkpoint"]}
             continue
+        # A missing log with a cached record keeps its usage as a lower bound;
+        # the entry says so (its "unverified" reasons).
         incoming[key] = _entry(rec, day)
 
-    if inventory is not None:
+    if history in ("unreadable", "corrupt"):
+        completeness = "unknown"     # the record of which sessions existed is damaged
+    elif history == "ok":
         completeness = "partial" if missing else "complete"
     else:
-        index = _read_json(store.index_path(root))
-        if isinstance(index, dict):
-            completeness = "unknown" if day in index.get("days", []) else "complete"
+        index, index_status = store.read_index(root)
+        if index_status == "corrupt":
+            completeness = "unknown"
+        elif index is not None:
+            completeness = "unknown" if day in index["days"] else "complete"
         else:
             others = [k for k in candidates if k != exclude]
             completeness = "unknown" if others else "complete"
@@ -533,6 +600,7 @@ def rebuild(store: BudgetStore, logs: Mapping[str, AgentLog], root: str, day: st
         pd.completeness = completeness
         pd.missing_sessions = missing
         pd.known_sessions = len(in_inventory)
+        pd.history = history
         store.save_day(pd)
     return pd
 
@@ -589,15 +657,14 @@ def _keep_inventory(store: BudgetStore, rec: SessionRecord, day: str, now: float
     root = rec.project_root
     assert root
     changed = False
-    if day not in rec.inventory_days:
-        store.append_inventory(root, day, {"event": "seen", "session": rec.key,
-                                           "locator": rec.locator, "start": rec.start})
+    if day not in rec.inventory_days and store.append_inventory(
+            root, day, {"event": "seen", "session": rec.key, "locator": rec.locator,
+                        "start": rec.start}):
         rec.inventory_days = sorted({*rec.inventory_days, day})[-7:]
         changed = True
-    if now - rec.checkpoint_at >= CHECKPOINT_EVERY:
-        store.append_inventory(root, day, {"event": "checkpoint", "session": rec.key,
-                                           "revision": rec.revision,
-                                           "usage": rec.usage_on(day), "at": now})
+    if now - rec.checkpoint_at >= CHECKPOINT_EVERY and store.append_inventory(
+            root, day, {"event": "checkpoint", "session": rec.key, "revision": rec.revision,
+                        "usage": rec.usage_on(day), "at": now}):
         rec.checkpoint_at = now
         changed = True
     return changed

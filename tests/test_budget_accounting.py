@@ -404,3 +404,89 @@ def test_merge_never_replaces_a_newer_entry():
     assert BudgetStore.merge_entries(pd, {"a/1": {"revision": 6, "usage": {"m": {"input": 1}}},
                                           "b/2": {"revision": 1, "usage": {}}})
     assert pd.entries["a/1"]["revision"] == 6 and "b/2" in pd.entries
+
+
+# --- verification status reaches the project (review, PR #36) ---------------------------------
+
+
+def _strict_verdict(snap):
+    from aegis_core.budget import price_table
+    from aegis_core.budget.evaluate import evaluate
+    from aegis_core.budget.policy import BudgetPolicy, Limit
+    p = BudgetPolicy("budget.yaml", "admin", "tokens", Limit(10**9), Limit(10**9), "UTC",
+                     ("claude",), "deny", "estimate")
+    return evaluate(p, price_table(p), snap)
+
+
+def test_another_sessions_missing_log_with_a_cached_record_fails_strict_closed(world):
+    """Reviewer's reproduction: s2's log is deleted but its session cache
+    survives; the project/day map is deleted; s1 refreshes."""
+    for sid, n in (("s1", 100), ("s2", 30)):
+        world.start(sid)
+        world.add(sid, n)
+        world.refresh(sid)
+    world.path("s2").unlink()
+    world.store.day_path(world.root, DAY).unlink()
+    snap = world.refresh("s1")
+    assert _input(snap.project_usage) == 130              # cached usage kept as a lower bound
+    assert snap.project.unverified() == {"claude/s2": ["log-missing"]}
+    assert snap.project.completeness == "partial"
+    v = _strict_verdict(snap)
+    assert v.decision == "deny" and "unknown-log" in v.reasons
+
+
+@pytest.mark.parametrize("via_rebuild", [False, True])
+def test_a_malformed_record_in_another_session_fails_strict_closed(world, via_rebuild):
+    for sid in ("s1", "s2"):
+        world.start(sid)
+        world.add(sid, 10)
+        world.refresh(sid)
+    with open(world.path("s2"), "a") as f:
+        f.write("{not json\n")
+    if via_rebuild:
+        world.store.day_path(world.root, DAY).unlink()
+    else:
+        world.refresh("s2")                                # s2's own hook records it
+    snap = world.refresh("s1")
+    assert snap.project.unverified(exclude="claude/s1") == {"claude/s2": ["unreadable-records"]}
+    assert _strict_verdict(snap).decision == "deny"
+    assert not snap.record.unverified()                    # s1 itself is fine
+
+
+@pytest.mark.parametrize("damage", ["malformed", "truncated", "foreign", "unreadable"])
+def test_a_damaged_inventory_is_unknown_history_not_an_empty_one(world, damage):
+    """Reviewer's reproduction: s2's log is gone, the day's inventory is
+    damaged, the cache is deleted, s1 refreshes."""
+    for sid, n in (("s1", 100), ("s2", 30)):
+        world.start(sid)
+        world.add(sid, n)
+        world.refresh(sid)
+    world.path("s2").unlink()
+    inv = world.store.inventory_path(world.root, DAY)
+    good = inv.read_text()
+    if damage == "malformed":
+        inv.write_text("{this is not json\n" + good)
+    elif damage == "truncated":
+        inv.write_text(good[:-20])
+    elif damage == "foreign":
+        inv.write_text('{"hello": "world"}\n' + good)
+    else:
+        inv.unlink()
+        inv.mkdir()                                          # exists, cannot be read as a file
+    _wipe_cache(world)
+    snap = world.refresh("s1")
+    assert snap.project.completeness == "unknown"
+    assert snap.project.history in ("corrupt", "unreadable")
+    assert _strict_verdict(snap).decision == "deny"
+    if damage in ("malformed", "foreign"):
+        assert _input(snap.project_usage) == 130             # valid checkpoints still used
+
+
+def test_a_corrupt_day_index_is_unknown(world):
+    world.start("s1")
+    world.add("s1", 100)
+    world.refresh("s1")
+    world.store.inventory_path(world.root, DAY).unlink()
+    world.store.index_path(world.root).write_text("garbage")
+    _wipe_cache(world)
+    assert world.refresh("s1").project.completeness == "unknown"
