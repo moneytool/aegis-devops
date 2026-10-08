@@ -1,6 +1,6 @@
 # TODO: cross-agent session budget cap
 
-Status: **parked**, 2026-10-06. Researched and scoped; not started. Decide when to take it.
+Status: **taken up 2026-10-07** — see [`DESIGN-v1.0-budget-cap.md`](DESIGN-v1.0-budget-cap.md) (target v1.0.0). This file keeps the research.
 
 ## The idea
 

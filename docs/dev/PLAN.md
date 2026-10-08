@@ -87,7 +87,7 @@ Items surfaced by the Week 1–3 build and the REVIEW-4 council. None block the 
 8.  **Shell-string front end — done (T1.2).** `aegis check command -- "<string>"` / `--split-compound` split compound commands, unwrap `sudo`/`env`/`timeout`/`sh -c`/aliases, and refuse (exit 64) anything whose argv needs execution to know; `examples/claude-code-hook.sh` uses it.
 9.  **Real source connectors + identity.** Git (file at SHA), Slack (permalink), Jira fetchers replacing `FileSourceFetcher`; `principal` bound to commit signature / Slack user ID / SSO group rather than a bare string. This is the line between "reference design" and "deployable". Not started — see §8.
 10. **SQL statement-class gating, then Pulumi — done.** `src/aegis_core/parsers/sql.py` (`from_sql` + psql/mysql/sqlite3/mongosh/migration wrappers, hardened against the T1.4 evasions) and `src/aegis_core/parsers/pulumi.py` (`from_pulumi_preview`/`from_pulumi_argv`) ship with tests. CDK remains backlog (§3.1).
-11. **Cross-agent session budget cap — TODO, parked 2026-10-06.** A signed token / estimated-$ cap per agent session and per project per day, enforced by the hook across Claude Code, Codex, Gemini CLI and OpenCode (Copilot: premium-request cap). Research, scope and rejected alternatives in [TODO-budget-cap.md](TODO-budget-cap.md).
+11. **Cross-agent session budget cap — design reviewed and all decisions made 2026-10-07, target v1.0.0** ([DESIGN-v1.0-budget-cap.md](DESIGN-v1.0-budget-cap.md)); previously parked 2026-10-06. A signed token / estimated-$ cap per agent session and per project per day, enforced by the hook across Claude Code, Codex, Gemini CLI and OpenCode (Copilot: premium-request cap). Research, scope and rejected alternatives in [TODO-budget-cap.md](TODO-budget-cap.md).
 
 ### 8. Open gaps (honest, as of 2026-09-21)
 None of these block the current feature set; they're the known distance between "reference
@@ -163,3 +163,23 @@ after a three-model council review): [`DESIGN-v0.3-server-side.md`](DESIGN-v0.3-
 council reviews in [`council-v0.3/`](council-v0.3/). The review also found two bugs in the
 current engine (unresolved-condition ESCALATEs from unverified rules; kubectl normal forms for
 drain/exec/plural kinds), scheduled for v0.2.1.
+
+### 11. Status, 2026-10-07
+
+- **Shipped:** v0.2.0–0.2.1 (Git sources with SSH/GPG-signed commits; council fixes),
+  v0.3.0 (verified snapshot, `agents.yaml` deny-by-default, `aegis compile aws` with every action
+  mapping verified in a sandbox AWS Organization, `aegis audit-identity aws`), v0.3.1
+  (`aegis compile kubernetes` → ValidatingAdmissionPolicy, 66/66 on kind with client/cluster
+  parity; `aegis audit-identity kubernetes`; aws parser resource names), v0.3.2 (PyPI author).
+  GitHub Action `moneytool/aegis-devops-action` v1.1.1 on the Marketplace (`v1` moves
+  automatically); demo repo `moneytool/aegis-devops-demo`; docs site
+  https://moneytool.github.io/aegis-devops/ (in Google Search Console).
+- **Deferred:** v0.4 public-key signing — design and council reviews in
+  [DESIGN-v0.4-public-key-signing.md](DESIGN-v0.4-public-key-signing.md) and
+  [council-v0.4/](council-v0.4/README.md); resume before the Kubernetes webhook, a secretless
+  Action for fork PRs, or a second maintainer.
+- **Next: v1.0.0 — cross-agent session budget cap** ([DESIGN-v1.0-budget-cap.md](DESIGN-v1.0-budget-cap.md)),
+  and the 1.0 stability promise for policy formats, CLI, hook protocol and Action interface.
+- **Adoption:** launch posts drafted (LinkedIn, write-up); awesome-tf declined for lack of
+  notability — resubmit with traction; listing PRs open at awesome-opencode,
+  awesome-k8s-security, awesome-ai-agents-security, awesome-ai-security.
