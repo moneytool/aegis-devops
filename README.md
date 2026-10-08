@@ -267,7 +267,7 @@ of anything you care about.
 ## Development
 
 ```bash
-venv/bin/python -m pytest -q      # 1257 passed (last full green run; CI runs this on 3.11/3.13/3.14)
+venv/bin/python -m pytest -q      # 1,791 passed (CI runs this on 3.11/3.13/3.14, Linux and macOS)
 venv/bin/python -m ruff check src tests scripts examples
 vhs docs/demo.tape                # regenerate docs/demo.gif
 ```
@@ -276,6 +276,12 @@ Adding a new parser or tool: see [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md).
 Reporting a bypass: see [`SECURITY.md`](SECURITY.md) — parser evasion is the largest
 attack surface and the most useful thing to report. Release history is in
 [`CHANGELOG.md`](CHANGELOG.md).
+
+## Support
+
+If Aegis-DevOps is useful to you, a ⭐ on [GitHub](https://github.com/moneytool/aegis-devops)
+helps other people find it. Bug reports, ideas and bypasses are welcome too: open an issue, or
+see [`SECURITY.md`](SECURITY.md) for anything that gets a blocked command through.
 
 ## License
 
