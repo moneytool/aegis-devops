@@ -3,7 +3,7 @@
 Config directory discovery, signing, source verification, the identity model (`agents.yaml`),
 and rate limits/ledger.
 
-← back to the [README](../README.md)
+← back to the [README](https://github.com/moneytool/aegis-devops#readme)
 
 ## Configuration
 
@@ -134,7 +134,7 @@ STORE: loaded=20 quarantined=1 principals=3
 ```
 
 The same `kubectl scale ...` command against the real `data/sources` (the CLI's default) is a
-plain `BLOCK` — see the [README](../README.md)'s Quick start. Forging the source turns a
+plain `BLOCK` — see the [README](https://github.com/moneytool/aegis-devops#readme)'s Quick start. Forging the source turns a
 legitimate rule into one with no vote, which is loud rather than quiet: the action is
 allowed on the strength of the rules that remain, and the forged one is named in
 `discarded` and in the store's health. Add `--on-untrusted-match escalate` to make it
@@ -230,12 +230,12 @@ signers:
 ```
 
 Design and threat model:
-[`dev/DESIGN-v0.2-git-sources.md`](dev/DESIGN-v0.2-git-sources.md).
+[`dev/DESIGN-v0.2-git-sources.md`](https://github.com/moneytool/aegis-devops/blob/main/docs/dev/DESIGN-v0.2-git-sources.md).
 
 ## agents.yaml (identity model)
 
 Server-side enforcement (compiled cloud policies, Kubernetes admission; see
-[`dev/DESIGN-v0.3-server-side.md`](dev/DESIGN-v0.3-server-side.md) §4) sees which identity made
+[`dev/DESIGN-v0.3-server-side.md`](https://github.com/moneytool/aegis-devops/blob/main/docs/dev/DESIGN-v0.3-server-side.md) §4) sees which identity made
 an API call, not who typed the command. So compiled policies apply to **agent identities**, and
 `agents.yaml`, next to `constraints.yaml`, is the one place that says which those are. Compilers
 generate their principal lists and Kubernetes `matchConditions` from it; nothing is written by
