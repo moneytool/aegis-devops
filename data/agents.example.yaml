@@ -34,6 +34,9 @@ trusted:
   - platform: aws
     kind: source-identity
     id: alice@example.com
+    # A source identity survives role chaining, so an agent started in alice's session would
+    # carry it and be exempt. Trust one only if no agent ever runs under it, and say so:
+    no_agents: true
   - platform: github
     kind: oidc-subject
     # bound to one reusable workflow at a protected ref, so an agent job in the same

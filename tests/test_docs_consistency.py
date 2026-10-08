@@ -138,3 +138,34 @@ def test_latency_svg_is_regenerated_from_current_results(tmp_path):
     assert (tmp_path / "docs" / "latency.svg").read_text() == committed, (
         "docs/latency.svg is stale: run venv/bin/python scripts/make_latency_svg.py"
     )
+
+
+# The README's "Why not RBAC" table states what the example policy does with each spelling of
+# a command. Rows with an ellipsis are expanded here.
+README_SPELLINGS = [
+    ("kubectl delete deploy web -n prod", "no-delete-in-prod-namespace"),
+    ("kubectl -n prod delete deploy web", "no-delete-in-prod-namespace"),
+    ("/usr/bin/kubectl delete deploy web -n prod", "no-delete-in-prod-namespace"),
+    ("sudo kubectl delete deploy web -n prod", "no-delete-in-prod-namespace"),
+    ("env kubectl delete deploy web -n prod", "no-delete-in-prod-namespace"),
+    ("bash -c 'kubectl delete deploy web -n prod'", "no-delete-in-prod-namespace"),
+    ("cd /tmp && kubectl delete deploy web -n prod", "no-delete-in-prod-namespace"),
+    ("git -C . push --force origin main", "git-block-force-push-main"),
+]
+
+
+@pytest.mark.parametrize("command,rule", README_SPELLINGS, ids=[c for c, _ in README_SPELLINGS])
+def test_readme_spelling_table_still_holds(command, rule):
+    from aegis_core.hook import decide
+
+    assert f"`{rule}`" in (ROOT / "README.md").read_text()
+    verdict = decide(command, ROOT / "data")
+    assert verdict.decision == "deny" and rule in verdict.reason, verdict
+
+
+def test_readme_unexpandable_command_is_refused():
+    from aegis_core.hook import decide
+
+    verdict = decide("K=kubectl; $K delete deploy web -n prod", ROOT / "data")
+    assert verdict.decision == "deny"
+    assert "without shell expansion" in verdict.reason

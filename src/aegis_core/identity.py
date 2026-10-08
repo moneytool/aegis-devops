@@ -135,6 +135,7 @@ class Identity:
     kind: str
     id: str
     note: str = ""
+    no_agents: bool = False   # trusted aws source identity: no agent ever runs under it
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -158,9 +159,11 @@ class Identity:
         return self.id
 
     def to_dict(self) -> dict[str, str]:
-        d = {"platform": self.platform, "kind": self.kind, "id": self.id}
+        d: dict[str, Any] = {"platform": self.platform, "kind": self.kind, "id": self.id}
         if self.note:
             d["note"] = self.note
+        if self.no_agents:
+            d["no_agents"] = True
         return d
 
     def __str__(self) -> str:
@@ -179,7 +182,7 @@ def _parse_identity(path: Path, section: str, entry: Any) -> Identity:
     where = f"{path}: {section}"
     if not isinstance(entry, dict):
         raise ValueError(f"{where}: every entry must be a mapping with platform, kind and id")
-    unknown = set(entry) - {"platform", "kind", "id", "note"}
+    unknown = set(entry) - {"platform", "kind", "id", "note", "no_agents"}
     if unknown:
         raise ValueError(f"{where}: unknown field(s) {sorted(unknown)}")
     platform, kind, value = entry.get("platform"), entry.get("kind"), entry.get("id")
@@ -193,6 +196,11 @@ def _parse_identity(path: Path, section: str, entry: Any) -> Identity:
         raise ValueError(f"{where}: {platform}/{kind} needs a non-empty string 'id'")
     if not isinstance(note, str):
         raise ValueError(f"{where}: 'note' must be a string")
+    no_agents = entry.get("no_agents", False)
+    if not isinstance(no_agents, bool):
+        raise ValueError(f"{where}: 'no_agents' must be true or false")
+    if no_agents and (section != "trusted" or (platform, kind) != ("aws", "source-identity")):
+        raise ValueError(f"{where}: 'no_agents' applies only to a trusted aws source-identity")
     value = value.strip()
     if "*" in value or "?" in value:
         raise ValueError(f"{where}: {platform}/{kind} {value!r}: wildcards are not allowed; "
@@ -201,7 +209,7 @@ def _parse_identity(path: Path, section: str, entry: Any) -> Identity:
     problem = KINDS[platform][kind](value)
     if problem:
         raise ValueError(f"{where}: {platform}/{kind} {value!r}: {problem}")
-    return Identity(platform, kind, value, note)
+    return Identity(platform, kind, value, note, no_agents)
 
 
 def _parse_section(path: Path, raw: dict, section: str) -> tuple[Identity, ...]:
@@ -384,6 +392,12 @@ def load_identity_model(
                 "in that repository (an agent's included) would present the strongest "
                 "exemption; bind it with job_workflow_ref or a protected environment")
     for ident in trusted:
+        if (ident.platform, ident.kind) == ("aws", "source-identity") and not ident.no_agents:
+            warnings.append(
+                f"source-identity-inherited: {ident.id} is set when a session starts and "
+                "survives role chaining, so an agent run in a session that carries it is "
+                "exempt too; trust it only if no agent ever runs under it, and then say so "
+                "with 'no_agents: true' (docs/server-side.md#trusted-source-identities)")
         if ident.platform == "github" and not _workflow_bound(ident.id):
             warnings.append(
                 f"workflow-unbound: {ident.id} is scoped to a repository/ref, so any job "
