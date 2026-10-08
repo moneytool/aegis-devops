@@ -188,11 +188,28 @@ the note `env-unresolved: <id>` (a BLOCK from another rule still outranks it). S
 `kubectl delete pod/x -n dev` with no `--context` escalates against `no-delete-in-prod-env`
 instead of sailing through. Plan-constraint selectors with `scope: {env: …}` behave the same.
 
+The same holds for **`namespace`**. A kubectl or helm command without `-n` runs in the kubeconfig
+context's namespace, which the argv does not show, and `-A` covers every namespace. A rule scoped
+on `namespace` that would otherwise match escalates with the note `namespace-unresolved: <id>`,
+instead of silently not applying: `kubectl rollout restart deploy/web` escalates against a
+`namespace: prod` rule. A cluster-scoped kind (`node`, `namespace`, ...) has no namespace and is
+never affected. (Until 1.0 such a rule simply did not match; reported by a reader on dev.to.)
+
+**Manifests are not read.** `kubectl apply|create|replace|delete -f <file>` (or a directory,
+`-k <kustomization>`, or `-f -` for stdin) is one intent on `manifest/<name>`; the objects inside
+are never parsed, since the file can change between the check and the run. A rule for the same
+action written on kinds or objects (`secret/*`, `deployment/web`) might be exactly what the
+manifest holds, so it escalates with the note `manifest-not-inspected: <id>`. A rule on `*`
+matches the manifest intent outright (`kubectl delete -f ./manifests/ -n prod` is a BLOCK under
+`no-delete-in-prod-namespace`), and a rule on `manifest/<glob>` is matched against the file name.
+
 `--resolve-current-context` fills a *missing* identifier from the invoking environment: the
 kubeconfig's `current-context` (and its cluster) from `$KUBECONFIG` / `~/.kube/config` (parsed,
 never by running `kubectl`), `$AWS_PROFILE`, `$AWS_DEFAULT_REGION`/`$AWS_REGION`,
 `$CLOUDSDK_CORE_PROJECT`, `$AZURE_SUBSCRIPTION_ID`, `$HELM_NAMESPACE`, `$ARGOCD_SERVER`. An
 explicit `--context` on the argv always wins, and the keys that were filled are listed in
-`metadata.resolved_from_environment`. It is opt-in because it **trusts the invoking
+`metadata.resolved_from_environment`. For kubectl and helm it also fills a missing
+namespace from the context's `namespace` (`default` when the context sets none, as kubectl does;
+never for a cluster-scoped kind or with `-A`). It is opt-in because it **trusts the invoking
 environment**: whoever controls the process environment controls what Aegis believes the
 target is.

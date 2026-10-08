@@ -642,6 +642,57 @@ def env_unresolved(scope: dict[str, Any], intent: InfrastructureIntent) -> bool:
                                                   if k != "env"})
 
 
+# Providers whose commands target a namespace (a missing one is unresolved,
+# not "no namespace"). flux is not here: it defaults to flux-system, not to
+# the kubeconfig context.
+_NAMESPACED_PROVIDERS = frozenset({"kubernetes", "helm"})
+
+
+def _kind_is_cluster_scoped(resource: str) -> bool:
+    """True only for a built-in kind known to be cluster-scoped (node,
+    namespace, ...). An unknown kind, a CRD or a manifest counts as possibly
+    namespaced."""
+    from aegis_core.compile.kubernetes import REGISTRY  # local: it imports this module
+
+    kind = resource.partition("/")[0]
+    entry = REGISTRY.get(kind)
+    return entry is not None and entry[2] is False
+
+
+def namespace_unresolved(intent: InfrastructureIntent) -> bool:
+    """Whether a Kubernetes/Helm intent's namespace is unknown: none was
+    given (``kubectl`` would use the kubeconfig context's, which the argv
+    does not show) or ``-A`` covers every namespace. Never for a
+    cluster-scoped kind, which has no namespace."""
+    if intent.provider not in _NAMESPACED_PROVIDERS:
+        return False
+    if _kind_is_cluster_scoped(intent.resource):
+        return False
+    if intent.metadata.get("all_namespaces"):
+        return True
+    return "namespace" not in intent.metadata and "namespace" not in intent.params
+
+
+def scope_unresolved(scope: dict[str, Any], intent: InfrastructureIntent) -> list[str]:
+    """The scope keys of ``scope`` that this intent leaves unresolved
+    (``env`` without a resolved environment; ``namespace`` per
+    :func:`namespace_unresolved`), provided every *other* scope key matches.
+    Such a rule can neither be honoured nor dismissed, so the interceptor
+    escalates with ``"<key>-unresolved: <id>"`` -- "unknown namespace" is
+    never "not prod", exactly as for ``env`` (REVIEW-4 T1.3)."""
+    unknown = set()
+    if "env" in scope and "env" not in intent.metadata:
+        unknown.add("env")
+    if "namespace" in scope and namespace_unresolved(intent):
+        unknown.add("namespace")
+    if not unknown:
+        return []
+    rest = {k: v for k, v in scope.items() if k not in unknown}
+    metadata = {k: v for k, v in intent.metadata.items() if k not in unknown}
+    params = {k: v for k, v in intent.params.items() if k not in unknown}
+    return sorted(unknown) if scope_matches(rest, metadata, params) else []
+
+
 def time_window_unresolved(
     c: Constraint,
     intent: InfrastructureIntent,
@@ -1018,6 +1069,54 @@ class ConstraintStore:
             if _matches_except_scope(c, intent, now, self.default_tz, self.tzdata_available)
             and env_unresolved(c.scope, intent)
         ]
+
+    def get_scope_unresolved(
+        self, intent: InfrastructureIntent, now: datetime
+    ) -> list[tuple[Constraint, list[str]]]:
+        """Every loaded constraint that would apply to this intent except
+        that scope keys it names are unresolved (``env``, ``namespace``; see
+        :func:`scope_unresolved`), with those keys. The interceptor turns
+        each into an ESCALATE with ``<key>-unresolved: <id>`` notes."""
+        _require_tz_aware(now)
+        out = []
+        for c in self._candidates(intent):
+            if not _matches_except_scope(c, intent, now, self.default_tz,
+                                         self.tzdata_available):
+                continue
+            keys = scope_unresolved(c.scope, intent)
+            if keys:
+                out.append((c, keys))
+        return out
+
+    def get_manifest_unresolved(
+        self, intent: InfrastructureIntent, now: datetime
+    ) -> list[Constraint]:
+        """For an intent whose objects live in a manifest Aegis did not read
+        (``kubectl apply|create|replace|delete -f <file>|-``,
+        ``params["manifest_not_inspected"]``): every constraint for the same
+        provider and action whose resource pattern names kinds or objects
+        (not ``manifest/...`` files), and whose scope matches or is only
+        unresolved. The manifest may hold exactly what such a rule protects,
+        so the interceptor escalates with ``manifest-not-inspected: <id>``.
+        Constraints whose pattern already matches the manifest intent are
+        decided normally and are not listed here."""
+        _require_tz_aware(now)
+        if intent.params.get("manifest_not_inspected") is not True:
+            return []
+        out = []
+        for c in self._candidates(intent):
+            if c.resource_pattern.startswith("manifest/") or resource_matches(
+                    c.resource_pattern, intent):
+                continue
+            if c.provider != intent.provider or (
+                    intent.action not in c.actions and ANY_ACTION not in c.actions):
+                continue
+            if c.time_window and (not self.tzdata_available or not _time_window_matches(
+                    c.time_window, now, self.default_tz)):
+                continue
+            if _scope_matches(c.scope, intent) or scope_unresolved(c.scope, intent):
+                out.append(c)
+        return out
 
     def get_time_window_unresolved(
         self, intent: InfrastructureIntent, now: datetime

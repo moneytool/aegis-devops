@@ -346,7 +346,10 @@ def test_resolve_current_context_reads_kubeconfig_current_context(tmp_path):
     assert intent.metadata["context"] == "prod-us-east"
     assert intent.metadata["cluster"] == "gke_acme_us-east1_prod"
     assert intent.metadata["kubeconfig"] == str(path)
-    assert intent.metadata["resolved_from_environment"] == ["context", "cluster", "kubeconfig"]
+    # the context sets no namespace, so kubectl would use "default"
+    assert intent.metadata["namespace"] == "default"
+    assert intent.metadata["resolved_from_environment"] == ["context", "cluster", "kubeconfig",
+                                                            "namespace"]
     assert _map().resolve(intent) == "prod"
 
 
@@ -394,3 +397,46 @@ def test_resolve_current_context_cloud_variables():
     argocd = resolve_current_context(_intent("argocd", resource="app/x"), environ=env)
     assert argocd.metadata["server"] == "argocd.internal"
     assert resolve_current_context(_intent("aws"), environ={}).metadata == {}
+
+
+KUBECONFIG_NS = """\
+apiVersion: v1
+kind: Config
+current-context: prod-us-east
+contexts:
+- name: prod-us-east
+  context: {cluster: gke_acme_us-east1_prod, user: admin, namespace: prod}
+- name: staging
+  context: {cluster: staging, user: admin, namespace: web}
+"""
+
+
+def test_resolve_current_context_fills_the_contexts_namespace(tmp_path):
+    """A kubectl command without -n runs in the context's namespace (review
+    on dev.to, 2026-10-08): --resolve-current-context fills it."""
+    from aegis_core.environments import resolve_current_context
+
+    env = {"KUBECONFIG": str(_kubeconfig(tmp_path, KUBECONFIG_NS))}
+    intent = _intent("kubernetes", resource="deployment/web")
+    resolve_current_context(intent, environ=env)
+    assert intent.metadata["namespace"] == "prod"
+    assert "namespace" in intent.metadata["resolved_from_environment"]
+    explicit = _intent("kubernetes", resource="deployment/web", context="staging")
+    resolve_current_context(explicit, environ=env)
+    assert explicit.metadata["namespace"] == "web"          # the named context's namespace
+
+
+@pytest.mark.parametrize("intent_kw", [
+    {"resource": "node/worker-1"},                            # cluster-scoped kind
+    {"resource": "namespace/prod"},                           # cluster-scoped kind
+    {"resource": "pod/*", "all_namespaces": True},           # -A
+    {"resource": "deployment/web", "namespace": "dev"},       # -n given: never overridden
+])
+def test_resolve_current_context_leaves_these_namespaces_alone(tmp_path, intent_kw):
+    from aegis_core.environments import resolve_current_context
+
+    env = {"KUBECONFIG": str(_kubeconfig(tmp_path, KUBECONFIG_NS))}
+    intent = _intent("kubernetes", **intent_kw)
+    before = intent.metadata.get("namespace")
+    resolve_current_context(intent, environ=env)
+    assert intent.metadata.get("namespace") == before

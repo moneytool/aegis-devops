@@ -207,19 +207,19 @@ def test_from_kubectl_apply_with_file():
     intent = from_kubectl(["kubectl", "apply", "-f", "manifests/app.yaml"])
     assert intent.resource == "manifest/app.yaml"
     assert intent.action == "apply"
-    assert intent.params == {"file": "manifests/app.yaml"}
+    assert intent.params == {"file": "manifests/app.yaml", "manifest_not_inspected": True}
 
 
 def test_from_kubectl_apply_with_stdin():
     intent = from_kubectl(["kubectl", "apply", "-f", "-"])
     assert intent.resource == "manifest/-"
-    assert intent.params == {"file": "-"}
+    assert intent.params == {"file": "-", "manifest_not_inspected": True}
 
 
 def test_from_kubectl_apply_with_kustomize_dir():
     intent = from_kubectl(["kubectl", "apply", "-k", "overlays/prod"])
     assert intent.resource == "manifest/prod"
-    assert intent.params == {"file": "overlays/prod"}
+    assert intent.params == {"file": "overlays/prod", "manifest_not_inspected": True}
 
 
 def test_from_kubectl_delete_with_file():

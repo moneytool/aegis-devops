@@ -237,6 +237,29 @@ def kubeconfig_current_context(
     return str(path), current, cluster
 
 
+def kubeconfig_context_namespace(
+    context: str, environ: Mapping[str, str] | None = None, home: str | Path | None = None
+) -> str | None:
+    """The ``namespace`` of kubeconfig context ``context`` -- ``"default"``
+    when the context sets none, as kubectl does -- or ``None`` when the
+    kubeconfig or the context cannot be read. Parsed, never by running
+    kubectl."""
+    environ = os.environ if environ is None else environ
+    raw = environ.get("KUBECONFIG", "")
+    first = raw.split(os.pathsep)[0].strip() if raw.strip() else ""
+    path = Path(first).expanduser() if first else Path(home or Path.home()) / ".kube" / "config"
+    try:
+        doc = yaml.safe_load(path.read_text()) or {}
+    except (OSError, yaml.YAMLError):
+        return None
+    for entry in (doc.get("contexts") or []) if isinstance(doc, dict) else []:
+        if isinstance(entry, dict) and entry.get("name") == context:
+            ctx = entry.get("context") or {}
+            ns = ctx.get("namespace") if isinstance(ctx, dict) else None
+            return ns if isinstance(ns, str) and ns else "default"
+    return None
+
+
 def resolve_current_context(
     intent: InfrastructureIntent,
     environ: Mapping[str, str] | None = None,
@@ -247,7 +270,10 @@ def resolve_current_context(
 
     * kubernetes/helm/flux: ``context`` (and ``cluster``) from the
       kubeconfig's ``current-context``; ``kubeconfig`` from ``$KUBECONFIG``;
-      helm ``namespace`` from ``$HELM_NAMESPACE``;
+      helm ``namespace`` from ``$HELM_NAMESPACE``; then, for kubernetes and
+      helm, a still-missing ``namespace`` from the context's ``namespace``
+      (``default`` when it sets none, as kubectl does) -- never for a
+      cluster-scoped kind or with ``-A``;
     * aws: ``profile`` from ``$AWS_PROFILE``, ``region`` from
       ``$AWS_DEFAULT_REGION`` / ``$AWS_REGION``;
     * gcp: ``project`` from ``$CLOUDSDK_CORE_PROJECT``;
@@ -277,6 +303,13 @@ def resolve_current_context(
                 fill("kubeconfig", path)
         if provider == "helm":
             fill("namespace", environ.get("HELM_NAMESPACE"))
+        if (provider in ("kubernetes", "helm") and "namespace" not in md
+                and "namespace" not in intent.params and not md.get("all_namespaces")
+                and isinstance(md.get("context"), str)):
+            from aegis_core.store import _kind_is_cluster_scoped  # local: avoids a cycle
+
+            if not _kind_is_cluster_scoped(intent.resource):
+                fill("namespace", kubeconfig_context_namespace(md["context"], environ, home))
     elif provider == "aws":
         fill("profile", environ.get("AWS_PROFILE"))
         fill("region", environ.get("AWS_DEFAULT_REGION") or environ.get("AWS_REGION"))

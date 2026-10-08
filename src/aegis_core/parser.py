@@ -643,7 +643,9 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
 
     if manifest_value is not None and verb in ("apply", "create", "replace", "delete"):
         basename = manifest_value if manifest_value == "-" else Path(manifest_value).name
-        params = {**params, "file": manifest_value}
+        # The objects are in the manifest, which is not read: kind- and
+        # name-based rules escalate on it (manifest-not-inspected).
+        params = {**params, "file": manifest_value, "manifest_not_inspected": True}
         return _make_intents([f"manifest/{basename}"], verb, params, metadata)
 
     if verb == "rollout":
