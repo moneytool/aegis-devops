@@ -6,6 +6,7 @@ principals:
     - deletion
     - configuration
     - identity       # may change agents.yaml, the identity model
+    - budget         # may change budget.yaml, the budget cap
   sre_lead:
     - scaling
     - configuration
