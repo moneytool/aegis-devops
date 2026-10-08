@@ -1,6 +1,6 @@
 # Design: cross-agent session budget cap (v1.0)
 
-Status: **draft for review**, 2026-10-07; revised the same day after two review rounds (guarantee §6.1, accounting §4.1, pricing §5, validation §10 step 5); §11 questions 6–7 decided. Builds on the research in
+Status: **draft for review**, 2026-10-07; revised the same day after two review rounds (guarantee §6.1, accounting §4.1, pricing §5, validation §10 step 5); all §11 questions decided; ready for implementation once merged. Builds on the research in
 [`TODO-budget-cap.md`](TODO-budget-cap.md) (PLAN backlog item 11). Target release: **v1.0.0** —
 the budget cap is the headline feature, and 1.0 also declares the public surface stable (§9).
 
@@ -49,7 +49,7 @@ Lives in the policy directory beside `constraints.yaml`, signed like the other f
 ```yaml
 version: 1
 principal: admin            # must hold the 'budget' class in authority.yaml
-unit: usd                   # usd | tokens
+unit: usd                   # usd | tokens; required, no default
 session:
   limit: 20                 # per agent session
   warn_at: 0.8
@@ -57,7 +57,8 @@ project_day:
   limit: 100                # all sessions in this project, per calendar day
   warn_at: 0.8
   tz: America/Chicago       # the day boundary; default UTC
-agents: [claude, codex, gemini, opencode, copilot]   # default: every supported agent
+agents: [claude, codex, gemini, opencode, copilot]   # default: every supported agent; only
+                            # listed agents are measured and enforced
 on_unknown_log: allow       # allow (warn) | deny
 on_unknown_price: estimate   # estimate (warn) | deny; usd only, see §5
 pricing:                    # optional overrides of the built-in table, per model
@@ -66,7 +67,7 @@ copilot:
   premium_requests: 50      # Copilot CLI counts premium requests, not tokens
 ```
 
-Load errors, never guesses: unknown fields, a non-positive limit, `warn_at` outside (0, 1), an
+Load errors, never guesses: a missing `unit`, unknown fields, a non-positive limit, `warn_at` outside (0, 1), an
 unknown agent, a price override with missing fields, a principal without `budget`.
 
 ## 4. Measuring usage
@@ -364,18 +365,20 @@ with:
      earlier estimated usage, and `unit: tokens` ignoring prices.
 6. Release 1.0.0; then the Action's `budget` input in 1.1.
 
-## 11. Open questions
+## 11. Decisions
 
-1. **Behaviour at 100%: deny every tool call, or allow read-only tools?** Proposed: deny all —
+All questions raised during review are decided (2026-10-07); the body of the design follows them.
+
+1. **Behaviour at 100%: deny every tool call, or allow read-only tools?** **Decided:** deny all —
    simplest to reason about, and a session over budget should stop.
 2. **Default unit:** `usd` (meaningful to API-key users) or `tokens` (honest for
-   subscriptions)? Proposed: no default — `unit` is required.
-3. **Warn as ESCALATE (ask) or as a message?** Proposed: a message; asking on every call near
+   subscriptions)? **Decided:** no default — `unit` is required.
+3. **Warn as ESCALATE (ask) or as a message?** **Decided:** a message; asking on every call near
    the limit would be noise.
 4. **Should the project/day cap also count sessions from agents not listed in `agents`?**
-   Proposed: no — only listed agents are measured and enforced.
-5. **Copilot CLI:** ship the premium-request cap in 1.0, or wait for token data? Proposed: ship
-   it, clearly labelled.
+   **Decided:** no — only listed agents are measured and enforced.
+5. **Copilot CLI:** ship the premium-request cap in 1.0, or wait for token data? **Decided:** ship
+   it, clearly labelled as a premium-request cap.
 6. **Default for `on_unknown_price`** — **decided:** `estimate` is the default (keeps working
    when an agent ships a new model, possibly under-counting); `deny` (requires explicit prices,
    so every new model stops covered activity until a price is signed) is documented for users
