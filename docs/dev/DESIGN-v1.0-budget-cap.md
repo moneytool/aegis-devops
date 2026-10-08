@@ -107,7 +107,7 @@ always a **sum computed** from per-session entries.
   identity (device, inode, and a hash of its first 4 KiB);
 - the read position (byte offset, or last row id), the end of the last complete record only, so
   a half-written line is read again next time;
-- a **revision** number, incremented on every write of the record;
+- the revision it was written at (a copy; the authoritative counter is durable, below);
 - usage so far as **token counts per billing category** (input, output, cache read, cache
   write; premium requests for Copilot), bucketed by **(day in `tz`, original model id)**. Dollars
   are never stored: they are computed from the current prices when read (§5);
@@ -129,14 +129,27 @@ incoming `(session, revision, usage)`, set the entry only if the incoming revisi
 than the stored one. Writers merge entries one by one; nobody ever writes a whole map built
 from an earlier snapshot.
 
+**Durable revision counter and lock** —
+`~/.local/state/aegis/budget/sessions/<agent>/<session id>.rev` and `.lock`, **outside the
+disposable cache**. The counter is the only source of a session's revisions. It is advanced
+only under S's lock, written atomically (temp file, `fsync`, `rename`) **before** the revision
+is used anywhere, and survives deletion of the session record, the project map or the whole
+cache, and replacement or truncation of the log. The lock lives beside it, so deleting the
+cache can never replace a lock file someone holds. If the counter itself is missing (the state
+directory was deleted), it is recovered under S's lock as one more than the highest revision
+for S found in any project map entry or inventory checkpoint, so it never goes backwards
+relative to anything a merge could compare it with.
+
 **Update protocol**, on each hook call for session S in project P:
 
-1. Take S's lock (`flock` on `S.json.lock`). Re-read S's record under the lock.
+1. Take S's lock. Read S's durable counter (recovering it if missing) and S's record; a missing
+   record means re-reading the log from the start.
 2. Check the file identity. Different inode or head hash, or a file shorter than the offset,
-   means the log was replaced or truncated: discard the record and re-read the log from the
-   start.
+   means the log was replaced or truncated: discard the record's offset and usage (**not** the
+   revision counter) and re-read the log from the start.
 3. Read from the offset to the last complete record; add to the day/model buckets; advance the
-   offset. Write the record atomically (temp file, `fsync`, `rename`).
+   offset. Advance the durable counter to r+1 and persist it, then write the record at r+1
+   atomically.
 4. Take P's lock and **merge** S's entry for today with S's new revision (merge rule), write
    atomically, release. Release S's lock.
 5. Evaluate both limits from S's record and the map's sum.
@@ -306,7 +319,7 @@ through a local Aegis endpoint is out of 1.0 (decided, §11 question 7).
 | The agent deletes the cache state | totals are rebuilt from the logs and the session inventory (§4.1); nothing is reset while the logs exist. Missing logs or a missing inventory make the rebuild partial or of unknown completeness, reported as such and denied in strict mode |
 | The agent truncates or rewrites its own session log | **not stopped**: the agent runs as the user and can write the log. The budget is a runaway guard against mistakes and loops, not a defence against a deliberately hostile agent; the docs say so |
 | A log format changes after an agent update | parser does not recognise it → `on_unknown_log` (allow with a warning by default; `deny` for strict deployments) |
-| Parallel tool calls, or a rebuild, race on the totals | per-session lock while reading; keyed, revision-checked merge into the project map under its lock; lock order session → project only (§4.1). No double counting, no stale overwrite |
+| Parallel tool calls, or a rebuild, race on the totals | per-session lock while reading; keyed, revision-checked merge into the project map under its lock, with revisions from a durable per-session counter outside the cache; lock order session → project only (§4.1). No double counting, no stale overwrite, no rejected update after a cache deletion |
 | Spend a hook cannot see in time: in-flight requests, delayed usage records, retries after denial, tool-free activity | **not stopped, not bounded** (§6.1); observed overshoot is reported by `aegis budget status`. Bounding spend needs a layer before each model request, whose guarantees must be verified separately |
 | An unknown or renamed model | `estimate`: priced at the vendor's (or the table's) most expensive entry, labelled as an estimate that may be low; `deny`: tool calls denied until priced (§5) |
 | Clock or time-zone confusion around midnight | the day comes from `tz` in signed policy; usage is bucketed by stable recorded timestamps, never by the time it is read, so a rebuild after midnight puts old usage in its own day |
@@ -338,7 +351,11 @@ with:
    - spend past the limit (§6.1): delayed usage records, parallel sessions sharing a project cap,
      repeated retries of a denied tool, turns without tools; each must deny covered calls once
      the available usage is over, and report the observed overshoot;
-   - accounting (§4.1): a crash between the session write and the project merge; a rebuild
+   - accounting (§4.1): delete **only** the session cache while the project map holds a
+     high-revision entry for S, append usage, and check that the next hook updates the project
+     total immediately (its revision, from the durable counter, is higher) and that a concurrent
+     rebuild holding an older snapshot of S cannot overwrite it; the same with the log replaced,
+     and with the state counter deleted (recovered from the map); a crash between the session write and the project merge; a rebuild
      concurrent with hook updates (no stale overwrite, no deadlock); linked sub-agent discovery
      (counted once, inside the parent); missing history (logs gone with the inventory present →
      partial; inventory gone → unknown, never "0 missing"; strict mode denies); a rebuild after
