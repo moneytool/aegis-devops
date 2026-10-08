@@ -5,6 +5,35 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while the major version is 0,
 any release may change behaviour.
 
+## [1.0.0] — Unreleased
+
+The cross-agent session budget cap, and the 1.0 stability promise
+([design](docs/dev/DESIGN-v1.0-budget-cap.md)). In progress: this entry grows as the parts land;
+the release is cut when the hook integration, the `aegis budget` commands, the docs and the live
+test on each agent are in.
+
+### Added
+- `aegis_core.budget`, the budget cap's core (design §3–§6):
+  - `budget.yaml`, signed, whose `principal` must hold the new **`budget`** authority class:
+    a per-session and a per-project-per-day limit in estimated USD or tokens (`unit` is
+    required), a warning threshold, the day's time zone, the agents measured (only listed
+    agents are), `on_unknown_log`, `on_unknown_price`, signed price overrides and a
+    premium-request limit for Copilot CLI. Every shape problem is a load error.
+  - A dated price table (`aegis_core/budget/prices.yaml`: Anthropic, OpenAI and Google list
+    prices read 2026-10-07). An unpriced model is estimated per billing category from its
+    vendor's (or the whole table's) highest rate — an estimate, not an upper bound — or, with
+    `on_unknown_price: deny`, refused until priced. Usage is stored as tokens per model, so a
+    new override re-prices earlier usage.
+  - Usage readers for the session logs of Claude Code, Codex CLI, Gemini CLI, OpenCode and
+    Copilot CLI (premium requests), with linked sub-agents counted inside their parent session,
+    tested against redacted samples of real logs.
+  - Accounting that the logs can always rebuild: per-session records, project/day totals merged
+    by revision from a durable per-session counter, a session inventory outside the cache,
+    rebuilds that report whether the day is complete, partial or of unknown completeness, and
+    usage bucketed by the time the log recorded, never the time it was read.
+  - Evaluation to allow / warn / deny with the measured usage, limits and observed overshoot.
+- The example `authority.yaml` gives `admin` the `budget` class.
+
 ## [0.3.2] — 2026-09-29
 
 Package metadata only; no change to behaviour.

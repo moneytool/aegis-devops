@@ -63,7 +63,7 @@ version = {attr = "aegis_core.__version__"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-aegis_core = ["_examples/**/*", "integrations/*", "compile/actions/*"]
+aegis_core = ["_examples/**/*", "integrations/*", "compile/actions/*", "budget/*.yaml"]
 
 [tool.ruff]
 line-length = 100

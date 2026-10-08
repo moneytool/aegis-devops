@@ -1,0 +1,385 @@
+{
+ "schema": {
+  "message": "CREATE TABLE `message` (\n\t`id` text PRIMARY KEY,\n\t`session_id` text NOT NULL,\n\t`time_created` integer NOT NULL,\n\t`time_updated` integer NOT NULL,\n\t`data` text NOT NULL,\n\tCONSTRAINT `fk_message_session_id_session_id_fk` FOREIGN KEY (`session_id`) REFERENCES `session`(`id`) ON DELETE CASCADE\n)",
+  "session": "CREATE TABLE `session` (\n\t`id` text PRIMARY KEY,\n\t`project_id` text NOT NULL,\n\t`parent_id` text,\n\t`slug` text NOT NULL,\n\t`directory` text NOT NULL,\n\t`title` text NOT NULL,\n\t`version` text NOT NULL,\n\t`share_url` text,\n\t`summary_additions` integer,\n\t`summary_deletions` integer,\n\t`summary_files` integer,\n\t`summary_diffs` text,\n\t`revert` text,\n\t`permission` text,\n\t`time_created` integer NOT NULL,\n\t`time_updated` integer NOT NULL,\n\t`time_compacting` integer,\n\t`time_archived` integer, `workspace_id` text, `path` text, `agent` text, `model` text, `cost` real DEFAULT 0 NOT NULL, `tokens_input` integer DEFAULT 0 NOT NULL, `tokens_output` integer DEFAULT 0 NOT NULL, `tokens_reasoning` integer DEFAULT 0 NOT NULL, `tokens_cache_read` integer DEFAULT 0 NOT NULL, `tokens_cache_write` integer DEFAULT 0 NOT NULL, `metadata` text,\n\tCONSTRAINT `fk_session_project_id_project_id_fk` FOREIGN KEY (`project_id`) REFERENCES `project`(`id`) ON DELETE CASCADE\n)"
+ },
+ "session": [
+  {
+   "id": "ses-0052",
+   "project_id": "proj-1",
+   "parent_id": "ses-0053",
+   "slug": "s",
+   "directory": "{PROJECT}",
+   "title": "<redacted>",
+   "version": "1.18.26",
+   "time_created": 1789305823015,
+   "time_updated": 1789305860777
+  },
+  {
+   "id": "ses-0054",
+   "project_id": "proj-1",
+   "parent_id": "ses-0053",
+   "slug": "s",
+   "directory": "{PROJECT}",
+   "title": "<redacted>",
+   "version": "1.18.26",
+   "time_created": 1789305733593,
+   "time_updated": 1789305817370
+  },
+  {
+   "id": "ses-0055",
+   "project_id": "proj-1",
+   "parent_id": "ses-0053",
+   "slug": "s",
+   "directory": "{PROJECT}",
+   "title": "<redacted>",
+   "version": "1.18.26",
+   "time_created": 1788796502399,
+   "time_updated": 1789305726468
+  },
+  {
+   "id": "ses-0056",
+   "project_id": "proj-1",
+   "parent_id": "ses-0053",
+   "slug": "s",
+   "directory": "{PROJECT}",
+   "title": "<redacted>",
+   "version": "1.18.26",
+   "time_created": 1788796455180,
+   "time_updated": 1788796500341
+  },
+  {
+   "id": "ses-0053",
+   "project_id": "proj-1",
+   "parent_id": null,
+   "slug": "s",
+   "directory": "{PROJECT}",
+   "title": "<redacted>",
+   "version": "1.18.26",
+   "time_created": 1788796401974,
+   "time_updated": 1789305900310
+  }
+ ],
+ "message": [
+  {
+   "id": "msg-0057",
+   "session_id": "ses-0053",
+   "time_created": 1788796402096,
+   "time_updated": 1788796437388,
+   "data": {
+    "role": "user",
+    "time": {
+     "created": 1788796402096
+    },
+    "path": {
+     "cwd": "{PROJECT}",
+     "root": "{PROJECT}"
+    }
+   }
+  },
+  {
+   "id": "msg-0058",
+   "session_id": "ses-0053",
+   "time_created": 1788796402101,
+   "time_updated": 1788796417004,
+   "data": {
+    "role": "assistant",
+    "modelID": "Qwen3-1.7B-MLX-bf16",
+    "providerID": "omlx",
+    "tokens": {
+     "total": 8202,
+     "input": 5900,
+     "output": 510,
+     "reasoning": 0,
+     "cache": {
+      "write": 0,
+      "read": 1792
+     }
+    },
+    "cost": 0,
+    "time": {
+     "created": 1788796402101,
+     "completed": 1788796417003
+    },
+    "finish": "tool-calls",
+    "mode": "build",
+    "path": {
+     "cwd": "{PROJECT}",
+     "root": "{PROJECT}"
+    }
+   }
+  },
+  {
+   "id": "msg-0059",
+   "session_id": "ses-0053",
+   "time_created": 1788796417005,
+   "time_updated": 1788796427783,
+   "data": {
+    "role": "assistant",
+    "modelID": "Qwen3-1.7B-MLX-bf16",
+    "providerID": "omlx",
+    "tokens": {
+     "total": 8770,
+     "input": 66,
+     "output": 512,
+     "reasoning": 0,
+     "cache": {
+      "write": 0,
+      "read": 8192
+     }
+    },
+    "cost": 0,
+    "time": {
+     "created": 1788796417005,
+     "completed": 1788796427783
+    },
+    "finish": "tool-calls",
+    "mode": "build",
+    "path": {
+     "cwd": "{PROJECT}",
+     "root": "{PROJECT}"
+    }
+   }
+  },
+  {
+   "id": "msg-0060",
+   "session_id": "ses-0053",
+   "time_created": 1788796427784,
+   "time_updated": 1788796437383,
+   "data": {
+    "role": "assistant",
+    "modelID": "Qwen3-1.7B-MLX-bf16",
+    "providerID": "omlx",
+    "tokens": {
+     "total": 9258,
+     "input": 109,
+     "output": 445,
+     "reasoning": 0,
+     "cache": {
+      "write": 0,
+      "read": 8704
+     }
+    },
+    "cost": 0,
+    "time": {
+     "created": 1788796427784,
+     "completed": 1788796437383
+    },
+    "finish": "tool-calls",
+    "mode": "build",
+    "path": {
+     "cwd": "{PROJECT}",
+     "root": "{PROJECT}"
+    }
+   }
+  },
+  {
+   "id": "msg-0061",
+   "session_id": "ses-0053",
+   "time_created": 1788796437384,
+   "time_updated": 1788796447807,
+   "data": {
+    "role": "user",
+    "time": {
+     "created": 1788796437384
+    },
+    "path": {
+     "cwd": "{PROJECT}",
+     "root": "{PROJECT}"
+    }
+   }
+  },
+  {
+   "id": "msg-0062",
+   "session_id": "ses-0053",
+   "time_created": 1788796437385,
+   "time_updated": 1788796447803,
+   "data": {
+    "role": "assistant",
+    "modelID": "Qwen3-1.7B-MLX-bf16",
+    "providerID": "omlx",
+    "tokens": {
+     "total": 2506,
+     "input": 1953,
+     "output": 553,
+     "reasoning": 0,
+     "cache": {
+      "write": 0,
+      "read": 0
+     }
+    },
+    "cost": 0,
+    "time": {
+     "created": 1788796437385,
+     "completed": 1788796447803
+    },
+    "finish": "stop",
+    "mode": "compaction",
+    "path": {
+     "cwd": "{PROJECT}",
+     "root": "{PROJECT}"
+    }
+   }
+  },
+  {
+   "id": "msg-0063",
+   "session_id": "ses-0053",
+   "time_created": 1788796447803,
+   "time_updated": 1789305860781,
+   "data": {
+    "role": "user",
+    "time": {
+     "created": 1788796447803
+    },
+    "path": {
+     "cwd": "{PROJECT}",
+     "root": "{PROJECT}"
+    }
+   }
+  },
+  {
+   "id": "msg-0064",
+   "session_id": "ses-0053",
+   "time_created": 1788796447805,
+   "time_updated": 1788796500331,
+   "data": {
+    "role": "assistant",
+    "modelID": "Qwen3-1.7B-MLX-bf16",
+    "providerID": "omlx",
+    "tokens": {
+     "total": 8287,
+     "input": 534,
+     "output": 329,
+     "reasoning": 0,
+     "cache": {
+      "write": 0,
+      "read": 7424
+     }
+    },
+    "cost": 0,
+    "time": {
+     "created": 1788796447805,
+     "completed": 1788796500331
+    },
+    "finish": "tool-calls",
+    "mode": "build",
+    "path": {
+     "cwd": "{PROJECT}",
+     "root": "{PROJECT}"
+    }
+   }
+  },
+  {
+   "id": "msg-0065",
+   "session_id": "ses-0056",
+   "time_created": 1788796455188,
+   "time_updated": 1788796500343,
+   "data": {
+    "role": "user",
+    "time": {
+     "created": 1788796455188
+    },
+    "path": {
+     "cwd": "{PROJECT}",
+     "root": "{PROJECT}"
+    }
+   }
+  },
+  {
+   "id": "msg-0066",
+   "session_id": "ses-0056",
+   "time_created": 1788796455203,
+   "time_updated": 1788796467083,
+   "data": {
+    "role": "assistant",
+    "modelID": "Qwen3-1.7B-MLX-bf16",
+    "providerID": "omlx",
+    "tokens": {
+     "total": 3696,
+     "input": 3114,
+     "output": 582,
+     "reasoning": 0,
+     "cache": {
+      "write": 0,
+      "read": 0
+     }
+    },
+    "cost": 0,
+    "time": {
+     "created": 1788796455203,
+     "completed": 1788796467083
+    },
+    "finish": "tool-calls",
+    "mode": "explore",
+    "path": {
+     "cwd": "{PROJECT}",
+     "root": "{PROJECT}"
+    }
+   }
+  },
+  {
+   "id": "msg-0067",
+   "session_id": "ses-0056",
+   "time_created": 1788796467085,
+   "time_updated": 1788796474925,
+   "data": {
+    "role": "assistant",
+    "modelID": "Qwen3-1.7B-MLX-bf16",
+    "providerID": "omlx",
+    "tokens": {
+     "total": 4073,
+     "input": 2435,
+     "output": 358,
+     "reasoning": 0,
+     "cache": {
+      "write": 0,
+      "read": 1280
+     }
+    },
+    "cost": 0,
+    "time": {
+     "created": 1788796467085,
+     "completed": 1788796474925
+    },
+    "finish": "tool-calls",
+    "mode": "explore",
+    "path": {
+     "cwd": "{PROJECT}",
+     "root": "{PROJECT}"
+    }
+   }
+  },
+  {
+   "id": "msg-0068",
+   "session_id": "ses-0056",
+   "time_created": 1788796474926,
+   "time_updated": 1788796480254,
+   "data": {
+    "role": "assistant",
+    "modelID": "Qwen3-1.7B-MLX-bf16",
+    "providerID": "omlx",
+    "tokens": {
+     "total": 4347,
+     "input": 252,
+     "output": 255,
+     "reasoning": 0,
+     "cache": {
+      "write": 0,
+      "read": 3840
+     }
+    },
+    "cost": 0,
+    "time": {
+     "created": 1788796474926,
+     "completed": 1788796480254
+    },
+    "finish": "tool-calls",
+    "mode": "explore",
+    "path": {
+     "cwd": "{PROJECT}",
+     "root": "{PROJECT}"
+    }
+   }
+  }
+ ]
+}

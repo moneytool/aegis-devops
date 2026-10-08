@@ -1,0 +1,26 @@
+{"startTime": "2026-09-27T20:58:34.394Z", "lastUpdated": "2026-09-27T20:58:34.394Z", "kind": "main", "sessionId": "77777777-aaaa-bbbb-cccc-000000000001", "projectHash": "0000000000000000000000000000000000000000000000000000000000000000"}
+{"$set": {"lastUpdated": "2026-09-27T20:58:34.394Z", "messages": [{"id": "d04923d38bb0f6017037e74183378ef4", "timestamp": "2026-09-27T20:58:34.394Z", "type": "user", "content": [{"text": "<redacted>"}]}]}}
+{"timestamp": "2026-09-27T20:58:41.042Z", "type": "user", "id": "gu-0042", "content": [{"text": "<redacted>"}]}
+{"$set": {"lastUpdated": "2026-09-27T20:58:41.043Z"}}
+{"timestamp": "2026-09-27T20:58:51.974Z", "type": "gemini", "tokens": {"input": 11391, "output": 115, "cached": 0, "thoughts": 887, "tool": 0, "total": 12393}, "model": "gemini-3.8-flash", "id": "g-0043", "content": "<redacted>"}
+{"$set": {"lastUpdated": "2026-09-27T20:58:51.974Z"}}
+{"timestamp": "2026-09-27T20:58:51.974Z", "type": "gemini", "tokens": {"input": 11391, "output": 115, "cached": 0, "thoughts": 887, "tool": 0, "total": 12393}, "model": "gemini-3.8-flash", "id": "g-0043", "content": "<redacted>"}
+{"timestamp": "2026-09-27T20:58:52.640Z", "type": "user", "id": "gu-0044", "content": [{"text": "<redacted>"}]}
+{"$set": {"lastUpdated": "2026-09-27T20:58:52.640Z"}}
+{"timestamp": "2026-09-27T20:58:53.737Z", "type": "gemini", "tokens": {"input": 12698, "output": 44, "cached": 0, "thoughts": 85, "tool": 0, "total": 12827}, "model": "gemini-3.8-flash", "id": "g-0045", "content": "<redacted>"}
+{"$set": {"lastUpdated": "2026-09-27T20:58:53.737Z"}}
+{"timestamp": "2026-09-27T20:58:53.737Z", "type": "gemini", "tokens": {"input": 12698, "output": 44, "cached": 0, "thoughts": 85, "tool": 0, "total": 12827}, "model": "gemini-3.8-flash", "id": "g-0045", "content": "<redacted>"}
+{"timestamp": "2026-09-27T20:58:53.943Z", "type": "user", "id": "gu-0046", "content": [{"text": "<redacted>"}]}
+{"$set": {"lastUpdated": "2026-09-27T20:58:53.943Z"}}
+{"timestamp": "2026-09-27T20:58:55.529Z", "type": "gemini", "tokens": {"input": 12888, "output": 82, "cached": 0, "thoughts": 172, "tool": 0, "total": 13142}, "model": "gemini-3.8-flash", "id": "g-0047", "content": "<redacted>"}
+{"$set": {"lastUpdated": "2026-09-27T20:58:55.529Z"}}
+{"timestamp": "2026-09-27T20:58:55.529Z", "type": "gemini", "tokens": {"input": 12888, "output": 82, "cached": 0, "thoughts": 172, "tool": 0, "total": 13142}, "model": "gemini-3.8-flash", "id": "g-0047", "content": "<redacted>"}
+{"timestamp": "2026-09-27T20:58:55.631Z", "type": "user", "id": "gu-0048", "content": [{"text": "<redacted>"}]}
+{"$set": {"lastUpdated": "2026-09-27T20:58:55.631Z"}}
+{"timestamp": "2026-09-27T20:58:57.427Z", "type": "gemini", "tokens": {"input": 13181, "output": 93, "cached": 0, "thoughts": 180, "tool": 0, "total": 13454}, "model": "gemini-3.8-flash", "id": "g-0049", "content": "<redacted>"}
+{"$set": {"lastUpdated": "2026-09-27T20:58:57.428Z"}}
+{"timestamp": "2026-09-27T20:58:57.427Z", "type": "gemini", "tokens": {"input": 13181, "output": 93, "cached": 0, "thoughts": 180, "tool": 0, "total": 13454}, "model": "gemini-3.8-flash", "id": "g-0049", "content": "<redacted>"}
+{"timestamp": "2026-09-27T20:58:57.433Z", "type": "user", "id": "gu-0050", "content": [{"text": "<redacted>"}]}
+{"$set": {"lastUpdated": "2026-09-27T20:58:57.433Z"}}
+{"timestamp": "2026-09-27T20:58:58.830Z", "type": "gemini", "tokens": {"input": 13547, "output": 114, "cached": 0, "thoughts": 129, "tool": 0, "total": 13790}, "model": "gemini-3.8-flash", "id": "g-0051", "content": "<redacted>"}
+{"$set": {"lastUpdated": "2026-09-27T20:58:58.830Z"}}
