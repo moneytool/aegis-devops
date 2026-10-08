@@ -205,11 +205,21 @@ key; an annotation may sit on an unchanged line above. So both `--since` and the
 3. **Normalize** each finding to a key: tool, file, the suppressed anchor (resource address,
    YAML path, or the code line's content hash when there is no structure), plus its value: the
    rule set (or `*`), scope (line < block < file < repo), and annotation.
-4. **Compare** before and after by key. A finding is **new** if its key is absent before; it is
-   **widened** if its rule set grows, it becomes blanket, its scope grows, its annotation loses a
-   required key, or its `expires` moves later. Narrowing and removal are recorded, never
-   violations. An annotation change on an unchanged suppression (reason edited, owner removed) is
-   evaluated like a new one.
+4. **Compare** before and after by key. A finding is **new** if its key is absent before.
+   For a key present in both, Aegis computes the **newly suppressed rules**:
+   - explicit rule sets on both sides: `after_rules − before_rules`. Any nonempty result is
+     evaluated, even if other rules were removed in the same change, so replacing `CKV_1` with
+     `CKV_2` (same size, not a superset) suppresses `CKV_2` anew;
+   - specific → blanket (`# nosec B101` → `# nosec`): widened, always, as a blanket ignore;
+   - blanket → specific, or blanket → blanket: no newly suppressed rules.
+
+   The finding is **widened** if the newly suppressed rules are nonempty, it becomes blanket, its
+   scope grows, its annotation loses a required key, or its `expires` moves later. Only the newly
+   suppressed rules are evaluated against policy; the rules it already covered are not
+   re-reported. A change is **pure narrowing** only when it is none of these (rules removed, scope
+   reduced, expiry brought forward); narrowing and removal are recorded, never violations. An
+   annotation change on an unchanged suppression (reason edited, owner removed) is evaluated like
+   a new one.
 
 ### 7.1 Hook installation
 
@@ -268,7 +278,9 @@ split into a library later if there is demand.
 
 - *Detection (§7):* `enabled = false` added inside an existing `.tflint.hcl` rule block; a new
   entry appended to `skip-check:` in `.checkov.yaml` and to `ignored:` in `.hadolint.yaml`; an
-  inline rule list widened (`CKV_AWS_18` → `CKV_AWS_18,CKV_AWS_19`) and a specific id made blanket
+  inline rule list widened (`CKV_AWS_18` → `CKV_AWS_18,CKV_AWS_19`), replaced at equal size
+  (`CKV_AWS_18` → `CKV_AWS_19`), and changed by mixed removal and addition (`CKV_AWS_18,CKV_AWS_19` →
+  `CKV_AWS_19,CKV_AWS_20`: only `CKV_AWS_20` is new); blanket → specific (narrowing); a specific id made blanket
   (`# nosec B101` → `# nosec`); scope widened (`ignore-line` → `ignore-block`); an annotation on an
   unchanged preceding line removed or its `expires` pushed later; a suppression moved to another
   file and a renamed file (not new); a multi-hunk `apply_patch` and a `MultiEdit` touching the same
