@@ -294,6 +294,12 @@ environment (below) is a load error too: break-glass is the strongest exemption.
   reusable workflow (`job_workflow_ref`, via GitHub's OIDC subject customisation) or to a
   protected environment with required reviewers (`…:environment:<name>`).
 - `no-break-glass` — a platform with listed identities but no break-glass identity.
+- `source-identity-inherited` — a trusted AWS `source-identity`. A source identity is set when a
+  session starts and survives role chaining, so an agent started in a session that carries it
+  is exempt too ([Trusted source identities](server-side.md#trusted-source-identities)). Trust
+  one only if no agent ever runs under it, and say so on the entry with `no_agents: true`, which
+  clears the warning (allowed only on a trusted `source-identity`; a signed statement like any
+  other in the file).
 
 Check it with `aegis agents --pretty` (exit 1 on any warning); `aegis snapshot` loads it the same
 way and includes its hash and warnings. `aegis init` writes `agents.example.yaml`, which never

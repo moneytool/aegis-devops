@@ -345,3 +345,39 @@ def test_workflow_unbound_break_glass_subject_is_rejected(tmp_path):
         *BREAK_GLASS,
         {"platform": "github", "kind": "oidc-subject", "id": "repo:org/app:environment:prod"}])
     assert model.warnings == ()
+
+
+# --- trusted source identities (review of the AWS SCP article, 2026-10-02) ---------------
+
+
+def test_a_trusted_source_identity_warns_that_agents_inherit_it(tmp_path):
+    """A source identity is fixed when a session starts and survives role
+    chaining, so an agent started in that session carries it and is exempt."""
+    model = _load(tmp_path, trusted=[
+        {"platform": "aws", "kind": "source-identity", "id": "alice@example.com"}])
+    [warning] = [w for w in model.warnings if not w.startswith("no-break-glass")]
+    assert warning.startswith("source-identity-inherited: alice@example.com")
+    assert "no_agents: true" in warning and "#trusted-source-identities" in warning
+
+
+def test_no_agents_acknowledges_a_trusted_source_identity(tmp_path):
+    model = _load(tmp_path, trusted=[
+        {"platform": "aws", "kind": "source-identity", "id": "alice@example.com",
+         "no_agents": True}])
+    assert not [w for w in model.warnings if w.startswith("source-identity-inherited")]
+    assert model.trusted[0].to_dict()["no_agents"] is True
+
+
+@pytest.mark.parametrize("section,entry", [
+    ("trusted", {"platform": "aws", "kind": "role",
+                 "id": "arn:aws:iam::111122223333:role/Deploy", "no_agents": True}),
+    ("break_glass", {"platform": "aws", "kind": "source-identity", "id": "oncall",
+                     "no_agents": True}),
+    ("trusted", {"platform": "aws", "kind": "source-identity", "id": "alice",
+                 "no_agents": "yes"}),
+])
+def test_no_agents_is_only_for_trusted_source_identities(tmp_path, section, entry):
+    fields = {"trusted": [entry]} if section == "trusted" else {
+        "break_glass": [*BREAK_GLASS, entry]}
+    with pytest.raises(ValueError, match="no_agents"):
+        _load(tmp_path, **fields)

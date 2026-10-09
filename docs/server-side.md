@@ -13,6 +13,13 @@ platform's own controls, so the platform refuses the call whatever the client.
 > the IAM policy simulator ([`dev/aws-acceptance/`](https://github.com/moneytool/aegis-devops/blob/main/docs/dev/aws-acceptance/README.md)). A mapping
 > added later starts unverified, and the coverage report says so per rule.
 
+**What the second layer adds, and what it doesn't.** The client hook and the compiled policy
+come from the same signed policy, so a rule that is wrong is wrong in both. The server-side
+layer adds enforcement for calls the hook never sees (an SDK script, a credential used from
+somewhere else); it doesn't add a second opinion on whether the rule is right. For that,
+review `coverage.md` and keep an independently written guardrail (your own SCPs, RBAC, admission
+policies) alongside Aegis.
+
 ## How it fits together
 
 1. **The verified snapshot.** Compilers start from `aegis snapshot`: only constraints that are
@@ -40,6 +47,18 @@ condition:
   `aws:SourceIdentity` a trusted source identity;
 - `agents-only`: applies when `aws:PrincipalArn` is a listed agent (or its `aws:SourceIdentity`
   is), and never to break-glass.
+
+### Trusted source identities
+
+**Trusted source identities must never carry an agent.** Source identity is set when a session
+starts and survives role chaining. If a developer whose session carries a trusted source
+identity runs an agent in that session, the agent's calls carry it too and are exempt. The
+self-protection statements stop an agent from *setting* an exempt source identity; they cannot
+stop it *inheriting* one. List a source identity as trusted only if no agent ever runs under
+it, and give agents their own role and source identity (for example `agent:<name>`).
+`aegis agents` warns about every trusted source identity (`source-identity-inherited`) until
+the entry says `no_agents: true`
+([Configuration: agents.yaml](configuration.md#agentsyaml-identity-model)).
 
 `--account` is the **member account** the SCPs attach to. Its environment comes from
 `environments.yaml` (`aws.accounts`), so an `env: prod` rule compiles into the prod account's
