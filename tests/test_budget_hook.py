@@ -233,3 +233,42 @@ def test_install_keeps_other_hooks_when_switching_budget_on_and_off(env):
     install("claude", user=False, project=env["project"], budget=True)
     install("claude", user=False, project=env["project"], budget=False)
     assert _settings(env)["hooks"]["UserPromptSubmit"] == [{"hooks": [mine]}]
+
+
+# --- install-time detection follows the hook's precedence (review of #39) --------------------
+
+
+def _matchers(env, project: Path) -> list[str]:
+    path = install("claude", user=False, project=project)
+    return [e["matcher"] for e in json.loads(path.read_text())["hooks"]["PreToolUse"]]
+
+
+def test_a_nested_project_inherits_its_parents_budget(env):
+    write_budget(env, BUDGET)
+    nested = env["project"] / "services" / "api"
+    nested.mkdir(parents=True)
+    assert _matchers(env, nested) == ["*"]
+
+
+def test_a_project_without_aegis_inherits_the_user_budget(env, tmp_path):
+    user_dir = env["home"] / ".config" / "aegis"
+    init_config_dir(user_dir)
+    (user_dir / "budget.yaml").write_text(BUDGET)
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    assert _matchers(env, other) == ["*"]
+
+
+def test_aegis_config_dir_shadows_a_local_budget(env, tmp_path, monkeypatch):
+    write_budget(env, BUDGET)
+    shadow = tmp_path / "central"
+    init_config_dir(shadow)                                  # no budget.yaml there
+    monkeypatch.setenv("AEGIS_CONFIG_DIR", str(shadow))
+    assert _matchers(env, env["project"]) == ["Bash"]
+
+
+def test_a_nearer_aegis_without_a_budget_shadows_the_parents(env):
+    write_budget(env, BUDGET)
+    nested = env["project"] / "services" / "api"
+    init_config_dir(nested / ".aegis")
+    assert _matchers(env, nested) == ["Bash"]

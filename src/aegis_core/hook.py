@@ -580,13 +580,18 @@ def merge_config(agent: str, existing: dict, command: str | None, *,
 
 
 def budget_configured(*, user: bool, project: Path) -> bool:
-    """Whether the policy that would apply has a ``budget.yaml``: the
-    project's ``.aegis/`` (or ``$AEGIS_CONFIG_DIR``), or ``~/.config/aegis``
-    for a user-level install."""
-    env = os.environ.get(config_module.CONFIG_ENV_VAR)
-    dirs = [Path(env)] if env else []
-    dirs.append(Path.home() / ".config" / "aegis" if user else project / ".aegis")
-    return any((d / BUDGET_FILE).is_file() for d in dirs)
+    """Whether the policy directory that would apply holds a ``budget.yaml``,
+    resolved with the hook's own precedence and never by looking past a
+    directory that shadows another: for a project install,
+    ``$AEGIS_CONFIG_DIR``, else the nearest ``.aegis/`` at or above the
+    project, else ``~/.config/aegis`` (:func:`find_opt_in_config`); for a
+    user install, ``$AEGIS_CONFIG_DIR``, else ``~/.config/aegis``."""
+    if user:
+        env = os.environ.get(config_module.CONFIG_ENV_VAR)
+        directory: Path | None = Path(env) if env else Path.home() / ".config" / "aegis"
+    else:
+        directory = find_opt_in_config(project)
+    return directory is not None and (directory / BUDGET_FILE).is_file()
 
 
 _AFTER_INSTALL = {
@@ -602,9 +607,11 @@ _AFTER_INSTALL = {
 }
 
 
-def _install_opencode_plugin(path: Path, *, remove: bool) -> Path:
+def _install_opencode_plugin(path: Path, *, remove: bool, budget: bool | None = None) -> Path:
     """OpenCode hooks are JS plugins: write (or delete) our plugin file, with
-    the argv of this aegis filled in."""
+    the argv of this aegis and the budget coverage filled in. The plugin
+    detects a ``budget.yaml`` at run time, so the default is ``"auto"``;
+    ``--no-budget`` (``budget=False``) writes ``"off"``: shell commands only."""
     if remove:
         if path.exists():
             path.unlink()
@@ -615,16 +622,26 @@ def _install_opencode_plugin(path: Path, *, remove: bool) -> Path:
     marker = "const INSTALLED = null"
     if marker not in template:
         raise ValueError("opencode plugin template has no INSTALLED marker")
+    mode_marker = 'const BUDGET_MODE = "auto"'
+    if mode_marker not in template:
+        raise ValueError("opencode plugin template has no BUDGET_MODE marker")
+    mode = "off" if budget is False else "auto"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(template.replace(marker, f"const INSTALLED = {json.dumps(_aegis_command())}"))
+    path.write_text(template.replace(marker, f"const INSTALLED = {json.dumps(_aegis_command())}")
+                    .replace(mode_marker, f"const BUDGET_MODE = {json.dumps(mode)}"))
     return path
 
 
 def install(agent: str, *, user: bool, project: Path, remove: bool = False,
-            budget: bool = False) -> Path:
+            budget: bool | None = None) -> Path:
+    """Writes (or removes) the agent's hook. ``budget``: ``True``/``False``
+    install or leave out the budget hooks; ``None`` detects whether the
+    policy directory that applies holds a ``budget.yaml``."""
     path = config_path(agent, user=user, project=project)
     if agent == "opencode":
-        return _install_opencode_plugin(path, remove=remove)
+        return _install_opencode_plugin(path, remove=remove, budget=budget)
+    if budget is None:
+        budget = budget_configured(user=user, project=project)
     existing: dict = {}
     if path.exists():
         text = path.read_text()
@@ -653,16 +670,19 @@ _BUDGET_INSTALL_NOTE = {
               "the limit",
     "copilot": "budget: the hook already sees every tool call (premium requests are "
                "counted); Copilot CLI's prompt hook cannot block, so prompts are not stopped",
-    "opencode": "budget: the plugin checks every tool call in projects with a budget.yaml; "
-                "OpenCode has no prompt hook, so prompts are not stopped",
+    "opencode": "budget: the plugin checks every tool call wherever a budget.yaml applies "
+                "(--no-budget: shell commands only); OpenCode has no prompt hook, so prompts "
+                "are not stopped",
 }
 
 
 def main_install(agent: str, *, user: bool, project: str, remove: bool,
                  budget: bool | None = None) -> int:
-    if budget is None:
-        budget = budget_configured(user=user, project=Path(project))
     path = install(agent, user=user, project=Path(project), remove=remove, budget=budget)
+    if agent == "opencode":
+        budget = budget is not False   # the plugin detects a budget.yaml at run time
+    elif budget is None:
+        budget = budget_configured(user=user, project=Path(project))
     if remove:
         print(f"aegis: removed the {agent} hook from {path}")
         return 0

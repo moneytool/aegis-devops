@@ -163,3 +163,53 @@ def test_budget_only_entries_allow_when_aegis_is_missing(tmp_path):
     """Without aegis nothing can be measured; only shell commands are gated
     by the wrapper's own fallback."""
     assert _run_budget_only(tmp_path, budget=True, aegis_ok=False) == (0, False)
+
+
+def _wrapper_starts_aegis(tmp_path, *, budget_in: str, cwd: str, payload_cwd: str | None,
+                          project_env: str | None, raw_payload: str | None = None) -> bool:
+    """Runs the budget-only wrapper with a fake aegis; True if it was started."""
+    dirs = {"orig": tmp_path / "orig", "wt": tmp_path / "work tree"}
+    for d in dirs.values():
+        (d / ".aegis").mkdir(parents=True, exist_ok=True)
+    (dirs[budget_in] / ".aegis" / "budget.yaml").write_text("unit: usd\n") if budget_in \
+        else None
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    marker = tmp_path / "aegis-ran"
+    marker.unlink(missing_ok=True)
+    fake = tmp_path / "aegis"
+    fake.write_text(f"#!/bin/sh\ncat >/dev/null\ntouch '{marker}'\nexit 0\n")
+    fake.chmod(0o755)
+    env = {"HOME": str(home), "PATH": "/usr/bin:/bin", "AEGIS_BIN": str(fake)}
+    if project_env:
+        env["CLAUDE_PROJECT_DIR"] = str(dirs[project_env])
+    payload = raw_payload or json.dumps(
+        {"tool_name": "Edit", "tool_input": {}, "session_id": "s",
+         **({"cwd": str(dirs[payload_cwd])} if payload_cwd else {})})
+    subprocess.run(["bash", str(WRAPPER), "claude", "--budget-only"], input=payload,
+                   capture_output=True, text=True, cwd=dirs[cwd], env=env, check=False)
+    return marker.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="bash wrapper")
+def test_budget_only_follows_the_hooks_cwd_not_the_original_project(tmp_path):
+    """Review of #39: CLAUDE_PROJECT_DIR stays at the session's original root
+    while the payload's cwd follows a cd into a worktree with a budget (whose
+    path here has a space)."""
+    assert _wrapper_starts_aegis(tmp_path, budget_in="wt", cwd="wt", payload_cwd="wt",
+                                 project_env="orig")
+    assert _wrapper_starts_aegis(tmp_path, budget_in="wt", cwd="orig", payload_cwd="wt",
+                                 project_env="orig")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="bash wrapper")
+def test_budget_only_skips_aegis_when_no_candidate_directory_has_a_budget(tmp_path):
+    assert not _wrapper_starts_aegis(tmp_path, budget_in="", cwd="wt", payload_cwd="wt",
+                                     project_env="orig")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="bash wrapper")
+def test_budget_only_starts_aegis_when_it_cannot_read_the_cwd(tmp_path):
+    raw = '{"tool_name": "Edit", "cwd": "/tmp/a\\"b", "session_id": "s"}'
+    assert _wrapper_starts_aegis(tmp_path, budget_in="", cwd="orig", payload_cwd=None,
+                                 project_env=None, raw_payload=raw)

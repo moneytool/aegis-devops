@@ -18,11 +18,11 @@ set -u
 agent=${1:-claude}
 mode=${2:-}
 
-# The policy directory aegis would use: $AEGIS_CONFIG_DIR, the nearest .aegis/
-# at or above the project, or ~/.config/aegis (as aegis_core/hook.py does).
+# The policy directory aegis would use from directory $1: $AEGIS_CONFIG_DIR,
+# the nearest .aegis/ at or above $1, or ~/.config/aegis (as hook.py does).
 policy_dir() {
   if [ -n "${AEGIS_CONFIG_DIR:-}" ]; then printf '%s' "$AEGIS_CONFIG_DIR"; return 0; fi
-  d=${CLAUDE_PROJECT_DIR:-${COPILOT_PROJECT_DIR:-${GEMINI_PROJECT_DIR:-$PWD}}}
+  d=$1
   while [ -n "$d" ]; do
     if [ -d "$d/.aegis" ]; then printf '%s' "$d/.aegis"; return 0; fi
     [ "$d" = "/" ] && break
@@ -32,11 +32,37 @@ policy_dir() {
   return 1
 }
 
-if [ "$mode" = "--budget-only" ]; then
-  dir=$(policy_dir) || exit 0
-  [ -f "$dir/budget.yaml" ] || exit 0
-fi
+budget_applies_from() {
+  [ -n "$1" ] || return 1
+  dir=$(policy_dir "$1") || return 1
+  [ -f "$dir/budget.yaml" ]
+}
+
 payload=$(cat)
+if [ "$mode" = "--budget-only" ]; then
+  # aegis decides from the payload's cwd first (the agent's directory may have
+  # changed since the session started, e.g. into a worktree), then the
+  # project variables. Skip starting aegis only when none of those has a
+  # budget.yaml; if the payload names a cwd this cannot read, start it.
+  found=1
+  cwds=$(printf '%s' "$payload" | grep -o '"cwd"[[:space:]]*:[[:space:]]*"[^"\\]*"' \
+         | sed 's/.*:[[:space:]]*"\(.*\)"$/\1/')
+  ncwd=$(printf '%s' "$payload" | grep -o '"cwd"' | wc -l | tr -d ' ')
+  if [ "$ncwd" != "$(printf '%s' "$cwds" | grep -c .)" ]; then
+    found=0   # a cwd this cannot read (escaped characters): let aegis decide
+  else
+    while IFS= read -r d; do
+      if budget_applies_from "$d"; then found=0; break; fi
+    done <<DIRS
+$cwds
+$PWD
+${CLAUDE_PROJECT_DIR:-}
+${GEMINI_PROJECT_DIR:-}
+${COPILOT_PROJECT_DIR:-}
+DIRS
+  fi
+  [ "$found" = 0 ] || exit 0
+fi
 
 aegis=${AEGIS_BIN:-}
 if [ -z "$aegis" ] && command -v aegis >/dev/null 2>&1; then aegis=aegis; fi

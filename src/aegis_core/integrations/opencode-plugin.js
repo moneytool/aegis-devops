@@ -22,6 +22,9 @@ import { dirname, join, resolve } from "node:path"
 // `aegis install opencode` replaces null with the argv that starts the aegis
 // it was run from (GUI apps do not see your shell's PATH).
 const INSTALLED = null
+// `aegis install opencode --no-budget` replaces "auto" with "off": then only bash
+// commands go to aegis, whatever budget.yaml says.
+const BUDGET_MODE = "auto"
 const AEGIS = process.env.AEGIS_BIN ? [process.env.AEGIS_BIN] : INSTALLED || ["aegis"]
 const INFRA =
   /(^|[^\w.-])(kubectl|k|terraform|tf|tofu|aws|az|gcloud|gsutil|helm|argocd|flux|git|gh|psql|mysql|sqlite3|mongosh|pulumi|alembic|flyway|rails|prisma)([^\w.-]|$)/
@@ -64,7 +67,7 @@ export const AegisDevOps = async ({ directory, client }) => ({
     const isBash = input?.tool === "bash"
     const command = output?.args?.command
     if (isBash && (typeof command !== "string" || !command.trim())) return
-    if (!isBash && !hasBudget(cwd)) return
+    if (!isBash && (BUDGET_MODE === "off" || !hasBudget(cwd))) return
     const payload = JSON.stringify({
       tool_name: input?.tool,
       tool_input: isBash ? { command } : output?.args || {},
