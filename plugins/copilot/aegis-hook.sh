@@ -23,10 +23,12 @@ mode=${2:-}
 policy_dir() {
   if [ -n "${AEGIS_CONFIG_DIR:-}" ]; then printf '%s' "$AEGIS_CONFIG_DIR"; return 0; fi
   d=$1
+  case "$d" in /*) ;; *) d="$PWD/$d" ;; esac   # relative: from the hook's directory
   while [ -n "$d" ]; do
     if [ -d "$d/.aegis" ]; then printf '%s' "$d/.aegis"; return 0; fi
-    [ "$d" = "/" ] && break
-    d=$(dirname "$d")
+    parent=$(dirname "$d")
+    [ "$parent" = "$d" ] && break               # reached the root (or "." / "//")
+    d=$parent
   done
   if [ -d "$HOME/.config/aegis" ]; then printf '%s' "$HOME/.config/aegis"; return 0; fi
   return 1
@@ -84,10 +86,12 @@ opted_in() {
   [ -n "${AEGIS_CONFIG_DIR:-}" ] && return 0
   [ -d "$HOME/.config/aegis" ] && return 0
   d=${CLAUDE_PROJECT_DIR:-${COPILOT_PROJECT_DIR:-${GEMINI_PROJECT_DIR:-$PWD}}}
+  case "$d" in /*) ;; *) d="$PWD/$d" ;; esac
   while [ -n "$d" ]; do
     [ -d "$d/.aegis" ] && return 0
-    [ "$d" = "/" ] && break
-    d=$(dirname "$d")
+    parent=$(dirname "$d")
+    [ "$parent" = "$d" ] && break
+    d=$parent
   done
   return 1
 }

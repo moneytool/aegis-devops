@@ -213,3 +213,41 @@ def test_budget_only_starts_aegis_when_it_cannot_read_the_cwd(tmp_path):
     raw = '{"tool_name": "Edit", "cwd": "/tmp/a\\"b", "session_id": "s"}'
     assert _wrapper_starts_aegis(tmp_path, budget_in="", cwd="orig", payload_cwd=None,
                                  project_env=None, raw_payload=raw)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="bash wrapper")
+@pytest.mark.parametrize("rel", [".", "..", "sub/dir", "./x/../y"])
+def test_budget_only_handles_relative_cwds_in_bounded_time(tmp_path, rel):
+    """Review of #39: a nested tool argument like {"cwd": "."} reached the
+    ancestor walk unresolved, and dirname(".") == "." never ended. Relative
+    candidates are resolved from the hook's directory; the walk stops when
+    dirname stops changing."""
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    payload = json.dumps({"tool_name": "Edit", "cwd": str(project), "session_id": "s",
+                          "tool_input": {"cwd": rel}})
+    proc = subprocess.run(["bash", str(WRAPPER), "claude", "--budget-only"], input=payload,
+                          capture_output=True, text=True, cwd=project, timeout=10,
+                          env={"HOME": str(home), "PATH": "/usr/bin:/bin"}, check=False)
+    assert proc.returncode == 0
+
+
+@pytest.mark.skipif(os.name == "nt", reason="bash wrapper")
+def test_a_relative_cwd_still_finds_a_budget_above_it(tmp_path):
+    project = tmp_path / "project"
+    (project / ".aegis").mkdir(parents=True)
+    (project / ".aegis" / "budget.yaml").write_text("unit: usd\n")
+    (project / "sub").mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    marker = tmp_path / "ran"
+    fake = tmp_path / "aegis"
+    fake.write_text(f"#!/bin/sh\ncat >/dev/null\ntouch '{marker}'\n")
+    fake.chmod(0o755)
+    payload = json.dumps({"tool_name": "Edit", "session_id": "s", "cwd": "sub"})
+    subprocess.run(["bash", str(WRAPPER), "claude", "--budget-only"], input=payload,
+                   capture_output=True, text=True, cwd=project, timeout=10, check=False,
+                   env={"HOME": str(home), "PATH": "/usr/bin:/bin", "AEGIS_BIN": str(fake)})
+    assert marker.exists()
