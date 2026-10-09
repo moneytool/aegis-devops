@@ -41,7 +41,9 @@ Gemini CLI: `gemini extensions install https://github.com/moneytool/aegis-devops
 Copilot (CLI and VS Code), Cursor and OpenCode: `aegis install codex|copilot|vscode|cursor|opencode`
 (see [Coding agents](docs/agents.md)). Aegis only acts in projects with a `.aegis/` policy, and
 only blocks what that policy blocks. `aegis init` writes example rules signed with a public
-example key; replace both before relying on it ([Configuration](docs/configuration.md)).
+example key; replace both before relying on it ([Configuration](docs/configuration.md)). It
+works alongside RBAC and your agent's own permission settings; see
+[Why not RBAC](#why-not-rbac-or-the-agents-own-permission-settings).
 
 In CI, the [Aegis-DevOps Plan Check](https://github.com/marketplace/actions/aegis-devops-plan-check)
 Action checks a Terraform or OpenTofu plan on every pull request
@@ -203,6 +205,45 @@ poisoned rule they are shown, `gpt-6-luna` on 15 of 19, and Aegis on none. A mod
 about who wrote a rule, but it cannot recompute a hash or fetch a source. Up to v0.1.5 these
 rows were scored against all 500 rules, which counted rules the models never saw as resisted
 poison and understated their susceptibility (0.23–0.33); see [`CHANGELOG.md`](CHANGELOG.md).
+
+## Why not RBAC, or the agent's own permission settings?
+
+Keep both. Aegis sits alongside them; it doesn't replace either.
+
+**Agent permission settings** (Claude Code's allow/deny rules, Copilot's tool approvals and
+similar) decide which commands an agent may run without asking you. They match the command
+text. Claude Code's documentation says a Bash deny rule ["isn't a security boundary around the
+program"](https://code.claude.com/docs/en/permissions#bash-rule-limits), and recommends a
+PreToolUse hook when you need to inspect the full command before it runs. Aegis is that hook. It
+works out what the command will do, so every spelling of the same action reaches the same rule:
+
+| Command the agent writes | Aegis with the example policy |
+|---|---|
+| `kubectl delete deploy web -n prod` | BLOCK (`no-delete-in-prod-namespace`) |
+| `kubectl -n prod delete deploy web` | BLOCK, same rule |
+| `/usr/bin/kubectl …`, `sudo kubectl …`, `env kubectl …` | BLOCK, same rule |
+| `bash -c 'kubectl delete deploy web -n prod'` | BLOCK, same rule |
+| `cd /tmp && kubectl delete deploy web -n prod` | BLOCK, same rule |
+| `git -C . push --force origin main` | BLOCK (`git-block-force-push-main`) |
+| `K=kubectl; $K delete deploy web -n prod` | Refused: it can't be checked statically, so the hook denies it and asks for the command on its own |
+
+Permission settings also record *what* is allowed, not who decided it. An Aegis rule only gets a
+vote if nobody has changed it since it was signed and its author was allowed to write that kind
+of rule.
+
+**RBAC and IAM** decide what an identity may do. A coding agent usually runs with the
+developer's own kubeconfig and cloud credentials, so RBAC sees the developer and grants the
+agent the same rights. Aegis decides each action against the policy: no deletes in the `prod`
+namespace, no `kubectl --as` impersonation, no plan that deletes a database. Once agents do have
+their own identities, the same policy compiles into the platform layer, so it holds even for
+calls that never pass through the hook (an SDK script, a leaked key):
+
+- `aegis compile aws`: Service Control Policies scoped to agent identities.
+- `aegis compile kubernetes`: ValidatingAdmissionPolicies scoped to agent identities, plus
+  `aegis audit-identity kubernetes` to report the RBAC permissions that would let an agent get
+  around them (impersonation, editing admission policies, RBAC escalation).
+
+Both are previews; see [server-side enforcement](docs/server-side.md).
 
 ## Why not OPA/Gatekeeper?
 

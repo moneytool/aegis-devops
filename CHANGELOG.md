@@ -33,6 +33,17 @@ test on each agent are in.
     usage bucketed by the time the log recorded, never the time it was read.
   - Evaluation to allow / warn / deny with the measured usage, limits and observed overshoot.
 - The example `authority.yaml` gives `admin` the `budget` class.
+- `agents.yaml`: a trusted AWS `source-identity` now warns (`source-identity-inherited`): a
+  source identity survives role chaining, so an agent started in a session that carries it is
+  exempt too. `no_agents: true` on the entry states that no agent runs under it and clears the
+  warning. Raised in a review of the AWS SCP article by dev.to reader mickyarun.
+
+### Documentation
+- README: "Why not RBAC, or the agent's own permission settings?", with each spelling of a
+  command the example policy blocks; a test keeps the table true.
+- `docs/server-side.md`: what the second layer adds and what it doesn't (one policy enforced
+  twice, not a second opinion), and why a trusted source identity must never carry an agent
+  (same review). Denial reporting from CloudTrail added to the plan.
 
 ## [0.3.2] — 2026-09-29
 
