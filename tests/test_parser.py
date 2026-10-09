@@ -111,7 +111,9 @@ def test_from_kubectl_context_and_cluster():
     assert intent.metadata == {"context": "staging", "cluster": "eu"}
 
 
-def test_from_kubectl_discards_output_and_kubeconfig_and_server():
+def test_from_kubectl_discards_output_and_server_and_records_kubeconfig():
+    """--kubeconfig is recorded: it decides which file the context and
+    namespace come from under --resolve-current-context (review of #38)."""
     intent = from_kubectl(
         [
             "kubectl",
@@ -126,7 +128,7 @@ def test_from_kubectl_discards_output_and_kubeconfig_and_server():
         ]
     )
     assert intent.params == {}
-    assert intent.metadata == {}
+    assert intent.metadata == {"kubeconfig": "/tmp/kc"}
 
 
 # --- kubectl: resource form normalisation -----------------------------------

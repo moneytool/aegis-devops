@@ -228,7 +228,6 @@ _DISCARD_BOOL_FLAGS = {
 
 # Global flags whose value is consumed but not recorded anywhere.
 _DISCARD_VALUE_FLAGS = {
-    "kubeconfig",
     "o",
     "output",
     "s",
@@ -256,7 +255,7 @@ _IMPERSONATION_FLAGS = {"as", "as-uid", "as-group"}
 _MANIFEST_FLAGS = {"f", "filename", "k", "kustomize"}
 
 # Flags carrying environment identity, recorded in metadata.
-_KUBECTL_IDENTITY_FLAGS = {"n", "namespace", "context", "cluster"}
+_KUBECTL_IDENTITY_FLAGS = {"n", "namespace", "context", "cluster", "kubeconfig"}
 
 # Selector flags: value flags recorded in params; the target becomes kind/*.
 _SELECTOR_FLAGS = {"l": "selector", "selector": "selector", "field-selector": "field_selector"}
@@ -498,6 +497,13 @@ def _parse_flags(
                     i += 1
                     val = _value_at(tokens, i, tok)
                 metadata["cluster"] = val
+            elif key == "kubeconfig":
+                # Which kubeconfig kubectl reads: --resolve-current-context
+                # must take the context and namespace from this file only.
+                if val is None:
+                    i += 1
+                    val = _value_at(tokens, i, tok)
+                metadata["kubeconfig"] = val
             elif key == "dry-run":
                 # bare --dry-run, --dry-run=client, --dry-run=server (and the
                 # deprecated --dry-run=true) are rehearsals; --dry-run=none /

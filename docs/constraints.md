@@ -210,6 +210,9 @@ never by running `kubectl`), `$AWS_PROFILE`, `$AWS_DEFAULT_REGION`/`$AWS_REGION`
 explicit `--context` on the argv always wins, and the keys that were filled are listed in
 `metadata.resolved_from_environment`. For kubectl and helm it also fills a missing
 namespace from the context's `namespace` (`default` when the context sets none, as kubectl does;
-never for a cluster-scoped kind or with `-A`). It is opt-in because it **trusts the invoking
+never for a cluster-scoped kind, with `-A`, or for a manifest that was not read, whose objects may
+name their own namespace). An explicit `--kubeconfig` on the argv is the only file consulted, and
+if it cannot be read nothing is filled; otherwise the files in `$KUBECONFIG` are merged as kubectl
+merges them (the first to define a context wins). It is opt-in because it **trusts the invoking
 environment**: whoever controls the process environment controls what Aegis believes the
 target is.

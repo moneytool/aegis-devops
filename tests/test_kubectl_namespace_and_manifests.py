@@ -145,3 +145,78 @@ def test_a_manifest_rule_with_a_namespace_scope_and_no_namespace_escalates():
     verdict, notes = _decide([rule], ["kubectl", "apply", "-f", "-"])
     assert verdict == "ESCALATE" and "manifest-not-inspected: no-prod-secrets" in notes
     assert _decide([rule], ["kubectl", "apply", "-f", "-", "-n", "dev"]) == ("ALLOW", [])
+
+
+# --- --resolve-current-context: which kubeconfig, and when not to infer (review of #38) ------
+
+
+def _kc(path: Path, namespace: str, current: str = "ctx") -> str:
+    path.write_text(f"apiVersion: v1\nkind: Config\ncurrent-context: {current}\ncontexts:\n"
+                    f"- name: ctx\n  context: {{cluster: c, user: u, namespace: {namespace}}}\n")
+    return str(path)
+
+
+def _decide_resolved(rules, argv, environ, home):
+    from aegis_core.environments import resolve_current_context
+
+    store = ConstraintStore(authority_map=dict(AUTHORITY))
+    for r in rules:
+        store.add_constraint(r)
+    interceptor = AegisInterceptor(store)
+    out = []
+    for intent in from_kubectl_multi(argv):
+        resolve_current_context(intent, environ=environ, home=home)
+        out.append((interceptor.intercept(intent, now=NOW), intent))
+    return out
+
+
+@pytest.fixture
+def two_kubeconfigs(tmp_path):
+    """The same context name in two files: dev in ~/.kube/config, prod in production.yaml."""
+    (tmp_path / ".kube").mkdir()
+    _kc(tmp_path / ".kube" / "config", "dev")
+    return tmp_path, _kc(tmp_path / "production.yaml", "prod")
+
+
+@pytest.mark.parametrize("with_context", [True, False])
+def test_an_explicit_kubeconfig_is_the_file_the_namespace_comes_from(two_kubeconfigs,
+                                                                      with_context):
+    home, production = two_kubeconfigs
+    argv = ["kubectl", "--kubeconfig", production, *(["--context", "ctx"] if with_context
+                                                     else []), "rollout", "restart", "deploy/web"]
+    [(decision, intent)] = _decide_resolved([PROD_RESTART], argv, {}, home)
+    assert intent.metadata["namespace"] == "prod"
+    assert decision.verdict == "BLOCK"
+
+
+def test_an_unreadable_explicit_kubeconfig_leaves_the_namespace_unresolved(two_kubeconfigs):
+    home, _ = two_kubeconfigs
+    argv = ["kubectl", "--kubeconfig", str(home / "missing.yaml"), "--context", "ctx",
+            "rollout", "restart", "deploy/web"]
+    [(decision, intent)] = _decide_resolved([PROD_RESTART], argv, {}, home)
+    assert "namespace" not in intent.metadata        # no fallback to ~/.kube/config (dev)
+    assert decision.verdict == "ESCALATE"
+    assert decision.notes == ["namespace-unresolved: no-restart-prod"]
+
+
+def test_kubeconfig_files_merge_first_definition_wins(two_kubeconfigs):
+    home, production = two_kubeconfigs
+    env = {"KUBECONFIG": f"{production}:{home / '.kube' / 'config'}"}
+    [(decision, intent)] = _decide_resolved(
+        [PROD_RESTART], ["kubectl", "rollout", "restart", "deploy/web"], env, home)
+    assert intent.metadata["namespace"] == "prod" and decision.verdict == "BLOCK"
+
+
+def test_an_unread_manifest_never_takes_the_contexts_namespace(two_kubeconfigs):
+    """A dev context is only a default: a stdin manifest can create a prod
+    Secret, so a prod-scoped secret rule must not be decided as dev."""
+    home, _ = two_kubeconfigs
+    rule = _rule("no-prod-secrets", "secret/*", ["apply"], {"namespace": "prod"})
+    [(decision, intent)] = _decide_resolved([rule], ["kubectl", "apply", "-f", "-"], {}, home)
+    assert "namespace" not in intent.metadata
+    assert decision.verdict == "ESCALATE"
+    assert "manifest-not-inspected: no-prod-secrets" in decision.notes
+    # an explicit -n is enforced by kubectl on every object, so it decides normally
+    [(explicit, _)] = _decide_resolved([rule], ["kubectl", "apply", "-f", "-", "-n", "dev"],
+                                       {}, home)
+    assert explicit.verdict == "ALLOW"
