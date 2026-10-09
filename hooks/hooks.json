@@ -11,6 +11,29 @@
             "timeout": 30000
           }
         ]
+      },
+      {
+        "matcher": "^(?!run_shell_command$).*",
+        "hooks": [
+          {
+            "name": "aegis-devops-budget",
+            "type": "command",
+            "command": "\"${extensionPath}${/}hooks${/}aegis-hook.sh\" gemini --budget-only",
+            "timeout": 30000
+          }
+        ]
+      }
+    ],
+    "BeforeAgent": [
+      {
+        "hooks": [
+          {
+            "name": "aegis-devops-budget",
+            "type": "command",
+            "command": "\"${extensionPath}${/}hooks${/}aegis-hook.sh\" gemini --budget-only",
+            "timeout": 30000
+          }
+        ]
       }
     ]
   }

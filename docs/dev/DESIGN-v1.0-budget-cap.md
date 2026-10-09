@@ -255,13 +255,17 @@ commands to **all tool calls**, and adds a prompt hook where the agent has one.
 | Agent | Before each tool call | Before a new prompt | How "warn" shows |
 |---|---|---|---|
 | Claude Code | `PreToolUse` (matcher `*`) | `UserPromptSubmit` | `systemMessage` to the user |
-| Codex CLI | `PreToolUse` | — | stderr message |
-| Gemini CLI | `BeforeTool` | `BeforeAgent` | `systemMessage` |
-| OpenCode | plugin `tool.execute.before` | — | toast |
-| Copilot CLI | `preToolUse` (premium-request cap) | — | stderr message |
+| Codex CLI | `PreToolUse` (matcher `.*`) | `UserPromptSubmit` | `systemMessage` (a UI warning) |
+| Gemini CLI | `BeforeTool` (matcher `.*`) | `BeforeAgent` | `systemMessage` |
+| OpenCode | plugin `tool.execute.before` (every tool, where a budget applies) | — | toast (`client.tui.showToast`) |
+| Copilot CLI | `preToolUse` (no matcher: every tool; premium-request cap) | — (`userPromptSubmitted` cannot block) | stderr only: Copilot CLI has no message field |
 
-Hook and event names in this table come from the 2026-10-06 research and must be re-checked
-against each agent's current version before implementation (step 4 of §10).
+Re-checked against each agent's hook documentation on 2026-10-08 (implementation PR 2): Codex
+now has `UserPromptSubmit` and `systemMessage`; Claude Code and Codex sub-agent hooks carry the
+parent's `session_id`; OpenCode's `tool.execute.before` input carries `sessionID`. The Claude
+Code plugin and the Gemini extension ship fixed hook files, so they carry extra budget-only
+entries (every other tool, and the prompt hook) whose wrapper exits at once unless the policy
+directory holds a `budget.yaml`: projects without a budget start no extra process.
 
 - **Below `warn_at`:** nothing changes; budget adds no output.
 - **Crossing `warn_at`:** one warning per session per threshold (not per call), with usage, the
