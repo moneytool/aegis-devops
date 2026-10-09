@@ -207,34 +207,86 @@ def load_environment_map(
 _KUBE_PROVIDERS = frozenset({"kubernetes", "helm", "flux"})
 
 
+def _load_kubeconfig(
+    environ: Mapping[str, str], home: str | Path | None, kubeconfig: str | None
+) -> tuple[str, str | None, dict[str, dict]] | None:
+    """The kubeconfig kubectl would use, parsed with ``yaml.safe_load``
+    (``kubectl`` is never executed): ``(label path, current-context,
+    {context name: context})``.
+
+    An explicit ``--kubeconfig`` is the only file read; if it cannot be
+    read the answer is ``None`` (unresolved), never a fallback to another
+    file. Otherwise every path in ``$KUBECONFIG`` is merged as kubectl
+    merges them -- the first file to set ``current-context`` wins, and the
+    first file to define a context name wins -- skipping files that do not
+    exist; ``~/.kube/config`` when ``$KUBECONFIG`` is unset. A malformed
+    file, or nothing readable at all, is ``None``."""
+    if kubeconfig:
+        files, strict = [Path(kubeconfig).expanduser()], True
+    else:
+        raw = environ.get("KUBECONFIG", "")
+        files = [Path(p).expanduser() for p in raw.split(os.pathsep) if p.strip()]
+        files, strict = files or [Path(home or Path.home()) / ".kube" / "config"], False
+    current: str | None = None
+    contexts: dict[str, dict] = {}
+    readable = False
+    for path in files:
+        if not strict and not path.exists():
+            continue
+        try:
+            doc = yaml.safe_load(path.read_text()) or {}
+        except (OSError, yaml.YAMLError):
+            return None
+        if not isinstance(doc, dict):
+            return None
+        readable = True
+        cc = doc.get("current-context")
+        if current is None and isinstance(cc, str) and cc:
+            current = cc
+        for entry in doc.get("contexts") or []:
+            if isinstance(entry, dict) and isinstance(entry.get("name"), str):
+                ctx = entry.get("context")
+                contexts.setdefault(entry["name"], ctx if isinstance(ctx, dict) else {})
+    return (str(files[0]), current, contexts) if readable else None
+
+
 def kubeconfig_current_context(
-    environ: Mapping[str, str] | None = None, home: str | Path | None = None
+    environ: Mapping[str, str] | None = None, home: str | Path | None = None,
+    kubeconfig: str | None = None,
 ) -> tuple[str | None, str | None, str | None]:
-    """``(kubeconfig path, current-context, its cluster)`` from the first
-    path in ``$KUBECONFIG`` (or ``~/.kube/config``), parsed with
-    ``yaml.safe_load`` -- ``kubectl`` is never executed. Any missing or
-    malformed file yields ``(path, None, None)``."""
+    """``(kubeconfig path, current-context, its cluster)`` from the
+    kubeconfig kubectl would use (see :func:`_load_kubeconfig`). A missing,
+    unreadable or malformed configuration yields ``(path, None, None)``."""
     environ = os.environ if environ is None else environ
-    raw = environ.get("KUBECONFIG", "")
-    first = raw.split(os.pathsep)[0].strip() if raw.strip() else ""
-    path = Path(first).expanduser() if first else Path(home or Path.home()) / ".kube" / "config"
-    try:
-        doc = yaml.safe_load(path.read_text()) or {}
-    except (OSError, yaml.YAMLError):
-        return str(path), None, None
-    if not isinstance(doc, dict):
-        return str(path), None, None
-    current = doc.get("current-context")
-    if not isinstance(current, str) or not current:
-        return str(path), None, None
-    cluster = None
-    for entry in doc.get("contexts") or []:
-        if isinstance(entry, dict) and entry.get("name") == current:
-            ctx = entry.get("context") or {}
-            if isinstance(ctx, dict) and isinstance(ctx.get("cluster"), str):
-                cluster = ctx["cluster"]
-            break
-    return str(path), current, cluster
+    loaded = _load_kubeconfig(environ, home, kubeconfig)
+    if loaded is None:
+        raw = environ.get("KUBECONFIG", "")
+        first = kubeconfig or (raw.split(os.pathsep)[0].strip() if raw.strip() else "")
+        label = str(Path(first).expanduser()) if first else str(
+            Path(home or Path.home()) / ".kube" / "config")
+        return label, None, None
+    path, current, contexts = loaded
+    if not current:
+        return path, None, None
+    cluster = contexts.get(current, {}).get("cluster")
+    return path, current, cluster if isinstance(cluster, str) else None
+
+
+def kubeconfig_context_namespace(
+    context: str, environ: Mapping[str, str] | None = None, home: str | Path | None = None,
+    kubeconfig: str | None = None,
+) -> str | None:
+    """The ``namespace`` of kubeconfig context ``context`` in the kubeconfig
+    kubectl would use (an explicit ``--kubeconfig`` only, else the merged
+    ``$KUBECONFIG``) -- ``"default"`` when the context sets none, as kubectl
+    does -- or ``None`` when that configuration or the context cannot be
+    read, which leaves the namespace unresolved."""
+    environ = os.environ if environ is None else environ
+    loaded = _load_kubeconfig(environ, home, kubeconfig)
+    if loaded is None or context not in loaded[2]:
+        return None
+    ns = loaded[2][context].get("namespace")
+    return ns if isinstance(ns, str) and ns else "default"
 
 
 def resolve_current_context(
@@ -247,7 +299,11 @@ def resolve_current_context(
 
     * kubernetes/helm/flux: ``context`` (and ``cluster``) from the
       kubeconfig's ``current-context``; ``kubeconfig`` from ``$KUBECONFIG``;
-      helm ``namespace`` from ``$HELM_NAMESPACE``;
+      helm ``namespace`` from ``$HELM_NAMESPACE``; then, for kubernetes and
+      helm, a still-missing ``namespace`` from the context's ``namespace``
+      (``default`` when it sets none, as kubectl does) -- never for a
+      cluster-scoped kind, with ``-A``, or for a manifest that was not read.
+      An explicit ``--kubeconfig`` is the only file consulted;
     * aws: ``profile`` from ``$AWS_PROFILE``, ``region`` from
       ``$AWS_DEFAULT_REGION`` / ``$AWS_REGION``;
     * gcp: ``project`` from ``$CLOUDSDK_CORE_PROJECT``;
@@ -269,14 +325,28 @@ def resolve_current_context(
 
     provider = intent.provider
     if provider in _KUBE_PROVIDERS:
+        # An explicit --kubeconfig on the argv is the only file kubectl reads.
+        explicit = md.get("kubeconfig") if isinstance(md.get("kubeconfig"), str) else None
         if "context" not in md:
-            path, current, cluster = kubeconfig_current_context(environ, home)
+            path, current, cluster = kubeconfig_current_context(environ, home, explicit)
             fill("context", current)
             fill("cluster", cluster)
-            if current and environ.get("KUBECONFIG", "").strip():
+            if current and not explicit and environ.get("KUBECONFIG", "").strip():
                 fill("kubeconfig", path)
         if provider == "helm":
             fill("namespace", environ.get("HELM_NAMESPACE"))
+        # The context's namespace is only a default: objects in a manifest
+        # Aegis did not read may name their own, so it is not filled there
+        # (review of #38) and the namespace stays unresolved.
+        if (provider in ("kubernetes", "helm") and "namespace" not in md
+                and "namespace" not in intent.params and not md.get("all_namespaces")
+                and intent.params.get("manifest_not_inspected") is not True
+                and isinstance(md.get("context"), str)):
+            from aegis_core.store import _kind_is_cluster_scoped  # local: avoids a cycle
+
+            if not _kind_is_cluster_scoped(intent.resource):
+                fill("namespace", kubeconfig_context_namespace(md["context"], environ, home,
+                                                               explicit))
     elif provider == "aws":
         fill("profile", environ.get("AWS_PROFILE"))
         fill("region", environ.get("AWS_DEFAULT_REGION") or environ.get("AWS_REGION"))

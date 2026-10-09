@@ -52,6 +52,13 @@ Two more fail-closed clauses (REVIEW-4 T1.3 / T1.7):
   (the environment map didn't recognise the context/account/project) is
   neither honoured nor dropped: it contributes ESCALATE with the note
   ``"env-unresolved: <id>"``. "Unknown environment" is never "not prod".
+  The same holds for ``namespace`` on a Kubernetes/Helm intent that names
+  none (kubectl would use the kubeconfig context's) or uses ``-A``:
+  ``"namespace-unresolved: <id>"``. Never for a cluster-scoped kind.
+* **manifest-not-inspected** -- ``kubectl apply|create|replace|delete -f
+  <file>|-``: the objects are in a manifest Aegis does not read, so a rule
+  for the same action written on kinds or objects (not on ``manifest/``
+  file names) contributes ESCALATE with ``"manifest-not-inspected: <id>"``.
 * **unknown-target** -- an intent whose parser could not determine what
   it targets (``params["unknown_target"]``, e.g. ``git push -f`` with no
   refspec) contributes ESCALATE with the note ``"unknown-target"``, so it
@@ -143,8 +150,17 @@ class AegisInterceptor:
 
         matches = self.store.get_matching_constraints(intent, now)
         quarantined_matches = self.store.get_matching_quarantined(intent, now)
-        get_env_unresolved = getattr(self.store, "get_env_unresolved", None)
-        env_unresolved = get_env_unresolved(intent, now) if get_env_unresolved else []
+        get_scope_unresolved = getattr(self.store, "get_scope_unresolved", None)
+        if get_scope_unresolved is not None:
+            scope_unresolved = get_scope_unresolved(intent, now)
+        else:  # a store that predates namespace resolution
+            get_env_unresolved = getattr(self.store, "get_env_unresolved", None)
+            scope_unresolved = [(c, ["env"]) for c in (
+                get_env_unresolved(intent, now) if get_env_unresolved else [])]
+        get_manifest_unresolved = getattr(self.store, "get_manifest_unresolved", None)
+        manifest_unresolved = (
+            get_manifest_unresolved(intent, now) if get_manifest_unresolved else []
+        )
         get_time_window_unresolved = getattr(self.store, "get_time_window_unresolved", None)
         time_window_unresolved = (
             get_time_window_unresolved(intent, now) if get_time_window_unresolved else []
@@ -153,7 +169,8 @@ class AegisInterceptor:
         uncovered = (
             not matches
             and not quarantined_matches
-            and not env_unresolved
+            and not scope_unresolved
+            and not manifest_unresolved
             and not time_window_unresolved
         )
         if uncovered:
@@ -182,8 +199,12 @@ class AegisInterceptor:
         # exactly as it is when it matches outright (below), so it cannot
         # force ESCALATE just because the intent's environment or time zone
         # could not be resolved.
-        for c, label in [*((c, "env-unresolved") for c in env_unresolved),
-                         *((c, "time-window-unresolved") for c in time_window_unresolved)]:
+        unresolved = [
+            *((c, ", ".join(f"{k}-unresolved" for k in keys)) for c, keys in scope_unresolved),
+            *((c, "manifest-not-inspected") for c in manifest_unresolved),
+            *((c, "time-window-unresolved") for c in time_window_unresolved),
+        ]
+        for c, label in unresolved:
             reason = self._untrusted_reason(c)
             if reason is not None:
                 discarded.append({"id": c.id, "reason": reason})
@@ -192,7 +213,10 @@ class AegisInterceptor:
                     notes.append(f"fail-closed: {c.id} ({reason})")
                 continue
             fail_closed = True
-            notes.append(f"{label}: {c.id}")
+            for part in label.split(", "):
+                note = f"{part}: {c.id}"
+                if note not in notes:
+                    notes.append(note)
         if unknown_target:
             fail_closed = True
             notes.append("unknown-target")

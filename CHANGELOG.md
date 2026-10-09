@@ -45,6 +45,18 @@ test on each agent are in.
   twice, not a second opinion), and why a trusted source identity must never carry an agent
   (same review). Denial reporting from CloudTrail added to the plan.
 
+### Changed
+- **kubectl: an unknown namespace is never "not prod".** A command without `-n` (which runs in
+  the kubeconfig context's namespace) or with `-A` now escalates a namespace-scoped rule that
+  would otherwise match, with the note `namespace-unresolved: <id>`, as an unresolved `env`
+  already did; before, the rule silently did not apply. Cluster-scoped kinds are unaffected.
+  `--resolve-current-context` now also fills the namespace from the kubeconfig context
+  (`default` when it sets none). Reported by a reader on dev.to (Chris Sellers).
+- **kubectl: manifests that are not read escalate kind rules.** `apply|create|replace|delete -f
+  <file>|<dir>|-` and `-k`: a rule for the same action on kinds or objects escalates with
+  `manifest-not-inspected: <id>`, since the manifest may hold what it protects; Aegis still
+  never reads the file. Same report.
+
 ## [0.3.2] — 2026-09-29
 
 Package metadata only; no change to behaviour.

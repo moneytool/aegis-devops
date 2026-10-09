@@ -111,7 +111,9 @@ def test_from_kubectl_context_and_cluster():
     assert intent.metadata == {"context": "staging", "cluster": "eu"}
 
 
-def test_from_kubectl_discards_output_and_kubeconfig_and_server():
+def test_from_kubectl_discards_output_and_server_and_records_kubeconfig():
+    """--kubeconfig is recorded: it decides which file the context and
+    namespace come from under --resolve-current-context (review of #38)."""
     intent = from_kubectl(
         [
             "kubectl",
@@ -126,7 +128,7 @@ def test_from_kubectl_discards_output_and_kubeconfig_and_server():
         ]
     )
     assert intent.params == {}
-    assert intent.metadata == {}
+    assert intent.metadata == {"kubeconfig": "/tmp/kc"}
 
 
 # --- kubectl: resource form normalisation -----------------------------------
@@ -207,19 +209,19 @@ def test_from_kubectl_apply_with_file():
     intent = from_kubectl(["kubectl", "apply", "-f", "manifests/app.yaml"])
     assert intent.resource == "manifest/app.yaml"
     assert intent.action == "apply"
-    assert intent.params == {"file": "manifests/app.yaml"}
+    assert intent.params == {"file": "manifests/app.yaml", "manifest_not_inspected": True}
 
 
 def test_from_kubectl_apply_with_stdin():
     intent = from_kubectl(["kubectl", "apply", "-f", "-"])
     assert intent.resource == "manifest/-"
-    assert intent.params == {"file": "-"}
+    assert intent.params == {"file": "-", "manifest_not_inspected": True}
 
 
 def test_from_kubectl_apply_with_kustomize_dir():
     intent = from_kubectl(["kubectl", "apply", "-k", "overlays/prod"])
     assert intent.resource == "manifest/prod"
-    assert intent.params == {"file": "overlays/prod"}
+    assert intent.params == {"file": "overlays/prod", "manifest_not_inspected": True}
 
 
 def test_from_kubectl_delete_with_file():

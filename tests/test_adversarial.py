@@ -521,16 +521,13 @@ def test_evade_provider_mismatch_correctly_does_not_match():
     assert decision.citations == []
 
 
-def test_evade_namespace_omitted_intent_does_not_match_scoped_rule():
-    """_scope_matches() requires every key in the constraint's scope dict to
-    be present with a matching value in the intent's merged metadata/params.
-    An intent that simply omits the 'namespace' key does not match a
-    namespace-scoped rule (it falls into combined.get('namespace') is None,
-    which != 'prod') — it is NOT treated as 'any namespace, including
-    prod'. This documents current, correct behaviour: the omission fails
-    open only in the sense that the *rule* fails to apply, not that the
-    action is silently allowed to bypass a rule it should have hit; there
-    is simply no evidence in the intent that this action targets prod."""
+def test_evade_namespace_omitted_intent_escalates_on_a_namespace_scoped_rule():
+    """An intent that omits the namespace runs in the kubeconfig context's
+    namespace, which the argv does not show -- possibly prod. Like an
+    unresolved ``env``, "unknown namespace" is never "not prod": the rule
+    escalates with ``namespace-unresolved`` instead of silently not applying
+    (reported by a reader on dev.to, 2026-10-08). Until 1.0 this was a
+    silent ALLOW."""
     store = ConstraintStore(authority_map=dict(AUTHORITY))
     base = make_constraint(resource_pattern="deployment/*", scope={"namespace": "prod"})
     store.add_constraint(base)
@@ -541,9 +538,14 @@ def test_evade_namespace_omitted_intent_does_not_match_scoped_rule():
     interceptor = AegisInterceptor(store)
     decision = interceptor.intercept(no_namespace_intent, now=NOW)
 
-    assert decision.verdict == "ALLOW"
-    assert decision.covered is False
+    assert decision.verdict == "ESCALATE"
+    assert decision.covered is True
     assert decision.citations == []
+    assert decision.notes == [f"namespace-unresolved: {base.id}"]
+
+    other = InfrastructureIntent(resource="deployment/api-server", action="scale",
+                                 provider="kubernetes", metadata={"namespace": "dev"})
+    assert interceptor.intercept(other, now=NOW).verdict == "ALLOW"
 
 
 # --------------------------------------------------------------------------
