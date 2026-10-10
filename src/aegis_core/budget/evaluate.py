@@ -87,28 +87,48 @@ class Acknowledgement:
     completeness: str
     history: str
     missing_sessions: int
-    unverified: Mapping[str, list[str]]
+    # session -> its verification quantities at reset time
+    # (SessionRecord.verification: log_missing, unreadable_records, unknown_time_usage)
+    unverified: Mapping[str, Mapping[str, Any]]
 
     @classmethod
     def of(cls, pd: ProjectDay) -> Acknowledgement:
-        return cls(pd.completeness, pd.history, pd.missing_sessions, pd.unverified())
+        return cls(pd.completeness, pd.history, pd.missing_sessions,
+                   {k: pd.verification(k) or {} for k in pd.unverified()})
 
     def to_dict(self) -> dict[str, Any]:
         return {"completeness": self.completeness, "history": self.history,
                 "missing_sessions": self.missing_sessions,
-                "unverified": {k: sorted(v) for k, v in sorted(self.unverified.items())}}
+                "unverified": {k: dict(v) for k, v in sorted(self.unverified.items())}}
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> Acknowledgement:
+        unverified = dict(d["unverified"])
+        if not all(isinstance(v, dict) for v in unverified.values()):
+            raise ValueError("reset baseline: unverified sessions need their quantities")
         return cls(str(d["completeness"]), str(d["history"]), int(d["missing_sessions"]),
-                   {str(k): list(v) for k, v in dict(d["unverified"]).items()})
+                   {str(k): dict(v) for k, v in unverified.items()})
 
     def covers_history(self, pd: ProjectDay) -> bool:
         return (pd.completeness == self.completeness and pd.history == self.history
                 and pd.missing_sessions <= self.missing_sessions)
 
-    def covers(self, key: str, reasons: list[str]) -> bool:
-        return key in self.unverified and set(reasons) <= set(self.unverified[key])
+    def covers(self, key: str, now: Mapping[str, Any] | None) -> bool:
+        """Whether session ``key``'s unverifiable usage is no worse than it
+        was when acknowledged: the same session, a log no more missing, no
+        more unreadable records and no more usage without a recorded time.
+        Unknown quantities are never covered."""
+        then = self.unverified.get(key)
+        if then is None or now is None:
+            return False
+        try:
+            return (bool(now.get("log_missing")) <= bool(then.get("log_missing"))
+                    and int(now.get("unreadable_records", 0))
+                    <= int(then.get("unreadable_records", 0))
+                    and float(now.get("unknown_time_usage", 0))
+                    <= float(then.get("unknown_time_usage", 0)))
+        except (TypeError, ValueError):
+            return False
 
 
 class _Builder:
@@ -142,7 +162,7 @@ class _Builder:
                       else f"session inventory {pd.history}")
             self.unknown.append(f"today's project total is {pd.completeness} ({detail})")
         others = {k: r for k, r in pd.unverified(exclude=exclude).items()
-                  if not (ack and ack.covers(k, r))}
+                  if not (ack and ack.covers(k, pd.verification(k)))}
         if others:
             reasons = sorted({r for rs in others.values() for r in rs})
             who = "other session(s)" if exclude else "session(s)"

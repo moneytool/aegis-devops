@@ -195,6 +195,15 @@ class SessionRecord:
             reasons.append("unknown-time")
         return reasons
 
+    def verification(self) -> dict[str, Any]:
+        """How much of this session's usage is unverifiable, as quantities
+        (not only reasons), so an acknowledgement can tell an unchanged gap
+        from one that grew: whether the log is missing, how many records
+        could not be read, and how much usage carries no recorded time."""
+        unknown = self.buckets().get(UNKNOWN_DAY, {})
+        return {"log_missing": self.log_missing, "unreadable_records": self.problem_total,
+                "unknown_time_usage": sum(v for u in unknown.values() for v in u.values())}
+
     def to_json(self) -> str:
         return json.dumps({"version": 1, **self.__dict__}, sort_keys=True)
 
@@ -230,6 +239,12 @@ class ProjectDay:
         (each entry carries its session's verification status)."""
         return {k: list(e["unverified"]) for k, e in self.entries.items()
                 if e.get("unverified") and k != exclude}
+
+    def verification(self, key: str) -> dict[str, Any] | None:
+        """The quantities behind an entry's ``unverified`` reasons (see
+        :meth:`SessionRecord.verification`); ``None`` if not recorded."""
+        v = self.entries.get(key, {}).get("verification")
+        return v if isinstance(v, dict) else None
 
     def to_json(self) -> str:
         return json.dumps({"version": 1, **self.__dict__}, sort_keys=True)
@@ -519,7 +534,7 @@ def _entry(rec: SessionRecord, day: str) -> dict[str, Any]:
     usage = rec.usage_on(day)
     return {"revision": rec.revision, "usage": usage,
             "providers": {m: p for m, p in rec.providers.items() if m in usage},
-            "unverified": rec.unverified()}
+            "unverified": rec.unverified(), "verification": rec.verification()}
 
 
 # --- rebuild -------------------------------------------------------------------------
@@ -574,7 +589,10 @@ def rebuild(store: BudgetStore, logs: Mapping[str, AgentLog], root: str, day: st
             if cp:
                 incoming[key] = {"revision": int(cp.get("revision", 0)),
                                  "usage": cp.get("usage", {}), "providers": {},
-                                 "unverified": ["log-missing", "from-checkpoint"]}
+                                 "unverified": ["log-missing", "from-checkpoint"],
+                                 "verification": {"log_missing": True,
+                                                  "unreadable_records": 0,
+                                                  "unknown_time_usage": 0}}
             continue
         # A missing log with a cached record keeps its usage as a lower bound;
         # the entry says so (its "unverified" reasons).

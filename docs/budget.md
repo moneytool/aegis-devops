@@ -126,10 +126,12 @@ were deleted, or the first day of a budget when other sessions had already run t
 - `deny`: covered calls are denied. A session's own unreadable log stays denied (start a new
   session). For an incomplete **project day**, `aegis budget reset --day` acknowledges that
   day's history **as it stands**: it records the day's verification state at that moment (how
-  complete the history is, which sessions are lower bounds and why) and is signed with the
+  complete the history is, and for each session that is a lower bound: whether its log is
+  missing, how many records could not be read, how much usage has no recorded time) and is
+  signed with the
   policy key, so an agent cannot write one. Exactly that is excused; anything that becomes
-  unverifiable afterwards — a new session with an unreadable log, more sessions without one —
-  counts again. Otherwise it clears at the next day.
+  unverifiable afterwards — a new session with an unreadable log, another unreadable record in a
+  session already acknowledged, more sessions without a log — counts again. Otherwise it clears at the next day.
 
 ## Commands
 

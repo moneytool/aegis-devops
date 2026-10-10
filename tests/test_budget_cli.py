@@ -209,3 +209,39 @@ def test_a_reset_still_excuses_what_it_acknowledged(env, capsys):  # noqa: F811
     assert hook_call(env, "a")[0] == 2                       # c is a lower bound: strict denies
     assert main(["budget", "reset", "--day", "--project", str(env["project"])]) == 0
     assert hook_call(env, "a")[0] == 0                       # acknowledged as it stood
+
+
+
+def test_more_unreadable_records_in_an_acknowledged_session_count_again(env):  # noqa: F811
+    """Review of #40: the baseline must hold quantities, not only reasons. A
+    second malformed record appended to an already acknowledged session is new
+    unverifiable usage, so a healthy session is denied again."""
+    write_budget(env, STRICT)
+    transcript(env, "a", 1_000)
+    broken = transcript(env, "broken", 1_000, malformed=True)
+    hook_call(env, "a")
+    hook_call(env, "broken")
+    assert main(["budget", "reset", "--day", "--project", str(env["project"])]) == 0
+    assert hook_call(env, "a")[0] == 0                       # the one bad record: excused
+    with open(broken, "a") as f:
+        f.write("{also broken\n")
+    assert hook_call(env, "broken")[0] == 2                  # its own hook records the change
+    code, _, err = hook_call(env, "a")
+    assert code == 2 and "lower bound" in err
+
+
+def test_the_acknowledged_quantities_are_signed(env):  # noqa: F811
+    write_budget(env, STRICT)
+    transcript(env, "a", 1_000)
+    transcript(env, "broken", 1_000, malformed=True)
+    hook_call(env, "a")
+    hook_call(env, "broken")
+    assert main(["budget", "reset", "--day", "--project", str(env["project"])]) == 0
+    store = BudgetStore()
+    marker = reset_path(store, str(env["project"].resolve()), TODAY)
+    doc = json.loads(marker.read_text())
+    [state] = doc["baseline"]["unverified"].values()
+    assert state == {"log_missing": False, "unreadable_records": 1, "unknown_time_usage": 0}
+    state["unreadable_records"] = 50                          # widened after signing
+    marker.write_text(json.dumps(doc))
+    assert hook_call(env, "a")[0] == 2
