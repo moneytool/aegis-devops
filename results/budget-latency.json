@@ -1,0 +1,16 @@
+{
+  "measured": "2026-10-10",
+  "runs": 40,
+  "python": "3.12.12",
+  "platform": "Darwin arm64",
+  "hook_without_budget": {
+    "median_ms": 65.3,
+    "p95_ms": 68.0
+  },
+  "hook_with_budget": {
+    "median_ms": 74.1,
+    "p95_ms": 77.6
+  },
+  "added_median_ms": 8.8,
+  "target_ms": 20
+}
