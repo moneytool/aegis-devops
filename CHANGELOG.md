@@ -2,15 +2,21 @@
 
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while the major version is 0,
-any release may change behaviour.
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html). From 1.0 the public surface listed
+under 1.0.0 below is stable: breaking it needs 2.0. Before 1.0 any release could change
+behaviour.
 
-## [1.0.0] — Unreleased
+## [1.0.0] — 2026-10-10
 
-The cross-agent session budget cap, and the 1.0 stability promise
-([design](docs/dev/DESIGN-v1.0-budget-cap.md)). In progress: this entry grows as the parts land;
-the release is cut when the hook integration, the `aegis budget` commands, the docs and the live
-test on each agent are in.
+The cross-agent session budget cap ([`docs/budget.md`](docs/budget.md)), and the 1.0 stability
+promise ([design §9](docs/dev/DESIGN-v1.0-budget-cap.md)).
+
+**Stable from 1.0** (breaking any of these needs 2.0): the policy file formats (`constraints`,
+`authority`, `environments`, `plan_constraints`, `agents`, `budget`, all `version: 1`), the CLI
+commands and their exit codes, the hook protocol per agent, and the GitHub Action's inputs and
+outputs. **Still preview within 1.x:** the server-side compilers' output (`aegis compile`) and
+the identity audit (`aegis audit-identity`), which may change shape in minor releases.
+**Deferred, additive when it comes:** public-key signing (`docs/dev/DESIGN-v0.4-public-key-signing.md`).
 
 ### Added
 - `aegis_core.budget`, the budget cap's core (design §3–§6):
@@ -487,6 +493,7 @@ See "Project status" in the README and [`docs/dev/PLAN.md`](docs/dev/PLAN.md) §
 rather than real connectors, signing uses a shared secret, and a principal is a signed name
 rather than a bound identity.
 
+[1.0.0]: https://github.com/moneytool/aegis-devops/releases/tag/v1.0.0
 [0.3.2]: https://github.com/moneytool/aegis-devops/releases/tag/v0.3.2
 [0.3.1]: https://github.com/moneytool/aegis-devops/releases/tag/v0.3.1
 [0.3.0]: https://github.com/moneytool/aegis-devops/releases/tag/v0.3.0

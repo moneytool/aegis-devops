@@ -275,7 +275,11 @@ context a rule can arrive from a ticket or a chat message as easily as from you.
 
 The engine (constraint store, interceptor, environment mapping, dry-run handling, rate limits,
 plan-level constraints, and parsers for every tool in "Supported tools") is complete, and
-v0.3.2 is on PyPI as an **alpha**. Real LLM baselines have been run: Claude Sonnet 5 through
+v1.0.0 is on PyPI, with the [session budget cap](docs/budget.md). **1.0 is a promise about the
+interface:** the policy file formats, the CLI commands and exit codes, the hook protocol and the
+Action's inputs and outputs stay compatible until 2.0; the server-side compilers and the
+identity audit remain previews ([CHANGELOG](CHANGELOG.md)). It is not a claim that the open gaps
+below are closed. Real LLM baselines have been run: Claude Sonnet 5 through
 the API (cached in `results/llm-external.md`), Haiku through the Claude Code CLI, `gpt-6-astra`
 through the Codex CLI, and a local `mistral:latest`.
 
