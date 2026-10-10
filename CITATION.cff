@@ -18,6 +18,9 @@ identifiers:
     value: "10.5281/zenodo.22950337"
     description: "Concept DOI: all versions, resolves to the latest."
   - type: doi
+    value: "10.5281/zenodo.23282994"
+    description: "v1.0.0 (cross-agent session budget cap; 1.0 interface stability)"
+  - type: doi
     value: "10.5281/zenodo.23049286"
     description: "v0.3.2"
   - type: doi
