@@ -291,8 +291,10 @@ Illustrative sources of spend past the limit, none of them bounded by Aegis:
 
 - **In-flight requests.** The model turn that crossed the limit, and any request already running
   in a parallel session or sub-agent, are paid for before a hook can see them.
-- **Delayed usage records.** An agent may write usage some time after the request (Copilot CLI
-  reports tokens only at shutdown), so a hook can evaluate against a total that is behind.
+- **Delayed usage records.** An agent may write usage some time after the request, so a hook can
+  evaluate against a total that is behind. Measured in the live test (`dev/budget-live-test/`):
+  Claude Code writes a response's usage before its tool calls run; Codex, OpenCode and Copilot
+  CLI only after, so the cap takes hold from their next turn or step.
 - **Retries after denial.** A denied tool call returns to the model, which may answer, retry the
   call, or try other tools; each of those model turns is paid for, however many there are.
 - **Tool-free activity.** A model turn with no tool call reaches no tool hook. Where the agent

@@ -86,13 +86,26 @@ The infrastructure policy still decides first: a command the policy blocks stays
 whatever the budget says. To continue past a limit: start a new session (session limit), wait
 for the next day in `tz` (project limit), or raise the limit in `budget.yaml` and re-sign it.
 
-| Agent | Tool hook | Prompt hook | Warning shows as |
-|---|---|---|---|
-| Claude Code | `PreToolUse`, every tool | `UserPromptSubmit` | a message in the transcript |
-| Codex CLI | `PreToolUse`, every tool | `UserPromptSubmit` | a UI warning |
-| Gemini CLI | `BeforeTool`, every tool | `BeforeAgent` | a message in the terminal |
-| OpenCode | plugin, every tool | — | a toast |
-| Copilot CLI | `preToolUse`, every tool (premium requests) | — (it cannot block) | stderr only |
+| Agent | Tool hook | Prompt hook | Warning shows as | A turn's usage is seen from |
+|---|---|---|---|---|
+| Claude Code | `PreToolUse`, every tool | `UserPromptSubmit` | a message in the transcript | its own tool calls |
+| Codex CLI | `PreToolUse`, every tool | `UserPromptSubmit` | a UI warning | the next turn |
+| Gemini CLI | `BeforeTool`, every tool | `BeforeAgent` | a message in the terminal | not yet measured live |
+| OpenCode | plugin, every tool | — | a toast | the next step |
+| Copilot CLI | `preToolUse`, every tool (premium requests) | — (it cannot block) | stderr only | the next turn |
+
+The last column is when each agent writes a model response's usage to its log, measured in the
+[live test](https://github.com/moneytool/aegis-devops/blob/main/docs/dev/budget-live-test/README.md):
+Claude Code before the response's tool calls run, the others only after them. So in Codex,
+OpenCode and Copilot CLI the turn that crosses a limit still runs its own tool calls, and the
+cap takes hold from the next one; a single Copilot CLI `-p` prompt cannot be stopped. That is
+part of the overshoot described above.
+
+**Getting the hooks to run.** Codex runs project hooks only in a trusted project and new hooks
+only after you review them (`/hooks`); Copilot CLI loads repository hooks only in trusted
+folders (a `--user` install always loads); Gemini CLI asks to trust the folder. An unattended
+setup (CI, a headless run) needs the agent's own trust option, e.g. Codex's
+`--dangerously-bypass-hook-trust` or Gemini's `GEMINI_CLI_TRUST_WORKSPACE=true`.
 
 ## Where the numbers come from
 
