@@ -85,3 +85,40 @@ def test_missing_aegis_blocks_only_infra_in_opted_in_projects(env):
     assert blocked["allowed"] is False
     assert "pip install aegis-devops" in blocked["message"]
     assert _call(env, "ls -la", missing) == {"allowed": True}
+
+
+TOOL_HARNESS = """
+import { pathToFileURL } from "node:url"
+const [pluginPath, directory, tool] = process.argv.slice(2)
+const { AegisDevOps } = await import(pathToFileURL(pluginPath).href)
+const hooks = await AegisDevOps({ directory, client: {} })
+try {
+  await hooks["tool.execute.before"]({ tool, sessionID: "ses_1" }, { args: { filePath: "x" } })
+  console.log(JSON.stringify({ allowed: true }))
+} catch (e) {
+  console.log(JSON.stringify({ allowed: false, message: e.message }))
+}
+"""
+
+
+@pytest.mark.parametrize("budget,expect_aegis", [(None, True), (True, True), (False, False)])
+def test_no_budget_keeps_non_bash_tools_away_from_aegis(env, tmp_path, budget, expect_aegis):
+    """Review of #39: --no-budget must hold for OpenCode too. A fake aegis
+    that denies everything shows whether a read call reached it."""
+    import os
+
+    main(["init", str(env["project"] / ".aegis")])
+    (env["project"] / ".aegis" / "budget.yaml").write_text("unit: usd\n")
+    plugin = hook.install("opencode", user=False, project=env["project"], budget=budget)
+    mjs = tmp_path / f"plugin-{budget}.mjs"
+    mjs.write_text(plugin.read_text())
+    harness = tmp_path / "tool-harness.mjs"
+    harness.write_text(TOOL_HARNESS)
+    fake = tmp_path / "deny-all"
+    fake.write_text("#!/bin/sh\ncat >/dev/null\necho denied >&2\nexit 2\n")
+    fake.chmod(0o755)
+    out = subprocess.run([NODE, str(harness), str(mjs), str(env["project"]), "read"],
+                         capture_output=True, text=True, check=True, timeout=60,
+                         env={**os.environ, "AEGIS_BIN": str(fake)})
+    result = json.loads(out.stdout.strip().splitlines()[-1])
+    assert result["allowed"] is (not expect_aegis)

@@ -56,6 +56,17 @@ from aegis_core.shell import _KNOWN_BINARIES, ShellRejected, intents_from_comman
 
 AGENTS = ("claude", "codex", "copilot", "cursor", "gemini", "opencode", "vscode")
 
+# Agents whose usage the budget cap can measure (design v1.0 §4). Cursor and
+# VS Code expose no token data.
+BUDGET_AGENTS = frozenset({"claude", "codex", "copilot", "gemini", "opencode"})
+BUDGET_FILE = "budget.yaml"
+# Hook events that come before a new prompt rather than a tool call.
+PROMPT_EVENTS = frozenset({"UserPromptSubmit", "BeforeAgent"})
+# Agents that show a hook's JSON "systemMessage" to the user (a warning that
+# does not block). OpenCode's plugin shows "warning" as a toast; Copilot CLI
+# has no such channel, so its warning goes to stderr.
+_SYSTEM_MESSAGE_AGENTS = frozenset({"claude", "codex", "gemini"})
+
 # Binaries whose commands are gated even when the policy is unusable or the
 # command cannot be parsed. terraform/tofu have no argv parser (their plans
 # are checked as JSON) but are infrastructure tools all the same; k/tf are
@@ -320,25 +331,102 @@ def render(agent: str, verdict: HookVerdict, *, escalate_as: str = "ask") -> tup
     return EXIT_ALLOW, json.dumps(body), ""
 
 
+def _with_warning(agent: str, reply: tuple[int, str, str], warning: str) -> tuple[int, str, str]:
+    """Adds a budget warning to a reply that lets the call through, in the
+    agent's own channel."""
+    code, out, err = reply
+    if not warning or code != EXIT_ALLOW:
+        return reply
+    if agent in _SYSTEM_MESSAGE_AGENTS or agent == "opencode":
+        try:
+            body = json.loads(out) if out else {}
+        except json.JSONDecodeError:
+            body = {}
+        body["systemMessage" if agent != "opencode" else "warning"] = warning
+        return code, json.dumps(body), err
+    return code, out, f"{err}\n{warning}".strip()
+
+
+def render_prompt(agent: str, verdict: HookVerdict, warning: str = "") -> tuple[int, str, str]:
+    """The reply to a prompt hook (Claude Code / Codex ``UserPromptSubmit``,
+    Gemini CLI ``BeforeAgent``): block the prompt, or let it through,
+    optionally with a warning."""
+    if verdict.decision == "deny":
+        reason = verdict.reason or "aegis: blocked"
+        body = ({"decision": "deny", "reason": reason} if agent == "gemini"
+                else {"decision": "block", "reason": reason})
+        return EXIT_BLOCK, json.dumps(body), reason
+    if warning:
+        return EXIT_ALLOW, json.dumps({"systemMessage": warning}), ""
+    return EXIT_ALLOW, "", ""
+
+
+def _budget_outcome(agent: str, payload: dict, request: HookRequest, config_dir: Path,
+                    extra_args: list[str] | None):
+    """The budget gate's outcome for this call. A budget.yaml that cannot be
+    used denies (the project opted in to a budget; fail closed)."""
+    from aegis_core import cli  # local: cli imports this module
+    from aegis_core.budget.gate import Outcome, check
+
+    try:
+        policy = cli.load_budget_for_hook(config_dir, extra_args)
+    except Exception as exc:  # noqa: BLE001 - any failure to load is reported, not raised
+        return Outcome("deny", f"aegis budget: {config_dir / BUDGET_FILE} cannot be used "
+                               f"({exc.__class__.__name__}: {exc}); fix and re-sign it, or "
+                               "remove it")
+    if policy is None:
+        return Outcome("allow")
+    return check(agent, payload, request.cwd, policy)
+
+
 def run_hook(agent: str, stdin_text: str, *, escalate_as: str = "ask",
              extra_args: list[str] | None = None) -> tuple[int, str, str]:
     """The whole hook: payload text in, ``(exit, stdout, stderr)`` out.
     Never raises. Outside an opted-in project every failure allows; inside
-    one, a failure blocks (fail closed where the user asked to be gated)."""
+    one, a failure blocks (fail closed where the user asked to be gated).
+
+    Where the project's policy directory also holds a ``budget.yaml``, the
+    budget cap is checked after the policy decision (a BLOCK stands whatever
+    the budget says): for every tool call the hook sees, and for prompt
+    events."""
     config_dir: Path | None = None
     try:
         try:
             payload = json.loads(stdin_text or "")
         except json.JSONDecodeError as exc:
             raise HookInputError(f"hook payload is not JSON: {exc}") from None
-        request = parse_request(agent, payload)
-        if request.command is None or not request.command.strip():
+        if not isinstance(payload, dict):
+            raise HookInputError("hook payload is not a JSON object")
+        prompt = payload.get("hook_event_name") in PROMPT_EVENTS
+        if prompt:
+            cwd = payload.get("cwd") if isinstance(payload.get("cwd"), str) else None
+            request = HookRequest(None, cwd)
+        else:
+            request = parse_request(agent, payload)
+        has_command = bool(request.command and request.command.strip())
+        if not has_command and agent not in BUDGET_AGENTS:
             return _allow(agent)
         config_dir = find_opt_in_config(_project_dir(request))
         if config_dir is None:
             return _allow(agent)
-        verdict = decide(request.command, config_dir, extra_args)
-        return render(agent, verdict, escalate_as=escalate_as)
+        has_budget = agent in BUDGET_AGENTS and (config_dir / BUDGET_FILE).is_file()
+        if not has_command and not has_budget:
+            return _allow(agent)
+
+        verdict = decide(request.command, config_dir, extra_args) if has_command \
+            else HookVerdict("allow")
+        if verdict.decision == "deny":
+            return render(agent, verdict, escalate_as=escalate_as)
+        warning = ""
+        if has_budget:
+            outcome = _budget_outcome(agent, payload, request, config_dir, extra_args)
+            if outcome.decision == "deny":
+                verdict = HookVerdict("deny", outcome.message)
+            elif outcome.message:
+                warning = outcome.message
+        if prompt:
+            return render_prompt(agent, verdict, warning)
+        return _with_warning(agent, render(agent, verdict, escalate_as=escalate_as), warning)
     except Exception as exc:  # noqa: BLE001 - a hook must answer, never crash
         if config_dir is None and not isinstance(exc, HookInputError):
             return _allow(agent)
@@ -427,43 +515,83 @@ def _strip_ours(entries: list) -> list:
     return kept
 
 
-def merge_config(agent: str, existing: dict, command: str | None) -> dict:
-    """``existing`` with the aegis hook added (``command``) or removed
-    (``None``), every other setting and hook left as it was."""
-    doc = dict(existing)
-    hooks = dict(doc.get("hooks") or {})
+# Events aegis may own per agent; reinstalling or removing cleans all of them.
+_EVENTS = {
+    "claude": ("PreToolUse", "UserPromptSubmit"),
+    "codex": ("PreToolUse", "UserPromptSubmit"),
+    "gemini": ("BeforeTool", "BeforeAgent"),
+    "copilot": ("preToolUse",),
+    "vscode": ("PreToolUse",),
+    "cursor": ("beforeShellExecution",),
+}
+
+
+def _entries(agent: str, command: str, budget: bool) -> list[tuple[str, dict]]:
+    """``(event, entry)`` pairs for this agent. With a budget, the tool hook
+    sees every tool call (the budget counts all of them, not only shell
+    commands) and a prompt hook is added where the agent has one that can
+    block (design v1.0 §6)."""
     if agent in ("claude", "codex"):
-        event, entry = "PreToolUse", {
-            "matcher": "Bash" if agent == "claude" else "^Bash$",
-            "hooks": [{"type": "command", "command": command, "timeout": 30}],
-        }
-    elif agent == "gemini":
-        event, entry = "BeforeTool", {
-            "matcher": "run_shell_command",
-            "hooks": [{"name": "aegis-devops", "type": "command", "command": command,
-                       "timeout": 30000}],
-        }
-    elif agent == "copilot":
-        doc.setdefault("version", 1)
-        event, entry = "preToolUse", {"type": "command", "bash": command, "timeoutSec": 30}
-    elif agent == "vscode":
+        matcher = ("*" if agent == "claude" else ".*") if budget else (
+            "Bash" if agent == "claude" else "^Bash$")
+        hook = {"type": "command", "command": command, "timeout": 30}
+        pairs = [("PreToolUse", {"matcher": matcher, "hooks": [hook]})]
+        if budget:
+            pairs.append(("UserPromptSubmit", {"hooks": [dict(hook)]}))
+        return pairs
+    if agent == "gemini":
+        hook = {"name": "aegis-devops", "type": "command", "command": command, "timeout": 30000}
+        pairs = [("BeforeTool", {"matcher": ".*" if budget else "run_shell_command",
+                                 "hooks": [hook]})]
+        if budget:
+            pairs.append(("BeforeAgent", {"hooks": [dict(hook)]}))
+        return pairs
+    if agent == "copilot":
+        # no matcher: Copilot CLI already sends every tool call; its prompt hook
+        # cannot block, so a budget adds nothing here
+        return [("preToolUse", {"type": "command", "bash": command, "timeoutSec": 30})]
+    if agent == "vscode":
         # VS Code's native format: PascalCase events and no "version" (a
         # numeric version marks the Copilot CLI format instead). VS Code
         # ignores matchers here, so the hook sees every tool call and
         # parse_request lets the non-terminal ones through.
-        event, entry = "PreToolUse", {"type": "command", "command": command, "timeout": 30}
-    else:  # cursor
+        return [("PreToolUse", {"type": "command", "command": command, "timeout": 30})]
+    return [("beforeShellExecution", {"command": command, "failClosed": True})]  # cursor
+
+
+def merge_config(agent: str, existing: dict, command: str | None, *,
+                 budget: bool = False) -> dict:
+    """``existing`` with the aegis hooks added (``command``) or removed
+    (``None``), every other setting and hook left as it was."""
+    doc = dict(existing)
+    hooks = dict(doc.get("hooks") or {})
+    if agent in ("copilot", "cursor") and command is not None:
         doc.setdefault("version", 1)
-        event, entry = "beforeShellExecution", {"command": command, "failClosed": True}
-    entries = _strip_ours(list(hooks.get(event) or []))
-    if command is not None:
-        entries.append(entry)
-    if entries:
-        hooks[event] = entries
-    else:
-        hooks.pop(event, None)
+    wanted = _entries(agent, command, budget) if command is not None else []
+    for event in _EVENTS[agent]:
+        entries = _strip_ours(list(hooks.get(event) or []))
+        entries.extend(entry for ev, entry in wanted if ev == event)
+        if entries:
+            hooks[event] = entries
+        else:
+            hooks.pop(event, None)
     doc["hooks"] = hooks
     return doc
+
+
+def budget_configured(*, user: bool, project: Path) -> bool:
+    """Whether the policy directory that would apply holds a ``budget.yaml``,
+    resolved with the hook's own precedence and never by looking past a
+    directory that shadows another: for a project install,
+    ``$AEGIS_CONFIG_DIR``, else the nearest ``.aegis/`` at or above the
+    project, else ``~/.config/aegis`` (:func:`find_opt_in_config`); for a
+    user install, ``$AEGIS_CONFIG_DIR``, else ``~/.config/aegis``."""
+    if user:
+        env = os.environ.get(config_module.CONFIG_ENV_VAR)
+        directory: Path | None = Path(env) if env else Path.home() / ".config" / "aegis"
+    else:
+        directory = find_opt_in_config(project)
+    return directory is not None and (directory / BUDGET_FILE).is_file()
 
 
 _AFTER_INSTALL = {
@@ -479,9 +607,11 @@ _AFTER_INSTALL = {
 }
 
 
-def _install_opencode_plugin(path: Path, *, remove: bool) -> Path:
+def _install_opencode_plugin(path: Path, *, remove: bool, budget: bool | None = None) -> Path:
     """OpenCode hooks are JS plugins: write (or delete) our plugin file, with
-    the argv of this aegis filled in."""
+    the argv of this aegis and the budget coverage filled in. The plugin
+    detects a ``budget.yaml`` at run time, so the default is ``"auto"``;
+    ``--no-budget`` (``budget=False``) writes ``"off"``: shell commands only."""
     if remove:
         if path.exists():
             path.unlink()
@@ -492,15 +622,26 @@ def _install_opencode_plugin(path: Path, *, remove: bool) -> Path:
     marker = "const INSTALLED = null"
     if marker not in template:
         raise ValueError("opencode plugin template has no INSTALLED marker")
+    mode_marker = 'const BUDGET_MODE = "auto"'
+    if mode_marker not in template:
+        raise ValueError("opencode plugin template has no BUDGET_MODE marker")
+    mode = "off" if budget is False else "auto"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(template.replace(marker, f"const INSTALLED = {json.dumps(_aegis_command())}"))
+    path.write_text(template.replace(marker, f"const INSTALLED = {json.dumps(_aegis_command())}")
+                    .replace(mode_marker, f"const BUDGET_MODE = {json.dumps(mode)}"))
     return path
 
 
-def install(agent: str, *, user: bool, project: Path, remove: bool = False) -> Path:
+def install(agent: str, *, user: bool, project: Path, remove: bool = False,
+            budget: bool | None = None) -> Path:
+    """Writes (or removes) the agent's hook. ``budget``: ``True``/``False``
+    install or leave out the budget hooks; ``None`` detects whether the
+    policy directory that applies holds a ``budget.yaml``."""
     path = config_path(agent, user=user, project=project)
     if agent == "opencode":
-        return _install_opencode_plugin(path, remove=remove)
+        return _install_opencode_plugin(path, remove=remove, budget=budget)
+    if budget is None:
+        budget = budget_configured(user=user, project=project)
     existing: dict = {}
     if path.exists():
         text = path.read_text()
@@ -508,7 +649,8 @@ def install(agent: str, *, user: bool, project: Path, remove: bool = False) -> P
             existing = json.loads(text)
             if not isinstance(existing, dict):
                 raise ValueError(f"{path} is not a JSON object; not touching it")
-    updated = merge_config(agent, existing, None if remove else hook_command(agent))
+    updated = merge_config(agent, existing, None if remove else hook_command(agent),
+                           budget=budget and agent in BUDGET_AGENTS)
     if remove and not updated["hooks"] and set(updated) <= {"version", "hooks"}:
         # nothing but our (now removed) hook was ever in it
         if path.exists():
@@ -519,12 +661,36 @@ def install(agent: str, *, user: bool, project: Path, remove: bool = False) -> P
     return path
 
 
-def main_install(agent: str, *, user: bool, project: str, remove: bool) -> int:
-    path = install(agent, user=user, project=Path(project), remove=remove)
+_BUDGET_INSTALL_NOTE = {
+    "claude": "budget: the hook sees every tool call, and UserPromptSubmit stops new prompts "
+              "over the limit",
+    "codex": "budget: the hook sees every tool call, and UserPromptSubmit stops new prompts "
+             "over the limit",
+    "gemini": "budget: the hook sees every tool call, and BeforeAgent stops new prompts over "
+              "the limit",
+    "copilot": "budget: the hook already sees every tool call (premium requests are "
+               "counted); Copilot CLI's prompt hook cannot block, so prompts are not stopped",
+    "opencode": "budget: the plugin checks every tool call wherever a budget.yaml applies "
+                "(--no-budget: shell commands only); OpenCode has no prompt hook, so prompts "
+                "are not stopped",
+}
+
+
+def main_install(agent: str, *, user: bool, project: str, remove: bool,
+                 budget: bool | None = None) -> int:
+    path = install(agent, user=user, project=Path(project), remove=remove, budget=budget)
+    if agent == "opencode":
+        budget = budget is not False   # the plugin detects a budget.yaml at run time
+    elif budget is None:
+        budget = budget_configured(user=user, project=Path(project))
     if remove:
         print(f"aegis: removed the {agent} hook from {path}")
         return 0
     print(f"aegis: {agent} hook written to {path}")
+    if budget and agent in _BUDGET_INSTALL_NOTE:
+        print(f"  {_BUDGET_INSTALL_NOTE[agent]}")
+    elif budget:
+        print(f"  budget: not measured for {agent} (no token data); only the policy applies")
     print(f"  {_AFTER_INSTALL[agent]}")
     if not user and not (Path(project) / ".aegis").is_dir():
         print(f"  No policy in {Path(project) / '.aegis'} yet, so every command is allowed "

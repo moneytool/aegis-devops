@@ -32,6 +32,17 @@ test on each agent are in.
     rebuilds that report whether the day is complete, partial or of unknown completeness, and
     usage bucketed by the time the log recorded, never the time it was read.
   - Evaluation to allow / warn / deny with the measured usage, limits and observed overshoot.
+- The budget cap in `aegis hook` (design §6): in a project whose policy directory holds a
+  `budget.yaml`, after the policy decision (a BLOCK always stands), every covered tool call is
+  denied once the usage available at the hook reaches a limit, and new prompts where the agent
+  can block them (Claude Code and Codex `UserPromptSubmit`, Gemini CLI `BeforeAgent`); a warning
+  is shown once per session per threshold (`systemMessage`; an OpenCode toast; stderr for Copilot
+  CLI). A `budget.yaml` that cannot be used (bad signature, shape, authority) fails closed.
+- `aegis install` adds the budget hooks when the policy directory that applies holds a
+  `budget.yaml` (`--budget` / `--no-budget` to choose): the tool hook sees every tool call and
+  the prompt hook is added where the agent has one. The Claude Code plugin and the Gemini
+  extension carry budget-only entries that start no process in projects without a budget; the
+  OpenCode plugin sends every tool call, with its session id, only where a budget applies.
 - The example `authority.yaml` gives `admin` the `budget` class.
 - `agents.yaml`: a trusted AWS `source-identity` now warns (`source-identity-inherited`): a
   source identity survives role chaining, so an agent started in a session that carries it is

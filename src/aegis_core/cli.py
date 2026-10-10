@@ -627,6 +627,17 @@ def _build_parser() -> argparse.ArgumentParser:
     install_parser.add_argument(
         "--remove", action="store_true", help="remove the aegis hook instead"
     )
+    budget_flag = install_parser.add_mutually_exclusive_group()
+    budget_flag.add_argument(
+        "--budget", dest="budget", action="store_true", default=None,
+        help="install the budget-cap hooks (every tool call, and the prompt hook where the "
+        "agent has one) even if no budget.yaml is found now",
+    )
+    budget_flag.add_argument(
+        "--no-budget", dest="budget", action="store_false",
+        help="install only the shell-command hook (default: budget hooks when the policy "
+        "directory that applies holds a budget.yaml)",
+    )
 
     return parser
 
@@ -1337,6 +1348,32 @@ def _load_identity(args: argparse.Namespace):
     return model, [*key_warnings, *authority_map.warnings, *model.warnings]
 
 
+def load_budget_for_hook(config_dir: Path, extra_args: list[str] | None = None):
+    """``budget.yaml`` in an opted-in policy directory, verified like every
+    other policy file (signature, and its principal must hold ``budget``),
+    for ``aegis hook``. ``None`` when the directory has no budget. The key
+    is resolved as for ``aegis check`` (``--key``/``--insecure`` among the
+    hook's extra arguments, ``$AEGIS_SIGNING_KEY``, the example key next to
+    the constraints). Raises when the budget cannot be used; the hook fails
+    closed on that."""
+    from aegis_core.budget.policy import BUDGET_FILE, load_budget_policy
+
+    path = Path(config_dir) / BUDGET_FILE
+    if not path.exists():
+        return None
+    opts = argparse.ArgumentParser(add_help=False)
+    opts.add_argument("--key")
+    opts.add_argument("--insecure", action="store_true")
+    known, _ = opts.parse_known_args(extra_args or [])
+    args = argparse.Namespace(config_dir=str(config_dir), constraints=None, authority=None,
+                              environments=None, plan_constraints=None, key=known.key,
+                              insecure=known.insecure)
+    _resolve_config_paths(args)
+    key, insecure = _resolve_key(args, [])
+    authority_map = load_authority_map(args.authority, key=key, insecure=insecure)
+    return load_budget_policy(path, authority_map=authority_map, key=key, insecure=insecure)
+
+
 def _run_audit_aws(args: argparse.Namespace) -> int:
     """``aegis audit-identity aws``: read-only; exit 1 on a problem."""
     from aegis_core.audit_aws import InventoryError, audit, collect_inventory
@@ -1640,7 +1677,8 @@ def _run(argv: list[str]) -> int:
         )
     if args.command == "install":
         return hook_module.main_install(
-            args.agent, user=args.user, project=args.project, remove=args.remove
+            args.agent, user=args.user, project=args.project, remove=args.remove,
+            budget=args.budget,
         )
     if args.command != "check":
         raise UsageError("unknown command")
