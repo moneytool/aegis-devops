@@ -4,13 +4,13 @@
   "python": "3.12.12",
   "platform": "Darwin arm64",
   "hook_without_budget": {
-    "median_ms": 65.3,
-    "p95_ms": 68.0
+    "median_ms": 64.7,
+    "p95_ms": 67.3
   },
   "hook_with_budget": {
-    "median_ms": 74.1,
-    "p95_ms": 77.6
+    "median_ms": 74.2,
+    "p95_ms": 76.7
   },
-  "added_median_ms": 8.8,
+  "added_median_ms": 9.5,
   "target_ms": 20
 }
