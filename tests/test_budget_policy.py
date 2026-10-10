@@ -1,5 +1,6 @@
 """budget.yaml loading (design v1.0 §3) and the price table (§5)."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -166,8 +167,8 @@ def test_unsigned_without_key_is_recorded(tmp_path):
 # --- prices ---------------------------------------------------------------------------
 
 
-@pytest.fixture(scope="module")
-def table():
+@pytest.fixture
+def table():  # function scope: the cache dir is redirected per test (conftest)
     return load_builtin_table()
 
 
@@ -264,3 +265,31 @@ def test_an_override_reprices_earlier_estimated_usage(table):
     after = PriceTable(table, {"claude-new-1": {"input": 1, "output": 2, "cache_read": 0,
                                                 "cache_write": 0}}).cost(usage)
     assert after.estimated == {} and after.dollars == pytest.approx(4.0)
+
+
+def test_the_parsed_price_table_is_cached_by_content(tmp_path, monkeypatch):
+    """Parsing prices.yaml costs ~15 ms on every hook call; the parsed table
+    is cached as JSON keyed by a hash of the YAML text."""
+    import aegis_core.budget.pricing as pricing
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    first = load_builtin_table()
+    [cache] = (tmp_path / "aegis" / "budget").glob("prices-*.json")
+    assert json.loads(cache.read_text()) == first
+    cache.write_text("{damaged")                                 # a damaged cache re-parses
+    assert load_builtin_table() == first
+    assert json.loads(cache.read_text()) == first
+    real = pricing.resources.files
+
+    class Edited:
+        def __init__(self, pkg):
+            self.pkg = pkg
+
+        def joinpath(self, name):
+            text = real(self.pkg).joinpath(name).read_text().replace("as_of: \"2026-10-07\"",
+                                                                    "as_of: \"2027-01-01\"")
+            return type("T", (), {"read_text": lambda self: text})()
+
+    monkeypatch.setattr(pricing.resources, "files", Edited)
+    assert load_builtin_table()["as_of"] == "2027-01-01"         # an edited table is re-read
+    assert len(list((tmp_path / "aegis" / "budget").glob("prices-*.json"))) == 2

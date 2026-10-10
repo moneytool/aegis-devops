@@ -63,6 +63,7 @@ ticket or chat message (prompt injection, context poisoning) cannot become polic
 - [Writing constraints](constraints.md) — rules, scopes, authority, environments
 - [Configuration](configuration.md) — config directory, signing, Git sources, `agents.yaml`
 - [Server-side enforcement](server-side.md) — AWS SCPs and Kubernetes admission policies
+- [Session budget cap](budget.md) — per-session and per-day spend limits across agents
 - [Benchmark](benchmark.md) — Aegis against OPA and LLM self-checks on poisoned rules
 
 ## Project

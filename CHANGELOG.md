@@ -38,6 +38,14 @@ test on each agent are in.
   can block them (Claude Code and Codex `UserPromptSubmit`, Gemini CLI `BeforeAgent`); a warning
   is shown once per session per threshold (`systemMessage`; an OpenCode toast; stderr for Copilot
   CLI). A `budget.yaml` that cannot be used (bad signature, shape, authority) fails closed.
+- `aegis budget status|check|reset` (design §7): today's project total and its sessions, rebuilt
+  from the logs (`--json`); `check` exits 0 under, 3 over, 65 for an unusable `budget.yaml`, 66
+  for none; `reset --day` acknowledges an incomplete day's history with a marker signed by the
+  policy key, so `on_unknown_log: deny` stops denying it (an agent without the key cannot).
+- `docs/budget.md`; `aegis init` writes a signed `budget.example.yaml`.
+- `scripts/budget_latency.py`: the budget adds ~9 ms to a hook call (74 vs 65 ms median,
+  `results/budget-latency.json`), under the 20 ms target. The parsed price table is cached by
+  content hash; parsing it on every call had cost ~15 ms.
 - `aegis install` adds the budget hooks when the policy directory that applies holds a
   `budget.yaml` (`--budget` / `--no-budget` to choose): the tool hook sees every tool call and
   the prompt hook is added where the agent has one. The Claude Code plugin and the Gemini

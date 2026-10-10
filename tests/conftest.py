@@ -15,3 +15,17 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 os.chdir(REPO_ROOT)
+
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _private_budget_dirs(tmp_path_factory, monkeypatch):
+    """The budget cap writes a cache and a state directory (default under
+    ~/.cache and ~/.local/state). Point both at a per-test temporary
+    directory so no test touches the real ones; tests that set HOME or the
+    XDG variables themselves still override this."""
+    base = tmp_path_factory.mktemp("xdg")
+    monkeypatch.setenv("XDG_CACHE_HOME", str(base / "cache"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(base / "state"))

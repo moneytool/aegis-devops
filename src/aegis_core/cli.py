@@ -82,6 +82,7 @@ import json
 import logging
 import os
 import sys
+import time
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -106,6 +107,7 @@ from aegis_core.gitsource import (
     load_repos,
     load_signers,
 )
+from aegis_core.hook import BUDGET_AGENTS
 from aegis_core.identity import AGENTS_FILE, load_identity_model
 from aegis_core.intent import InfrastructureIntent
 from aegis_core.interceptor import AegisInterceptor, Decision
@@ -638,6 +640,38 @@ def _build_parser() -> argparse.ArgumentParser:
         help="install only the shell-command hook (default: budget hooks when the policy "
         "directory that applies holds a budget.yaml)",
     )
+
+    budget_parser = subparsers.add_parser(
+        "budget", help="The session budget cap: status, check, and the signed day reset "
+        "(docs/budget.md)")
+    budget_sub = budget_parser.add_subparsers(dest="budget_command", required=True)
+
+    def _budget_common(p):
+        p.add_argument("--project", default=".",
+                       help="project directory (default: .); its policy directory is found as "
+                       "the hook finds it")
+        p.add_argument("--key", help="signing key (file:PATH, env:VAR or hex)")
+        p.add_argument("--insecure", action="store_true",
+                       help="do not verify signatures (not accepted by reset)")
+
+    status_p = budget_sub.add_parser(
+        "status", help="today's project total and each session in it, rebuilt from the logs")
+    _budget_common(status_p)
+    status_p.add_argument("--agent", choices=sorted(BUDGET_AGENTS))
+    status_p.add_argument("--json", action="store_true", help="machine-readable output")
+    check_p = budget_sub.add_parser(
+        "check", help="exit 0 under budget, 3 over (65: budget.yaml unusable, 66: no budget)")
+    _budget_common(check_p)
+    check_p.add_argument("--agent", choices=sorted(BUDGET_AGENTS),
+                         help="with --session: also check that session's limit")
+    check_p.add_argument("--session", help="a session id of --agent")
+    reset_p = budget_sub.add_parser(
+        "reset", help="acknowledge one day's incomplete history (signed with the policy key), "
+        "so on_unknown_log: deny stops denying for it")
+    _budget_common(reset_p)
+    reset_p.add_argument("--day", nargs="?", const="today", required=True,
+                         help="the day to acknowledge, YYYY-MM-DD (default: today in the "
+                         "policy's tz)")
 
     return parser
 
@@ -1348,19 +1382,16 @@ def _load_identity(args: argparse.Namespace):
     return model, [*key_warnings, *authority_map.warnings, *model.warnings]
 
 
-def load_budget_for_hook(config_dir: Path, extra_args: list[str] | None = None):
-    """``budget.yaml`` in an opted-in policy directory, verified like every
-    other policy file (signature, and its principal must hold ``budget``),
-    for ``aegis hook``. ``None`` when the directory has no budget. The key
-    is resolved as for ``aegis check`` (``--key``/``--insecure`` among the
-    hook's extra arguments, ``$AEGIS_SIGNING_KEY``, the example key next to
-    the constraints). Raises when the budget cannot be used; the hook fails
-    closed on that."""
+def load_budget_with_key(config_dir: Path, extra_args: list[str] | None = None):
+    """``(policy, key, insecure)`` for ``budget.yaml`` in a policy directory,
+    verified like every other policy file (signature, and its principal must
+    hold ``budget``); ``(None, key, insecure)`` when there is no budget. The
+    key is resolved as for ``aegis check`` (``--key``/``--insecure`` among
+    ``extra_args``, ``$AEGIS_SIGNING_KEY``, the example key next to the
+    constraints). Raises when the budget cannot be used."""
     from aegis_core.budget.policy import BUDGET_FILE, load_budget_policy
 
     path = Path(config_dir) / BUDGET_FILE
-    if not path.exists():
-        return None
     opts = argparse.ArgumentParser(add_help=False)
     opts.add_argument("--key")
     opts.add_argument("--insecure", action="store_true")
@@ -1370,8 +1401,100 @@ def load_budget_for_hook(config_dir: Path, extra_args: list[str] | None = None):
                               insecure=known.insecure)
     _resolve_config_paths(args)
     key, insecure = _resolve_key(args, [])
+    if not path.exists():
+        return None, key, insecure
     authority_map = load_authority_map(args.authority, key=key, insecure=insecure)
-    return load_budget_policy(path, authority_map=authority_map, key=key, insecure=insecure)
+    policy = load_budget_policy(path, authority_map=authority_map, key=key, insecure=insecure)
+    return policy, key, insecure
+
+
+def _run_budget(args: argparse.Namespace) -> int:
+    """``aegis budget status|check|reset`` (docs/budget.md)."""
+    from aegis_core.budget import BudgetStore, default_logs, evaluate, price_table, refresh
+    from aegis_core.budget.accounting import day_of, find_project_root
+    from aegis_core.budget.report import (
+        check_exit,
+        project_status,
+        render_status,
+        reset_acknowledged,
+        write_reset,
+    )
+
+    project = Path(args.project).resolve()
+    config_dir = hook_module.find_opt_in_config(project)
+    if config_dir is None:
+        raise ConfigNotFoundError(f"no policy directory for {project} (.aegis/ here or above, "
+                                  "$AEGIS_CONFIG_DIR, ~/.config/aegis)")
+    extra = [*(["--key", args.key] if args.key else []), *(["--insecure"] if args.insecure
+                                                          else [])]
+    policy, key, insecure = load_budget_with_key(config_dir, extra)
+    if policy is None:
+        raise ConfigNotFoundError(f"no budget: {config_dir / 'budget.yaml'} does not exist")
+    root = find_project_root(str(project))
+    store, logs, prices = BudgetStore(), default_logs(), price_table(policy)
+    now = time.time()
+    today = day_of(datetime.fromtimestamp(now, tz=UTC), policy.zone)
+
+    if args.budget_command == "reset":
+        if key is None:
+            raise UsageError("budget reset must be signed with the policy key; --insecure is "
+                             "not accepted")
+        if root is None:
+            raise DataError(f"{project} is not inside a project with .aegis/: project/day "
+                            "totals (and their history) exist only there")
+        day = today if args.day == "today" else args.day
+        try:
+            datetime.strptime(day, "%Y-%m-%d")
+        except ValueError:
+            raise UsageError(f"--day {day!r} is not YYYY-MM-DD") from None
+        path = write_reset(store, root, day, key, now)
+        print(f"aegis budget: history for {day} acknowledged for {root} ({path})")
+        return 0
+
+    if args.budget_command == "status":
+        if root is None:
+            print(f"aegis budget: {project} is not inside a project with .aegis/; only session "
+                  "limits apply here")
+            return 0
+        status = project_status(policy, prices, store, logs, root, now=now, key=key,
+                                insecure=insecure, agent=args.agent)
+        print(json.dumps(status, indent=2, sort_keys=True) if args.json
+              else render_status(status))
+        return 0
+
+    # check
+    if bool(args.agent) != bool(args.session):
+        raise UsageError("--agent and --session go together")
+    if args.session:
+        if not policy.measures(args.agent):
+            print(f"aegis budget: {args.agent} is not measured by this budget")
+            return 0
+        loc = logs[args.agent].locate(args.session)
+        if loc is None:
+            raise DataError(f"cannot find the log of {args.agent} session {args.session}")
+        measured = {a: lg for a, lg in logs.items() if policy.measures(a)}
+        snap = refresh(store, measured, loc, policy.zone, now=now, fallback_cwd=str(project))
+        acknowledged = bool(snap.record.project_root) and reset_acknowledged(
+            store, snap.record.project_root, snap.day, key, insecure)
+        verdict = evaluate(policy, prices, snap, acknowledged=acknowledged)
+        decision, messages = verdict.decision, verdict.messages
+    elif root is None:
+        print(f"aegis budget: {project} is not inside a project with .aegis/; pass --agent "
+              "and --session to check a session")
+        return 0
+    else:
+        status = project_status(policy, prices, store, logs, root, now=now, key=key,
+                                insecure=insecure)
+        decision, messages = status["decision"], status["messages"]
+    for m in messages:
+        print(f"aegis {m}")
+    print(f"aegis budget: {'over' if decision == 'deny' else 'under'} budget")
+    return check_exit(decision)
+
+
+def load_budget_for_hook(config_dir: Path, extra_args: list[str] | None = None):
+    """The budget policy alone (see :func:`load_budget_with_key`)."""
+    return load_budget_with_key(config_dir, extra_args)[0]
 
 
 def _run_audit_aws(args: argparse.Namespace) -> int:
@@ -1675,6 +1798,8 @@ def _run(argv: list[str]) -> int:
             escalate_as=args.escalate_as,
             extra_args=_strip_leading_separator(args.check_args),
         )
+    if args.command == "budget":
+        return _run_budget(args)
     if args.command == "install":
         return hook_module.main_install(
             args.agent, user=args.user, project=args.project, remove=args.remove,

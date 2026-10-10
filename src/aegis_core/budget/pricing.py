@@ -14,11 +14,16 @@ table knows, so the fallback is not an upper bound.
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
+import json
 import math
+import os
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from importlib import resources
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -161,9 +166,29 @@ class PriceTable:
         return total
 
 
+def _table_cache_dir() -> Path:
+    home = Path(os.environ.get("HOME") or Path.home())
+    return Path(os.environ.get("XDG_CACHE_HOME") or home / ".cache") / "aegis" / "budget"
+
+
 def load_builtin_table() -> dict[str, Any]:
+    """The built-in price table. Parsing it with PyYAML's pure-Python loader
+    costs ~15 ms, paid on every hook call, so the parsed table is cached as
+    JSON under the cache directory, keyed by a hash of the YAML text: an
+    edited table is re-parsed, and a damaged or missing cache only costs a
+    re-parse."""
     text = resources.files("aegis_core.budget").joinpath("prices.yaml").read_text()
-    table = yaml.safe_load(text)
+    digest = hashlib.sha256(text.encode()).hexdigest()[:16]
+    cache = _table_cache_dir() / f"prices-{digest}.json"
+    try:
+        table = json.loads(cache.read_text())
+    except (OSError, ValueError):
+        table = yaml.safe_load(text)
+        with contextlib.suppress(OSError):
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            tmp = cache.with_suffix(f".{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(table))
+            os.replace(tmp, cache)
     if not isinstance(table, dict) or table.get("version") != 1:
         raise ValueError("aegis_core/budget/prices.yaml: unsupported shape or version")
     return table
