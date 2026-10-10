@@ -44,6 +44,10 @@ test on each agent are in.
   signed by the policy key that records the acknowledged state, so `on_unknown_log: deny` stops
   denying for exactly that (later problems count again; an agent without the key cannot reset).
 - `docs/budget.md`; `aegis init` writes a signed `budget.example.yaml`.
+- Live test in each agent (`docs/dev/budget-live-test/`): tool calls and prompts over a
+  budget denied in Claude Code, Codex and OpenCode; Copilot CLI's premium-request count reaches
+  its log only at the end of a turn; Gemini CLI not tested (API credits). `docs/budget.md` now
+  says, per agent, from when a turn's usage is seen.
 - `scripts/budget_latency.py`: the budget adds ~9 ms to a hook call (74 vs 65 ms median,
   `results/budget-latency.json`), under the 20 ms target. The price table ships as
   `prices.json` generated from `prices.yaml` (`scripts/sync_prices.py`; a test keeps them equal)
