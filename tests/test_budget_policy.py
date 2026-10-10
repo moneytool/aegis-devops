@@ -1,5 +1,6 @@
 """budget.yaml loading (design v1.0 §3) and the price table (§5)."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -166,8 +167,8 @@ def test_unsigned_without_key_is_recorded(tmp_path):
 # --- prices ---------------------------------------------------------------------------
 
 
-@pytest.fixture(scope="module")
-def table():
+@pytest.fixture
+def table():  # function scope: the cache dir is redirected per test (conftest)
     return load_builtin_table()
 
 
@@ -264,3 +265,40 @@ def test_an_override_reprices_earlier_estimated_usage(table):
     after = PriceTable(table, {"claude-new-1": {"input": 1, "output": 2, "cache_read": 0,
                                                 "cache_write": 0}}).cost(usage)
     assert after.estimated == {} and after.dollars == pytest.approx(4.0)
+
+
+def test_prices_json_is_prices_yaml():
+    """The package loads prices.json (fast); people edit prices.yaml. They
+    must be the same table: run scripts/sync_prices.py after an edit."""
+    import subprocess
+    import sys
+
+    from aegis_core.budget.pricing import load_source_table
+
+    assert load_builtin_table() == load_source_table()
+    assert subprocess.run([sys.executable, "scripts/sync_prices.py", "--check"],
+                          capture_output=True).returncode == 0
+
+
+def test_no_writable_file_can_change_a_price(tmp_path, monkeypatch):
+    """Review of #40: a cached copy of the table under ~/.cache acted as an
+    unsigned price override. The table is read only from the package now; a
+    planted 'cache' with zero rates, or with a bogus version, changes
+    nothing."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    before = load_builtin_table()
+    cache = tmp_path / "aegis" / "budget"
+    cache.mkdir(parents=True, exist_ok=True)
+    zero = {**before, "vendors": {v: {**spec, "models": {m: {c: 0 for c in r}
+                                                       for m, r in spec["models"].items()}}
+                                  for v, spec in before["vendors"].items()}}
+    import hashlib
+    from importlib import resources
+
+    yaml_text = resources.files("aegis_core.budget").joinpath("prices.yaml").read_text()
+    old_name = f"prices-{hashlib.sha256(yaml_text.encode()).hexdigest()[:16]}.json"
+    for name in ("prices.json", old_name):          # old_name: the cache the review exploited
+        (cache / name).write_text(json.dumps(zero))
+    (cache / "prices-bogus.json").write_text(json.dumps({"version": 999}))
+    assert load_builtin_table() == before
+    assert PriceTable(load_builtin_table()).price("claude-opus-5-5").rates["input"] == 4.0

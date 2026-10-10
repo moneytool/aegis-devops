@@ -1,0 +1,21 @@
+# The session budget cap (docs/budget.md). Copy to budget.yaml, set your own limits, and sign
+# it with `aegis sign`; its principal must hold the 'budget' class in authority.yaml. Until
+# it is named budget.yaml it does nothing. Then reinstall your agents' hooks (`aegis install
+# <agent>`) so they see every tool call, and check with: aegis budget status
+version: 1
+principal: admin                 # must hold the 'budget' class in authority.yaml
+unit: usd                        # usd (estimated from list prices) | tokens; required
+session:
+  limit: 20                      # per agent session
+  warn_at: 0.8                   # warn once at 80%
+project_day:
+  limit: 100                     # every measured session in this project, per day
+  warn_at: 0.8
+  tz: UTC                        # the day boundary
+agents: [claude, codex, gemini, opencode, copilot]   # only listed agents are measured
+on_unknown_log: allow            # allow (warn) | deny: usage Aegis cannot verify
+on_unknown_price: estimate       # estimate (warn) | deny: models with no price
+pricing: {}                      # signed overrides, USD per million tokens:
+#  claude-opus-5-5: {input: 4, output: 20, cache_read: 0.2, cache_write: 8}
+copilot:
+  premium_requests: 50           # Copilot CLI reports premium requests, not tokens

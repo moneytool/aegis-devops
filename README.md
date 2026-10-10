@@ -298,6 +298,7 @@ of anything you care about.
 | [`docs/constraints.md`](docs/constraints.md) | Writing constraints, metadata vocabulary, authority policy, environment mapping |
 | [`docs/configuration.md`](docs/configuration.md) | Configuration/config-dir discovery, signing, source verification, the identity model (`agents.yaml`), rate limits & ledger |
 | [`docs/server-side.md`](docs/server-side.md) | Preview: compiling the policy to AWS Service Control Policies scoped to agent identities |
+| [`docs/budget.md`](docs/budget.md) | The session budget cap: per-session and per-project-per-day limits in estimated USD or tokens, across Claude Code, Codex, Gemini CLI, OpenCode and Copilot CLI |
 | [`docs/benchmark.md`](docs/benchmark.md) | Benchmark methodology, full results table, real LLM baselines, agent-harness baselines, corpus, adversarial suite |
 | [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) | Adding a new parser or tool |
 | [`docs/dev/PLAN.md`](docs/dev/PLAN.md) | Design plan and open gaps |

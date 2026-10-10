@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from aegis_core.budget.accounting import UNKNOWN_DAY, Snapshot
+from aegis_core.budget.accounting import UNKNOWN_DAY, ProjectDay, Snapshot
 from aegis_core.budget.policy import BudgetPolicy, Limit
 from aegis_core.budget.pricing import CATEGORIES, PriceTable
 
@@ -77,91 +77,183 @@ def _fmt(unit: str, amount: float) -> str:
     return f"{amount:,.2f} premium requests"
 
 
-def evaluate(policy: BudgetPolicy, prices: PriceTable, snap: Snapshot) -> Verdict:
+@dataclass(frozen=True)
+class Acknowledgement:
+    """What a signed ``aegis budget reset --day`` acknowledged: the project
+    day's verification state at reset time. Only that is excused; anything
+    that becomes unverifiable later (a new session's unreadable log, more
+    missing sessions) counts again."""
+
+    completeness: str
+    history: str
+    missing_sessions: int
+    # session -> its verification quantities at reset time
+    # (SessionRecord.verification: log_missing, unreadable_records, unknown_time_usage)
+    unverified: Mapping[str, Mapping[str, Any]]
+
+    @classmethod
+    def of(cls, pd: ProjectDay) -> Acknowledgement:
+        return cls(pd.completeness, pd.history, pd.missing_sessions,
+                   {k: pd.verification(k) or {} for k in pd.unverified()})
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"completeness": self.completeness, "history": self.history,
+                "missing_sessions": self.missing_sessions,
+                "unverified": {k: dict(v) for k, v in sorted(self.unverified.items())}}
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> Acknowledgement:
+        unverified = dict(d["unverified"])
+        if not all(isinstance(v, dict) for v in unverified.values()):
+            raise ValueError("reset baseline: unverified sessions need their quantities")
+        return cls(str(d["completeness"]), str(d["history"]), int(d["missing_sessions"]),
+                   {str(k): dict(v) for k, v in unverified.items()})
+
+    def covers_history(self, pd: ProjectDay) -> bool:
+        return (pd.completeness == self.completeness and pd.history == self.history
+                and pd.missing_sessions <= self.missing_sessions)
+
+    def covers(self, key: str, now: Mapping[str, Any] | None) -> bool:
+        """Whether session ``key``'s unverifiable usage is no worse than it
+        was when acknowledged: the same session, a log no more missing, no
+        more unreadable records and no more usage without a recorded time.
+        Unknown quantities are never covered."""
+        then = self.unverified.get(key)
+        if then is None or now is None:
+            return False
+        try:
+            return (bool(now.get("log_missing")) <= bool(then.get("log_missing"))
+                    and int(now.get("unreadable_records", 0))
+                    <= int(then.get("unreadable_records", 0))
+                    and float(now.get("unknown_time_usage", 0))
+                    <= float(then.get("unknown_time_usage", 0)))
+        except (TypeError, ValueError):
+            return False
+
+
+class _Builder:
+    """Collects measures, price flags and unverifiable usage into a Verdict."""
+
+    def __init__(self, policy: BudgetPolicy, prices: PriceTable, providers: Mapping[str, str]):
+        self.policy, self.prices, self.providers = policy, prices, providers
+        self.verdict = Verdict(ALLOW)
+        self.levels: list[str] = []
+        self.unknown: list[str] = []
+
+    def amount(self, usage: Mapping[str, Mapping[str, float]]) -> float:
+        if self.policy.unit == "tokens":
+            return tokens_of(usage)
+        cost = self.prices.cost(usage, self.providers)
+        for model, cats in cost.estimated.items():
+            merged = set(self.verdict.estimated.get(model, [])) | set(cats)
+            self.verdict.estimated[model] = sorted(merged)
+        return cost.dollars
+
+    def measure(self, name: str, unit: str, used: float, lim: Limit) -> None:
+        self.verdict.measures.append(Measure(name, unit, used, lim.limit, lim.warn_at))
+
+    def project_history(self, pd: ProjectDay, exclude: str | None,
+                        ack: Acknowledgement | None) -> None:
+        """A project day whose history is incomplete, or whose other
+        sessions are only a lower bound, is unverifiable -- except for what
+        a signed ``aegis budget reset --day`` acknowledged."""
+        if pd.completeness != "complete" and not (ack and ack.covers_history(pd)):
+            detail = (f"{pd.missing_sessions} session(s) without a log" if pd.history == "ok"
+                      else f"session inventory {pd.history}")
+            self.unknown.append(f"today's project total is {pd.completeness} ({detail})")
+        others = {k: r for k, r in pd.unverified(exclude=exclude).items()
+                  if not (ack and ack.covers(k, pd.verification(k)))}
+        if others:
+            reasons = sorted({r for rs in others.values() for r in rs})
+            who = "other session(s)" if exclude else "session(s)"
+            self.unknown.append(f"{len(others)} {who} in the project are a lower bound "
+                                f"({', '.join(reasons)})")
+
+    def finish(self) -> Verdict:
+        verdict, policy = self.verdict, self.policy
+        for m in verdict.measures:
+            self.levels.append(m.level)
+            if m.level == DENY:
+                verdict.reasons.append(f"{m.name}-over")
+                verdict.messages.append(
+                    f"budget: {m.name.replace('_', ' ')} limit reached: {_fmt(m.unit, m.used)} "
+                    f"of {_fmt(m.unit, m.limit)}" + (
+                        f" (overshoot {_fmt(m.unit, m.overshoot)})" if m.overshoot else ""))
+            elif m.level == WARN:
+                verdict.reasons.append(f"{m.name}-warn")
+                verdict.messages.append(
+                    f"budget: {m.name.replace('_', ' ')} at {m.fraction:.0%}: "
+                    f"{_fmt(m.unit, m.used)} of {_fmt(m.unit, m.limit)}, "
+                    f"{_fmt(m.unit, m.limit - m.used)} left")
+        # Unpriced models: estimated in 'estimate' mode, refused in 'deny' mode.
+        if policy.unit == "usd" and verdict.estimated:
+            names = ", ".join(sorted(verdict.estimated))
+            if policy.on_unknown_price == "deny":
+                self.levels.append(DENY)
+                verdict.reasons.append("unpriced-model")
+                verdict.messages.append(f"budget: no explicit price for {names}; add it under "
+                                        "'pricing:' in budget.yaml and sign it")
+            else:
+                verdict.reasons.append("estimated-price")
+                verdict.messages.append(f"budget: estimated, unpriced model(s): {names}")
+        # Usage Aegis could not read or place: an unknown log.
+        if self.unknown:
+            if policy.on_unknown_log == "deny":
+                self.levels.append(DENY)
+                verdict.reasons.append("unknown-log")
+                verdict.messages.append("budget: usage cannot be verified ("
+                                        + "; ".join(self.unknown) + "); on_unknown_log: deny")
+            else:
+                verdict.reasons.append("unknown-log-warn")
+                verdict.messages.append("budget: usage may be under-counted: "
+                                        + "; ".join(self.unknown))
+        if DENY in self.levels:
+            verdict.decision = DENY
+        elif WARN in self.levels or verdict.reasons:
+            verdict.decision = WARN
+        return verdict
+
+
+def evaluate(policy: BudgetPolicy, prices: PriceTable, snap: Snapshot, *,
+             ack: Acknowledgement | None = None) -> Verdict:
+    """The decision for one session at one hook. ``ack``: what a signed
+    ``aegis budget reset --day`` acknowledged for today; only that part of
+    an incomplete project history stops counting as unverifiable (the
+    session's own log problems always count)."""
     agent = snap.record.agent
     if not policy.measures(agent):
         return Verdict(ALLOW)
-    verdict = Verdict(ALLOW)
-
-    def amount(usage: Mapping[str, Mapping[str, float]]) -> float:
-        if policy.unit == "tokens":
-            return tokens_of(usage)
-        cost = prices.cost(usage, snap.providers)
-        for model, cats in cost.estimated.items():
-            verdict.estimated[model] = sorted(set(verdict.estimated.get(model, [])) | set(cats))
-        return cost.dollars
-
-    def measure(name: str, unit: str, used: float, lim: Limit) -> None:
-        verdict.measures.append(Measure(name, unit, used, lim.limit, lim.warn_at))
-
+    b = _Builder(policy, prices, snap.providers)
     if agent == "copilot":
         assert policy.copilot_premium_requests
         used = sum(u.get("requests", 0) for u in snap.session_usage.values())
-        measure("copilot_premium_requests", "requests", used, policy.copilot_premium_requests)
+        b.measure("copilot_premium_requests", "requests", used, policy.copilot_premium_requests)
     else:
         if policy.session:
-            measure("session", policy.unit, amount(snap.session_usage), policy.session)
+            b.measure("session", policy.unit, b.amount(snap.session_usage), policy.session)
         if policy.project_day and snap.project is not None:
-            measure("project_day", policy.unit, amount(snap.project_usage), policy.project_day)
-
-    levels = [m.level for m in verdict.measures]
-    for m in verdict.measures:
-        if m.level == DENY:
-            verdict.reasons.append(f"{m.name}-over")
-            verdict.messages.append(
-                f"budget: {m.name.replace('_', ' ')} limit reached: {_fmt(m.unit, m.used)} of "
-                f"{_fmt(m.unit, m.limit)}" + (f" (overshoot {_fmt(m.unit, m.overshoot)})"
-                                              if m.overshoot else ""))
-        elif m.level == WARN:
-            verdict.reasons.append(f"{m.name}-warn")
-            verdict.messages.append(
-                f"budget: {m.name.replace('_', ' ')} at {m.fraction:.0%}: {_fmt(m.unit, m.used)} "
-                f"of {_fmt(m.unit, m.limit)}, {_fmt(m.unit, m.limit - m.used)} left")
-
-    # Unpriced models: estimated in 'estimate' mode, refused in 'deny' mode.
-    if policy.unit == "usd" and verdict.estimated:
-        names = ", ".join(sorted(verdict.estimated))
-        if policy.on_unknown_price == "deny":
-            levels.append(DENY)
-            verdict.reasons.append("unpriced-model")
-            verdict.messages.append(f"budget: no explicit price for {names}; add it under "
-                                    "'pricing:' in budget.yaml and sign it")
-        else:
-            verdict.reasons.append("estimated-price")
-            verdict.messages.append(f"budget: estimated, unpriced model(s): {names}")
-
-    # Usage Aegis could not read or place: an unknown log.
-    unknown: list[str] = []
+            b.measure("project_day", policy.unit, b.amount(snap.project_usage),
+                      policy.project_day)
     rec = snap.record
     if rec.log_missing:
-        unknown.append("the session's log is missing")
+        b.unknown.append("the session's log is missing")
     if rec.problem_total:
-        unknown.append(f"{rec.problem_total} unreadable log record(s)")
+        b.unknown.append(f"{rec.problem_total} unreadable log record(s)")
     if rec.buckets().get(UNKNOWN_DAY):
-        unknown.append("usage with no recorded time (counted for the session only)")
+        b.unknown.append("usage with no recorded time (counted for the session only)")
     if snap.project is not None:
-        pd = snap.project
-        if pd.completeness != "complete":
-            detail = (f"{pd.missing_sessions} session(s) without a log" if pd.history == "ok"
-                      else f"session inventory {pd.history}")
-            unknown.append(f"today's project total is {pd.completeness} ({detail})")
-        others = pd.unverified(exclude=rec.key)
-        if others:
-            reasons = sorted({r for rs in others.values() for r in rs})
-            unknown.append(f"{len(others)} other session(s) in the project are a lower bound "
-                           f"({', '.join(reasons)})")
-    if unknown:
-        if policy.on_unknown_log == "deny":
-            levels.append(DENY)
-            verdict.reasons.append("unknown-log")
-            verdict.messages.append("budget: usage cannot be verified (" + "; ".join(unknown)
-                                    + "); on_unknown_log: deny")
-        else:
-            verdict.reasons.append("unknown-log-warn")
-            verdict.messages.append("budget: usage may be under-counted: " + "; ".join(unknown))
+        b.project_history(snap.project, rec.key, ack)
+    return b.finish()
 
-    if DENY in levels:
-        verdict.decision = DENY
-    elif WARN in levels or verdict.reasons:
-        verdict.decision = WARN
-    return verdict
+
+def evaluate_project(policy: BudgetPolicy, prices: PriceTable, pd: ProjectDay, *,
+                     ack: Acknowledgement | None = None) -> Verdict:
+    """The project/day limit alone, for ``aegis budget check`` without a
+    session: the day's total against ``project_day``, with every
+    contributing session's verification status."""
+    b = _Builder(policy, prices, pd.providers())
+    if policy.project_day:
+        token_usage = {m: u for m, u in pd.usage().items() if "requests" not in u}
+        b.measure("project_day", policy.unit, b.amount(token_usage), policy.project_day)
+    b.project_history(pd, None, ack)
+    return b.finish()

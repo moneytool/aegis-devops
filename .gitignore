@@ -18,6 +18,7 @@ results/*
 !results/benchmark.json
 !results/latency.md
 !results/latency.json
+!results/budget-latency.json
 !results/llm-external.md
 !results/llm-cache-naive.jsonl
 !results/llm-cache-aware.jsonl

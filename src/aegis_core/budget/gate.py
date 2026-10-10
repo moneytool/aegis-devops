@@ -26,6 +26,7 @@ from aegis_core.budget.evaluate import ALLOW, DENY, WARN, evaluate
 from aegis_core.budget.logs import AgentLog, default_logs
 from aegis_core.budget.policy import BudgetPolicy
 from aegis_core.budget.pricing import PriceTable, load_builtin_table
+from aegis_core.budget.report import reset_acknowledged
 
 # Hook events that come before a new prompt rather than a tool call.
 PROMPT_EVENTS = frozenset({"UserPromptSubmit", "BeforeAgent"})
@@ -73,7 +74,8 @@ def _first_time(store: BudgetStore, agent: str, sid: str, keys: list[str]) -> li
 
 def check(agent: str, payload: Mapping[str, Any], cwd: str | None, policy: BudgetPolicy, *,
           store: BudgetStore | None = None, logs: Mapping[str, AgentLog] | None = None,
-          now: float | None = None) -> Outcome:
+          now: float | None = None, key: bytes | None = None,
+          insecure: bool = False) -> Outcome:
     """The budget decision for one hook call. Raises on internal errors;
     the caller fails closed inside an opted-in project."""
     if not policy.measures(agent):
@@ -96,7 +98,9 @@ def check(agent: str, payload: Mapping[str, Any], cwd: str | None, policy: Budge
     snap = refresh(store, logs, loc, policy.zone, now=time.time() if now is None else now,
                    fallback_cwd=cwd)
     prices = PriceTable(load_builtin_table(), policy.pricing)
-    verdict = evaluate(policy, prices, snap)
+    ack = reset_acknowledged(store, snap.record.project_root, snap.day, key, insecure) \
+        if snap.record.project_root else None
+    verdict = evaluate(policy, prices, snap, ack=ack)
     if verdict.decision == DENY:
         over = [m.name for m in verdict.measures if m.level == DENY]
         ways = sorted({_HOW_TO_CONTINUE[n] for n in over})

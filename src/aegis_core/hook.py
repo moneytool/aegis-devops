@@ -369,14 +369,14 @@ def _budget_outcome(agent: str, payload: dict, request: HookRequest, config_dir:
     from aegis_core.budget.gate import Outcome, check
 
     try:
-        policy = cli.load_budget_for_hook(config_dir, extra_args)
+        policy, key, insecure = cli.load_budget_with_key(config_dir, extra_args)
     except Exception as exc:  # noqa: BLE001 - any failure to load is reported, not raised
         return Outcome("deny", f"aegis budget: {config_dir / BUDGET_FILE} cannot be used "
                                f"({exc.__class__.__name__}: {exc}); fix and re-sign it, or "
                                "remove it")
     if policy is None:
         return Outcome("allow")
-    return check(agent, payload, request.cwd, policy)
+    return check(agent, payload, request.cwd, policy, key=key, insecure=insecure)
 
 
 def run_hook(agent: str, stdin_text: str, *, escalate_as: str = "ask",
