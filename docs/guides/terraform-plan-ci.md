@@ -26,8 +26,15 @@ jobs:
       - uses: moneytool/aegis-devops-action@v1
         with:
           plan: tfplan
+          fail-on: escalate      # fail on ESCALATE too, not only BLOCK
           signing-key: ${{ secrets.AEGIS_SIGNING_KEY }}
 ```
+
+`fail-on: escalate` matters: the Action's default (`block`) lets an ESCALATE verdict pass, and the
+example policy escalates rather than blocks some plans (`plan-max-25-resources`: more than 25
+resources in one plan). With it, the check fails on either verdict, like `--exit-style ci`
+below. An escalated plan then needs its own review and approval before anyone applies it, for
+example a protected environment with required reviewers on the apply job.
 
 Add a policy to the repository first: `pip install aegis-devops && aegis init .aegis`. For OpenTofu, use `opentofu/setup-opentofu` and set `tool: tofu`. The Action's [README](https://github.com/moneytool/aegis-devops-action#readme) covers every input.
 
@@ -75,4 +82,20 @@ See [writing constraints](../constraints.md).
 
 ## How this differs from OPA or Sentinel
 
-Both check a plan against rules, and both are good at it. Aegis adds a check on the rules themselves: a rule only counts if nobody has edited it since it was signed, and if its author is allowed to write that kind of rule. That matters when the change, or the rules, may have come from an AI agent that read a ticket or a pull request comment. The same policy also runs as a pre-execution hook for [Claude Code](claude-code.md), [Cursor](cursor.md), [Codex](codex.md), [Copilot](copilot.md) and [Gemini CLI](gemini-cli.md), so an agent can't skip CI by running `terraform apply` itself.
+Both check a plan against rules, and both are good at it. Aegis adds a check on the rules themselves: a rule only counts if nobody has edited it since it was signed, and if its author is allowed to write that kind of rule. That matters when the change, or the rules, may have come from an AI agent that read a ticket or a pull request comment. The same policy also runs as a pre-execution hook for [Claude Code](claude-code.md), [Cursor](cursor.md), [Codex](codex.md), [Copilot](copilot.md) and [Gemini CLI](gemini-cli.md).
+
+## What the hooks do and don't cover
+
+The two checks are different. The **agent hook** sees the command, so it enforces command-level
+rules: `terraform destroy` and `terraform apply -destroy` are blocked by the example policy. It
+does **not** see what a saved plan will change, so a plain `terraform apply` (or `terraform apply
+tfplan`) is allowed, even for a plan that the **plan check** above would block. Plan-level rules
+such as `plan-no-db-deletes` hold only where the exact plan is checked and the apply path is
+protected:
+
+- apply in CI, from the plan the check approved, behind a protected environment;
+- keep apply credentials (cloud keys, state backend access) out of the agents' environment;
+- if agents must never run Terraform at all, add a rule for the shell intent
+  `binary/terraform` (provider `shell`, action `exec`) — it blocks every `terraform` command,
+  `plan` included, since the hook cannot tell them apart; or rely on the
+  [server-side layer](../server-side.md), which denies the cloud calls whatever runs them.
