@@ -1411,7 +1411,8 @@ def load_budget_with_key(config_dir: Path, extra_args: list[str] | None = None):
 def _run_budget(args: argparse.Namespace) -> int:
     """``aegis budget status|check|reset`` (docs/budget.md)."""
     from aegis_core.budget import BudgetStore, default_logs, evaluate, price_table, refresh
-    from aegis_core.budget.accounting import day_of, find_project_root
+    from aegis_core.budget.accounting import Snapshot, day_of, find_project_root, rebuild
+    from aegis_core.budget.evaluate import Acknowledgement
     from aegis_core.budget.report import (
         check_exit,
         project_status,
@@ -1432,6 +1433,7 @@ def _run_budget(args: argparse.Namespace) -> int:
         raise ConfigNotFoundError(f"no budget: {config_dir / 'budget.yaml'} does not exist")
     root = find_project_root(str(project))
     store, logs, prices = BudgetStore(), default_logs(), price_table(policy)
+    measured = {a: lg for a, lg in logs.items() if policy.measures(a)}
     now = time.time()
     today = day_of(datetime.fromtimestamp(now, tz=UTC), policy.zone)
 
@@ -1447,7 +1449,9 @@ def _run_budget(args: argparse.Namespace) -> int:
             datetime.strptime(day, "%Y-%m-%d")
         except ValueError:
             raise UsageError(f"--day {day!r} is not YYYY-MM-DD") from None
-        path = write_reset(store, root, day, key, now)
+        # the baseline is the day as the logs show it now: only that is excused
+        pd = rebuild(store, measured, root, day, policy.zone)
+        path = write_reset(store, root, day, key, Acknowledgement.of(pd), now)
         print(f"aegis budget: history for {day} acknowledged for {root} ({path})")
         return 0
 
@@ -1472,11 +1476,16 @@ def _run_budget(args: argparse.Namespace) -> int:
         loc = logs[args.agent].locate(args.session)
         if loc is None:
             raise DataError(f"cannot find the log of {args.agent} session {args.session}")
-        measured = {a: lg for a, lg in logs.items() if policy.measures(a)}
         snap = refresh(store, measured, loc, policy.zone, now=now, fallback_cwd=str(project))
-        acknowledged = bool(snap.record.project_root) and reset_acknowledged(
-            store, snap.record.project_root, snap.day, key, insecure)
-        verdict = evaluate(policy, prices, snap, acknowledged=acknowledged)
+        ack = None
+        if snap.record.project_root:
+            # a refresh only updates this session; rebuild the project day from
+            # every measured agent's logs, as status and an unscoped check do
+            pd = rebuild(store, measured, snap.record.project_root, snap.day, policy.zone)
+            snap = Snapshot(snap.record, snap.day, pd, snap.session_usage, pd.usage(),
+                            {**pd.providers(), **snap.record.providers})
+            ack = reset_acknowledged(store, snap.record.project_root, snap.day, key, insecure)
+        verdict = evaluate(policy, prices, snap, ack=ack)
         decision, messages = verdict.decision, verdict.messages
     elif root is None:
         print(f"aegis budget: {project} is not inside a project with .aegis/; pass --agent "

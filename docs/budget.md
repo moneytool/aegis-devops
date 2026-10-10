@@ -125,8 +125,11 @@ were deleted, or the first day of a budget when other sessions had already run t
 - `allow` (default): a warning, once; the lower bound is used.
 - `deny`: covered calls are denied. A session's own unreadable log stays denied (start a new
   session). For an incomplete **project day**, `aegis budget reset --day` acknowledges that
-  day's history as it stands — it is signed with the policy key, so an agent cannot do it — and
-  the day is no longer denied for that reason. Otherwise it clears at the next day.
+  day's history **as it stands**: it records the day's verification state at that moment (how
+  complete the history is, which sessions are lower bounds and why) and is signed with the
+  policy key, so an agent cannot write one. Exactly that is excused; anything that becomes
+  unverifiable afterwards — a new session with an unreadable log, more sessions without one —
+  counts again. Otherwise it clears at the next day.
 
 ## Commands
 
@@ -141,9 +144,11 @@ aegis budget reset  --day [YYYY-MM-DD] [--project DIR] [--key KEY]
   whether it is a lower bound), estimated prices and the policy's warnings.
 - `check` exits **0** under budget (a warning included), **3** over, **65** if `budget.yaml`
   cannot be used, **66** if there is none: for CI and scripts, including headless agent runs.
-  With `--agent` and `--session` it also checks that session's own limit.
-- `reset --day` writes the signed acknowledgement described above (default: today in the
-  policy's `tz`); it needs the signing key and refuses `--insecure`.
+  It rebuilds the project day from the logs too; with `--agent` and `--session` it also checks
+  that session's own limit.
+- `reset --day` rebuilds the day, then writes the signed acknowledgement of its current state
+  described above (default: today in the policy's `tz`); it needs the signing key and refuses
+  `--insecure`.
 
 ## Cost
 

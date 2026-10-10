@@ -77,6 +77,40 @@ def _fmt(unit: str, amount: float) -> str:
     return f"{amount:,.2f} premium requests"
 
 
+@dataclass(frozen=True)
+class Acknowledgement:
+    """What a signed ``aegis budget reset --day`` acknowledged: the project
+    day's verification state at reset time. Only that is excused; anything
+    that becomes unverifiable later (a new session's unreadable log, more
+    missing sessions) counts again."""
+
+    completeness: str
+    history: str
+    missing_sessions: int
+    unverified: Mapping[str, list[str]]
+
+    @classmethod
+    def of(cls, pd: ProjectDay) -> Acknowledgement:
+        return cls(pd.completeness, pd.history, pd.missing_sessions, pd.unverified())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"completeness": self.completeness, "history": self.history,
+                "missing_sessions": self.missing_sessions,
+                "unverified": {k: sorted(v) for k, v in sorted(self.unverified.items())}}
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> Acknowledgement:
+        return cls(str(d["completeness"]), str(d["history"]), int(d["missing_sessions"]),
+                   {str(k): list(v) for k, v in dict(d["unverified"]).items()})
+
+    def covers_history(self, pd: ProjectDay) -> bool:
+        return (pd.completeness == self.completeness and pd.history == self.history
+                and pd.missing_sessions <= self.missing_sessions)
+
+    def covers(self, key: str, reasons: list[str]) -> bool:
+        return key in self.unverified and set(reasons) <= set(self.unverified[key])
+
+
 class _Builder:
     """Collects measures, price flags and unverifiable usage into a Verdict."""
 
@@ -98,17 +132,17 @@ class _Builder:
     def measure(self, name: str, unit: str, used: float, lim: Limit) -> None:
         self.verdict.measures.append(Measure(name, unit, used, lim.limit, lim.warn_at))
 
-    def project_history(self, pd: ProjectDay, exclude: str | None, acknowledged: bool) -> None:
+    def project_history(self, pd: ProjectDay, exclude: str | None,
+                        ack: Acknowledgement | None) -> None:
         """A project day whose history is incomplete, or whose other
-        sessions are only a lower bound, is unverifiable -- unless a signed
-        ``aegis budget reset --day`` acknowledged that day."""
-        if acknowledged:
-            return
-        if pd.completeness != "complete":
+        sessions are only a lower bound, is unverifiable -- except for what
+        a signed ``aegis budget reset --day`` acknowledged."""
+        if pd.completeness != "complete" and not (ack and ack.covers_history(pd)):
             detail = (f"{pd.missing_sessions} session(s) without a log" if pd.history == "ok"
                       else f"session inventory {pd.history}")
             self.unknown.append(f"today's project total is {pd.completeness} ({detail})")
-        others = pd.unverified(exclude=exclude)
+        others = {k: r for k, r in pd.unverified(exclude=exclude).items()
+                  if not (ack and ack.covers(k, r))}
         if others:
             reasons = sorted({r for rs in others.values() for r in rs})
             who = "other session(s)" if exclude else "session(s)"
@@ -161,11 +195,11 @@ class _Builder:
 
 
 def evaluate(policy: BudgetPolicy, prices: PriceTable, snap: Snapshot, *,
-             acknowledged: bool = False) -> Verdict:
-    """The decision for one session at one hook. ``acknowledged``: a signed
-    ``aegis budget reset --day`` covers today, so an incomplete project
-    history no longer counts as unverifiable (the session's own log problems
-    still do)."""
+             ack: Acknowledgement | None = None) -> Verdict:
+    """The decision for one session at one hook. ``ack``: what a signed
+    ``aegis budget reset --day`` acknowledged for today; only that part of
+    an incomplete project history stops counting as unverifiable (the
+    session's own log problems always count)."""
     agent = snap.record.agent
     if not policy.measures(agent):
         return Verdict(ALLOW)
@@ -188,12 +222,12 @@ def evaluate(policy: BudgetPolicy, prices: PriceTable, snap: Snapshot, *,
     if rec.buckets().get(UNKNOWN_DAY):
         b.unknown.append("usage with no recorded time (counted for the session only)")
     if snap.project is not None:
-        b.project_history(snap.project, rec.key, acknowledged)
+        b.project_history(snap.project, rec.key, ack)
     return b.finish()
 
 
 def evaluate_project(policy: BudgetPolicy, prices: PriceTable, pd: ProjectDay, *,
-                     acknowledged: bool = False) -> Verdict:
+                     ack: Acknowledgement | None = None) -> Verdict:
     """The project/day limit alone, for ``aegis budget check`` without a
     session: the day's total against ``project_day``, with every
     contributing session's verification status."""
@@ -201,5 +235,5 @@ def evaluate_project(policy: BudgetPolicy, prices: PriceTable, pd: ProjectDay, *
     if policy.project_day:
         token_usage = {m: u for m, u in pd.usage().items() if "requests" not in u}
         b.measure("project_day", policy.unit, b.amount(token_usage), policy.project_day)
-    b.project_history(pd, None, acknowledged)
+    b.project_history(pd, None, ack)
     return b.finish()

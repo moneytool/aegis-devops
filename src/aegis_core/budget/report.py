@@ -20,7 +20,14 @@ from pathlib import Path
 from typing import Any
 
 from aegis_core.budget.accounting import BudgetStore, day_of, rebuild
-from aegis_core.budget.evaluate import ALLOW, DENY, Measure, evaluate_project, tokens_of
+from aegis_core.budget.evaluate import (
+    ALLOW,
+    DENY,
+    Acknowledgement,
+    Measure,
+    evaluate_project,
+    tokens_of,
+)
 from aegis_core.budget.logs import AgentLog
 from aegis_core.budget.policy import BudgetPolicy
 from aegis_core.budget.pricing import PriceTable
@@ -43,13 +50,15 @@ def reset_path(store: BudgetStore, root: str, day: str) -> Path:
     return store.project_dir(root) / f"reset-{day}.json"
 
 
-def write_reset(store: BudgetStore, root: str, day: str, key: bytes,
+def write_reset(store: BudgetStore, root: str, day: str, key: bytes, baseline: Acknowledgement,
                 now: float | None = None) -> Path:
-    """Acknowledges ``day``'s project history as it stands, signed with
-    ``key`` (the policy signing key)."""
+    """Acknowledges ``day``'s project history as it stands -- ``baseline``,
+    the day's verification state now -- signed with ``key`` (the policy
+    signing key). Later problems are not covered."""
     fields = {"header": RESET_HEADER, "root": root, "day": day,
               "at": datetime.fromtimestamp(time.time() if now is None else now,
-                                           tz=UTC).isoformat()}
+                                           tz=UTC).isoformat(),
+              "baseline": baseline.to_dict()}
     path = reset_path(store, root, day)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({**fields, "mac": _mac(_canonical(fields), key)}, indent=2))
@@ -57,23 +66,32 @@ def write_reset(store: BudgetStore, root: str, day: str, key: bytes,
 
 
 def reset_acknowledged(store: BudgetStore, root: str, day: str, key: bytes | None,
-                       insecure: bool = False) -> bool:
-    """Whether a valid reset marker covers ``day`` in project ``root``.
-    Without a key (``--insecure``) nothing is verified, so a marker's
-    presence is taken as it is, like every other policy file then."""
+                       insecure: bool = False) -> Acknowledgement | None:
+    """What a valid reset marker for ``day`` in project ``root``
+    acknowledged, or ``None``. Without a key (``--insecure``) nothing is
+    verified, so a marker is taken as it is, like every other policy file
+    then."""
     try:
         doc = json.loads(reset_path(store, root, day).read_text())
     except (OSError, ValueError):
-        return False
+        return None
     if not isinstance(doc, dict):
-        return False
-    fields = {k: doc.get(k) for k in ("header", "root", "day", "at")}
+        return None
+    fields = {k: doc.get(k) for k in ("header", "root", "day", "at", "baseline")}
     if fields["header"] != RESET_HEADER or fields["root"] != root or fields["day"] != day:
-        return False
+        return None
     if key is None:
-        return insecure
-    mac = doc.get("mac")
-    return isinstance(mac, str) and hmac.compare_digest(mac, _mac(_canonical(fields), key))
+        if not insecure:
+            return None
+    else:
+        mac = doc.get("mac")
+        if not (isinstance(mac, str)
+                and hmac.compare_digest(mac, _mac(_canonical(fields), key))):
+            return None
+    try:
+        return Acknowledgement.from_dict(fields["baseline"])
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 # --- status / check --------------------------------------------------------------------
@@ -98,8 +116,8 @@ def project_status(policy: BudgetPolicy, prices: PriceTable, store: BudgetStore,
     day = day_of(datetime.fromtimestamp(now, tz=UTC), zone)
     measured = {a: lg for a, lg in logs.items() if policy.measures(a)}
     pd = rebuild(store, measured, root, day, zone)
-    acknowledged = reset_acknowledged(store, root, day, key, insecure)
-    verdict = evaluate_project(policy, prices, pd, acknowledged=acknowledged)
+    ack = reset_acknowledged(store, root, day, key, insecure)
+    verdict = evaluate_project(policy, prices, pd, ack=ack)
 
     sessions = []
     for entry_key, entry in sorted(pd.entries.items()):
@@ -131,7 +149,7 @@ def project_status(policy: BudgetPolicy, prices: PriceTable, store: BudgetStore,
     return {
         "project": root, "day": day, "tz": policy.tz, "unit": policy.unit,
         "project_day": project, "completeness": pd.completeness, "history": pd.history,
-        "missing_sessions": pd.missing_sessions, "acknowledged": acknowledged,
+        "missing_sessions": pd.missing_sessions, "acknowledged": ack is not None,
         "decision": verdict.decision, "messages": verdict.messages,
         "estimated": verdict.estimated, "sessions": sessions,
         "warnings": list(policy.warnings),

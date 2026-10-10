@@ -98,9 +98,9 @@ def check(agent: str, payload: Mapping[str, Any], cwd: str | None, policy: Budge
     snap = refresh(store, logs, loc, policy.zone, now=time.time() if now is None else now,
                    fallback_cwd=cwd)
     prices = PriceTable(load_builtin_table(), policy.pricing)
-    acknowledged = bool(snap.record.project_root) and reset_acknowledged(
-        store, snap.record.project_root, snap.day, key, insecure)
-    verdict = evaluate(policy, prices, snap, acknowledged=acknowledged)
+    ack = reset_acknowledged(store, snap.record.project_root, snap.day, key, insecure) \
+        if snap.record.project_root else None
+    verdict = evaluate(policy, prices, snap, ack=ack)
     if verdict.decision == DENY:
         over = [m.name for m in verdict.measures if m.level == DENY]
         ways = sorted({_HOW_TO_CONTINUE[n] for n in over})

@@ -150,15 +150,18 @@ def test_reset_markers_are_verified(env, capsys):  # noqa: F811
     key = bytes.fromhex("".join(
         line.strip() for line in (env["project"] / ".aegis" / "example-signing.key")
         .read_text().splitlines() if not line.lstrip().startswith("#")))
-    assert reset_acknowledged(store, root, TODAY, key)
+    assert reset_acknowledged(store, root, TODAY, key) is not None
     doc = json.loads(marker.read_text())
     marker.write_text(json.dumps({**doc, "day": "2001-01-01"}))   # moved to another day
-    assert not reset_acknowledged(store, root, TODAY, key)
+    assert reset_acknowledged(store, root, TODAY, key) is None
     marker.write_text(json.dumps({**doc, "mac": "0" * 64}))         # forged without the key
-    assert not reset_acknowledged(store, root, TODAY, key)
+    assert reset_acknowledged(store, root, TODAY, key) is None
+    widened = {**doc["baseline"], "missing_sessions": 99}
+    marker.write_text(json.dumps({**doc, "baseline": widened}))      # baseline widened
+    assert reset_acknowledged(store, root, TODAY, key) is None
     assert hook_call(env, "now")[0] == 2
-    assert not reset_acknowledged(store, root, TODAY, None)        # no key: not verified
-    assert reset_acknowledged(store, root, TODAY, None, insecure=True) is True
+    assert reset_acknowledged(store, root, TODAY, None) is None    # no key: not verified
+    assert reset_acknowledged(store, root, TODAY, None, insecure=True) is not None
 
 
 def test_reset_needs_the_key_and_a_project(env, capsys, tmp_path):  # noqa: F811
@@ -169,3 +172,40 @@ def test_reset_needs_the_key_and_a_project(env, capsys, tmp_path):  # noqa: F811
                  "--project", str(env["project"])]) == 64
     assert main(["budget", "reset", "--day", "2026-10-01",
                  "--project", str(env["project"])]) == 0
+
+
+# --- review of #40 ---------------------------------------------------------------------------
+
+
+def test_a_session_check_sees_other_sessions_unhooked_spend(env, capsys):  # noqa: F811
+    """check --agent/--session rebuilds the project day too: session a's
+    hook recorded $0.50, then session b spent $2.00 with no hook firing."""
+    write_budget(env, DAY_BUDGET)
+    transcript(env, "a", 125_000)
+    assert hook_call(env, "a")[0] == 0                      # the project cache now exists
+    transcript(env, "b", 500_000)
+    assert _check(env, "--agent", "claude", "--session", "a") == 3
+    assert "project day limit reached" in capsys.readouterr().out
+
+
+def test_a_reset_does_not_excuse_problems_that_appear_after_it(env, capsys):  # noqa: F811
+    write_budget(env, STRICT)
+    transcript(env, "a", 1_000)
+    assert hook_call(env, "a")[0] == 0
+    assert main(["budget", "reset", "--day", "--project", str(env["project"])]) == 0
+    transcript(env, "c", 1_000, malformed=True)             # a new, unreadable session
+    code, _, err = hook_call(env, "c")
+    assert code == 2 and "unreadable log record" in err      # its own hook denies
+    code, _, err = hook_call(env, "a")
+    assert code == 2 and "lower bound" in err                # and it is not excused for a
+
+
+def test_a_reset_still_excuses_what_it_acknowledged(env, capsys):  # noqa: F811
+    write_budget(env, STRICT)
+    transcript(env, "a", 1_000)
+    transcript(env, "c", 1_000, malformed=True)
+    hook_call(env, "a")
+    hook_call(env, "c")
+    assert hook_call(env, "a")[0] == 2                       # c is a lower bound: strict denies
+    assert main(["budget", "reset", "--day", "--project", str(env["project"])]) == 0
+    assert hook_call(env, "a")[0] == 0                       # acknowledged as it stood
