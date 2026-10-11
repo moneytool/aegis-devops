@@ -58,6 +58,7 @@ ticket or chat message (prompt injection, context poisoning) cannot become polic
 
 ## Documentation
 
+- [Guides](guides/README.md) — task-first: stop an agent's destructive commands, check plans in CI
 - [Coding agents](agents.md) — install and what gets blocked, per agent
 - [CLI reference](cli.md) — `aegis check`, exit codes, snapshots, compile, identity audit
 - [Writing constraints](constraints.md) — rules, scopes, authority, environments

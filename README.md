@@ -297,6 +297,7 @@ of anything you care about.
 
 | Page | Covers |
 | :--- | :--- |
+| [`docs/guides/`](docs/guides/README.md) | Task-first guides: stop Claude Code, Cursor, Codex, Copilot or Gemini CLI from running destructive commands; block risky Terraform plans in CI |
 | [`docs/agents.md`](docs/agents.md) | Claude Code, Codex, Copilot, VS Code and Cursor: install, what gets blocked |
 | [`docs/cli.md`](docs/cli.md) | Exit codes, store health, the Claude Code hook, argv forms, compound commands, dry runs, library usage |
 | [`docs/constraints.md`](docs/constraints.md) | Writing constraints, metadata vocabulary, authority policy, environment mapping |
