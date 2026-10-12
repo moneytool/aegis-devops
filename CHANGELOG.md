@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 under 1.0.0 below is stable: breaking it needs 2.0. Before 1.0 any release could change
 behaviour.
 
+## [Unreleased]
+
+### Added
+- **Preview:** `aegis report aws`: which calls the compiled SCPs denied, from CloudTrail
+  (`--collect` with `aws cloudtrail lookup-events`, or saved events): attributed to Aegis when
+  the error carries the SCP's policy ARN (`--policy-id`), per rule (the rules whose mapped
+  actions cover the call), real versus deliberate tests (`--test-principal`). No real denial in
+  a window of at least `--quiet-days` (default 30) exits 1: zero denials is not proof the policy
+  works. SCP denials without a policy ARN are reported as possibly Aegis's; EC2's encoded
+  reasons as undetermined. Proposed after outside review of the AWS SCP article.
+
 ## [1.0.0] — 2026-10-10
 
 The cross-agent session budget cap ([`docs/budget.md`](docs/budget.md)), and the 1.0 stability
