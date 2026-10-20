@@ -63,6 +63,11 @@ Two more fail-closed clauses (REVIEW-4 T1.3 / T1.7):
   it targets (``params["unknown_target"]``, e.g. ``git push -f`` with no
   refspec) contributes ESCALATE with the note ``"unknown-target"``, so it
   can't sail past a rule written for the concrete target as ``ref/*``.
+* **runs-code** -- with ``escalate_scripts=True``, a shell intent that runs
+  code Aegis cannot read (``params["runs_code"]``: a script file, a task
+  runner, inline ``python3 -c`` code, a shell fed through a pipe)
+  contributes ESCALATE with the note ``"runs-code: <what>"``. Off by
+  default.
 
 A rate-limited constraint that hasn't hit its quota (step 3) is neither
 discarded nor honoured — it's simply not a match for this decision.
@@ -116,6 +121,7 @@ class AegisInterceptor:
         *,
         fail_closed: bool = False,
         on_untrusted_match: str = "discard",
+        escalate_scripts: bool = False,
     ):
         if on_untrusted_match not in _ON_UNTRUSTED_MATCH:
             raise ValueError(
@@ -126,6 +132,17 @@ class AegisInterceptor:
         self.ledger = ledger
         self.fail_closed = fail_closed
         self.on_untrusted_match = on_untrusted_match
+        self.escalate_scripts = escalate_scripts
+
+    def _runs_code_note(self, intent: InfrastructureIntent) -> str | None:
+        """``"runs-code: script nuke.sh"`` when ``escalate_scripts`` is on and
+        the intent runs code Aegis cannot read; otherwise ``None``."""
+        runs = intent.params.get("runs_code") if self.escalate_scripts else None
+        if not isinstance(runs, dict):
+            return None
+        kind = runs.get("kind", "script")
+        parts = [runs.get("interpreter", ""), runs.get("path", "") if kind == "script" else ""]
+        return f"runs-code: {kind} {' '.join(p for p in parts if p)}".rstrip()
 
     def _untrusted_reason(self, c: Constraint) -> str | None:
         """``"tampered"`` / ``"unauthorized"`` if this constraint may not
@@ -166,6 +183,7 @@ class AegisInterceptor:
             get_time_window_unresolved(intent, now) if get_time_window_unresolved else []
         )
         unknown_target = intent.params.get("unknown_target") is True
+        runs_code = self._runs_code_note(intent)
         uncovered = (
             not matches
             and not quarantined_matches
@@ -179,6 +197,8 @@ class AegisInterceptor:
                 verdict, notes = "ESCALATE", ["fail-closed: uncovered"]
             if unknown_target:
                 verdict, notes = "ESCALATE", [*notes, "unknown-target"]
+            if runs_code:
+                verdict, notes = "ESCALATE", [*notes, runs_code]
             decision = Decision(
                 verdict="ALLOW" if is_dry_run else verdict,
                 covered=False,
@@ -220,6 +240,9 @@ class AegisInterceptor:
         if unknown_target:
             fail_closed = True
             notes.append("unknown-target")
+        if runs_code:
+            fail_closed = True
+            notes.append(runs_code)
         for c, reason in quarantined_matches:
             discarded.append({"id": c.id, "reason": reason})
             if c.effect in _ENFORCING_EFFECTS and self.on_untrusted_match == "escalate":

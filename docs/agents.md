@@ -56,6 +56,50 @@ Codex has no "ask" for hooks (it treats an unknown decision as an error and runs
 and Gemini CLI and OpenCode have none either, so there an escalation is a block. `aegis hook <agent> --escalate-as deny` makes every agent
 block instead of asking.
 
+## What the hook cannot see
+
+The hook reads the command an agent is about to run. It cannot read code that the command
+runs, so an agent that writes its infrastructure calls into a script, or calls a cloud SDK,
+gets past it. With the example policy:
+
+| Command the agent runs | Result |
+|---|---|
+| `kubectl delete namespace prod` | blocked by the policy |
+| `bash -c 'kubectl delete namespace prod'` | blocked: the string is unwrapped and checked |
+| `K=kubectl; $K delete namespace prod` | blocked: cannot be checked, names an infrastructure tool |
+| `python3 -c "subprocess.run(['kubectl','delete','namespace','prod'])"` | blocked: inline code that names an infrastructure tool |
+| `node -e` / `--eval=…`, `python3 -Ic`, `perl -e` / `-lne`, `ruby -e`, `php -r` naming `kubectl` | blocked the same way |
+| `echo 'kubectl delete namespace prod' \| bash` | blocked: code piped into a shell that names an infrastructure tool |
+| `bash -c "$(cat nuke.sh)"`, `eval "$(…)"`, `source <(curl …)` | asks: the code only exists when the command runs |
+| `cat > nuke.sh <<'EOF' … EOF` (here-doc that names `kubectl`) | blocked: cannot be checked, names an infrastructure tool |
+| `bash nuke.sh`, `bash < nuke.sh`, `./nuke.sh`, `source nuke.sh`, `python3 cleanup.py` | **runs** |
+| `make destroy`, `npm run teardown` | **runs** |
+| a file written with the agent's Write/Edit tool, then run | **runs**: file edits are not commands |
+| a cloud SDK or HTTP call from code the agent wrote | **runs** |
+
+"Names an infrastructure tool" means one of the binaries listed above appears as a word in the
+code. Code that builds the name (`"kube" + "ctl"`) or calls an SDK (`boto3`, `@aws-sdk`) is not
+recognised. The hook is a guard against mistakes, not against an agent that is trying to get
+round it.
+
+**Escalate local scripts (optional, off by default).** Add `--escalate-scripts` to the hook
+command and every command that runs code the hook cannot read asks first (blocks in Codex,
+Gemini CLI and OpenCode): a script file (named or fed through `<`, also with `$VAR`
+arguments), a task runner (`make`, `just`, `npm run`, …), inline
+interpreter code and a shell fed through a pipe:
+
+```json
+{"type": "command", "command": "aegis hook claude -- --escalate-scripts"}
+```
+
+It also asks for `python -m pytest`, `./configure` and `. venv/bin/activate`, so turn it on
+where agents should not run scripts unattended. `aegis check command --escalate-scripts` does
+the same outside a hook (note `runs-code: …`).
+
+**The real boundary is on the server.** A script or an SDK call reaches the same cloud and
+cluster APIs. The [server-side layer](server-side.md) compiles the policy to AWS SCPs and
+Kubernetes admission policies, which deny the call whatever made it.
+
 ## Claude Code
 
 As a plugin (updates with the repository):

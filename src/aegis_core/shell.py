@@ -25,6 +25,12 @@ binary standing on its own (``rm -rf /``, ``terraform apply``, ``bash
 deploy.sh``) produces a synthetic intent ``provider="shell"``,
 ``resource="binary/<name>"``, ``action="exec"``, ``params={"argv": …}`` so
 a ``--fail-closed`` policy can escalate on tools Aegis has no parser for.
+When that binary runs code the hook cannot read (:func:`code_run`: inline
+``python3 -c``/``node -e`` code, a shell or interpreter fed through a pipe,
+a script file, a task runner), the intent also carries
+``params["runs_code"]`` -- kept even inside a pipeline -- so the hook can
+deny inline code that names an infrastructure tool and ``--escalate-scripts``
+can escalate the rest.
 
 **Environment.** ``KUBECONFIG=/prod kubectl …`` and ``env AWS_PROFILE=prod
 aws …`` land in ``metadata["env_assignments"]``; the variables the parsers
@@ -488,6 +494,172 @@ _KNOWN_BINARIES = frozenset(
     }
 )
 
+# Interpreters and the flags that hand them code on the command line.
+_INLINE_FLAGS = {
+    "python": ("-c",), "node": ("-e", "--eval", "-p", "--print"), "perl": ("-e", "-E"),
+    "ruby": ("-e",), "php": ("-r",), "bun": ("-e", "--eval", "-p", "--print"),
+    "deno": ("eval",), "osascript": ("-e",), "pwsh": ("-c", "-Command"),
+    "powershell": ("-c", "-Command"),
+}
+# Options that take a value, so the value is not mistaken for a script path.
+_VALUE_FLAGS = frozenset({"-o", "+o", "-O", "+O", "-W", "-X", "-r", "--require"})
+_PYTHON_RE = re.compile(r"^python(?:\d+(?:\.\d+)?)?$")
+# Task runners: what they run is in a Makefile / package.json the hook does not read.
+_TASK_RUNNERS = frozenset({"make", "gmake", "just", "task", "rake", "invoke"})
+_RUN_SUBCOMMANDS = {"npm": ("run", "run-script"), "pnpm": ("run",), "yarn": ("run",),
+                    "bun": ("run",), "deno": ("run", "task")}
+_SYSTEM_PREFIXES = ("/bin/", "/sbin/", "/usr/", "/opt/homebrew/", "/nix/")
+
+
+def _interpreter(name: str) -> str | None:
+    if _PYTHON_RE.match(name):
+        return "python"
+    return name if name in _INLINE_FLAGS or name in _SHELLS else None
+
+
+# Interpreters whose short options cluster (``python3 -Ic CODE``, ``perl -lne CODE``):
+# the letters that take inline code or a module, and the letters whose value is the
+# rest of the cluster (``-Wignore``), after which no code letter can follow, and the
+# letters followed by optional digits only (perl ``-l`` / ``-0``: ``-l012ne``).
+_CLUSTERS = {
+    "python": ("c", "m", "WXQ", ""),
+    "perl": ("eE", "", "IMmdDxiC", "l0"),
+    "ruby": ("e", "", "IrxCEFiTWK", "0"),
+}
+
+
+def _cluster(interp: str, tok: str) -> tuple[str, str] | None:
+    """For a clustered short option ``-Ic`` / ``-Icprint(1)`` / ``-lne``: ``(letter,
+    attached)`` for the code (or module) letter it contains -- ``attached`` is the rest
+    of the token, empty when the value is the next argument -- else ``None``."""
+    spec = _CLUSTERS.get(interp)
+    if spec is None or not tok.startswith("-") or tok.startswith("--") or len(tok) < 2:
+        return None
+    code_letters, module_letters, valued, digits = spec
+    i = 1
+    while i < len(tok):
+        ch = tok[i]
+        if ch in code_letters or (module_letters and ch in module_letters):
+            return ch, tok[i + 1:]
+        if ch in valued:
+            return None
+        i += 1
+        if ch in digits:
+            while i < len(tok) and tok[i].isdigit():
+                i += 1
+    return None
+
+
+def _stdin_file(simple: SimpleCommand) -> str | None:
+    """The file a command reads its standard input from (``< x.sh``, ``0< x.sh``)."""
+    for r in simple.redirects:
+        body = r[1:] if r.startswith("0<") else r
+        if body.startswith("<") and not body.startswith(("<<", "<>", "<&")):
+            return body[1:]
+    return None
+
+
+def code_run(simple: SimpleCommand) -> dict[str, str] | None:
+    """What a command runs that the hook cannot read: ``{"kind": "inline",
+    "code": …}`` for code passed on the command line (``python3 -c``, ``python3
+    -Ic``, ``node -e`` / ``--eval=…``, ``perl -lne``, …), ``{"kind": "stdin"}`` for an
+    interpreter or shell reading its code from a pipe (``curl … | bash``),
+    ``{"kind": "script", "path": …}`` for a script file -- named, or fed through
+    ``< file`` -- or a task runner (``bash nuke.sh``, ``bash < nuke.sh``, ``./nuke.sh``,
+    ``python3 x.py``, ``make destroy``, ``npm run teardown``). ``None`` for anything
+    else. A shell ``-c`` never gets here: its string is unwrapped and checked like
+    any other command."""
+    argv = simple.argv
+    if not argv:
+        return None
+    head = argv[0]
+    name = _basename(head)
+    interp = _interpreter(name)
+    if interp is not None:
+        flags = _INLINE_FLAGS.get(interp, ())
+        rest = argv[1:]
+        skip = False
+        for i, tok in enumerate(rest):
+            if skip:
+                skip = False
+                continue
+            following = rest[i + 1] if i + 1 < len(rest) else ""
+            if tok in flags:
+                return {"kind": "inline", "interpreter": name, "code": following}
+            long_flag = next((f for f in flags if f.startswith("--")
+                              and tok.startswith(f + "=")), None)
+            if long_flag:
+                return {"kind": "inline", "interpreter": name,
+                        "code": tok[len(long_flag) + 1:]}
+            if interp == "python" and tok.startswith("-c") and len(tok) > 2:
+                return {"kind": "inline", "interpreter": name, "code": tok[2:]}
+            clustered = _cluster(interp, tok)
+            if clustered is not None:
+                letter, attached = clustered
+                value = attached or following
+                if letter == "m":
+                    return {"kind": "script", "interpreter": name,
+                            "path": f"-m {value}".strip()}
+                return {"kind": "inline", "interpreter": name, "code": value}
+            if tok == "-m" and interp == "python":
+                return {"kind": "script", "interpreter": name,
+                        "path": f"-m {following}".strip()}
+            if tok == "-" or (interp in _SHELLS and tok == "-s"):
+                break  # code from stdin
+            if tok in _VALUE_FLAGS:
+                skip = True
+                continue
+            if tok.startswith(("-", "+")):
+                continue
+            if interp in ("deno", "bun") and tok in _RUN_SUBCOMMANDS.get(interp, ()):
+                return {"kind": "script", "interpreter": name, "path": following}
+            return {"kind": "script", "interpreter": name, "path": tok}
+        source = _stdin_file(simple)
+        if source is not None:
+            return {"kind": "script", "interpreter": name, "path": f"< {source}"}
+        if simple.in_pipeline:
+            return {"kind": "stdin", "interpreter": name}
+        return None
+    if name in _TASK_RUNNERS:
+        targets = [t for t in argv[1:] if not t.startswith("-")]
+        return {"kind": "script", "interpreter": name, "path": " ".join(targets) or "(default)"}
+    if name in _RUN_SUBCOMMANDS and len(argv) > 1 and argv[1] in _RUN_SUBCOMMANDS[name]:
+        return {"kind": "script", "interpreter": f"{name} {argv[1]}",
+                "path": argv[2] if len(argv) > 2 else ""}
+    if "/" in head and not head.startswith(_SYSTEM_PREFIXES):
+        return {"kind": "script", "interpreter": "", "path": head}
+    return None
+
+
+def script_runs_loosely(command: str) -> list[dict[str, str]]:
+    """Best effort for a command the parser rejected (``bash x.sh "$TARGET"``): splits
+    it on the shell's separators without expanding anything, strips launchers, and
+    returns what :func:`code_run` finds in each part. Never raises; only for asking,
+    never for allowing."""
+    found = []
+    for part in re.split(r"\|\||&&|[;|&\n]", command):
+        try:
+            argv = shlex.split(part, comments=False)
+        except ValueError:
+            continue
+        if not argv:
+            continue
+        redirects = [t for t in argv if t.startswith(("<", "0<"))]
+        argv = [t for t in argv if t not in redirects]
+        if argv and _basename(argv[0]) in ("source", "."):
+            found.append({"kind": "script", "interpreter": argv[0],
+                          "path": argv[1] if len(argv) > 1 else ""})
+            continue
+        try:
+            argv, _env, _wrappers, _string = _unwrap_inner(argv, 1)
+        except ShellRejected:
+            continue
+        runs = code_run(SimpleCommand(argv, redirects))
+        if runs is not None:
+            found.append(runs)
+    return found
+
+
 _ENV_METADATA_KEYS = {
     "KUBECONFIG": "kubeconfig",
     "AWS_PROFILE": "profile",
@@ -563,15 +735,19 @@ def intents_from_command(command: str) -> list[InfrastructureIntent]:
             produced = destroy
         elif name in _KNOWN_BINARIES:
             produced = from_argv(simple.argv)
-        elif simple.in_pipeline:
-            continue
         else:
+            runs = code_run(simple)
+            if simple.in_pipeline and runs is None:
+                continue
+            params: dict[str, Any] = {"argv": list(simple.argv)}
+            if runs is not None:
+                params["runs_code"] = runs
             produced = [
                 InfrastructureIntent(
                     resource=f"binary/{name}",
                     action="exec",
                     provider="shell",
-                    params={"argv": list(simple.argv)},
+                    params=params,
                 )
             ]
         for intent in produced:
