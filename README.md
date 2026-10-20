@@ -275,7 +275,8 @@ context a rule can arrive from a ticket or a chat message as easily as from you.
 
 The engine (constraint store, interceptor, environment mapping, dry-run handling, rate limits,
 plan-level constraints, and parsers for every tool in "Supported tools") is complete, and
-v1.0.0 is on PyPI, with the [session budget cap](docs/budget.md). **1.0 is a promise about the
+v1.1.0 is on PyPI, with the [session budget cap](docs/budget.md) and denial reports for the
+server-side layer (`aegis report aws`, `aegis report kubernetes`). **1.0 is a promise about the
 interface:** the policy file formats, the CLI commands and exit codes, the hook protocol and the
 Action's inputs and outputs stay compatible until 2.0; the server-side compilers and the
 identity audit remain previews ([CHANGELOG](CHANGELOG.md)). It is not a claim that the open gaps

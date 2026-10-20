@@ -8,6 +8,11 @@ behaviour.
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-10-20
+
+Denial reports for the server-side layer, and the agent hook checks code passed inline or
+piped to an interpreter.
+
 ### Added
 - **Preview:** `aegis report aws`: which calls the compiled SCPs denied, from CloudTrail
   (`--collect` with `aws cloudtrail lookup-events`, or saved events): attributed to Aegis when
@@ -528,6 +533,7 @@ See "Project status" in the README and [`docs/dev/PLAN.md`](docs/dev/PLAN.md) §
 rather than real connectors, signing uses a shared secret, and a principal is a signed name
 rather than a bound identity.
 
+[1.1.0]: https://github.com/moneytool/aegis-devops/releases/tag/v1.1.0
 [1.0.0]: https://github.com/moneytool/aegis-devops/releases/tag/v1.0.0
 [0.3.2]: https://github.com/moneytool/aegis-devops/releases/tag/v0.3.2
 [0.3.1]: https://github.com/moneytool/aegis-devops/releases/tag/v0.3.1
