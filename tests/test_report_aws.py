@@ -181,9 +181,13 @@ def test_every_event_file_shape_reads(tmp_path):
     logfile.write_bytes(gzip.compress(json.dumps({"Records": [ev, ev]}).encode()))
     lines = tmp_path / "events.jsonl"
     lines.write_text(json.dumps(ev) + "\n" + json.dumps(ev) + "\n")
-    assert len(read_events(lookup)) == 1
-    assert len(read_events(logfile)) == 2
-    assert len(read_events(lines)) == 2
+    assert read_events(lookup) == ([ev], False)
+    assert len(read_events(logfile)[0]) == 2
+    assert len(read_events(lines)[0]) == 2
+    paged = tmp_path / "paged.json"
+    paged.write_text(json.dumps({"Events": [{"CloudTrailEvent": json.dumps(ev)}],
+                                 "NextToken": "more"}))
+    assert read_events(paged)[1] is True                    # a page the CLI stopped short
     (tmp_path / "bad.json").write_text('{"foo": 1}')
     with pytest.raises(EventsError):
         read_events(tmp_path / "bad.json")
@@ -223,3 +227,94 @@ def test_self_protection_denials_are_named(compiled):
     rep = run(compiled, [denial(NOW, "organizations.amazonaws.com", "LeaveOrganization")])
     [d] = rep.denials
     assert d.rules and all(r.startswith("self-protection:") for r in d.rules)
+
+
+
+# --- review of #43 ----------------------------------------------------------------------------
+
+
+def synthetic(rule: str, iam: list[str]) -> tuple[dict, list[dict], dict]:
+    """A compiled output with one rule whose statement denies ``iam``."""
+    manifest = {"target": "aws-scp", "deployable": True,
+                "statements": {"Aegis1": [f"rule:{rule}"]}}
+    policies = [{"Version": "2012-10-17", "Statement": [
+        {"Sid": "Aegis1", "Effect": "Deny", "Action": iam, "Resource": "*"}]}]
+    coverage = {"rules": [{"id": rule, "enforced": [{"iam": iam}]}]}
+    return manifest, policies, coverage
+
+
+def bare_scp_message(policy_id: str = AEGIS_ID) -> str:
+    """An SCP deny that does not name the IAM action (only the policy)."""
+    return ("Access denied with an explicit deny in a service control policy: "
+            f"{ORG_POLICY}{policy_id}")
+
+
+@pytest.mark.parametrize("source,event_name,iam,message", [
+    # Lambda appends an API version to the operation name
+    ("lambda.amazonaws.com", "DeleteFunction20150331", "lambda:DeleteFunction", None),
+    ("lambda.amazonaws.com", "UpdateFunctionConfiguration20150331v2",
+     "lambda:UpdateFunctionConfiguration", None),
+    # S3 names the operation, not the permission
+    ("s3.amazonaws.com", "PutBucketEncryption", "s3:PutEncryptionConfiguration", None),
+    ("s3.amazonaws.com", "DeleteObjects", "s3:DeleteObject", None),
+    # the message's own IAM action wins when AWS includes it
+    ("s3.amazonaws.com", "PutBucketEncryption", "s3:PutEncryptionConfiguration",
+     f"User: x is not authorized to perform: s3:PutEncryptionConfiguration on resource: "
+     f"arn:aws:s3:::b with an explicit deny in a service control policy: {ORG_POLICY}{AEGIS_ID}"),
+])
+def test_cloudtrail_operation_names_map_to_iam_actions(source, event_name, iam, message):
+    manifest, policies, coverage = synthetic("the-rule", [iam])
+    ev = denial(NOW, source, event_name, message=message or bare_scp_message())
+    rep = report([ev], manifest, policies, coverage=coverage, policy_ids=[AEGIS_ID],
+                 test_principals=[])
+    [d] = rep.denials
+    assert (d.action, d.kind, d.rules) == (iam, "aegis", ["the-rule"])
+
+
+def test_an_sns_authorization_error_with_an_scp_message_is_a_denial():
+    manifest, policies, coverage = synthetic("no-topic-deletes", ["sns:DeleteTopic"])
+    ev = denial(NOW, "sns.amazonaws.com", "DeleteTopic", code="AuthorizationError",
+                message=f"User: x is not authorized to perform: SNS:DeleteTopic on resource: "
+                        f"arn:aws:sns:us-east-1:{ACCOUNT}:t with an explicit deny in a service "
+                        f"control policy: {ORG_POLICY}{AEGIS_ID}")
+    rep = report([ev], manifest, policies, coverage=coverage, policy_ids=[AEGIS_ID],
+                 test_principals=[])
+    [d] = rep.denials
+    assert d.kind == "aegis" and d.rules == ["no-topic-deletes"]
+
+
+def _fake_lookup(monkeypatch, doc: dict):
+    import subprocess
+
+    import aegis_core.report_aws as mod
+
+    def fake_run(argv, **kw):
+        assert argv[:3] == ["aws", "cloudtrail", "lookup-events"]
+        return subprocess.CompletedProcess(argv, 0, json.dumps(doc), "")
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+
+
+@pytest.mark.parametrize("events", [[], [allowed(datetime.now(UTC) - timedelta(days=2))]])
+def test_collect_keeps_the_queried_window(compiled, monkeypatch, capsys, events):
+    """An empty or sparse 30-day collection still covers 30 days, so no real
+    denial in it is the quiet warning (exit 1)."""
+    _fake_lookup(monkeypatch, {"Events": [{"CloudTrailEvent": json.dumps(e)} for e in events]})
+    argv = ["report", "aws", "--compiled", str(compiled), "--collect", "--days", "30",
+            "--policy-id", AEGIS_ID, "--json"]
+    assert main(argv) == 1
+    out = json.loads(capsys.readouterr().out)
+    assert out["status"] == "quiet" and out["window"]["days"] == pytest.approx(30, abs=0.1)
+
+
+def test_a_truncated_collection_cannot_claim_the_whole_window(compiled, monkeypatch, capsys):
+    recent = allowed(datetime.now(UTC) - timedelta(days=1))
+    _fake_lookup(monkeypatch, {"Events": [{"CloudTrailEvent": json.dumps(recent)}],
+                               "NextToken": "more-older-events"})
+    argv = ["report", "aws", "--compiled", str(compiled), "--collect", "--days", "60",
+            "--policy-id", AEGIS_ID, "--json"]
+    assert main(argv) == 0                                   # one day read: too short to judge
+    out = json.loads(capsys.readouterr().out)
+    assert out["status"] == "ok" and out["window"]["days"] < 2
+    assert any(w.startswith("truncated") for w in out["warnings"])
+    assert any(w.startswith("short-window") for w in out["warnings"])

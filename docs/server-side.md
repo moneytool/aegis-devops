@@ -160,7 +160,10 @@ aegis report aws --compiled build/aegis-aws --collect --days 30 \
   policy" in its error, *sometimes* followed by the policy's ARN. With the ARN and the
   `--policy-id` you attached the Aegis SCP as, the denial is Aegis's; without the ARN it is
   reported as an SCP denial that may be Aegis's. The message never names the statement, so the
-  rules shown are those whose mapped actions cover the denied call. EC2 encodes its reasons;
+  rules shown are those whose mapped actions cover the denied call: the IAM action the message
+  names, or else CloudTrail's operation name translated to it (Lambda's `DeleteFunction20150331`
+  is `lambda:DeleteFunction`; S3's `PutBucketEncryption` is `s3:PutEncryptionConfiguration`).
+  An explicit SCP deny counts whatever the service calls the error (SNS: `AuthorizationError`). EC2 encodes its reasons;
   those denials are counted as undetermined (`aws sts decode-authorization-message` shows one).
 - **Real or a test.** Denials by `--test-principal` identities (the acceptance roles, say) are
   deliberate tests; the rest are real.
@@ -170,7 +173,10 @@ aegis report aws --compiled build/aegis-aws --collect --days 30 \
 - **Events** come from `--collect` (`aws cloudtrail lookup-events`, the last 1–90 days, with
   your credentials; LookupEvents cannot filter on errors, so every management event in the
   window is read) or from files: that command's output, CloudTrail log files (`Records`,
-  gzipped or not) or JSON lines. `--json` for machines.
+  gzipped or not) or JSON lines. With `--collect` the window is the one queried, so a quiet
+  month with few events still counts as a month. If CloudTrail had more events than were read
+  (a `NextToken` left over), the window is cut back to the oldest event read and the report
+  says so, rather than claim silence over days it never saw. `--json` for machines.
 
 ## Kubernetes: ValidatingAdmissionPolicy
 

@@ -1554,14 +1554,22 @@ def _run_report_aws(args: argparse.Namespace) -> int:
             raise UsageError(f"--policy-id {pid!r} is not an Organizations policy id (p-...)")
     try:
         manifest, policies, coverage = load_compiled(args.compiled)
+        until, truncated = None, False
         if args.collect:
-            events = collect_events(days=args.days, profile=args.profile, region=args.region)
+            got = collect_events(days=args.days, profile=args.profile, region=args.region)
+            events, truncated, until = got.events, got.truncated, got.end
+            # the window is the one queried, not just the span of what came back
+            since = max(since, got.start) if since else got.start
         else:
-            events = [e for f in args.events for e in read_events(f)]
+            events = []
+            for f in args.events:
+                read, cut = read_events(f)
+                events.extend(read)
+                truncated = truncated or cut
         rep = build_report(events, manifest, policies, coverage=coverage,
                            policy_ids=args.policy_id,
                            test_principals=args.test_principal, quiet_days=args.quiet_days,
-                           since=since)
+                           since=since, until=until, truncated=truncated)
     except EventsError as exc:
         raise DataError(f"report aws: {exc}") from None
     print(json.dumps(rep.to_dict(), indent=2, sort_keys=True) if args.json

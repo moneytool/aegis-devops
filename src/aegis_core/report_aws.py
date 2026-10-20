@@ -53,8 +53,25 @@ SCP_DENY = re.compile(
     r"service_control_policy/(?P<id>p-[a-z0-9]+)))?",
     re.IGNORECASE,
 )
-_DENIAL_CODES = re.compile(r"(AccessDenied|UnauthorizedOperation|Unauthorized|Forbidden)",
-                           re.IGNORECASE)
+_DENIAL_CODES = re.compile(r"(AccessDenied|UnauthorizedOperation|Unauthorized|Authorization"
+                           r"Error|Forbidden)", re.IGNORECASE)
+# "... is not authorized to perform: s3:PutEncryptionConfiguration ..." -- the IAM action itself
+_DENIED_ACTION = re.compile(r"not authorized to perform:?\s+([a-z0-9-]+:[A-Za-z0-9*]+)")
+# CloudTrail event names that are not the IAM action suffix: Lambda appends an API version
+# (DeleteFunction20150331, UpdateFunctionConfiguration20150331v2); S3 bucket sub-resources are
+# named after the API operation, not the permission.
+_API_VERSION = re.compile(r"20\d{6}(v\d+)?$")
+_S3_EVENT_TO_IAM = {
+    "PutBucketEncryption": "PutEncryptionConfiguration",
+    "DeleteBucketEncryption": "PutEncryptionConfiguration",
+    "PutBucketLifecycle": "PutLifecycleConfiguration",
+    "PutBucketLifecycleConfiguration": "PutLifecycleConfiguration",
+    "DeleteBucketLifecycle": "PutLifecycleConfiguration",
+    "PutBucketReplication": "PutReplicationConfiguration",
+    "DeleteBucketReplication": "PutReplicationConfiguration",
+    "DeleteBucketPublicAccessBlock": "PutBucketPublicAccessBlock",
+    "DeleteObjects": "DeleteObject",
+}
 _ENCODED = re.compile(r"encoded authorization failure message", re.IGNORECASE)
 DEFAULT_QUIET_DAYS = 30
 
@@ -64,6 +81,11 @@ class EventsError(ValueError):
 
 
 # --- reading events ----------------------------------------------------------------------
+
+
+def _truncated(doc: Any) -> bool:
+    """A lookup-events page the CLI stopped short of the end (``--max-items``)."""
+    return isinstance(doc, dict) and bool(doc.get("NextToken"))
 
 
 def _records(doc: Any) -> list[dict[str, Any]]:
@@ -90,7 +112,9 @@ def _records(doc: Any) -> list[dict[str, Any]]:
                       "{'Events': [...]} (lookup-events), a list, or JSON lines")
 
 
-def read_events(path: str | Path) -> list[dict[str, Any]]:
+def read_events(path: str | Path) -> tuple[list[dict[str, Any]], bool]:
+    """``(events, truncated)`` from a file: truncated when it is a lookup-events
+    page that still carries a ``NextToken``."""
     path = Path(path)
     try:
         raw = path.read_bytes()
@@ -100,7 +124,8 @@ def read_events(path: str | Path) -> list[dict[str, Any]]:
         raw = gzip.decompress(raw)
     text = raw.decode("utf-8")
     try:
-        return _records(json.loads(text))
+        doc = json.loads(text)
+        return _records(doc), _truncated(doc)
     except json.JSONDecodeError:
         out = []
         for n, line in enumerate(text.splitlines(), 1):
@@ -109,19 +134,34 @@ def read_events(path: str | Path) -> list[dict[str, Any]]:
                     out.extend(_records(json.loads(line)))
                 except json.JSONDecodeError:
                     raise EventsError(f"{path}:{n}: not JSON") from None
-        return out
+        return out, False
+
+
+@dataclass
+class Collected:
+    """What ``collect_events`` read: the events, the window it asked for, and
+    whether the CLI stopped at ``max_events`` before the window's start."""
+
+    events: list[dict[str, Any]]
+    start: datetime
+    end: datetime
+    truncated: bool
 
 
 def collect_events(*, days: int, profile: str | None = None, region: str | None = None,
-                   max_events: int = 50_000) -> list[dict[str, Any]]:
+                   max_events: int = 50_000, now: datetime | None = None) -> Collected:
     """``aws cloudtrail lookup-events`` over the last ``days`` (at most 90, the
     event history CloudTrail keeps), read-only. LookupEvents cannot filter on
-    the error, so every management event in the window is read, up to
-    ``max_events``; the CLI paginates."""
+    the error, so every management event in the window is read, newest first,
+    up to ``max_events`` (the CLI paginates); a ``NextToken`` left over means
+    the older part of the window was not read."""
     if not 1 <= days <= 90:
         raise EventsError("--days must be 1..90 (CloudTrail event history keeps 90 days)")
-    start = (datetime.now(UTC) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    argv = ["aws", "cloudtrail", "lookup-events", "--start-time", start,
+    end = now or datetime.now(UTC)
+    begin = end - timedelta(days=days)
+    argv = ["aws", "cloudtrail", "lookup-events",
+            "--start-time", begin.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "--end-time", end.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "--max-items", str(max_events), "--output", "json"]
     if profile:
         argv += ["--profile", profile]
@@ -134,7 +174,8 @@ def collect_events(*, days: int, profile: str | None = None, region: str | None 
         raise EventsError("the aws CLI is not on PATH (or pass --events FILE)") from None
     if proc.returncode != 0:
         raise EventsError(f"aws cloudtrail lookup-events failed: {proc.stderr.strip()[:500]}")
-    return _records(json.loads(proc.stdout))
+    doc = json.loads(proc.stdout) if proc.stdout.strip() else {"Events": []}
+    return Collected(_records(doc), begin, end, _truncated(doc))
 
 
 # --- classifying -----------------------------------------------------------------------
@@ -172,8 +213,16 @@ def _principal(event: dict[str, Any]) -> str:
 
 
 def _action(event: dict[str, Any]) -> str:
+    """The IAM action that was denied: from the error message when AWS names it
+    there, else the CloudTrail operation name translated to the IAM action."""
+    m = _DENIED_ACTION.search(str(event.get("errorMessage") or ""))
+    if m:
+        return m.group(1)
     source = str(event.get("eventSource", "")).split(".")[0]
-    return f"{source}:{event.get('eventName', '')}"
+    name = _API_VERSION.sub("", str(event.get("eventName", "")))
+    if source == "s3":
+        name = _S3_EVENT_TO_IAM.get(name, name)
+    return f"{source}:{name}"
 
 
 def _statements_for(action: str, policies: list[dict[str, Any]]) -> list[str]:
@@ -211,10 +260,12 @@ def classify(event: dict[str, Any], *, aegis_policy_ids: set[str],
              rule_actions: dict[str, set[str]] | None = None) -> Denial | None:
     """The denial this event records, or ``None`` if it is not a denied call."""
     code = str(event.get("errorCode") or "")
-    if not code or not _DENIAL_CODES.search(code):
-        return None
     message = str(event.get("errorMessage") or "")
     m = SCP_DENY.search(message)
+    # An explicit SCP deny in the message decides, whatever the service calls the error
+    # (SNS: AuthorizationError); otherwise only recognised denial codes are looked at.
+    if not m and (not code or not _DENIAL_CODES.search(code)):
+        return None
     if m and m.group("id"):
         kind = "aegis" if m.group("id") in aegis_policy_ids else "other-scp"
     elif m:
@@ -294,13 +345,18 @@ def report(events: list[dict[str, Any]], manifest: dict[str, Any],
            policies: list[dict[str, Any]], *, policy_ids: list[str],
            coverage: dict[str, Any] | None = None,
            test_principals: list[str], quiet_days: int = DEFAULT_QUIET_DAYS,
-           since: datetime | None = None, until: datetime | None = None) -> Report:
+           since: datetime | None = None, until: datetime | None = None,
+           truncated: bool = False) -> Report:
     """The report over ``events`` for one compiled output (``manifest`` and its
-    SCPs). ``since``/``until`` bound the window; by default it is the span of
-    the events read."""
+    SCPs). ``since``/``until`` bound the window -- for ``--collect``, the window
+    queried, so an empty or sparse collection still covers it; by default it is
+    the span of the events read. ``truncated``: the events stop short of the
+    window's start, so the window is cut back to the oldest event read."""
     times = [t for t in (_parse_time(str(e.get("eventTime", ""))) for e in events) if t]
     start = since or (min(times) if times else None)
     end = until or (max(times) if times else None)
+    if truncated and times and (start is None or min(times) > start):
+        start = min(times)
     if since or until:
         events = [e for e in events
                   if (t := _parse_time(str(e.get("eventTime", ""))))
@@ -318,6 +374,12 @@ def report(events: list[dict[str, Any]], manifest: dict[str, Any],
                  len(events), bool(manifest.get("deployable")), sorted(policy_ids), denials)
 
     real_aegis = [d for d in denials if d.kind == "aegis" and not d.test]
+    if truncated:
+        rep.warnings.append(
+            f"truncated: the events stop before the requested window's start (CloudTrail "
+            f"returned more than were read); the window is cut back to the oldest event read "
+            f"({rep.window_start}). Raise the limit, shorten --days, or read the trail's log "
+            "files from S3")
     unattributed = [d for d in denials if d.kind == "scp-unattributed"]
     if not rep.deployable:
         rep.warnings.append("report-only: this output is not deployable (agents.yaml says "
