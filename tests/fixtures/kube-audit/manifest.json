@@ -1,0 +1,31 @@
+{
+  "aegis_version": "probe",
+  "cluster": "kind-aegis-audit",
+  "enforcement": "enforce",
+  "env": null,
+  "escalate": "deny",
+  "files": [
+    "coverage.json",
+    "coverage.md",
+    "policies.yaml"
+  ],
+  "identity_model_sha256": "",
+  "mode": "deny-by-default",
+  "output_digest": "14eb28bfb9f9d4f5dfd1fd12746528724846260057b6e0774317e98f1e9b6b57",
+  "policies": {
+    "aegis-app-config": "app-config",
+    "aegis-deploy-changes": "deploy-changes",
+    "aegis-guardrails": "self-protection",
+    "aegis-no-exec": "no-exec",
+    "aegis-no-node-changes": "no-node-changes",
+    "aegis-no-staging-pod-deletes": "no-staging-pod-deletes",
+    "aegis-prod-no-deletes": "prod-no-deletes",
+    "aegis-qa-undo-only": "qa-undo-only"
+  },
+  "snapshot_digest": "95f706c2f34d90a6c3ec8a0eba65dedaaf4e8a606eb484f371c3e108692652a8",
+  "target": "kubernetes-vap",
+  "validation_actions": [
+    "Deny",
+    "Audit"
+  ]
+}

@@ -203,6 +203,17 @@ tests. Exit 0; **1** when no real call was denied in a window of at least `--qui
 nothing could be attributed (no `--policy-id`); 65 for unreadable events or compile output.
 See [Server-side: is it denying anything?](server-side.md#is-it-denying-anything).
 
+```bash
+aegis report kubernetes --compiled build/aegis-kube --audit-log FILE...
+    [--test-principal GLOB] [--quiet-days 30] [--since ISO] [--json]
+```
+
+Read-only. Which requests the compiled admission policies denied (or warned about, in
+report-only mode), from the API server's audit log: per rule, real versus `--test-principal`
+tests. Exit 0; **1** when no real request failed an Aegis policy in a window of at least
+`--quiet-days`, or the log holds no events; 65 for unreadable events or compile output. See
+[Server-side: is it denying anything? (Kubernetes)](server-side.md#is-it-denying-anything-kubernetes).
+
 ### Server-side compile (preview)
 
 `aegis compile aws --account <12-digit id> --out DIR` compiles the verified snapshot to AWS
