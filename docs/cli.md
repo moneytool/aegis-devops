@@ -190,6 +190,19 @@ Exit 0, 1 when the model has a warning (`workflow-unbound`, `no-break-glass`), 6
 not verify, 66 when there is no `agents.yaml` (`--agents PATH` points elsewhere). Without
 `--pretty` it prints one JSON object. See [Configuration](configuration.md#agentsyaml-identity-model).
 
+### Denial report (preview)
+
+```bash
+aegis report aws --compiled build/aegis-aws (--events FILE... | --collect [--days N])
+    [--policy-id p-...] [--test-principal GLOB] [--quiet-days 30] [--since ISO] [--json]
+```
+
+Read-only. Which calls the compiled SCPs denied, from CloudTrail: attributed to Aegis when the
+error carries the policy ARN of a `--policy-id`, per rule, real versus `--test-principal`
+tests. Exit 0; **1** when no real call was denied in a window of at least `--quiet-days`, or
+nothing could be attributed (no `--policy-id`); 65 for unreadable events or compile output.
+See [Server-side: is it denying anything?](server-side.md#is-it-denying-anything).
+
 ### Server-side compile (preview)
 
 `aegis compile aws --account <12-digit id> --out DIR` compiles the verified snapshot to AWS

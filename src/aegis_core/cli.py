@@ -81,6 +81,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sys
 import time
 from dataclasses import asdict
@@ -579,6 +580,37 @@ def _build_parser() -> argparse.ArgumentParser:
     audit_kube.add_argument("--would-restrict", action="store_true",
                             help="print only the identities the compiled policies would "
                             "restrict")
+
+    report_parser = subparsers.add_parser(
+        "report",
+        help="Read-only: what the compiled server-side policies have denied (preview)")
+    report_sub = report_parser.add_subparsers(dest="target", required=True)
+    report_aws = report_sub.add_parser(
+        "aws", help="denials by the compiled SCPs, from CloudTrail: real vs test, per rule; "
+        "zero real denials over --quiet-days is a warning")
+    report_aws.add_argument("--compiled", required=True, metavar="DIR",
+                            help="the 'aegis compile aws --out' directory (manifest.json)")
+    events_src = report_aws.add_mutually_exclusive_group(required=True)
+    events_src.add_argument("--events", nargs="+", metavar="FILE",
+                            help="CloudTrail events: 'aws cloudtrail lookup-events' output, "
+                            "CloudTrail log files (Records, .gz ok) or JSON lines")
+    events_src.add_argument("--collect", action="store_true",
+                            help="read events with 'aws cloudtrail lookup-events' (read-only)")
+    report_aws.add_argument("--days", type=int, default=30,
+                            help="with --collect: how far back, 1..90 (default 30)")
+    report_aws.add_argument("--profile", default=None, help="with --collect: aws CLI profile")
+    report_aws.add_argument("--region", default=None, help="with --collect: region to read")
+    report_aws.add_argument("--policy-id", action="append", default=[], metavar="p-...",
+                            help="Organizations id of an attached Aegis SCP (repeatable); "
+                            "needed to attribute denials to Aegis")
+    report_aws.add_argument("--test-principal", action="append", default=[], metavar="GLOB",
+                            help="principal ARN glob whose denials are deliberate tests "
+                            "(repeatable), e.g. 'arn:aws:iam::*:role/aegis-test-*'")
+    report_aws.add_argument("--quiet-days", type=int, default=30,
+                            help="warn when no real denial in a window at least this long "
+                            "(default 30)")
+    report_aws.add_argument("--since", default=None, help="ISO 8601 start of the window")
+    report_aws.add_argument("--json", action="store_true", help="machine-readable output")
 
     agents_parser = subparsers.add_parser(
         "agents",
@@ -1506,6 +1538,49 @@ def load_budget_for_hook(config_dir: Path, extra_args: list[str] | None = None):
     return load_budget_with_key(config_dir, extra_args)[0]
 
 
+def _run_report_aws(args: argparse.Namespace) -> int:
+    """``aegis report aws``: read-only. Exit 0 when the compiled SCPs denied real
+    calls (or the window is too short to tell), 1 when there were none in at
+    least --quiet-days or no denial could be attributed (no --policy-id)."""
+    from aegis_core.report_aws import (
+        EventsError,
+        collect_events,
+        coverage_start,
+        load_compiled,
+        read_events,
+    )
+    from aegis_core.report_aws import render as render_report
+    from aegis_core.report_aws import report as build_report
+
+    since = None
+    if args.since:
+        since = _parse_now(args.since)
+    for pid in args.policy_id:
+        if not re.fullmatch(r"p-[a-z0-9]+", pid):
+            raise UsageError(f"--policy-id {pid!r} is not an Organizations policy id (p-...)")
+    try:
+        manifest, policies, coverage = load_compiled(args.compiled)
+        until = None
+        if args.collect:
+            got = collect_events(days=args.days, profile=args.profile, region=args.region)
+            events, until = got.events, got.end
+            inputs = [(got.events, got.truncated)]
+            # the window is the one queried, not just the span of what came back
+            since = max(since, got.start) if since else got.start
+        else:
+            inputs = [read_events(f) for f in args.events]
+            events = [e for read, _ in inputs for e in read]
+        rep = build_report(events, manifest, policies, coverage=coverage,
+                           policy_ids=args.policy_id,
+                           test_principals=args.test_principal, quiet_days=args.quiet_days,
+                           since=since, until=until, covered_from=coverage_start(inputs))
+    except EventsError as exc:
+        raise DataError(f"report aws: {exc}") from None
+    print(json.dumps(rep.to_dict(), indent=2, sort_keys=True) if args.json
+          else render_report(rep))
+    return 0 if rep.status == "ok" else 1
+
+
 def _run_audit_aws(args: argparse.Namespace) -> int:
     """``aegis audit-identity aws``: read-only; exit 1 on a problem."""
     from aegis_core.audit_aws import InventoryError, audit, collect_inventory
@@ -1797,6 +1872,8 @@ def _run(argv: list[str]) -> int:
         if args.target == "kubernetes":
             return _run_compile_kubernetes(args)
         return _run_compile_aws(args)
+    if args.command == "report":
+        return _run_report_aws(args)
     if args.command == "audit-identity":
         if args.target == "kubernetes":
             return _run_audit_kubernetes(args)

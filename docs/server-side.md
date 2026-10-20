@@ -144,6 +144,40 @@ aegis compile aws --account 123456789012 --check build/aegis-aws
 exits 1 and names every file that is missing, different or stale. Run it in CI next to the
 committed output so a policy change without a recompile fails the build.
 
+### Is it denying anything?
+
+`--check` says the committed policies are the ones the policy compiles to; it cannot say the
+attached SCPs are doing anything. Zero denials over a month looks the same as a policy that was
+detached. `aegis report aws` reads CloudTrail's record of denied calls (read-only) and answers
+that:
+
+```bash
+aegis report aws --compiled build/aegis-aws --collect --days 30 \
+    --policy-id p-abc12345 --test-principal 'arn:aws:iam::*:role/aegis-test-*'
+```
+
+- **Attribution.** A call an SCP denied carries "with an explicit deny in a service control
+  policy" in its error, *sometimes* followed by the policy's ARN. With the ARN and the
+  `--policy-id` you attached the Aegis SCP as, the denial is Aegis's; without the ARN it is
+  reported as an SCP denial that may be Aegis's. The message never names the statement, so the
+  rules shown are those whose mapped actions cover the denied call: the IAM action the message
+  names, or else CloudTrail's operation name translated to it (Lambda's `DeleteFunction20150331`
+  is `lambda:DeleteFunction`; S3's `PutBucketEncryption` is `s3:PutEncryptionConfiguration`).
+  An explicit SCP deny counts whatever the service calls the error (SNS: `AuthorizationError`). EC2 encodes its reasons;
+  those denials are counted as undetermined (`aws sts decode-authorization-message` shows one).
+- **Real or a test.** Denials by `--test-principal` identities (the acceptance roles, say) are
+  deliberate tests; the rest are real.
+- **The warning.** No real denial in a window of at least `--quiet-days` (default 30) exits 1:
+  that is not proof the policy works. Check it is attached
+  (`aws organizations list-policies-for-target`) and that its tests still deny.
+- **Events** come from `--collect` (`aws cloudtrail lookup-events`, the last 1–90 days, with
+  your credentials; LookupEvents cannot filter on errors, so every management event in the
+  window is read) or from files: that command's output, CloudTrail log files (`Records`,
+  gzipped or not) or JSON lines. With `--collect` the window is the one queried, so a quiet
+  month with few events still counts as a month. If CloudTrail had more events than were read
+  (a `NextToken` left over), the window is cut back to the oldest event read and the report
+  says so, rather than claim silence over days it never saw. `--json` for machines.
+
 ## Kubernetes: ValidatingAdmissionPolicy
 
 ```bash
