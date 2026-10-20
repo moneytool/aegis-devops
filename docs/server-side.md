@@ -263,7 +263,9 @@ aegis report kubernetes --compiled build/aegis-kube --audit-log /var/log/kuberne
   apply) is reported as `binding-drift`; an `aegis-*` policy that the output does not list
   (left from an older compile) as `stale-policy`.
 - **The warning.** No real denial in at least `--quiet-days` (default 30) exits 1, as for AWS.
-  So does an empty log. The audit policy must log writes at `Metadata` level or above, or no
+  When enforcing, only a denial counts: a warning from a drifted binding does not. In
+  report-only mode the warnings are what the bindings produce, so they count. An empty log
+  also exits 1. The audit policy must log writes at `Metadata` level or above, or no
   denial can show up (`no-writes` says so).
 - **Events** are the files `--audit-log-path` writes (JSON lines, rotated `.gz` files fine), an
   `EventList`, or for EKS the output of `aws logs filter-log-events` on the cluster's

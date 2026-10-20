@@ -9,7 +9,9 @@ a JSON list of ``{message, policy, binding, expressionIndex, validationActions}`
 This report reads the API server's audit log and answers, read-only:
 
 * which requests the Aegis policies (the names in ``manifest.json``'s
-  ``policies``) denied, or warned about in report-only mode, per rule;
+  ``policies``) denied, or warned about in report-only mode, per rule (only the
+  outcome the compiled bindings produce -- Deny when enforcing, Warn when
+  report-only -- counts as the policy working for the quiet check);
 * real versus deliberate tests (``--test-principal`` globs on the username;
   an impersonated request counts as the identity it impersonated);
 * policies named ``aegis-*`` that the compiled output does not list (left over
@@ -292,12 +294,17 @@ def report(events: list[dict[str, Any]], manifest: dict[str, Any], *,
             "output; delete them or re-compile (kubectl delete validatingadmissionpolicies,"
             "validatingadmissionpolicybindings -l app.kubernetes.io/managed-by=aegis, then "
             "apply policies.yaml)")
-    real = [d for d in denials if d.kind == "aegis" and not d.test]
+    # Only the outcome the compiled bindings produce shows the policy working: a denial
+    # when they Deny, a warning when they are report-only. A warning or audit entry from a
+    # binding that should deny is drift (above), not proof of enforcement.
+    working = {"denied"} if "Deny" in compiled_actions else {"denied", "warned"}
+    real = [d for d in denials if d.kind == "aegis" and not d.test and d.outcome in working]
     if not real:
         if days >= quiet_days:
+            what = "was denied by" if working == {"denied"} else "failed"
             rep.status = "quiet"
             rep.warnings.append(
-                f"no-real-denials: no real request failed an Aegis policy in {days:.0f} days. "
+                f"no-real-denials: no real request {what} an Aegis policy in {days:.0f} days. "
                 "That is not proof the policies work: check they are applied (kubectl get "
                 "validatingadmissionpolicybindings -l app.kubernetes.io/managed-by=aegis) and "
                 "that their tests still deny")

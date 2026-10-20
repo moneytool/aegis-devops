@@ -160,6 +160,29 @@ def test_quiet_over_a_long_window(manifest):
     assert any(w.startswith("no-real-denials") for w in rep.warnings)
 
 
+@pytest.mark.parametrize("actions", [("Warn", "Audit"), ("Audit",)])
+def test_drifted_binding_does_not_count_as_a_denial(manifest, actions):
+    t = datetime(2026, 9, 1, tzinfo=UTC)
+    rep = report([_event(t, policy=None, audit_id="1"),
+                  _event(t + timedelta(days=20), actions=actions, audit_id="2"),
+                  _event(t + timedelta(days=40), policy=None, audit_id="3")],
+                 manifest, test_principals=[])
+    assert rep.status == "quiet"
+    assert any(w.startswith("binding-drift") for w in rep.warnings)
+    assert any(w.startswith("no-real-denials") for w in rep.warnings)
+
+
+def test_report_only_warnings_count_over_a_long_window(manifest):
+    m = copy.deepcopy(manifest)
+    m["enforcement"], m["validation_actions"] = "report-only", ["Warn", "Audit"]
+    t = datetime(2026, 9, 1, tzinfo=UTC)
+    rep = report([_event(t, policy=None, audit_id="1"),
+                  _event(t + timedelta(days=20), actions=("Warn", "Audit"), audit_id="2"),
+                  _event(t + timedelta(days=40), policy=None, audit_id="3")],
+                 m, test_principals=[])
+    assert rep.status == "ok"
+
+
 def test_short_window_is_not_quiet(manifest):
     t = datetime(2026, 9, 1, tzinfo=UTC)
     rep = report([_event(t, policy=None)], manifest, test_principals=[])
