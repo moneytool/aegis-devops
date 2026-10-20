@@ -77,6 +77,16 @@ _INFRA_WORD_RE = re.compile(
     + r")(?![\w.-])"
 )
 
+# A shell, eval or source fed code made at run time: `bash -c "$(cat x)"`,
+# `eval "$(…)"`, `source <(…)`, `sh <(curl …)`. Asked about, not denied:
+# `eval "$(pyenv init -)"` is an everyday line.
+_GENERATED_CODE_RE = re.compile(
+    r"(?:^|[;&|(]\s*|\s)((?:sudo\s+)?(?:(?:ba|z|da|k|a)?sh|eval|source|\.))"
+    r"(?:\s+-[A-Za-z]+)*\s+[\"']?(?:\$\(|`|<\()"
+)
+# `source x` / `. x` (rejected by the parser, so found here).
+_SOURCE_RE = re.compile(r"(?:^|[;&|]\s*)(?:source|\.)\s+\S")
+
 # Tool names agents use for "run a shell command". Anything else (file
 # edits, MCP tools ...) is not ours to judge and is allowed.
 _SHELL_TOOL_NAMES = frozenset(
@@ -224,8 +234,9 @@ def decide(command: str, config_dir: Path, extra_args: list[str] | None = None) 
     result to allow / deny / ask. Tool errors deny only gated commands."""
     from aegis_core import cli  # local: cli imports this module
 
+    escalate_scripts = "--escalate-scripts" in (extra_args or [])
     try:
-        intents_from_command(command)
+        intents = intents_from_command(command)
     except ShellRejected as exc:
         if mentions_infra(command):
             return HookVerdict(
@@ -233,9 +244,32 @@ def decide(command: str, config_dir: Path, extra_args: list[str] | None = None) 
                 f"aegis: cannot check this command statically ({exc.reason}); "
                 "run the infrastructure command on its own, without shell expansion",
             )
+        generated = _GENERATED_CODE_RE.search(command)
+        if generated:
+            return HookVerdict(
+                "ask",
+                f"aegis: {generated.group(1)} runs code that is only produced when the command "
+                "runs, so it cannot be checked; run the commands directly instead",
+            )
+        if escalate_scripts and _SOURCE_RE.search(command):
+            return HookVerdict(
+                "ask", "aegis: this runs a local script, which the hook cannot read "
+                "(--escalate-scripts)")
         return HookVerdict("allow")
     except ValueError as exc:  # a known binary with an argv its parser rejects
         return HookVerdict("deny", f"aegis: cannot parse this command: {exc}")
+    for intent in intents:
+        runs = intent.params.get("runs_code") if intent.provider == "shell" else None
+        if runs is None:
+            continue
+        hidden = runs.get("code", "") if runs["kind"] == "inline" else command
+        if runs["kind"] in ("inline", "stdin") and mentions_infra(hidden):
+            how = "on the command line" if runs["kind"] == "inline" else "through a pipe"
+            return HookVerdict(
+                "deny",
+                f"aegis: cannot check code passed to {runs['interpreter']} {how}, and it "
+                "names an infrastructure tool; run the infrastructure command on its own",
+            )
 
     argv = [
         "check", "command", "--config-dir", str(config_dir), "--exit-style", "claude-hook",
