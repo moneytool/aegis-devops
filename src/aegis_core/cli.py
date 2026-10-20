@@ -611,6 +611,25 @@ def _build_parser() -> argparse.ArgumentParser:
                             "(default 30)")
     report_aws.add_argument("--since", default=None, help="ISO 8601 start of the window")
     report_aws.add_argument("--json", action="store_true", help="machine-readable output")
+    report_kube = report_sub.add_parser(
+        "kubernetes", help="requests the compiled admission policies denied (or warned about, "
+        "report-only), from the API server's audit log: real vs test, per rule; zero real "
+        "denials over --quiet-days is a warning")
+    report_kube.add_argument("--compiled", required=True, metavar="DIR",
+                             help="the 'aegis compile kubernetes --out' directory "
+                             "(manifest.json)")
+    report_kube.add_argument("--audit-log", nargs="+", required=True, metavar="FILE",
+                             help="API server audit events: --audit-log-path files (JSON "
+                             "lines, .gz ok), an EventList, or 'aws logs filter-log-events' "
+                             "output for EKS")
+    report_kube.add_argument("--test-principal", action="append", default=[], metavar="GLOB",
+                             help="username glob whose denials are deliberate tests "
+                             "(repeatable), e.g. 'system:serviceaccount:aegis-test:*'")
+    report_kube.add_argument("--quiet-days", type=int, default=30,
+                             help="warn when no real denial in a window at least this long "
+                             "(default 30)")
+    report_kube.add_argument("--since", default=None, help="ISO 8601 start of the window")
+    report_kube.add_argument("--json", action="store_true", help="machine-readable output")
 
     agents_parser = subparsers.add_parser(
         "agents",
@@ -1581,6 +1600,27 @@ def _run_report_aws(args: argparse.Namespace) -> int:
     return 0 if rep.status == "ok" else 1
 
 
+def _run_report_kubernetes(args: argparse.Namespace) -> int:
+    """``aegis report kubernetes``: read-only. Exit 0 when the compiled admission
+    policies failed real requests (or the window is too short to tell), 1 when
+    there were none in at least --quiet-days or no events were read."""
+    from aegis_core.report_kubernetes import AuditError, load_compiled, read_audit_log
+    from aegis_core.report_kubernetes import render as render_report
+    from aegis_core.report_kubernetes import report as build_report
+
+    since = _parse_now(args.since) if args.since else None
+    try:
+        manifest = load_compiled(args.compiled)
+        events = [e for f in args.audit_log for e in read_audit_log(f)]
+        rep = build_report(events, manifest, test_principals=args.test_principal,
+                           quiet_days=args.quiet_days, since=since)
+    except AuditError as exc:
+        raise DataError(f"report kubernetes: {exc}") from None
+    print(json.dumps(rep.to_dict(), indent=2, sort_keys=True) if args.json
+          else render_report(rep))
+    return 0 if rep.status == "ok" else 1
+
+
 def _run_audit_aws(args: argparse.Namespace) -> int:
     """``aegis audit-identity aws``: read-only; exit 1 on a problem."""
     from aegis_core.audit_aws import InventoryError, audit, collect_inventory
@@ -1873,6 +1913,8 @@ def _run(argv: list[str]) -> int:
             return _run_compile_kubernetes(args)
         return _run_compile_aws(args)
     if args.command == "report":
+        if args.target == "kubernetes":
+            return _run_report_kubernetes(args)
         return _run_report_aws(args)
     if args.command == "audit-identity":
         if args.target == "kubernetes":

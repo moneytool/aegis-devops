@@ -243,6 +243,37 @@ With `enforcement: report-only` the bindings use `validationActions: [Warn, Audi
 warning and the audit log records it, but nothing is denied. After review, `enforcement:
 enforce` compiles `[Deny, Audit]`. `--check DIR` reports drift, as for AWS.
 
+### Is it denying anything? (Kubernetes)
+
+The bindings carry the `Audit` action, so the API server writes every failed validation into
+the request's audit event (the annotation
+`validation.policy.admission.k8s.io/validation_failure`, naming the policy and the binding's
+actions). `aegis report kubernetes` reads the audit log, read-only:
+
+```bash
+aegis report kubernetes --compiled build/aegis-kube --audit-log /var/log/kubernetes/audit.log \
+    --test-principal 'system:serviceaccount:aegis-test:*'
+```
+
+- **Attribution is exact.** Each policy is named after its rule (`manifest.json` lists them),
+  so a denial counts for that rule; `aegis-guardrails` is self-protection. A request an agent
+  made by impersonation counts as the identity it impersonated.
+- **Report-only.** With `[Warn, Audit]` the request goes through and is counted as *warned*.
+  A binding that ran with other actions than the compiled ones (edited by hand, or an older
+  apply) is reported as `binding-drift`; an `aegis-*` policy that the output does not list
+  (left from an older compile) as `stale-policy`.
+- **The warning.** No real denial in at least `--quiet-days` (default 30) exits 1, as for AWS.
+  So does an empty log. The audit policy must log writes at `Metadata` level or above, or no
+  denial can show up (`no-writes` says so).
+- **Events** are the files `--audit-log-path` writes (JSON lines, rotated `.gz` files fine), an
+  `EventList`, or for EKS the output of `aws logs filter-log-events` on the cluster's
+  `kube-apiserver-audit` log streams (control-plane audit logging must be on). GKE and AKS
+  export audit logs in their own formats; convert them to `audit.k8s.io/v1` events first. A
+  server-side dry run (`--dry-run=server`) fails validation exactly like the real request and
+  the audit event does not say which it was, so run tests as a `--test-principal` identity.
+  Verified on kind (Kubernetes 1.36.1) with the acceptance rules: denials, a test identity, an
+  impersonated request and a `[Warn, Audit]` binding (`tests/fixtures/kube-audit/`).
+
 ### Verified
 
 `scripts/kube_acceptance.py` applies a compiled policy to a local kind cluster and runs 22 cases

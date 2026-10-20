@@ -16,6 +16,14 @@ behaviour.
   a window of at least `--quiet-days` (default 30) exits 1: zero denials is not proof the policy
   works. SCP denials without a policy ARN are reported as possibly Aegis's; EC2's encoded
   reasons as undetermined. Proposed after outside review of the AWS SCP article.
+- **Preview:** `aegis report kubernetes`: which requests the compiled ValidatingAdmissionPolicies
+  denied, or warned about in report-only mode, from the API server's audit log (the `Audit`
+  action's `validation_failure` annotation): per rule (exact, from the policy name), real versus
+  deliberate tests (`--test-principal`), impersonated requests counted as the identity
+  impersonated. Reports bindings that ran with other actions than the compiled ones and
+  `aegis-*` policies missing from the output. No real denial in at least `--quiet-days`, or no
+  events, exits 1. Reads `--audit-log-path` files (`.gz` ok), an `EventList`, or EKS
+  `aws logs filter-log-events` output. Verified on kind.
 
 ## [1.0.0] — 2026-10-10
 
