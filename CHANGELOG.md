@@ -18,15 +18,15 @@ behaviour.
   reasons as undetermined. Proposed after outside review of the AWS SCP article.
 - `aegis check command --escalate-scripts` (off by default; add it to the hook command as
   `aegis hook <agent> -- --escalate-scripts`): escalates commands that run code Aegis cannot
-  read: `bash nuke.sh`, `./nuke.sh`, `source x`, `python3 x.py`, `make`, `npm run`, inline
-  `python3 -c` code, a shell fed through a pipe. Shell intents for those carry
+  read: `bash nuke.sh`, `bash < nuke.sh`, `./nuke.sh`, `source x`, `python3 x.py`, `make`,
+  `npm run` (also with `$VAR` arguments), inline `python3 -c` code, a shell fed through a pipe. Shell intents for those carry
   `params.runs_code`.
 - `docs/agents.md`: "What the hook cannot see", the tested list of what gets past the hook
   (scripts, Write/Edit tool files, SDK calls) and the server-side layer that does not.
 
 ### Changed
-- Agent hook: inline interpreter code (`python -c`, `node -e`, `perl -e`, `ruby -e`, `php -r`,
-  …) and code piped into a shell or interpreter are denied when the code names an
+- Agent hook: inline interpreter code (`python -c` / `-Ic`, `node -e` / `--eval=`, `perl -e` /
+  `-lne`, `ruby -e`, `php -r`, …) and code piped into a shell or interpreter are denied when the code names an
   infrastructure tool. Before, `python3 -c "subprocess.run(['kubectl','delete',…])"` and
   `echo 'kubectl delete …' | bash` ran unchecked.
 - Agent hook: `bash -c "$(…)"`, `eval "$(…)"`, `source <(…)` and similar ask first (deny where

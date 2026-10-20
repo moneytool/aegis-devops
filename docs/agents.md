@@ -68,11 +68,11 @@ gets past it. With the example policy:
 | `bash -c 'kubectl delete namespace prod'` | blocked: the string is unwrapped and checked |
 | `K=kubectl; $K delete namespace prod` | blocked: cannot be checked, names an infrastructure tool |
 | `python3 -c "subprocess.run(['kubectl','delete','namespace','prod'])"` | blocked: inline code that names an infrastructure tool |
-| `node -e "…kubectl…"`, `perl -e`, `ruby -e`, `php -r` | blocked the same way |
+| `node -e` / `--eval=…`, `python3 -Ic`, `perl -e` / `-lne`, `ruby -e`, `php -r` naming `kubectl` | blocked the same way |
 | `echo 'kubectl delete namespace prod' \| bash` | blocked: code piped into a shell that names an infrastructure tool |
 | `bash -c "$(cat nuke.sh)"`, `eval "$(…)"`, `source <(curl …)` | asks: the code only exists when the command runs |
 | `cat > nuke.sh <<'EOF' … EOF` (here-doc that names `kubectl`) | blocked: cannot be checked, names an infrastructure tool |
-| `bash nuke.sh`, `./nuke.sh`, `source nuke.sh`, `python3 cleanup.py` | **runs** |
+| `bash nuke.sh`, `bash < nuke.sh`, `./nuke.sh`, `source nuke.sh`, `python3 cleanup.py` | **runs** |
 | `make destroy`, `npm run teardown` | **runs** |
 | a file written with the agent's Write/Edit tool, then run | **runs**: file edits are not commands |
 | a cloud SDK or HTTP call from code the agent wrote | **runs** |
@@ -84,7 +84,8 @@ round it.
 
 **Escalate local scripts (optional, off by default).** Add `--escalate-scripts` to the hook
 command and every command that runs code the hook cannot read asks first (blocks in Codex,
-Gemini CLI and OpenCode): a script file, a task runner (`make`, `just`, `npm run`, …), inline
+Gemini CLI and OpenCode): a script file (named or fed through `<`, also with `$VAR`
+arguments), a task runner (`make`, `just`, `npm run`, …), inline
 interpreter code and a shell fed through a pipe:
 
 ```json

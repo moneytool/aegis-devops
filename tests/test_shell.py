@@ -547,6 +547,19 @@ def test_acceptance_git_force_push_through_wrappers_and_tee(example_gate):
     ("python -m pytest", {"kind": "script", "interpreter": "python", "path": "-m pytest"}),
     ("make -j4 destroy", {"kind": "script", "interpreter": "make", "path": "destroy"}),
     ("npm run teardown", {"kind": "script", "interpreter": "npm run", "path": "teardown"}),
+    # review of #44: long `--eval=`, clustered short options, stdin redirection
+    ("node --eval='x()'", {"kind": "inline", "interpreter": "node", "code": "x()"}),
+    ("bun --print=1", {"kind": "inline", "interpreter": "bun", "code": "1"}),
+    ("python3 -Ic 'import os'", {"kind": "inline", "interpreter": "python3",
+                                 "code": "import os"}),
+    ("python3 '-Icprint(1)'", {"kind": "inline", "interpreter": "python3", "code": "print(1)"}),
+    ("python3 -Im pytest", {"kind": "script", "interpreter": "python3", "path": "-m pytest"}),
+    ("perl -lne 'print' f", {"kind": "inline", "interpreter": "perl", "code": "print"}),
+    ("perl -l012ne 'print' f", {"kind": "inline", "interpreter": "perl", "code": "print"}),
+    ("ruby -ne 'print'", {"kind": "inline", "interpreter": "ruby", "code": "print"}),
+    ("bash < cleanup.sh", {"kind": "script", "interpreter": "bash", "path": "< cleanup.sh"}),
+    ("bash -s < cleanup.sh", {"kind": "script", "interpreter": "bash", "path": "< cleanup.sh"}),
+    ("python3 0< x.py", {"kind": "script", "interpreter": "python3", "path": "< x.py"}),
 ])
 def test_runs_code_marks_code_the_parser_cannot_read(command, runs):
     (intent,) = intents_from_command(command)
@@ -562,6 +575,21 @@ def test_interpreter_reading_a_pipe_is_kept_inside_the_pipeline(command):
 
 
 @pytest.mark.parametrize("command", ["ls -la", "/usr/bin/env ls", "python3", "npm test",
-                                     "bash -c 'ls'"])
+                                     "bash -c 'ls'", "python3 -Wignore", "perl -v",
+                                     "sort < data.txt"])
 def test_runs_code_absent_for_ordinary_commands(command):
     assert all("runs_code" not in i.params for i in intents_from_command(command))
+
+
+@pytest.mark.parametrize("command,kinds", [
+    ('bash cleanup.sh "$TARGET"', ["script"]),
+    ('npm run teardown -- "$TARGET"', ["script"]),
+    ('cd "$DIR" && ./nuke.sh', ["script"]),
+    ('source "$ENV_FILE"', ["script"]),
+    ('ls "$HOME"', []),
+])
+def test_script_runs_loosely_finds_scripts_in_rejected_commands(command, kinds):
+    from aegis_core.shell import script_runs_loosely
+    with pytest.raises(ShellRejected):
+        intents_from_command(command)
+    assert [r["kind"] for r in script_runs_loosely(command)] == kinds

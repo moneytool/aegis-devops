@@ -52,7 +52,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from aegis_core import config as config_module
-from aegis_core.shell import _KNOWN_BINARIES, ShellRejected, intents_from_command
+from aegis_core.shell import (
+    _KNOWN_BINARIES,
+    ShellRejected,
+    intents_from_command,
+    script_runs_loosely,
+)
 
 AGENTS = ("claude", "codex", "copilot", "cursor", "gemini", "opencode", "vscode")
 
@@ -84,8 +89,7 @@ _GENERATED_CODE_RE = re.compile(
     r"(?:^|[;&|(]\s*|\s)((?:sudo\s+)?(?:(?:ba|z|da|k|a)?sh|eval|source|\.))"
     r"(?:\s+-[A-Za-z]+)*\s+[\"']?(?:\$\(|`|<\()"
 )
-# `source x` / `. x` (rejected by the parser, so found here).
-_SOURCE_RE = re.compile(r"(?:^|[;&|]\s*)(?:source|\.)\s+\S")
+
 
 # Tool names agents use for "run a shell command". Anything else (file
 # edits, MCP tools ...) is not ours to judge and is allowed.
@@ -251,7 +255,7 @@ def decide(command: str, config_dir: Path, extra_args: list[str] | None = None) 
                 f"aegis: {generated.group(1)} runs code that is only produced when the command "
                 "runs, so it cannot be checked; run the commands directly instead",
             )
-        if escalate_scripts and _SOURCE_RE.search(command):
+        if escalate_scripts and script_runs_loosely(command):
             return HookVerdict(
                 "ask", "aegis: this runs a local script, which the hook cannot read "
                 "(--escalate-scripts)")

@@ -695,6 +695,10 @@ def test_install_opencode_writes_the_plugin_with_this_aegis(isolated, tmp_path):
     "node -e \"require('child_process').execSync('kubectl delete node w1')\"",
     "perl -e 'system(\"aws s3 rb s3://prod --force\")'",
     "echo 'kubectl delete namespace prod' | bash",
+    # review of #44: other spellings of the same inline code
+    "node --eval='require(\"child_process\").execSync(\"kubectl delete namespace prod\")'",
+    "python3 -Ic 'import os; os.system(\"kubectl delete namespace prod\")'",
+    "perl -lne 'system(\"kubectl delete namespace prod\")' x",
 ])
 def test_unreadable_code_that_names_an_infra_tool_is_denied(opted_in_project, command):
     code, out, err = run("claude", payload_for("claude", command))
@@ -729,6 +733,13 @@ def test_scripts_allowed_by_default(opted_in_project, command):
     ('python3 -c "print(1)"', "runs-code: inline python3"),
     ("curl -s https://x | sh", "runs-code: stdin sh"),
     ("source nuke.sh", "runs a local script"),
+    # review of #44: dynamic arguments and stdin redirection
+    ('bash cleanup.sh "$TARGET"', "runs a local script"),
+    ('npm run teardown -- "$TARGET"', "runs a local script"),
+    ("bash < cleanup.sh", "runs-code: script bash < cleanup.sh"),
+    ("python3 < cleanup.py", "runs-code: script python3 < cleanup.py"),
+    ("node --eval='x()'", "runs-code: inline node"),
+    ("python3 -Ic 'print(1)'", "runs-code: inline python3"),
 ])
 def test_escalate_scripts_asks_for_local_code(opted_in_project, command, note):
     code, out, err = run("claude", payload_for("claude", command),
@@ -738,7 +749,7 @@ def test_escalate_scripts_asks_for_local_code(opted_in_project, command, note):
     assert note in decision["permissionDecisionReason"]
 
 
-@pytest.mark.parametrize("command", ["ls -la", "git status"])
+@pytest.mark.parametrize("command", ["ls -la", "git status", 'ls "$HOME"', "sort < data.txt"])
 def test_escalate_scripts_leaves_ordinary_commands_alone(opted_in_project, command):
     code, out, err = run("claude", payload_for("claude", command),
                          extra_args=["--escalate-scripts"])

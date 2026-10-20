@@ -517,15 +517,58 @@ def _interpreter(name: str) -> str | None:
     return name if name in _INLINE_FLAGS or name in _SHELLS else None
 
 
+# Interpreters whose short options cluster (``python3 -Ic CODE``, ``perl -lne CODE``):
+# the letters that take inline code or a module, and the letters whose value is the
+# rest of the cluster (``-Wignore``), after which no code letter can follow, and the
+# letters followed by optional digits only (perl ``-l`` / ``-0``: ``-l012ne``).
+_CLUSTERS = {
+    "python": ("c", "m", "WXQ", ""),
+    "perl": ("eE", "", "IMmdDxiC", "l0"),
+    "ruby": ("e", "", "IrxCEFiTWK", "0"),
+}
+
+
+def _cluster(interp: str, tok: str) -> tuple[str, str] | None:
+    """For a clustered short option ``-Ic`` / ``-Icprint(1)`` / ``-lne``: ``(letter,
+    attached)`` for the code (or module) letter it contains -- ``attached`` is the rest
+    of the token, empty when the value is the next argument -- else ``None``."""
+    spec = _CLUSTERS.get(interp)
+    if spec is None or not tok.startswith("-") or tok.startswith("--") or len(tok) < 2:
+        return None
+    code_letters, module_letters, valued, digits = spec
+    i = 1
+    while i < len(tok):
+        ch = tok[i]
+        if ch in code_letters or (module_letters and ch in module_letters):
+            return ch, tok[i + 1:]
+        if ch in valued:
+            return None
+        i += 1
+        if ch in digits:
+            while i < len(tok) and tok[i].isdigit():
+                i += 1
+    return None
+
+
+def _stdin_file(simple: SimpleCommand) -> str | None:
+    """The file a command reads its standard input from (``< x.sh``, ``0< x.sh``)."""
+    for r in simple.redirects:
+        body = r[1:] if r.startswith("0<") else r
+        if body.startswith("<") and not body.startswith(("<<", "<>", "<&")):
+            return body[1:]
+    return None
+
+
 def code_run(simple: SimpleCommand) -> dict[str, str] | None:
     """What a command runs that the hook cannot read: ``{"kind": "inline",
-    "code": …}`` for code passed on the command line (``python3 -c``, ``node
-    -e``, …), ``{"kind": "stdin"}`` for an interpreter or shell reading its
-    code from a pipe (``curl … | bash``), ``{"kind": "script", "path": …}``
-    for a script file or task runner (``bash nuke.sh``, ``./nuke.sh``,
-    ``python3 x.py``, ``make destroy``, ``npm run teardown``). ``None`` for
-    anything else. A shell ``-c`` never gets here: its string is unwrapped
-    and checked like any other command."""
+    "code": …}`` for code passed on the command line (``python3 -c``, ``python3
+    -Ic``, ``node -e`` / ``--eval=…``, ``perl -lne``, …), ``{"kind": "stdin"}`` for an
+    interpreter or shell reading its code from a pipe (``curl … | bash``),
+    ``{"kind": "script", "path": …}`` for a script file -- named, or fed through
+    ``< file`` -- or a task runner (``bash nuke.sh``, ``bash < nuke.sh``, ``./nuke.sh``,
+    ``python3 x.py``, ``make destroy``, ``npm run teardown``). ``None`` for anything
+    else. A shell ``-c`` never gets here: its string is unwrapped and checked like
+    any other command."""
     argv = simple.argv
     if not argv:
         return None
@@ -540,12 +583,27 @@ def code_run(simple: SimpleCommand) -> dict[str, str] | None:
             if skip:
                 skip = False
                 continue
-            if tok in flags or (interp == "python" and tok.startswith("-c") and len(tok) > 2):
-                code = tok[2:] if tok not in flags else (rest[i + 1] if i + 1 < len(rest) else "")
-                return {"kind": "inline", "interpreter": name, "code": code}
+            following = rest[i + 1] if i + 1 < len(rest) else ""
+            if tok in flags:
+                return {"kind": "inline", "interpreter": name, "code": following}
+            long_flag = next((f for f in flags if f.startswith("--")
+                              and tok.startswith(f + "=")), None)
+            if long_flag:
+                return {"kind": "inline", "interpreter": name,
+                        "code": tok[len(long_flag) + 1:]}
+            if interp == "python" and tok.startswith("-c") and len(tok) > 2:
+                return {"kind": "inline", "interpreter": name, "code": tok[2:]}
+            clustered = _cluster(interp, tok)
+            if clustered is not None:
+                letter, attached = clustered
+                value = attached or following
+                if letter == "m":
+                    return {"kind": "script", "interpreter": name,
+                            "path": f"-m {value}".strip()}
+                return {"kind": "inline", "interpreter": name, "code": value}
             if tok == "-m" and interp == "python":
-                module = rest[i + 1] if i + 1 < len(rest) else ""
-                return {"kind": "script", "interpreter": name, "path": f"-m {module}".strip()}
+                return {"kind": "script", "interpreter": name,
+                        "path": f"-m {following}".strip()}
             if tok == "-" or (interp in _SHELLS and tok == "-s"):
                 break  # code from stdin
             if tok in _VALUE_FLAGS:
@@ -554,9 +612,11 @@ def code_run(simple: SimpleCommand) -> dict[str, str] | None:
             if tok.startswith(("-", "+")):
                 continue
             if interp in ("deno", "bun") and tok in _RUN_SUBCOMMANDS.get(interp, ()):
-                target = rest[i + 1] if i + 1 < len(rest) else ""
-                return {"kind": "script", "interpreter": name, "path": target}
+                return {"kind": "script", "interpreter": name, "path": following}
             return {"kind": "script", "interpreter": name, "path": tok}
+        source = _stdin_file(simple)
+        if source is not None:
+            return {"kind": "script", "interpreter": name, "path": f"< {source}"}
         if simple.in_pipeline:
             return {"kind": "stdin", "interpreter": name}
         return None
@@ -569,6 +629,35 @@ def code_run(simple: SimpleCommand) -> dict[str, str] | None:
     if "/" in head and not head.startswith(_SYSTEM_PREFIXES):
         return {"kind": "script", "interpreter": "", "path": head}
     return None
+
+
+def script_runs_loosely(command: str) -> list[dict[str, str]]:
+    """Best effort for a command the parser rejected (``bash x.sh "$TARGET"``): splits
+    it on the shell's separators without expanding anything, strips launchers, and
+    returns what :func:`code_run` finds in each part. Never raises; only for asking,
+    never for allowing."""
+    found = []
+    for part in re.split(r"\|\||&&|[;|&\n]", command):
+        try:
+            argv = shlex.split(part, comments=False)
+        except ValueError:
+            continue
+        if not argv:
+            continue
+        redirects = [t for t in argv if t.startswith(("<", "0<"))]
+        argv = [t for t in argv if t not in redirects]
+        if argv and _basename(argv[0]) in ("source", "."):
+            found.append({"kind": "script", "interpreter": argv[0],
+                          "path": argv[1] if len(argv) > 1 else ""})
+            continue
+        try:
+            argv, _env, _wrappers, _string = _unwrap_inner(argv, 1)
+        except ShellRejected:
+            continue
+        runs = code_run(SimpleCommand(argv, redirects))
+        if runs is not None:
+            found.append(runs)
+    return found
 
 
 _ENV_METADATA_KEYS = {
