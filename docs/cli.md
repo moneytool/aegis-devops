@@ -303,7 +303,10 @@ aegis check command -- 'kubectl delete $(cat x)'                    # exit 64: c
 ```
 
 Inside a pipeline an unknown binary (`| grep x`) produces nothing; on its own it produces a
-synthetic `shell` / `binary/<name>` / `exec` intent that `--fail-closed` escalates. `KUBECONFIG=…`
+synthetic `shell` / `binary/<name>` / `exec` intent that `--fail-closed` escalates. When that
+binary runs code Aegis cannot read (a script file, `make` or `npm run`, `python3 -c` code, a
+shell fed through a pipe, which counts even inside a pipeline), the intent carries
+`params.runs_code` and `--escalate-scripts` escalates it with the note `runs-code: …`. `KUBECONFIG=…`
 and `env AWS_PROFILE=…` prefixes land in the intent's metadata (`kubeconfig`, `profile`, …) so
 the environment map sees them. **Fail closed:** anything whose argv cannot be known without
 running it is refused as a usage error (exit 64, `command rejected: <reason>`) — command

@@ -359,6 +359,14 @@ def _add_common_options(subparser: argparse.ArgumentParser) -> None:
         help="ESCALATE (instead of ALLOW) any intent that no constraint covers",
     )
     subparser.add_argument(
+        "--escalate-scripts",
+        action="store_true",
+        default=False,
+        help="ESCALATE commands that run code Aegis cannot read: a script file "
+        "(bash x.sh, ./x.sh, python3 x.py), a task runner (make, npm run), inline "
+        "code (python3 -c) or a shell fed through a pipe",
+    )
+    subparser.add_argument(
         "--on-untrusted-match",
         choices=("discard", "escalate"),
         default="discard",
@@ -1150,6 +1158,7 @@ def _evaluate(intents: list[InfrastructureIntent], args: argparse.Namespace) -> 
         ledger=ledger,
         fail_closed=args.fail_closed,
         on_untrusted_match=args.on_untrusted_match,
+        escalate_scripts=getattr(args, "escalate_scripts", False),
     )
     env_map = (
         _load_or_data_error(
@@ -1199,6 +1208,10 @@ def _evaluate(intents: list[InfrastructureIntent], args: argparse.Namespace) -> 
         reason_parts = list(plan_decision.citations)
         if not reason_parts:
             reason_parts = [n for n in plan_decision.notes if _is_fail_closed_note(n)]
+        if not reason_parts:
+            for d in plan_decision.per_intent:
+                reason_parts.extend(
+                    n for n in d.notes if _is_fail_closed_note(n) and n not in reason_parts)
         output.finish(plan_decision.verdict, reason_parts)
         return _EXIT_CODES[args.exit_style][plan_decision.verdict]
 
@@ -1226,7 +1239,7 @@ def _evaluate(intents: list[InfrastructureIntent], args: argparse.Namespace) -> 
 def _is_fail_closed_note(note: str) -> bool:
     return note.startswith(
         ("fail-closed", "env-unresolved", "namespace-unresolved", "manifest-not-inspected",
-         "unknown-target", "ledger:", "time-window-unresolved")
+         "unknown-target", "ledger:", "time-window-unresolved", "runs-code:")
     )
 
 
