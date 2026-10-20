@@ -1542,7 +1542,13 @@ def _run_report_aws(args: argparse.Namespace) -> int:
     """``aegis report aws``: read-only. Exit 0 when the compiled SCPs denied real
     calls (or the window is too short to tell), 1 when there were none in at
     least --quiet-days or no denial could be attributed (no --policy-id)."""
-    from aegis_core.report_aws import EventsError, collect_events, load_compiled, read_events
+    from aegis_core.report_aws import (
+        EventsError,
+        collect_events,
+        coverage_start,
+        load_compiled,
+        read_events,
+    )
     from aegis_core.report_aws import render as render_report
     from aegis_core.report_aws import report as build_report
 
@@ -1554,22 +1560,20 @@ def _run_report_aws(args: argparse.Namespace) -> int:
             raise UsageError(f"--policy-id {pid!r} is not an Organizations policy id (p-...)")
     try:
         manifest, policies, coverage = load_compiled(args.compiled)
-        until, truncated = None, False
+        until = None
         if args.collect:
             got = collect_events(days=args.days, profile=args.profile, region=args.region)
-            events, truncated, until = got.events, got.truncated, got.end
+            events, until = got.events, got.end
+            inputs = [(got.events, got.truncated)]
             # the window is the one queried, not just the span of what came back
             since = max(since, got.start) if since else got.start
         else:
-            events = []
-            for f in args.events:
-                read, cut = read_events(f)
-                events.extend(read)
-                truncated = truncated or cut
+            inputs = [read_events(f) for f in args.events]
+            events = [e for read, _ in inputs for e in read]
         rep = build_report(events, manifest, policies, coverage=coverage,
                            policy_ids=args.policy_id,
                            test_principals=args.test_principal, quiet_days=args.quiet_days,
-                           since=since, until=until, truncated=truncated)
+                           since=since, until=until, covered_from=coverage_start(inputs))
     except EventsError as exc:
         raise DataError(f"report aws: {exc}") from None
     print(json.dumps(rep.to_dict(), indent=2, sort_keys=True) if args.json

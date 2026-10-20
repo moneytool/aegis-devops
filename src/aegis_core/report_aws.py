@@ -334,6 +334,22 @@ class Report:
                 "denials": [d.to_dict() for d in self.denials], "warnings": self.warnings}
 
 
+def coverage_start(inputs: list[tuple[list[dict[str, Any]], bool]]) -> datetime | None:
+    """For several inputs ``(events, truncated)``: the time from which every
+    truncated input was read -- the latest of their oldest events -- or ``None``
+    if none is truncated. Each truncated input's boundary is kept before the
+    events are combined, so an older, complete input cannot stand in for the
+    days a truncated one never read."""
+    bounds = []
+    for events, truncated in inputs:
+        if not truncated:
+            continue
+        times = [t for t in (_parse_time(str(e.get("eventTime", ""))) for e in events) if t]
+        if times:
+            bounds.append(min(times))
+    return max(bounds) if bounds else None
+
+
 def _parse_time(value: str) -> datetime | None:
     try:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -346,17 +362,25 @@ def report(events: list[dict[str, Any]], manifest: dict[str, Any],
            coverage: dict[str, Any] | None = None,
            test_principals: list[str], quiet_days: int = DEFAULT_QUIET_DAYS,
            since: datetime | None = None, until: datetime | None = None,
-           truncated: bool = False) -> Report:
+           truncated: bool = False, covered_from: datetime | None = None) -> Report:
     """The report over ``events`` for one compiled output (``manifest`` and its
     SCPs). ``since``/``until`` bound the window -- for ``--collect``, the window
     queried, so an empty or sparse collection still covers it; by default it is
     the span of the events read. ``truncated``: the events stop short of the
-    window's start, so the window is cut back to the oldest event read."""
+    window's start, so the window is cut back to the oldest event read (one source).
+    ``covered_from``: with several inputs, the latest of the truncated inputs' own
+    oldest events -- before it at least one source was not read, so the window
+    assessed starts there (see :func:`coverage_start`)."""
     times = [t for t in (_parse_time(str(e.get("eventTime", ""))) for e in events) if t]
     start = since or (min(times) if times else None)
     end = until or (max(times) if times else None)
-    if truncated and times and (start is None or min(times) > start):
-        start = min(times)
+    if truncated and covered_from is None and times:
+        covered_from = min(times)
+    truncated = truncated or covered_from is not None
+    if covered_from is not None and (start is None or covered_from > start):
+        start = covered_from
+        events = [e for e in events
+                  if (t := _parse_time(str(e.get("eventTime", "")))) and t >= start]
     if since or until:
         events = [e for e in events
                   if (t := _parse_time(str(e.get("eventTime", ""))))

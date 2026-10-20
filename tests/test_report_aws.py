@@ -318,3 +318,32 @@ def test_a_truncated_collection_cannot_claim_the_whole_window(compiled, monkeypa
     assert out["status"] == "ok" and out["window"]["days"] < 2
     assert any(w.startswith("truncated") for w in out["warnings"])
     assert any(w.startswith("short-window") for w in out["warnings"])
+
+
+
+def test_a_truncated_file_keeps_its_own_boundary_among_other_inputs(compiled, tmp_path, capsys):
+    """Review of #43: an older, complete file must not stand in for the days a
+    truncated file never read."""
+    now = datetime.now(UTC)
+    older = tmp_path / "older.json"
+    older.write_text(json.dumps({"Records": [allowed(now - timedelta(days=60))]}))
+    partial = tmp_path / "partial.json"
+    partial.write_text(json.dumps({"Events": [{"CloudTrailEvent": json.dumps(
+        allowed(now - timedelta(days=1)))}], "NextToken": "more"}))
+    argv = ["report", "aws", "--compiled", str(compiled), "--events", str(older),
+            str(partial), "--policy-id", AEGIS_ID, "--json"]
+    assert main(argv) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["status"] == "ok" and out["window"]["days"] < 2
+    assert any(w.startswith("truncated") for w in out["warnings"])
+    assert not any(w.startswith("no-real-denials") for w in out["warnings"])
+
+
+def test_coverage_start_is_the_latest_truncated_boundary():
+    from aegis_core.report_aws import coverage_start
+
+    a = [allowed(NOW - timedelta(days=10)), allowed(NOW)]
+    b = [allowed(NOW - timedelta(days=3))]
+    assert coverage_start([(a, False), (b, False)]) is None
+    assert coverage_start([(a, True), (b, False)]) == NOW - timedelta(days=10)
+    assert coverage_start([(a, True), (b, True)]) == NOW - timedelta(days=3)
