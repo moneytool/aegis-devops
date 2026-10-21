@@ -8,6 +8,10 @@ behaviour.
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-10-21
+
+OpenCode V2 support, `aegis install --escalate-scripts`, and a hook latency benchmark.
+
 ### Added
 - `aegis install <agent> --escalate-scripts`: registers the hook with `-- --escalate-scripts`
   (OpenCode: the plugin passes it on), so the opt-in script escalation no longer needs a
@@ -556,6 +560,7 @@ See "Project status" in the README and [`docs/dev/PLAN.md`](docs/dev/PLAN.md) §
 rather than real connectors, signing uses a shared secret, and a principal is a signed name
 rather than a bound identity.
 
+[1.2.0]: https://github.com/moneytool/aegis-devops/releases/tag/v1.2.0
 [1.1.0]: https://github.com/moneytool/aegis-devops/releases/tag/v1.1.0
 [1.0.0]: https://github.com/moneytool/aegis-devops/releases/tag/v1.0.0
 [0.3.2]: https://github.com/moneytool/aegis-devops/releases/tag/v0.3.2
