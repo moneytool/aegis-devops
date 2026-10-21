@@ -505,6 +505,27 @@ def test_install_escalate_scripts_and_reinstall_without(isolated, agent, tmp_pat
     assert f"hook {agent}" in path.read_text()
 
 
+@pytest.mark.parametrize("user", [False, True])
+@pytest.mark.parametrize("agent", ["claude", "codex", "copilot", "vscode", "cursor", "gemini"])
+def test_install_escalate_scripts_with_budget_then_remove(isolated, agent, user, tmp_path):
+    """With the budget hooks the flag rides on every aegis entry (the prompt hook too),
+    and --remove takes them all out."""
+    path = hook.install(agent, user=user, project=tmp_path, budget=True, escalate_scripts=True)
+    text = path.read_text()
+    assert text.count(f"hook {agent} -- --escalate-scripts") == text.count(f"hook {agent}")
+    assert text.count(f"hook {agent}") == (2 if agent in ("claude", "codex", "gemini") else 1)
+    hook.install(agent, user=user, project=tmp_path, remove=True)
+    assert not path.exists() or f"hook {agent}" not in path.read_text()
+
+
+def test_prompt_hook_tolerates_escalate_scripts(isolated):
+    """The budget's prompt hook gets the same extra args; it must not choke on them."""
+    code, out, err = run("claude", {"hook_event_name": "UserPromptSubmit", "session_id": "s",
+                                    "prompt": "hi", "cwd": str(isolated[1])},
+                         extra_args=["--escalate-scripts"])
+    assert code == 0, err
+
+
 def test_installed_escalate_scripts_command_asks_for_a_script(isolated, tmp_path):
     """The command `aegis install claude --escalate-scripts` writes, run as Claude Code
     runs it, asks before `bash nuke.sh` in an opted-in project."""

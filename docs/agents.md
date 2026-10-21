@@ -82,19 +82,22 @@ code. Code that builds the name (`"kube" + "ctl"`) or calls an SDK (`boto3`, `@a
 recognised. The hook is a guard against mistakes, not against an agent that is trying to get
 round it.
 
-**Escalate local scripts (optional, off by default).** Add `--escalate-scripts` to the hook
-command and every command that runs code the hook cannot read asks first (blocks in Codex,
-Gemini CLI and OpenCode): a script file (named or fed through `<`, also with `$VAR`
-arguments), a task runner (`make`, `just`, `npm run`, …), inline
-interpreter code and a shell fed through a pipe:
+**Escalate local scripts (optional, off by default).** Install the hook with
+`--escalate-scripts` and every command that runs code the hook cannot read asks first (blocks in
+Codex, Gemini CLI and OpenCode): a script file (named or fed through `<`, also with `$VAR`
+arguments), a task runner (`make`, `just`, `npm run`, …), inline interpreter code and a shell
+fed through a pipe:
 
 ```bash
 aegis install claude --escalate-scripts     # any agent; reinstall without it to turn it off
 ```
 
 That registers `aegis hook claude -- --escalate-scripts` (OpenCode: the plugin passes it on). A
-hook command you wrote by hand takes the same `-- --escalate-scripts`. The Claude Code and Copilot
-plugins do not take options; use `aegis install` for this.
+hook command you wrote by hand takes the same `-- --escalate-scripts`. `aegis install` rewrites
+the whole hook command, so other options you added by hand after `--` are dropped when you
+reinstall. The Claude Code and Copilot plugins and the Gemini CLI extension do not take
+options; use `aegis install` for this (with a plugin also installed, both hooks run and the
+stricter answer wins).
 
 It also asks for `python -m pytest`, `./configure` and `. venv/bin/activate`, so turn it on
 where agents should not run scripts unattended. `aegis check command --escalate-scripts` does
