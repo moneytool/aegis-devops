@@ -13,10 +13,19 @@ behaviour.
   shell commands, 1.0.0 against 1.1.0 on the same interpreter. 1.1.0 was 0.7–1.2 ms slower
   (median) on the five commands both decide alike, consistently about 1 ms, within run-to-run
   spread; inline code naming an infrastructure tool is denied before the policy loads
-  (70 → 55 ms).
-  `--escalate-scripts` was not measured. `docs/agents.md` has a "Cost" section.
+  (70 → 55 ms). `--escalate-scripts` was not measured. `docs/agents.md` has a "Cost" section.
 - `scripts/budget_latency.py`: p95 is the nearest-rank value (the same sample for its 40 runs,
   so `results/budget-latency.json` is unchanged).
+- The OpenCode plugin (`aegis install opencode`) supports OpenCode V2 (2.x) alongside V1: its
+  default export is `{ id: "aegis-devops", setup(ctx), server() }`, so V2 calls `setup`
+  (registering `ctx.tool.hook("execute.before", …)`) and V1 (1.15 and later) calls `server`.
+  No npm dependency; same decisions and fail-closed behaviour on both. Under V2 a budget
+  warning goes to OpenCode's log (V2 server plugins have no toast). Needed to stay in the
+  awesome-opencode catalog, which removes V1-only plugins on 2027-01-01.
+
+### Changed
+- The OpenCode plugin no longer has a named `AegisDevOps` export (the default export replaces
+  it). Reinstall with `aegis install opencode` to get the new file; nothing else changes.
 
 ## [1.1.0] — 2026-10-20
 
