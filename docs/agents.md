@@ -92,7 +92,9 @@ fed through a pipe:
 aegis install claude --escalate-scripts     # any agent; reinstall without it to turn it off
 ```
 
-That registers `aegis hook claude -- --escalate-scripts` (OpenCode: the plugin passes it on). A
+That registers `aegis hook claude -- --escalate-scripts` (OpenCode: the plugin passes it on,
+and if aegis cannot run it blocks every shell command in an opted-in project rather than only
+infrastructure ones). A
 hook command you wrote by hand takes the same `-- --escalate-scripts`. `aegis install` rewrites
 the whole hook command, so other options you added by hand after `--` are dropped when you
 reinstall. The Claude Code and Copilot plugins and the Gemini CLI extension do not take

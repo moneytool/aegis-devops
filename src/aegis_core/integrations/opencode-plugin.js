@@ -85,6 +85,15 @@ export const AegisDevOps = async ({ directory, client }) => ({
       cwd,
     })
     if (run.error || run.status === null) {
+      // With --escalate-scripts any command may run code aegis would have stopped, and
+      // without aegis nothing can tell which: block every bash command, not only infra.
+      const strict = CHECK_ARGS.includes("--escalate-scripts")
+      if (isBash && optedIn(cwd) && strict) {
+        throw new Error(
+          "aegis-devops could not run, so this command cannot be checked (installed with " +
+            "--escalate-scripts): run 'pip install aegis-devops' (blocking to fail closed)",
+        )
+      }
       if (isBash && optedIn(cwd) && INFRA.test(command)) {
         throw new Error(
           "aegis-devops could not run, so this infrastructure command cannot be checked: " +

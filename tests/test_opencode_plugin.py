@@ -141,3 +141,19 @@ def test_plain_install_lets_scripts_run(env):
     main(["init", str(env["project"] / ".aegis")])
     assert 'const CHECK_ARGS = []' in env["plugin"].read_text()
     assert _call(env, "bash nuke.sh") == {"allowed": True}
+
+
+def test_escalate_scripts_fallback_blocks_every_bash_command_when_aegis_cannot_run(env):
+    """Review of #49: with --escalate-scripts installed, a missing aegis must not let script
+    runs through; the plain install keeps its infra-only fallback."""
+    missing = {"AEGIS_BIN": str(env["home"] / "no-such-aegis")}
+    (env["project"] / ".aegis").mkdir()
+    assert _call(env, "bash nuke.sh", missing) == {"allowed": True}      # plain install
+    plugin = hook.install("opencode", user=False, project=env["project"], escalate_scripts=True)
+    env["plugin"].write_text(plugin.read_text())
+    for command in ("bash nuke.sh", "ls -la"):
+        blocked = _call(env, command, missing)
+        assert blocked["allowed"] is False
+        assert "--escalate-scripts" in blocked["message"]
+    (env["project"] / ".aegis").rmdir()                                  # not opted in
+    assert _call(env, "bash nuke.sh", missing) == {"allowed": True}
