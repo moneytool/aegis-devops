@@ -100,6 +100,16 @@ the same outside a hook (note `runs-code: …`).
 cluster APIs. The [server-side layer](server-side.md) compiles the policy to AWS SCPs and
 Kubernetes admission policies, which deny the call whatever made it.
 
+## Cost
+
+One hook call on a shell command takes about 60–81 ms (median, Apple M4 Pro, Python 3.12),
+most of it starting Python and loading the signed policy. The inline-code and script checks added in 1.1 cost
+0.2–2.2 ms over 1.0.0 on the same commands; inline code that names an infrastructure
+tool is now denied before the policy loads, so that case got faster (76 → 60 ms).
+Measured with [`scripts/hook_latency.py`](https://github.com/moneytool/aegis-devops/blob/main/scripts/hook_latency.py)
+([`results/hook-latency.json`](https://github.com/moneytool/aegis-devops/blob/main/results/hook-latency.json)).
+The budget check adds its own ~9 ms where a `budget.yaml` exists ([budget: cost](budget.md#cost)).
+
 ## Claude Code
 
 As a plugin (updates with the repository):

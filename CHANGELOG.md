@@ -8,6 +8,11 @@ behaviour.
 
 ## [Unreleased]
 
+### Added
+- `scripts/hook_latency.py` and `results/hook-latency.json`: one `aegis hook claude` call on six
+  shell commands, 1.0.0 against 1.1.0 on the same interpreter. 1.1's inline-code and script
+  checks add 0.2–2.2 ms per call; `docs/agents.md` has a "Cost" section.
+
 ## [1.1.0] — 2026-10-20
 
 Denial reports for the server-side layer, and the agent hook checks code passed inline or
