@@ -29,6 +29,9 @@ const INSTALLED = null
 // `aegis install opencode --no-budget` replaces "auto" with "off": then only bash
 // commands go to aegis, whatever budget.yaml says.
 const BUDGET_MODE = "auto"
+// `aegis install opencode --escalate-scripts` replaces [] with ["--escalate-scripts"]:
+// options passed on to `aegis check command`.
+const CHECK_ARGS = []
 const AEGIS = process.env.AEGIS_BIN ? [process.env.AEGIS_BIN] : INSTALLED || ["aegis"]
 const INFRA =
   /(^|[^\w.-])(kubectl|k|terraform|tf|tofu|aws|az|gcloud|gsutil|helm|argocd|flux|git|gh|psql|mysql|sqlite3|mongosh|pulumi|alembic|flyway|rails|prisma)([^\w.-]|$)/
@@ -78,13 +81,22 @@ async function check({ cwd, tool, args, sessionID, warn }) {
     cwd,
     session_id: sessionID,
   })
-  const run = spawnSync(AEGIS[0], [...AEGIS.slice(1), "hook", "opencode"], {
+  const extra = CHECK_ARGS.length ? ["--", ...CHECK_ARGS] : []
+  const run = spawnSync(AEGIS[0], [...AEGIS.slice(1), "hook", "opencode", ...extra], {
     input: payload,
     encoding: "utf8",
     timeout: 30000,
     cwd,
   })
   if (run.error || run.status === null) {
+    // With --escalate-scripts any command may run code aegis would have stopped, and
+    // without aegis nothing can tell which: block every bash command, not only infra.
+    if (isBash && optedIn(cwd) && CHECK_ARGS.includes("--escalate-scripts")) {
+      throw new Error(
+        "aegis-devops could not run, so this command cannot be checked (installed with " +
+          "--escalate-scripts): run 'pip install aegis-devops' (blocking to fail closed)",
+      )
+    }
     if (isBash && optedIn(cwd) && INFRA.test(command)) {
       throw new Error(
         "aegis-devops could not run, so this infrastructure command cannot be checked: " +

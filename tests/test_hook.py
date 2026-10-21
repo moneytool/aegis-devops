@@ -487,6 +487,70 @@ def test_install_claude_json_shape(isolated, tmp_path):
     assert "hook claude" in entries[0]["hooks"][0]["command"]
 
 
+def test_hook_command_passes_check_args_after_separator():
+    assert hook.hook_command("claude").endswith(" hook claude")
+    assert hook.hook_command("claude", ("--escalate-scripts",)).endswith(
+        " hook claude -- --escalate-scripts")
+
+
+@pytest.mark.parametrize("agent", ["claude", "codex", "copilot", "vscode", "cursor", "gemini"])
+def test_install_escalate_scripts_and_reinstall_without(isolated, agent, tmp_path):
+    path = hook.install(agent, user=False, project=tmp_path, escalate_scripts=True)
+    assert "-- --escalate-scripts" in path.read_text()
+    hook.install(agent, user=False, project=tmp_path, escalate_scripts=True)  # idempotent
+    assert path.read_text().count("--escalate-scripts") == path.read_text().count(
+        f"hook {agent}")
+    hook.install(agent, user=False, project=tmp_path)
+    assert "--escalate-scripts" not in path.read_text()
+    assert f"hook {agent}" in path.read_text()
+
+
+@pytest.mark.parametrize("user", [False, True])
+@pytest.mark.parametrize("agent", ["claude", "codex", "copilot", "vscode", "cursor", "gemini"])
+def test_install_escalate_scripts_with_budget_then_remove(isolated, agent, user, tmp_path):
+    """With the budget hooks the flag rides on every aegis entry (the prompt hook too),
+    and --remove takes them all out."""
+    path = hook.install(agent, user=user, project=tmp_path, budget=True, escalate_scripts=True)
+    text = path.read_text()
+    assert text.count(f"hook {agent} -- --escalate-scripts") == text.count(f"hook {agent}")
+    assert text.count(f"hook {agent}") == (2 if agent in ("claude", "codex", "gemini") else 1)
+    hook.install(agent, user=user, project=tmp_path, remove=True)
+    assert not path.exists() or f"hook {agent}" not in path.read_text()
+
+
+def test_prompt_hook_tolerates_escalate_scripts(isolated):
+    """The budget's prompt hook gets the same extra args; it must not choke on them."""
+    code, out, err = run("claude", {"hook_event_name": "UserPromptSubmit", "session_id": "s",
+                                    "prompt": "hi", "cwd": str(isolated[1])},
+                         extra_args=["--escalate-scripts"])
+    assert code == 0, err
+
+
+def test_installed_escalate_scripts_command_asks_for_a_script(isolated, tmp_path):
+    """The command `aegis install claude --escalate-scripts` writes, run as Claude Code
+    runs it, asks before `bash nuke.sh` in an opted-in project."""
+    import shlex
+    _home, project = isolated
+    opt_in(project)
+    path = hook.install("claude", user=False, project=project, escalate_scripts=True)
+    command = json.loads(path.read_text())["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+    proc = subprocess.run(shlex.split(command), input=json.dumps(
+        claude_payload("bash nuke.sh", cwd=str(project))), capture_output=True, text=True,
+        cwd=project, check=False)
+    assert proc.returncode == 0, proc.stderr
+    decision = json.loads(proc.stdout)["hookSpecificOutput"]
+    assert decision["permissionDecision"] == "ask"
+    assert "runs-code: script bash nuke.sh" in decision["permissionDecisionReason"]
+
+
+def test_install_cli_flag(isolated, tmp_path, capsys):
+    assert cli_module.main(["install", "claude", "--project", str(tmp_path),
+                            "--escalate-scripts"]) == 0
+    assert "--escalate-scripts:" in capsys.readouterr().out
+    text = (tmp_path / ".claude" / "settings.json").read_text()
+    assert "-- --escalate-scripts" in text
+
+
 def test_install_codex_json_shape(isolated, tmp_path):
     path = hook.install("codex", user=False, project=tmp_path)
     doc = json.loads(path.read_text())

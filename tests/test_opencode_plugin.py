@@ -129,6 +129,41 @@ def test_no_budget_keeps_non_bash_tools_away_from_aegis(env, tmp_path, budget, e
     assert result["allowed"] is (not expect_aegis)
 
 
+def test_escalate_scripts_install_blocks_scripts(env):
+    """`aegis install opencode --escalate-scripts` bakes the option into the plugin;
+    OpenCode has no ask, so a script run is blocked."""
+    plugin = hook.install("opencode", user=False, project=env["project"], escalate_scripts=True)
+    assert 'const CHECK_ARGS = ["--escalate-scripts"]' in plugin.read_text()
+    env["plugin"].write_text(plugin.read_text())
+    main(["init", str(env["project"] / ".aegis")])
+    blocked = _call(env, "bash nuke.sh")
+    assert blocked["allowed"] is False
+    assert "runs-code: script bash nuke.sh" in blocked["message"]
+    assert _call(env, "ls -la") == {"allowed": True}
+
+
+def test_plain_install_lets_scripts_run(env):
+    main(["init", str(env["project"] / ".aegis")])
+    assert 'const CHECK_ARGS = []' in env["plugin"].read_text()
+    assert _call(env, "bash nuke.sh") == {"allowed": True}
+
+
+def test_escalate_scripts_fallback_blocks_every_bash_command_when_aegis_cannot_run(env):
+    """Review of #49: with --escalate-scripts installed, a missing aegis must not let script
+    runs through; the plain install keeps its infra-only fallback."""
+    missing = {"AEGIS_BIN": str(env["home"] / "no-such-aegis")}
+    (env["project"] / ".aegis").mkdir()
+    assert _call(env, "bash nuke.sh", missing) == {"allowed": True}      # plain install
+    plugin = hook.install("opencode", user=False, project=env["project"], escalate_scripts=True)
+    env["plugin"].write_text(plugin.read_text())
+    for command in ("bash nuke.sh", "ls -la"):
+        blocked = _call(env, command, missing)
+        assert blocked["allowed"] is False
+        assert "--escalate-scripts" in blocked["message"]
+    (env["project"] / ".aegis").rmdir()                                  # not opted in
+    assert _call(env, "bash nuke.sh", missing) == {"allowed": True}
+
+
 # OpenCode V2: setup(ctx) registers the hook; the callback gets one event with
 # tool, sessionID and the tool's input, and a throw fails that call.
 V2_HARNESS = """
@@ -219,3 +254,16 @@ def test_source_is_detected_as_v2_by_the_catalog_probe():
     v2_object = re.compile(r"\{[^{}]*\bid\s*:\s*[\w\"'`][^{}]*\b(async\s+)?setup\s*[:,(}]")
     assert v2_object.search(source), "catalog probe would not see a V2 { id, setup } export"
     assert "@opencode-ai/plugin" not in source  # no V1 import to misread as V1-only
+
+
+def test_escalate_scripts_under_the_v2_api(env):
+    """The installed option and its strict fallback hold for OpenCode V2's setup() too."""
+    plugin = hook.install("opencode", user=False, project=env["project"], escalate_scripts=True)
+    env["plugin"].write_text(plugin.read_text())
+    main(["init", str(env["project"] / ".aegis")])
+    blocked = _call_v2(env, "bash", "bash nuke.sh")
+    assert blocked["allowed"] is False
+    assert "runs-code: script bash nuke.sh" in blocked["message"]
+    assert _call_v2(env, "bash", "ls -la")["allowed"] is True
+    missing = _call_v2(env, "bash", "ls -la", {"AEGIS_BIN": str(env["home"] / "no-such-aegis")})
+    assert missing["allowed"] is False and "--escalate-scripts" in missing["message"]
