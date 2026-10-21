@@ -57,8 +57,8 @@ def _setup(base: Path) -> tuple[dict[str, str], dict[str, str]]:
         payloads[name] = json.dumps({"session_id": "s", "transcript_path": str(log),
                                      "cwd": str(project), "tool_name": "Edit",
                                      "tool_input": {"file_path": "x"}})
-    env = {k: v for k, v in os.environ.items() if k not in (
-        "PYTHONDONTWRITEBYTECODE", "AEGIS_CONFIG_DIR", "XDG_CACHE_HOME", "XDG_STATE_HOME")}
+    env = {k: v for k, v in os.environ.items() if not k.startswith("AEGIS_") and k not in (
+        "PYTHONDONTWRITEBYTECODE", "XDG_CACHE_HOME", "XDG_STATE_HOME")}
     env.update({"HOME": str(home), "PYTHONPATH": str(ROOT / "src")})
     return payloads, {**env, "_budget": str(projects["budget"]),
                       "_none": str(projects["none"])}

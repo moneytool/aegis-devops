@@ -9,8 +9,11 @@ runs it -- a new process per tool call -- in a project made with ``aegis init``
 ``policy_from``). Runs are interleaved across interpreters and commands so all
 see the same machine load, the interpreter order alternating each round, after
 a warm-up run, with bytecode caching on (``PYTHONDONTWRITEBYTECODE`` would make
-every run recompile aegis). The interpreters must be the same Python; every
-timed run must reach the warm-up's decision. p95 is the nearest-rank value.
+every run recompile aegis). The caller's ``AEGIS_*`` settings are removed, so
+its signing key cannot replace the example key. The interpreters must be the
+same Python; every timed run must reach the warm-up's decision, and a hook
+that answers because it could not use the policy aborts the run. p95 is the
+nearest-rank value.
 
     python scripts/hook_latency.py --python 1.0.0=/tmp/a/bin/python \\
         --python 1.1.0=/tmp/b/bin/python [--runs 30] [--out results/hook-latency.json]
@@ -42,6 +45,10 @@ COMMANDS = [
 ]
 
 
+# A hook that answers because it could not use the policy is not the path being timed.
+_BROKEN = ("hook error", "is unusable", "cannot be used")
+
+
 def _cpu() -> str:
     try:
         return subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"], capture_output=True,
@@ -62,9 +69,10 @@ def main() -> int:
     ap.add_argument("--out", default=str(ROOT / "results" / "hook-latency.json"))
     args = ap.parse_args()
     pythons = dict(p.split("=", 1) for p in args.python)
-    env = {k: v for k, v in os.environ.items() if k not in (
-        "PYTHONDONTWRITEBYTECODE", "PYTHONPATH", "AEGIS_CONFIG_DIR", "XDG_CACHE_HOME",
-        "XDG_STATE_HOME")}
+    # every AEGIS_* setting is the caller's (a signing key would override the example key
+    # the generated policy is signed with, and turn each decision into "policy unusable")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("AEGIS_") and k not in (
+        "PYTHONDONTWRITEBYTECODE", "PYTHONPATH", "XDG_CACHE_HOME", "XDG_STATE_HOME")}
     with tempfile.TemporaryDirectory() as tmp:
         project = Path(tmp) / "project"
         project.mkdir()
@@ -92,8 +100,9 @@ def main() -> int:
                                   input=_payload(command, project), text=True,
                                   capture_output=True, env=env, cwd=project, check=False)
             elapsed = (time.perf_counter() - start) * 1000
-            if proc.returncode not in (0, 2) or "hook error" in proc.stderr:
-                raise SystemExit(f"hook failed ({py}, {command!r}): {proc.stderr}")
+            if proc.returncode not in (0, 2) or any(
+                    s in proc.stderr + proc.stdout for s in _BROKEN):
+                raise SystemExit(f"hook failed ({py}, {command!r}): {proc.stderr}{proc.stdout}")
             decision = "deny" if proc.returncode == 2 else (
                 json.loads(proc.stdout)["hookSpecificOutput"]["permissionDecision"]
                 if proc.stdout.strip() else "allow")
