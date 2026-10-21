@@ -18,6 +18,9 @@ identifiers:
     value: "10.5281/zenodo.22950337"
     description: "Concept DOI: all versions, resolves to the latest."
   - type: doi
+    value: "10.5281/zenodo.23548986"
+    description: "v1.2.0 (OpenCode V2 plugin; aegis install --escalate-scripts; hook latency benchmark)"
+  - type: doi
     value: "10.5281/zenodo.23518076"
     description: "v1.1.0 (denial reports for SCPs and admission policies; hook inline-code checks)"
   - type: doi
