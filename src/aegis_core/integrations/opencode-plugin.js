@@ -25,6 +25,9 @@ const INSTALLED = null
 // `aegis install opencode --no-budget` replaces "auto" with "off": then only bash
 // commands go to aegis, whatever budget.yaml says.
 const BUDGET_MODE = "auto"
+// `aegis install opencode --escalate-scripts` replaces [] with ["--escalate-scripts"]:
+// options passed on to `aegis check command`.
+const CHECK_ARGS = []
 const AEGIS = process.env.AEGIS_BIN ? [process.env.AEGIS_BIN] : INSTALLED || ["aegis"]
 const INFRA =
   /(^|[^\w.-])(kubectl|k|terraform|tf|tofu|aws|az|gcloud|gsutil|helm|argocd|flux|git|gh|psql|mysql|sqlite3|mongosh|pulumi|alembic|flyway|rails|prisma)([^\w.-]|$)/
@@ -74,7 +77,8 @@ export const AegisDevOps = async ({ directory, client }) => ({
       cwd,
       session_id: input?.sessionID,
     })
-    const run = spawnSync(AEGIS[0], [...AEGIS.slice(1), "hook", "opencode"], {
+    const extra = CHECK_ARGS.length ? ["--", ...CHECK_ARGS] : []
+    const run = spawnSync(AEGIS[0], [...AEGIS.slice(1), "hook", "opencode", ...extra], {
       input: payload,
       encoding: "utf8",
       timeout: 30000,

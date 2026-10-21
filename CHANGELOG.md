@@ -8,6 +8,11 @@ behaviour.
 
 ## [Unreleased]
 
+### Added
+- `aegis install <agent> --escalate-scripts`: registers the hook with `-- --escalate-scripts`
+  (OpenCode: the plugin passes it on), so the opt-in script escalation no longer needs a
+  hand-edited hook command. Reinstalling without the flag takes it out.
+
 ## [1.1.0] — 2026-10-20
 
 Denial reports for the server-side layer, and the agent hook checks code passed inline or

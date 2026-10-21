@@ -122,3 +122,22 @@ def test_no_budget_keeps_non_bash_tools_away_from_aegis(env, tmp_path, budget, e
                          env={**os.environ, "AEGIS_BIN": str(fake)})
     result = json.loads(out.stdout.strip().splitlines()[-1])
     assert result["allowed"] is (not expect_aegis)
+
+
+def test_escalate_scripts_install_blocks_scripts(env):
+    """`aegis install opencode --escalate-scripts` bakes the option into the plugin;
+    OpenCode has no ask, so a script run is blocked."""
+    plugin = hook.install("opencode", user=False, project=env["project"], escalate_scripts=True)
+    assert 'const CHECK_ARGS = ["--escalate-scripts"]' in plugin.read_text()
+    env["plugin"].write_text(plugin.read_text())
+    main(["init", str(env["project"] / ".aegis")])
+    blocked = _call(env, "bash nuke.sh")
+    assert blocked["allowed"] is False
+    assert "runs-code: script bash nuke.sh" in blocked["message"]
+    assert _call(env, "ls -la") == {"allowed": True}
+
+
+def test_plain_install_lets_scripts_run(env):
+    main(["init", str(env["project"] / ".aegis")])
+    assert 'const CHECK_ARGS = []' in env["plugin"].read_text()
+    assert _call(env, "bash nuke.sh") == {"allowed": True}

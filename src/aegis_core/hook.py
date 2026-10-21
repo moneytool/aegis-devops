@@ -504,8 +504,11 @@ def _aegis_command() -> list[str]:
     return [sys.executable, "-m", "aegis_core.cli"]
 
 
-def hook_command(agent: str) -> str:
-    return shlex.join([*_aegis_command(), "hook", agent])
+def hook_command(agent: str, check_args: tuple[str, ...] = ()) -> str:
+    """The command the agent runs; ``check_args`` (``--escalate-scripts``) are passed on
+    to ``aegis check command`` after ``--``."""
+    return shlex.join([*_aegis_command(), "hook", agent, *(("--", *check_args) if check_args
+                                                         else ())])
 
 
 def _is_ours(command: object) -> bool:
@@ -645,7 +648,8 @@ _AFTER_INSTALL = {
 }
 
 
-def _install_opencode_plugin(path: Path, *, remove: bool, budget: bool | None = None) -> Path:
+def _install_opencode_plugin(path: Path, *, remove: bool, budget: bool | None = None,
+                             check_args: tuple[str, ...] = ()) -> Path:
     """OpenCode hooks are JS plugins: write (or delete) our plugin file, with
     the argv of this aegis and the budget coverage filled in. The plugin
     detects a ``budget.yaml`` at run time, so the default is ``"auto"``;
@@ -663,21 +667,29 @@ def _install_opencode_plugin(path: Path, *, remove: bool, budget: bool | None = 
     mode_marker = 'const BUDGET_MODE = "auto"'
     if mode_marker not in template:
         raise ValueError("opencode plugin template has no BUDGET_MODE marker")
+    args_marker = "const CHECK_ARGS = []"
+    if args_marker not in template:
+        raise ValueError("opencode plugin template has no CHECK_ARGS marker")
     mode = "off" if budget is False else "auto"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(template.replace(marker, f"const INSTALLED = {json.dumps(_aegis_command())}")
-                    .replace(mode_marker, f"const BUDGET_MODE = {json.dumps(mode)}"))
+                    .replace(mode_marker, f"const BUDGET_MODE = {json.dumps(mode)}")
+                    .replace(args_marker, f"const CHECK_ARGS = {json.dumps(list(check_args))}"))
     return path
 
 
 def install(agent: str, *, user: bool, project: Path, remove: bool = False,
-            budget: bool | None = None) -> Path:
+            budget: bool | None = None, escalate_scripts: bool = False) -> Path:
     """Writes (or removes) the agent's hook. ``budget``: ``True``/``False``
     install or leave out the budget hooks; ``None`` detects whether the
-    policy directory that applies holds a ``budget.yaml``."""
+    policy directory that applies holds a ``budget.yaml``. ``escalate_scripts``
+    adds ``-- --escalate-scripts`` to the hook command (reinstalling without it
+    takes it out again)."""
+    check_args = ("--escalate-scripts",) if escalate_scripts else ()
     path = config_path(agent, user=user, project=project)
     if agent == "opencode":
-        return _install_opencode_plugin(path, remove=remove, budget=budget)
+        return _install_opencode_plugin(path, remove=remove, budget=budget,
+                                        check_args=check_args)
     if budget is None:
         budget = budget_configured(user=user, project=project)
     existing: dict = {}
@@ -687,7 +699,7 @@ def install(agent: str, *, user: bool, project: Path, remove: bool = False,
             existing = json.loads(text)
             if not isinstance(existing, dict):
                 raise ValueError(f"{path} is not a JSON object; not touching it")
-    updated = merge_config(agent, existing, None if remove else hook_command(agent),
+    updated = merge_config(agent, existing, None if remove else hook_command(agent, check_args),
                            budget=budget and agent in BUDGET_AGENTS)
     if remove and not updated["hooks"] and set(updated) <= {"version", "hooks"}:
         # nothing but our (now removed) hook was ever in it
@@ -715,8 +727,9 @@ _BUDGET_INSTALL_NOTE = {
 
 
 def main_install(agent: str, *, user: bool, project: str, remove: bool,
-                 budget: bool | None = None) -> int:
-    path = install(agent, user=user, project=Path(project), remove=remove, budget=budget)
+                 budget: bool | None = None, escalate_scripts: bool = False) -> int:
+    path = install(agent, user=user, project=Path(project), remove=remove, budget=budget,
+                   escalate_scripts=escalate_scripts)
     if agent == "opencode":
         budget = budget is not False   # the plugin detects a budget.yaml at run time
     elif budget is None:
@@ -729,6 +742,9 @@ def main_install(agent: str, *, user: bool, project: str, remove: bool,
         print(f"  {_BUDGET_INSTALL_NOTE[agent]}")
     elif budget:
         print(f"  budget: not measured for {agent} (no token data); only the policy applies")
+    if escalate_scripts:
+        print("  --escalate-scripts: commands that run a script, a task runner, inline or "
+              "piped code ask first (block where the agent has no ask)")
     print(f"  {_AFTER_INSTALL[agent]}")
     if not user and not (Path(project) / ".aegis").is_dir():
         print(f"  No policy in {Path(project) / '.aegis'} yet, so every command is allowed "

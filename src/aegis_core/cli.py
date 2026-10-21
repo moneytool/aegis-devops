@@ -699,6 +699,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="install only the shell-command hook (default: budget hooks when the policy "
         "directory that applies holds a budget.yaml)",
     )
+    install_parser.add_argument(
+        "--escalate-scripts", action="store_true",
+        help="register the hook with '-- --escalate-scripts': commands that run a script, a "
+        "task runner, inline or piped code ask first (block where the agent has no ask)",
+    )
 
     budget_parser = subparsers.add_parser(
         "budget", help="The session budget cap: status, check, and the signed day reset "
@@ -1944,7 +1949,7 @@ def _run(argv: list[str]) -> int:
     if args.command == "install":
         return hook_module.main_install(
             args.agent, user=args.user, project=args.project, remove=args.remove,
-            budget=args.budget,
+            budget=args.budget, escalate_scripts=args.escalate_scripts,
         )
     if args.command != "check":
         raise UsageError("unknown command")
