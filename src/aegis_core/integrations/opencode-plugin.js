@@ -13,7 +13,11 @@
 //
 // Budget cap (aegis 1.0): where the policy directory holds a budget.yaml,
 // every tool call goes to aegis, not only bash, with OpenCode's session id so
-// aegis can read this session's usage; a warning comes back as a toast.
+// aegis can read this session's usage; a warning comes back as a toast
+// (OpenCode V1) or in OpenCode's log (V2, whose server plugins have no toast).
+//
+// Works with both plugin APIs: OpenCode V2 (2.x, `setup(ctx)`) and V1 (1.15
+// and later, `server(input)`), see the default export at the bottom.
 import { spawnSync } from "node:child_process"
 import { existsSync } from "node:fs"
 import { homedir } from "node:os"
@@ -64,51 +68,85 @@ async function toast(client, message) {
   }
 }
 
-export const AegisDevOps = async ({ directory, client }) => ({
-  "tool.execute.before": async (input, output) => {
-    const cwd = directory || process.cwd()
-    const isBash = input?.tool === "bash"
-    const command = output?.args?.command
-    if (isBash && (typeof command !== "string" || !command.trim())) return
-    if (!isBash && (BUDGET_MODE === "off" || !hasBudget(cwd))) return
-    const payload = JSON.stringify({
-      tool_name: input?.tool,
-      tool_input: isBash ? { command } : output?.args || {},
-      cwd,
-      session_id: input?.sessionID,
-    })
-    const extra = CHECK_ARGS.length ? ["--", ...CHECK_ARGS] : []
-    const run = spawnSync(AEGIS[0], [...AEGIS.slice(1), "hook", "opencode", ...extra], {
-      input: payload,
-      encoding: "utf8",
-      timeout: 30000,
-      cwd,
-    })
-    if (run.error || run.status === null) {
-      // With --escalate-scripts any command may run code aegis would have stopped, and
-      // without aegis nothing can tell which: block every bash command, not only infra.
-      const strict = CHECK_ARGS.includes("--escalate-scripts")
-      if (isBash && optedIn(cwd) && strict) {
-        throw new Error(
-          "aegis-devops could not run, so this command cannot be checked (installed with " +
-            "--escalate-scripts): run 'pip install aegis-devops' (blocking to fail closed)",
-        )
-      }
-      if (isBash && optedIn(cwd) && INFRA.test(command)) {
-        throw new Error(
-          "aegis-devops could not run, so this infrastructure command cannot be checked: " +
-            "run 'pip install aegis-devops' (blocking to fail closed)",
-        )
-      }
-      return
+// One tool call, from either plugin API: throws to block, calls warn() for a
+// budget warning, returns for an allowed call.
+async function check({ cwd, tool, args, sessionID, warn }) {
+  const isBash = tool === "bash"
+  const command = args?.command
+  if (isBash && (typeof command !== "string" || !command.trim())) return
+  if (!isBash && (BUDGET_MODE === "off" || !hasBudget(cwd))) return
+  const payload = JSON.stringify({
+    tool_name: tool,
+    tool_input: isBash ? { command } : args || {},
+    cwd,
+    session_id: sessionID,
+  })
+  const extra = CHECK_ARGS.length ? ["--", ...CHECK_ARGS] : []
+  const run = spawnSync(AEGIS[0], [...AEGIS.slice(1), "hook", "opencode", ...extra], {
+    input: payload,
+    encoding: "utf8",
+    timeout: 30000,
+    cwd,
+  })
+  if (run.error || run.status === null) {
+    // With --escalate-scripts any command may run code aegis would have stopped, and
+    // without aegis nothing can tell which: block every bash command, not only infra.
+    if (isBash && optedIn(cwd) && CHECK_ARGS.includes("--escalate-scripts")) {
+      throw new Error(
+        "aegis-devops could not run, so this command cannot be checked (installed with " +
+          "--escalate-scripts): run 'pip install aegis-devops' (blocking to fail closed)",
+      )
     }
-    if (run.status === 0) {
-      try {
-        const reply = JSON.parse(run.stdout || "{}")
-        if (reply.warning) await toast(client, reply.warning)
-      } catch {}
-      return
+    if (isBash && optedIn(cwd) && INFRA.test(command)) {
+      throw new Error(
+        "aegis-devops could not run, so this infrastructure command cannot be checked: " +
+          "run 'pip install aegis-devops' (blocking to fail closed)",
+      )
     }
-    throw new Error((run.stderr || "").trim() || `aegis: blocked (exit ${run.status})`)
+    return
+  }
+  if (run.status === 0) {
+    try {
+      const reply = JSON.parse(run.stdout || "{}")
+      if (reply.warning) await warn(reply.warning)
+    } catch {}
+    return
+  }
+  throw new Error((run.stderr || "").trim() || `aegis: blocked (exit ${run.status})`)
+}
+
+// One default export serves both plugin APIs: OpenCode V2 (2.x) calls
+// setup(ctx), OpenCode V1 (1.15 and later) calls server(input). V2's
+// Plugin.define() is the identity function, so this object is a V2 plugin
+// without a dependency on @opencode/plugin. No other export: a V1 loader
+// registers every export, so a second one would run each check twice.
+export default {
+  id: "aegis-devops",
+  async setup(ctx) {
+    const cwd = ctx?.location?.directory || process.cwd()
+    // V2 server plugins have no toast API (that lives in TUI plugins), so a
+    // budget warning goes to OpenCode's log instead.
+    await ctx.tool.hook("execute.before", (event) =>
+      check({
+        cwd,
+        tool: event?.tool,
+        args: event?.input,
+        sessionID: event?.sessionID,
+        warn: async (message) => console.warn(message),
+      }),
+    )
   },
-})
+  async server({ directory, client }) {
+    const cwd = directory || process.cwd()
+    return {
+      "tool.execute.before": (input, output) =>
+        check({
+          cwd,
+          tool: input?.tool,
+          args: output?.args,
+          sessionID: input?.sessionID,
+          warn: (message) => toast(client, message),
+        }),
+    }
+  },
+}

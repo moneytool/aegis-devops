@@ -12,7 +12,7 @@ that agent's own format: allow, block (with the reason shown to the model), or a
 | VS Code (Copilot agent mode) | `aegis install vscode` | `PreToolUse` (run_in_terminal) | yes |
 | Cursor | `aegis install cursor` | `beforeShellExecution` | yes (`cursor-agent`) |
 | Gemini CLI | extension, or `aegis install gemini` | `BeforeTool` (run_shell_command) | yes |
-| OpenCode | `aegis install opencode` | plugin, `tool.execute.before` (bash) | yes |
+| OpenCode (V1 1.15+ and V2) | `aegis install opencode` | plugin, `tool.execute.before` (bash) | yes |
 
 "Live-tested" means a real session of that agent (Claude Code, Codex, Copilot, Cursor,
 Gemini CLI and OpenCode from their CLIs, VS Code from its chat panel), asked to run `ls -la`,
@@ -217,6 +217,14 @@ OpenCode's hooks are JavaScript plugins, so this writes a small plugin that hand
 command to `aegis hook opencode` and throws (which blocks the call and shows the model the
 reason) when Aegis says no. If `aegis` cannot be started, the plugin still refuses
 infrastructure commands in opted-in projects. Restart OpenCode after installing.
+
+The plugin works with both OpenCode plugin APIs from one default export: OpenCode V2 (2.x)
+calls its `setup(ctx)`, which registers the check with `ctx.tool.hook("execute.before", …)`;
+OpenCode V1 (1.15 and later) calls its `server()`, which returns the `tool.execute.before`
+hook. It needs no npm dependency (V2's `Plugin.define` is the identity function). One
+difference: a budget warning is a toast under V1 and a line in OpenCode's log under V2,
+whose server plugins have no toast API. On V2 the config key for plugins is `plugins` (V1:
+`plugin`); `aegis install opencode` writes to the plugin directory, which both versions load.
 
 ## Removing it
 
