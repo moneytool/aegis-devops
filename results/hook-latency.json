@@ -1,12 +1,24 @@
 {
   "measured": "2026-10-21",
   "runs": 30,
-  "python": "3.12.12",
+  "driver_python": "3.12.12",
   "platform": "Darwin arm64",
+  "cpu": "Apple M4 Pro",
   "versions": {
-    "1.0.0": "1.0.0",
-    "1.1.0": "1.1.0"
+    "1.0.0": {
+      "aegis": "1.0.0",
+      "python": "3.12.12",
+      "implementation": "CPython",
+      "base_prefix": "/Users/vampiremac/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none"
+    },
+    "1.1.0": {
+      "aegis": "1.1.0",
+      "python": "3.12.12",
+      "implementation": "CPython",
+      "base_prefix": "/Users/vampiremac/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none"
+    }
   },
+  "policy_from": "1.0.0",
   "commands": {
     "plain": "ls -la",
     "blocked": "kubectl delete namespace prod",
@@ -18,65 +30,65 @@
   "results": {
     "1.0.0": {
       "plain": {
-        "median_ms": 75.4,
-        "p95_ms": 78.6,
+        "median_ms": 70.2,
+        "p95_ms": 73.4,
         "decision": "allow"
       },
       "blocked": {
-        "median_ms": 79.0,
-        "p95_ms": 83.0,
+        "median_ms": 73.3,
+        "p95_ms": 76.5,
         "decision": "deny"
       },
       "pipeline": {
-        "median_ms": 76.0,
-        "p95_ms": 79.9,
+        "median_ms": 70.0,
+        "p95_ms": 73.5,
         "decision": "allow"
       },
       "inline-infra": {
-        "median_ms": 76.3,
-        "p95_ms": 79.3,
+        "median_ms": 70.2,
+        "p95_ms": 73.4,
         "decision": "allow"
       },
       "script": {
-        "median_ms": 76.9,
-        "p95_ms": 79.4,
+        "median_ms": 70.0,
+        "p95_ms": 74.2,
         "decision": "allow"
       },
       "expansion": {
-        "median_ms": 60.2,
-        "p95_ms": 62.7,
+        "median_ms": 54.5,
+        "p95_ms": 58.9,
         "decision": "allow"
       }
     },
     "1.1.0": {
       "plain": {
-        "median_ms": 75.9,
-        "p95_ms": 81.5,
+        "median_ms": 71.0,
+        "p95_ms": 74.9,
         "decision": "allow"
       },
       "blocked": {
-        "median_ms": 81.2,
-        "p95_ms": 84.0,
+        "median_ms": 74.0,
+        "p95_ms": 76.2,
         "decision": "deny"
       },
       "pipeline": {
-        "median_ms": 77.3,
-        "p95_ms": 80.3,
+        "median_ms": 71.2,
+        "p95_ms": 74.3,
         "decision": "allow"
       },
       "inline-infra": {
-        "median_ms": 60.3,
-        "p95_ms": 62.5,
+        "median_ms": 55.4,
+        "p95_ms": 57.4,
         "decision": "deny"
       },
       "script": {
-        "median_ms": 77.5,
-        "p95_ms": 81.9,
+        "median_ms": 70.8,
+        "p95_ms": 73.8,
         "decision": "allow"
       },
       "expansion": {
-        "median_ms": 60.4,
-        "p95_ms": 61.8,
+        "median_ms": 55.2,
+        "p95_ms": 58.3,
         "decision": "allow"
       }
     }

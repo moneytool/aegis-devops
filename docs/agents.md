@@ -102,10 +102,12 @@ Kubernetes admission policies, which deny the call whatever made it.
 
 ## Cost
 
-One hook call on a shell command takes about 60–81 ms (median, Apple M4 Pro, Python 3.12),
-most of it starting Python and loading the signed policy. The inline-code and script checks added in 1.1 cost
-0.2–2.2 ms over 1.0.0 on the same commands; inline code that names an infrastructure
-tool is now denied before the policy loads, so that case got faster (76 → 60 ms).
+One hook call on a shell command took 55–74 ms (median, Apple M4 Pro, CPython 3.12.12; a new
+process per call, as the agents run it). Against 1.0.0 on the same interpreter, 1.1.0 was
+0.7–1.2 ms slower on the five commands both versions decide alike, which is within the
+run-to-run spread (p95 is up to 4 ms above the median). Inline code that names an
+infrastructure tool is now denied before the policy loads, so that call is faster
+(70 → 55 ms). `--escalate-scripts` was not measured.
 Measured with [`scripts/hook_latency.py`](https://github.com/moneytool/aegis-devops/blob/main/scripts/hook_latency.py)
 ([`results/hook-latency.json`](https://github.com/moneytool/aegis-devops/blob/main/results/hook-latency.json)).
 The budget check adds its own ~9 ms where a `budget.yaml` exists ([budget: cost](budget.md#cost)).

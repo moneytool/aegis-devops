@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import platform
 import statistics
@@ -91,7 +92,7 @@ def main() -> int:
     def summary(xs: list[float]) -> dict[str, float]:
         ordered = sorted(xs)
         return {"median_ms": round(statistics.median(xs), 1),
-                "p95_ms": round(ordered[max(0, int(len(xs) * 0.95) - 1)], 1)}
+                "p95_ms": round(ordered[max(0, math.ceil(len(xs) * 0.95) - 1)], 1)}  # nearest rank
 
     with_b, without = summary(samples["budget"]), summary(samples["none"])
     result = {

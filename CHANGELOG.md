@@ -10,8 +10,12 @@ behaviour.
 
 ### Added
 - `scripts/hook_latency.py` and `results/hook-latency.json`: one `aegis hook claude` call on six
-  shell commands, 1.0.0 against 1.1.0 on the same interpreter. 1.1's inline-code and script
-  checks add 0.2–2.2 ms per call; `docs/agents.md` has a "Cost" section.
+  shell commands, 1.0.0 against 1.1.0 on the same interpreter. 1.1.0 was 0.7–1.2 ms slower
+  (median) on the five commands both decide alike, within run-to-run spread; inline code naming
+  an infrastructure tool is denied before the policy loads (70 → 55 ms).
+  `--escalate-scripts` was not measured. `docs/agents.md` has a "Cost" section.
+- `scripts/budget_latency.py`: p95 is the nearest-rank value (the same sample for its 40 runs,
+  so `results/budget-latency.json` is unchanged).
 
 ## [1.1.0] — 2026-10-20
 
