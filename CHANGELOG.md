@@ -8,6 +8,10 @@ behaviour.
 
 ## [Unreleased]
 
+## [1.2.1] — 2026-10-24
+
+A coverage-report fix for `aegis compile kubernetes`.
+
 ### Fixed
 - `aegis compile kubernetes`: rules on `apply`, `update`, `patch`, `edit` or `replace` are now
   reported over-enforced. Admission sees the CREATE or UPDATE these send, not the kubectl verb,
@@ -567,6 +571,7 @@ See "Project status" in the README and [`docs/dev/PLAN.md`](docs/dev/PLAN.md) §
 rather than real connectors, signing uses a shared secret, and a principal is a signed name
 rather than a bound identity.
 
+[1.2.1]: https://github.com/moneytool/aegis-devops/releases/tag/v1.2.1
 [1.2.0]: https://github.com/moneytool/aegis-devops/releases/tag/v1.2.0
 [1.1.0]: https://github.com/moneytool/aegis-devops/releases/tag/v1.1.0
 [1.0.0]: https://github.com/moneytool/aegis-devops/releases/tag/v1.0.0
