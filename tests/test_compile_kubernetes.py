@@ -326,9 +326,21 @@ def test_apply_and_update_verbs_are_over_enforced(tmp_path, verb):
     """End-to-end corpus run: admission sees CREATE/UPDATE, not the client
     verb, so an apply or patch rule also denies create, set image and label,
     which the client allows -- over-enforced, not exact."""
-    cov = _cov(_compile(tmp_path, _rule("v", "deployment/*", [verb])), "v")
+    r = _compile(tmp_path, _rule("v", "deployment/*", [verb]))
+    cov = _cov(r, "v")
     assert cov["status"] == "over-enforced"
-    assert any(f"deployment {verb}:" in o for o in cov["over_enforced"])
+    note = next(o for o in cov["over_enforced"] if f"deployment {verb}:" in o)
+    resources = {res for d in r.policies if d["kind"] == "ValidatingAdmissionPolicy"
+                 and d["metadata"]["annotations"]["aegis.dev/rule"] == "v"
+                 for rr in d["spec"]["matchConstraints"]["resourceRules"]
+                 for res in rr["resources"]}
+    if verb == "apply":
+        # review of #51: kubectl scale updates deployments/scale, which an
+        # apply rule (the object only) does not match -- the note must say so
+        assert resources == {"deployments"}
+        assert "scale subresource" in note and "does not match" in note
+    else:
+        assert "deployments/*" in resources and "scale" in note
 
 
 @pytest.mark.parametrize("namespace", ["*", "prod"])

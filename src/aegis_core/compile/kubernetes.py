@@ -487,8 +487,9 @@ def _compile_rule(c: Constraint, target: KubernetesTarget) -> _Rule:
                 # kubectl verb (found by the end-to-end corpus run)
                 rule.over.append(f"{kind} apply: admission sees the CREATE or UPDATE an apply "
                                  f"sends, not the client verb, so every create and update of a "
-                                 f"{kind} by an agent is denied (create, set image, scale, "
-                                 "label, annotate)")
+                                 f"{kind} by an agent is denied (create, set image, label, "
+                                 "annotate); kubectl scale updates the scale subresource, "
+                                 "which this rule does not match")
             elif verb in _UPDATE_VERBS:
                 rule.over.append(f"{kind} {verb}: label, annotate, scale, set image and rollout "
                                  "restart are all UPDATEs at admission, so an agent's "

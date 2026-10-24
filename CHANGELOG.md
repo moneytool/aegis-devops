@@ -11,8 +11,9 @@ behaviour.
 ### Fixed
 - `aegis compile kubernetes`: rules on `apply`, `update`, `patch`, `edit` or `replace` are now
   reported over-enforced. Admission sees the CREATE or UPDATE these send, not the kubectl verb,
-  so such a rule also denies an agent's create, set image, scale, label and annotate, which the
-  client-side verifier allows; the coverage report called these rules exact.
+  so such a rule also denies an agent's create, set image, label and annotate (update verbs:
+  also scale, through the `scale` subresource), which the client-side verifier allows; the
+  coverage report called these rules exact.
 
 ## [1.2.0] — 2026-10-21
 
