@@ -207,7 +207,8 @@ CD, Flux) in `trusted`.
 |---|---|---|
 | `delete` | DELETE; for pods also the eviction a `kubectl drain` sends. The name comes from `request.name`, else the object's — a `delete --all` is admitted per item with an empty `request.name` | exact |
 | `create`, `run` | CREATE (an object created with `generateName` has no name yet, so a name-specific rule does not match it) | exact |
-| `update`, `patch`, `edit`, `replace` | UPDATE — all the same request at the API | exact |
+| `apply` | CREATE or UPDATE | over-enforced: admission sees the request, not the verb, so every create and update of the kind by an agent is denied (`create`, `set image`, `scale`, `label`) |
+| `update`, `patch`, `edit`, `replace` | UPDATE — all the same request at the API | over-enforced: `label`, `annotate`, `scale`, `set image` and `rollout restart` are UPDATEs too, so they are denied as well; the client matches only the verb named |
 | `scale` | the `scale` subresource, or an UPDATE that changes `spec.replicas` | exact |
 | `set-image`, `rollout-restart`, `cordon`, `taint`, `label`, `annotate` | an UPDATE whose old and new objects differ in that field (images: containers and init containers) | exact |
 | `rollout-undo` | an UPDATE that changes the pod template (metadata included) | over-enforced: admission cannot tell an undo from any other template change, so a restart, `set image` or `apply` of a changed template is denied too |

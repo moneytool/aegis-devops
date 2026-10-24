@@ -482,6 +482,17 @@ def _compile_rule(c: Constraint, target: KubernetesTarget) -> _Rule:
                                  "other pod-template change, so every template change by an "
                                  "agent is denied (rollout restart, set image, apply of a "
                                  "changed template)")
+            if verb == "apply":
+                # admission sees the CREATE or UPDATE an apply sends, not the
+                # kubectl verb (found by the end-to-end corpus run)
+                rule.over.append(f"{kind} apply: admission sees the CREATE or UPDATE an apply "
+                                 f"sends, not the client verb, so every create and update of a "
+                                 f"{kind} by an agent is denied (create, set image, scale, "
+                                 "label, annotate)")
+            elif verb in _UPDATE_VERBS:
+                rule.over.append(f"{kind} {verb}: label, annotate, scale, set image and rollout "
+                                 "restart are all UPDATEs at admission, so an agent's "
+                                 f"{kind} changes of every kind are denied, not only {verb}")
             if verb == "drain":
                 rule.not_enforced.append("node: a drain's pod evictions are not tied to the "
                                          "node at admission (only its cordon is); a pod delete "

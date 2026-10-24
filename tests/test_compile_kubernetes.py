@@ -321,6 +321,16 @@ def test_rollout_undo_compares_the_whole_template(tmp_path):
     assert cov["status"] == "not-enforced"
 
 
+@pytest.mark.parametrize("verb", ["apply", "patch", "update"])
+def test_apply_and_update_verbs_are_over_enforced(tmp_path, verb):
+    """End-to-end corpus run: admission sees CREATE/UPDATE, not the client
+    verb, so an apply or patch rule also denies create, set image and label,
+    which the client allows -- over-enforced, not exact."""
+    cov = _cov(_compile(tmp_path, _rule("v", "deployment/*", [verb])), "v")
+    assert cov["status"] == "over-enforced"
+    assert any(f"deployment {verb}:" in o for o in cov["over_enforced"])
+
+
 @pytest.mark.parametrize("namespace", ["*", "prod"])
 def test_namespace_scope_never_matches_cluster_scoped_requests(tmp_path, namespace):
     """Review of #20: the client never matches a namespace scope when the
