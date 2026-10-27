@@ -1,8 +1,8 @@
 """examples/app_sql_gate.py and examples/app-sql/: the guide docs/guides/app-sql.md.
 
-Every row of the guide's table is checked here, including the gaps it documents (a read
-whose JOIN reaches another table, SELECT ... INTO, SET ROLE pass as reads). If the SQL
-classifier learns to see those, the gap tests fail: update the guide with them."""
+Every row of the guide's table is checked here, including what it leaves to the database: a
+read runs whatever tables it reaches (Aegis names each one, #58), and so does a slow read. If
+the classifier changes what it sees, these tests fail: update the guide with them."""
 
 import importlib.util
 import os
@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from aegis_core.parsers.sql import from_sql
 from aegis_core.signing import SignatureError, sign_file
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -64,6 +65,9 @@ def test_reads_run(gate, sql):
     ("CALL refresh_prices()", "update procedure/refresh_prices"),
     ("EXPLAIN ANALYZE DELETE FROM orders", "delete table/orders"),
     ("DELETE/**/FROM orders", "delete table/orders"),
+    ("SELECT * INTO copy_of_products FROM products", "create table/copy_of_products"),
+    ("SET ROLE admin", "update role/admin"),
+    ("SET SESSION AUTHORIZATION admin", "update role/admin"),
 ])
 def test_writes_and_unclassified_are_rejected(gate, sql, what):
     module = _module()
@@ -79,17 +83,32 @@ def test_empty_or_comment_only_sql_is_rejected(gate):
         gate.check("-- nothing here")      # unclassified, so it counts as a write
 
 
-@pytest.mark.parametrize("sql", [
-    "SELECT p.name FROM products p JOIN customers c ON c.id = p.id",    # 2nd table unseen
-    "SELECT * FROM products UNION SELECT email, password_hash FROM users",
-    "SELECT * INTO copy_of_products FROM products",                     # creates a table
-    "SET ROLE admin",
-    "SELECT pg_sleep(60)",                                              # cost
+@pytest.mark.parametrize("sql,tables", [
+    ("SELECT p.name FROM products p JOIN customers c ON c.id = p.id",
+     ["table/products", "table/customers"]),
+    ("SELECT * FROM products UNION SELECT email, password_hash FROM users",
+     ["table/products", "table/users"]),
+    ("SELECT * FROM products WHERE id IN (SELECT id FROM orders)",
+     ["table/products", "table/orders"]),
+    ("SELECT pg_sleep(60)", ["table/*"]),                               # cost
 ])
-def test_documented_gaps_pass_as_reads(gate, sql):
-    """The guide says these get through; the database role and a read-only transaction
-    are what stop them."""
+def test_documented_gaps_pass_as_reads(gate, sql, tables):
+    """The guide says these get through the read-only rule: which tables a read may reach
+    is the database role's job, and its cost is statement_timeout's. Aegis does name every
+    table read, so a rule on table/users would now match the UNION."""
     gate.check(sql)
+    intents = from_sql(sql, dialect="postgres")
+    assert [i.resource for i in intents] == tables
+    assert {i.action for i in intents} == {"read"}
+
+
+def test_locking_read_runs_and_is_marked(gate):
+    """FOR UPDATE stays a read (the read-only rule lets it run), marked so a rule can match."""
+    sql = "SELECT * FROM products WHERE id = 1 FOR UPDATE"
+    gate.check(sql)
+    (intent,) = from_sql(sql, dialect="postgres")
+    assert intent.params["locking"] is True
+    assert intent.params["lock_strength"] == "update"
 
 
 def test_unsigned_policy_is_refused(tmp_path):

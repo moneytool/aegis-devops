@@ -763,20 +763,22 @@ def test_perform_proc_is_opaque_update():
 
 
 def test_mysql_multi_table_delete_targets_first_table():
-    (intent,) = from_sql("DELETE users FROM users JOIN orders ON users.id = orders.uid;")
+    (intent, joined) = from_sql("DELETE users FROM users JOIN orders ON users.id = orders.uid;")
     assert intent.action == "delete"
     assert intent.resource == "table/users"
+    assert (joined.resource, joined.action) == ("table/orders", "read")
 
 
 def test_delete_from_using_targets_first_table():
-    (intent,) = from_sql("DELETE FROM t1 USING t2 WHERE t1.id = t2.id;")
+    (intent, using) = from_sql("DELETE FROM t1 USING t2 WHERE t1.id = t2.id;")
     assert intent.action == "delete"
     assert intent.resource == "table/t1"
     assert intent.params["unbounded"] is False
+    assert (using.resource, using.action) == ("table/t2", "read")
 
 
 def test_delete_from_using_without_where_is_unbounded():
-    (intent,) = from_sql("DELETE FROM t1 USING t2;")
+    (intent, _using) = from_sql("DELETE FROM t1 USING t2;")
     assert intent.params["unbounded"] is True
 
 
@@ -942,3 +944,379 @@ def test_explain_analyze_delete_is_blocked_end_to_end():
     decision = interceptor.intercept(intent, now=NOW)
     assert decision.verdict == "BLOCK"
     assert "sql-block-unbounded-table-delete" in decision.citations
+
+
+# --- 12. #58: every table a statement reads ---------------------------------------
+
+
+def _reads(sql: str) -> list[str]:
+    intents = from_sql(sql, dialect="postgres")
+    return [i.resource for i in intents if i.action == "read"]
+
+
+def _summary(sql: str) -> list[tuple[str, str]]:
+    return [(i.action, i.resource) for i in from_sql(sql, dialect="postgres")]
+
+
+@pytest.mark.parametrize("sql,tables", [
+    # joins, with and without aliases
+    ("SELECT p.name FROM products p JOIN users u ON u.id = p.owner_id",
+     ["products", "users"]),
+    ("SELECT * FROM products AS p INNER JOIN users AS u ON u.id = p.owner_id",
+     ["products", "users"]),
+    ("SELECT * FROM a LEFT OUTER JOIN b ON a.id = b.id RIGHT JOIN c ON c.id = a.id",
+     ["a", "b", "c"]),
+    ("SELECT * FROM a CROSS JOIN b NATURAL JOIN c FULL JOIN d USING (id)",
+     ["a", "b", "c", "d"]),
+    ("SELECT * FROM a STRAIGHT_JOIN b ON a.id = b.id", ["a", "b"]),
+    ("SELECT * FROM (a JOIN b ON a.x = b.x) JOIN c ON true", ["a", "b", "c"]),
+    # comma joins
+    ("SELECT * FROM a, b", ["a", "b"]),
+    ("SELECT * FROM a x, b AS y, c WHERE x.id = y.id", ["a", "b", "c"]),
+    ("SELECT * FROM a JOIN b ON a.x = b.x, c WHERE a.y IN (1, 2)", ["a", "b", "c"]),
+    # subqueries: WHERE, FROM, nested, EXISTS, scalar, LATERAL
+    ("SELECT * FROM products WHERE id IN (SELECT id FROM users)", ["products", "users"]),
+    ("SELECT * FROM (SELECT * FROM users) sub", ["users"]),
+    ("SELECT * FROM (SELECT * FROM (SELECT * FROM deep) x WHERE x.id IN "
+     "(SELECT id FROM deeper)) y", ["deep", "deeper"]),
+    ("SELECT * FROM a WHERE EXISTS (SELECT 1 FROM b WHERE b.x = ANY(ARRAY[1, 2]))",
+     ["a", "b"]),
+    ("SELECT (SELECT max(price) FROM products) AS top", ["products"]),
+    ("SELECT * FROM ONLY parent, LATERAL (SELECT * FROM kid WHERE kid.p = parent.id) k",
+     ["parent", "kid"]),
+    # set operations
+    ("SELECT name FROM products UNION SELECT password_hash FROM users",
+     ["products", "users"]),
+    ("SELECT a FROM t1 UNION ALL SELECT a FROM t2 INTERSECT SELECT a FROM t3 "
+     "EXCEPT SELECT a FROM t4", ["t1", "t2", "t3", "t4"]),
+    ("SELECT * FROM t UNION ALL TABLE users", ["t", "users"]),
+    # dedupe
+    ("SELECT * FROM users u1 JOIN users u2 ON u1.boss = u2.id", ["users"]),
+    # names
+    ('SELECT * FROM "Weird Name" w JOIN "S"."T" ON true', ["Weird Name", "S.T"]),
+    ("SELECT * FROM public.users JOIN audit.log l ON true", ["public.users", "audit.log"]),
+    ("SELECT * FROM `shop`.`users` JOIN `orders` ON 1", ["shop.users", "orders"]),
+    ("SELECT * FROM cat.sch.tbl", ["cat.sch.tbl"]),
+    # functions in FROM are not tables
+    ("SELECT * FROM generate_series(1, 10) g, users", ["users"]),
+    ("SELECT * FROM unnest(ARRAY[1, 2]) WITH ORDINALITY AS t(v, n)", ["*"]),
+    # FROM inside a function call is not a table
+    ("SELECT EXTRACT(YEAR FROM ts), SUBSTRING(name FROM 2 FOR 3), TRIM(BOTH 'x' FROM s) "
+     "FROM events WHERE a IS DISTINCT FROM b", ["events"]),
+    # keywords inside string literals and dollar quotes are not parsed
+    ("SELECT 'x FROM secrets JOIN y' AS s FROM products "
+     "WHERE name = 'a UNION SELECT * FROM users'", ["products"]),
+    ("SELECT $$ FROM users $$ FROM products", ["products"]),
+    ("SELECT * FROM products WHERE note = 'it''s FROM users'", ["products"]),
+    # clauses after FROM end the comma list
+    ("SELECT * FROM a ORDER BY x, y", ["a"]),
+    ("SELECT a, b FROM t GROUP BY a, b", ["t"]),
+    ("SELECT 1", ["*"]),
+])
+def test_select_reads_every_table(sql, tables):
+    assert _reads(sql) == [f"table/{t}" for t in tables]
+    assert all(i.action == "read" for i in from_sql(sql))
+
+
+def test_select_read_of_schema_qualified_table_carries_schema():
+    intents = from_sql('SELECT * FROM products JOIN "Audit"."Log" ON true;')
+    assert [i.resource for i in intents] == ["table/products", "table/Audit.Log"]
+    assert "schema" not in intents[0].metadata
+    assert intents[1].metadata["schema"] == "Audit"
+    assert all(i.params["statement_class"] == "dql" for i in intents)
+    assert all(i.params["raw_action"] == "SELECT" for i in intents)
+
+
+@pytest.mark.parametrize("sql,tables", [
+    # a CTE's name is not a table; its body is read
+    ("WITH cheap AS (SELECT * FROM products) SELECT * FROM cheap JOIN users ON true",
+     ["products", "users"]),
+    ("WITH a AS (SELECT * FROM t1), b AS (SELECT * FROM a JOIN t2 ON true) SELECT * FROM b",
+     ["t1", "t2"]),
+    ("WITH x (id) AS MATERIALIZED (SELECT id FROM t1) SELECT * FROM x", ["t1"]),
+    # inside its own body a (non-recursive) CTE's name is the real table
+    ("WITH users AS (SELECT * FROM users WHERE active) SELECT * FROM users", ["users"]),
+    ("WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM t) SELECT * FROM t",
+     ["*"]),
+    # a CTE in a subquery does not hide the real table outside it
+    ("SELECT * FROM (WITH users AS (SELECT 1) SELECT * FROM users) s JOIN users u ON true",
+     ["users"]),
+    ("SELECT * FROM (WITH u AS (SELECT * FROM t1) SELECT * FROM u) s, u", ["t1", "u"]),
+])
+def test_cte_bodies_are_read_and_cte_names_are_not_tables(sql, tables):
+    assert _reads(sql) == [f"table/{t}" for t in tables]
+
+
+def test_cte_dml_keeps_strongest_dml_and_adds_other_reads():
+    assert _summary(
+        "WITH d AS (DELETE FROM users RETURNING *) SELECT * FROM d JOIN secrets ON true;"
+    ) == [("delete", "table/users"), ("read", "table/secrets")]
+    assert _summary(
+        "WITH src AS (SELECT * FROM users) INSERT INTO pub SELECT * FROM src;"
+    ) == [("put", "table/pub"), ("read", "table/users")]
+
+
+@pytest.mark.parametrize("sql,expected", [
+    ("INSERT INTO pub SELECT * FROM users",
+     [("put", "table/pub"), ("read", "table/users")]),
+    ("INSERT INTO t VALUES (1, 'FROM users')", [("put", "table/t")]),
+    ("INSERT INTO t SELECT * FROM t", [("put", "table/t")]),
+    ("UPDATE t SET a = (SELECT max(x) FROM s) WHERE id = 1",
+     [("update", "table/t"), ("read", "table/s")]),
+    ("UPDATE t SET a = s.a FROM s, u WHERE t.id = s.id",
+     [("update", "table/t"), ("read", "table/s"), ("read", "table/u")]),
+    ("DELETE FROM t WHERE id IN (SELECT id FROM s)",
+     [("delete", "table/t"), ("read", "table/s")]),
+    ("CREATE TABLE c AS SELECT * FROM users",
+     [("create", "table/c"), ("read", "table/users")]),
+    ("CREATE VIEW v AS SELECT * FROM a JOIN b ON true",
+     [("create", "view/v"), ("read", "table/a"), ("read", "table/b")]),
+    ("CREATE TABLE t (id int REFERENCES u ON DELETE CASCADE)", [("create", "table/t")]),
+])
+def test_writes_also_read_their_source_tables(sql, expected):
+    assert _summary(sql) == expected
+
+
+def test_show_columns_from_still_names_its_table():
+    (intent,) = from_sql("SHOW COLUMNS FROM users;", dialect="mysql")
+    assert (intent.action, intent.resource) == ("read", "table/users")
+
+
+def test_write_flags_unchanged_by_extra_reads():
+    (update, read) = from_sql("UPDATE t SET a = (SELECT 1 FROM s);")
+    assert update.params["unbounded"] is True
+    assert read.params == {"statement_class": "dql", "raw_action": "SELECT"}
+
+
+# --- SELECT ... INTO ---
+
+
+def test_select_into_is_a_create_plus_reads():
+    (create, read) = from_sql("SELECT * INTO users_copy FROM users;", dialect="postgres")
+    assert (create.action, create.resource) == ("create", "table/users_copy")
+    assert create.params["ddl"] is True
+    assert create.params["select_into"] is True
+    assert create.params["statement_class"] == "ddl"
+    assert create.params["raw_action"] == "SELECT INTO"
+    assert (read.action, read.resource) == ("read", "table/users")
+
+
+@pytest.mark.parametrize("sql,expected", [
+    ("SELECT * INTO TEMP TABLE t2 FROM users", [("create", "table/t2"), ("read", "table/users")]),
+    ("SELECT * INTO UNLOGGED archive.t2 FROM a JOIN b ON true",
+     [("create", "table/archive.t2"), ("read", "table/a"), ("read", "table/b")]),
+    ("SELECT 1 INTO t", [("create", "table/t")]),
+    ("WITH x AS (SELECT * FROM users) SELECT * INTO copy FROM x",
+     [("create", "table/copy"), ("read", "table/users")]),
+    # MySQL: into a session variable only reads
+    ("SELECT name INTO @n FROM users WHERE id = 1", [("read", "table/users")]),
+    ("SELECT 1 INTO @a", [("read", "table/*")]),
+    # INSERT INTO is not SELECT INTO
+    ("INSERT INTO t SELECT * FROM s", [("put", "table/t"), ("read", "table/s")]),
+    # INTO in a string is not a clause
+    ("SELECT 'INTO x' FROM t", [("read", "table/t")]),
+])
+def test_select_into_variants(sql, expected):
+    assert _summary(sql) == expected
+
+
+@pytest.mark.parametrize("sql,path", [
+    ("SELECT * FROM users INTO OUTFILE '/tmp/users.csv'", "/tmp/users.csv"),
+    ("SELECT * INTO DUMPFILE '/tmp/blob' FROM users", "/tmp/blob"),
+])
+def test_select_into_outfile_is_an_opaque_write(sql, path):
+    (write, read) = from_sql(sql, dialect="mysql")
+    assert write.action == "update"
+    assert write.resource == f"file/{path}"
+    assert write.params["opaque"] is True
+    assert write.params["unclassified"] is True
+    assert write.params["into_file"] is True
+    assert (read.action, read.resource) == ("read", "table/users")
+
+
+def test_select_into_unparseable_target_is_unclassified_write():
+    (intent,) = from_sql("SELECT 1 INTO 42;")
+    assert intent.action == "update"
+    assert intent.params["unclassified"] is True
+
+
+# --- SET ROLE and other identity changes ---
+
+
+@pytest.mark.parametrize("sql,resource,raw", [
+    ("SET ROLE admin", "role/admin", "SET ROLE"),
+    ("SET LOCAL ROLE admin", "role/admin", "SET ROLE"),
+    ("SET SESSION ROLE 'admin'", "role/admin", "SET ROLE"),
+    ('SET ROLE "Admin"', "role/Admin", "SET ROLE"),
+    ("SET role TO admin", "role/admin", "SET ROLE"),
+    ("SET role = admin", "role/admin", "SET ROLE"),
+    ("SET ROLE NONE", "role/*", "SET ROLE"),
+    ("SET SESSION AUTHORIZATION admin", "role/admin", "SET SESSION AUTHORIZATION"),
+    ("SET SESSION SESSION AUTHORIZATION admin", "role/admin", "SET SESSION AUTHORIZATION"),
+    ("SET SESSION AUTHORIZATION DEFAULT", "role/*", "SET SESSION AUTHORIZATION"),
+    ("SET session_authorization = 'admin'", "role/admin", "SET SESSION AUTHORIZATION"),
+    ("RESET ROLE", "role/*", "RESET ROLE"),
+    ("RESET SESSION AUTHORIZATION", "role/*", "RESET SESSION AUTHORIZATION"),
+    ("SET DEFAULT ROLE ALL TO alice", "role/alice", "SET DEFAULT ROLE"),
+    ("SET PASSWORD FOR 'bob'@'%' = 'x'", "role/bob", "SET PASSWORD"),
+    ("SET PASSWORD = 'x'", "role/*", "SET PASSWORD"),
+])
+def test_identity_changes_are_privilege_updates(sql, resource, raw):
+    (intent,) = from_sql(sql)
+    assert intent.action == "update"
+    assert intent.resource == resource
+    assert intent.params["privilege"] is True
+    assert intent.params["statement_class"] == "dcl"
+    assert intent.params["raw_action"] == raw
+
+
+def test_set_role_to_several_roles_emits_one_intent_each():
+    intents = from_sql("SET ROLE 'r1'@'%', r2;", dialect="mysql")
+    assert [i.resource for i in intents] == ["role/r1", "role/r2"]
+    assert all(i.params["privilege"] is True for i in intents)
+
+
+def test_set_config_role_in_a_select_is_a_privilege_update():
+    (role, read) = from_sql("SELECT set_config('role', 'admin', false);")
+    assert (role.action, role.resource) == ("update", "role/admin")
+    assert role.params["privilege"] is True
+    assert (read.action, read.resource) == ("read", "table/*")
+
+
+@pytest.mark.parametrize("sql", [
+    "SET search_path = public",
+    "SET statement_timeout = '2s'",
+    "SET rolename_hint = 'x'",
+    "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL SERIALIZABLE",
+    "SET NAMES utf8mb4",
+    "SET @role = 'admin'",
+])
+def test_other_sets_stay_session_reads(sql):
+    (intent,) = from_sql(sql)
+    assert intent.action == "read"
+    assert intent.resource == "session/*"
+
+
+def test_reset_other_setting_stays_unclassified():
+    (intent,) = from_sql("RESET search_path;")
+    assert intent.action == "update"
+    assert intent.params["unclassified"] is True
+
+
+# --- locking reads ---
+
+
+@pytest.mark.parametrize("sql,strength", [
+    ("SELECT * FROM orders FOR UPDATE", "update"),
+    ("SELECT * FROM orders FOR NO KEY UPDATE", "no key update"),
+    ("SELECT * FROM orders FOR SHARE", "share"),
+    ("SELECT * FROM orders FOR KEY SHARE", "key share"),
+    ("SELECT * FROM orders LOCK IN SHARE MODE", "share"),
+    ("SELECT * FROM orders FOR SHARE FOR UPDATE", "update"),
+])
+def test_locking_select_stays_read_with_locking_param(sql, strength):
+    (intent,) = from_sql(sql)
+    assert intent.action == "read"
+    assert intent.resource == "table/orders"
+    assert intent.params["locking"] is True
+    assert intent.params["lock_strength"] == strength
+    assert "nowait" not in intent.params
+    assert "skip_locked" not in intent.params
+
+
+def test_locking_select_records_nowait_and_skip_locked():
+    (intent,) = from_sql("SELECT * FROM orders FOR UPDATE NOWAIT;")
+    assert intent.params["nowait"] is True
+    intents = from_sql("SELECT * FROM orders o JOIN items i USING (id) "
+                       "FOR NO KEY UPDATE OF o SKIP LOCKED;")
+    assert [i.resource for i in intents] == ["table/orders", "table/items"]
+    assert all(i.params["skip_locked"] is True for i in intents)
+    assert all(i.params["lock_strength"] == "no key update" for i in intents)
+
+
+def test_locking_in_a_subquery_is_seen():
+    (intent,) = from_sql("SELECT * FROM (SELECT * FROM orders FOR UPDATE) s;")
+    assert intent.params["locking"] is True
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT * FROM orders",
+    "SELECT SUBSTRING(name FROM 1 FOR 3) FROM orders",
+    "SELECT 'FOR UPDATE' FROM orders",
+])
+def test_non_locking_select_has_no_locking_param(sql):
+    (intent,) = from_sql(sql)
+    assert "locking" not in intent.params
+
+
+# --- EXPLAIN ---
+
+
+def test_explain_reads_every_table_and_its_target():
+    assert _summary("EXPLAIN SELECT * FROM a JOIN b ON true;") == [
+        ("read", "table/a"), ("read", "table/b")
+    ]
+    assert _summary("EXPLAIN DELETE FROM users WHERE id IN (SELECT id FROM banned);") == [
+        ("read", "table/users"), ("read", "table/banned")
+    ]
+    assert _summary("EXPLAIN SELECT * INTO t FROM users;") == [
+        ("read", "table/t"), ("read", "table/users")
+    ]
+
+
+def test_explain_with_options_analyze_runs_the_statement():
+    (intent,) = from_sql("EXPLAIN (ANALYZE, BUFFERS) DELETE FROM users;")
+    assert intent.action == "delete"
+    assert intent.params["explain_analyze"] is True
+    (intent,) = from_sql("EXPLAIN ANALYZE VERBOSE DELETE FROM users;")
+    assert intent.action == "delete"
+    (intent,) = from_sql("EXPLAIN (ANALYZE false) DELETE FROM users;")
+    assert intent.action == "read"
+    (intent,) = from_sql("EXPLAIN (FORMAT JSON) SELECT * FROM users;")
+    assert (intent.action, intent.resource) == ("read", "table/users")
+
+
+# --- DB-CLI wrappers ---
+
+
+def test_psql_select_into_is_a_create():
+    intents = from_psql(["psql", "-d", "shop", "-c", "SELECT * INTO users_copy FROM users"])
+    assert [(i.action, i.resource) for i in intents] == [
+        ("create", "table/users_copy"), ("read", "table/users")
+    ]
+    assert all(i.metadata["database"] == "shop" for i in intents)
+
+
+def test_psql_join_reads_both_tables_and_set_role_is_update():
+    intents = from_psql(["psql", "-c", "SELECT * FROM a JOIN users ON true", "-c", "SET ROLE x"])
+    assert [(i.action, i.resource) for i in intents] == [
+        ("read", "table/a"), ("read", "table/users"), ("update", "role/x")
+    ]
+
+
+def test_mysql_into_outfile_is_opaque_write():
+    intents = from_mysql(["mysql", "-e", "SELECT * FROM users INTO OUTFILE '/tmp/u'"])
+    assert intents[0].action == "update"
+    assert intents[0].params["opaque"] is True
+    assert intents[0].metadata["dialect"] == "mysql"
+
+
+def test_sqlite3_union_reads_both_tables():
+    intents = from_sqlite3(["sqlite3", "app.db", "SELECT a FROM t UNION SELECT b FROM u"])
+    assert [i.resource for i in intents] == ["table/t", "table/u"]
+
+
+# --- end-to-end against the example store (signatures unchanged) ---
+
+
+def test_join_read_still_allowed_by_example_store():
+    interceptor = AegisInterceptor(_load_example_store())
+    for intent in from_sql("SELECT * FROM a JOIN users ON true FOR UPDATE;"):
+        assert interceptor.intercept(intent, now=NOW).verdict == "ALLOW"
+
+
+def test_cte_delete_with_extra_reads_still_blocked_end_to_end():
+    interceptor = AegisInterceptor(_load_example_store())
+    (delete, read) = from_sql("WITH d AS (DELETE FROM users RETURNING *) SELECT * FROM d, logs;")
+    assert interceptor.intercept(delete, now=NOW).verdict == "BLOCK"
+    assert interceptor.intercept(read, now=NOW).verdict == "ALLOW"

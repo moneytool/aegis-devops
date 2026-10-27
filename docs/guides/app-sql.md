@@ -38,7 +38,13 @@ row-level security if one table holds several customers' data.
 Aegis splits the SQL into statements and classifies each one: a read, an insert, an update, a
 delete, a schema change, a permission change, or something it cannot classify (a procedure call,
 `COPY`, a `DO` block). Comments and `WITH` clauses do not hide a write: `DELETE/**/FROM orders` and
-`EXPLAIN ANALYZE DELETE …` are deletes. A statement it cannot classify counts as a write.
+`EXPLAIN ANALYZE DELETE …` are deletes. `SELECT … INTO new_table` creates a table, and `SET ROLE`
+is a permission change. A statement it cannot classify counts as a write.
+
+A read is reported once for every table it reads: the `FROM` table, each `JOIN`, subqueries,
+`UNION` branches and `WITH` bodies. A rule can therefore name a table (`resource_pattern:
+table/customers`) and catch a query that reaches it through a JOIN. `SELECT … FOR UPDATE` stays a
+read, marked `locking: true` for a rule that wants to match it.
 
 One rule allows reads only:
 
@@ -99,7 +105,7 @@ def search(generated_sql: str):
         return conn.execute(generated_sql).fetchall()
 ```
 
-Loading took 0.6 ms and a check 14 µs on an Apple M4 Pro (one rule, a typical search query).
+Loading took 0.6 ms and a check 25 µs on an Apple M4 Pro (one rule, a typical search query).
 
 ## What it catches, and what it does not
 
@@ -110,17 +116,21 @@ Loading took 0.6 ms and a check 14 µs on an Apple M4 Pro (one rule, a typical s
 | `SELECT 1; DROP TABLE products` | **rejected** (each statement is checked) | Aegis (and the role) |
 | `CREATE`, `ALTER`, `TRUNCATE`, `GRANT`, `COPY`, `CALL`, `DO $$…$$` | **rejected** | Aegis (and the role) |
 | `DELETE/**/FROM orders`, `EXPLAIN ANALYZE DELETE …` | **rejected** | Aegis |
-| `SELECT … FROM products p JOIN customers c …` | runs: only the first table is seen | the role (no grant on `customers`) |
-| `SELECT … UNION SELECT email, password_hash FROM users` | runs | the role |
-| `SELECT * INTO copy_of_products FROM products` | runs: classified as a read | the role (no `CREATE`) |
-| `SET ROLE admin` | runs: classified as a read | the role (not a member) |
+| `SELECT * INTO copy_of_products FROM products` | **rejected** (creates a table) | Aegis (and the role: no `CREATE`) |
+| `SET ROLE admin`, `SET SESSION AUTHORIZATION admin` | **rejected** (a permission change) | Aegis (and the role: not a member) |
+| `SELECT … FROM products p JOIN customers c …` | runs: a read of `products` and of `customers` | the role (no grant on `customers`) |
+| `SELECT … UNION SELECT email, password_hash FROM users` | runs: a read of each table | the role |
+| `SELECT … FOR UPDATE` | runs: a read, marked `locking` | the role, a read-only transaction |
 | `SELECT pg_sleep(60)`, an unbounded cross join | runs | `statement_timeout` |
 | A read of the right table for the wrong customer | runs | row-level security |
 
 So the Aegis check guarantees the statement type ("this app's model only ever reads"), under a
-rule nobody can loosen without the signing key and the `configuration` authority. Which data a
-read may reach is up to the database. Search engines (Elasticsearch, OpenSearch, Algolia, Solr) and
-other query languages are not covered.
+rule nobody can loosen without the signing key and the `configuration` authority. Aegis names every
+table a read touches, so you can add a rule that blocks reads of `table/users`; that is a list you
+keep up to date, while the role's grants fail closed on any table you forgot. Which tables and
+columns a read may reach is still up to the database, and Aegis does not look inside functions a
+query calls. Search engines (Elasticsearch, OpenSearch, Algolia, Solr) and other query languages
+are not covered.
 
 ## When this is worth it
 

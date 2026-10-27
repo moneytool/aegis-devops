@@ -12,8 +12,34 @@ behaviour.
 - Guide (experimental): [check the SQL an LLM writes before your app runs it](docs/guides/app-sql.md),
   with `examples/app_sql_gate.py` and a signed-rule template in `examples/app-sql/`. Aegis
   enforces "reads only" on generated SQL; the guide is explicit that a read's tables, columns and
-  cost are the database role's job (the SQL classifier sees only a SELECT's first table, and
-  treats `SELECT … INTO` and `SET ROLE` as reads). Every Aegis result in its table is a test.
+  cost are the database role's job. Every Aegis result in its table is a test.
+
+### Fixed
+- SQL classifier (`psql -c`, `mysql -e`, `sqlite3`, `aegis check sql` and `from_sql`) (#58):
+  - A statement now yields a `read` intent for every table it reads, not only the first one after
+    `FROM`: each `JOIN` and comma-joined table, subqueries, `UNION`/`INTERSECT`/`EXCEPT` branches,
+    `TABLE t` and `WITH` bodies (a CTE's own name is not a table; functions in `FROM` are not
+    tables). Writes keep their own intent first and add a read of each other table they read
+    (`INSERT … SELECT`, `UPDATE … FROM`, `DELETE … USING`, `CREATE TABLE|VIEW … AS SELECT`, a
+    `WITH` holding DML). `EXPLAIN <stmt>` reads every table `<stmt>` names.
+  - `SELECT … INTO t` is a `create` of `table/t` (as `CREATE TABLE … AS SELECT` already was), not a
+    read. MySQL `SELECT … INTO OUTFILE|DUMPFILE` is an opaque, unclassified `update` of
+    `file/<path>`; `SELECT … INTO @var` stays a read.
+  - `SET ROLE`, `SET SESSION AUTHORIZATION`, `SET role = …`, `RESET ROLE`, MySQL `SET DEFAULT ROLE`
+    and `SET PASSWORD`, and `SELECT set_config('role', …)` are an `update` of `role/<name>` with
+    `privilege: true`, like `GRANT`/`REVOKE`, instead of a `session/*` read. Other `SET`s stay
+    reads.
+  - `SELECT … FOR UPDATE|NO KEY UPDATE|SHARE|KEY SHARE` (and MySQL `LOCK IN SHARE MODE`) stay
+    reads, now with `locking: true`, `lock_strength` and `nowait`/`skip_locked`, so a rule can
+    match them with `scope: {locking: true}`.
+  - `EXPLAIN (ANALYZE[, …]) <stmt>` is classified as `<stmt>`, as `EXPLAIN ANALYZE <stmt>` already
+    was; it was a read.
+
+  **Behaviour change:** a statement can now produce more intents than before. Where a rule matches
+  one of the newly visible tables, or `create`/`update` on `table/*` or `role/*`, a command that
+  used to be ALLOWed is now BLOCKed or ESCALATEd. That is the intended fix; review rules on reads
+  of specific tables, and any `actions: [create, update]` rule on `*`, before upgrading. The
+  example policies and their signatures are unchanged.
 
 ## [1.2.1] — 2026-10-24
 
