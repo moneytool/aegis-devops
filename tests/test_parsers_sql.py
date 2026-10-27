@@ -679,11 +679,13 @@ def test_cte_with_insert_classifies_as_put():
 
 
 def test_cte_prefers_delete_over_update_when_both_present():
-    (intent,) = from_sql(
+    # Every DML operation is reported (#58); the strongest comes first.
+    (intent, other) = from_sql(
         "WITH u AS (UPDATE accounts SET x = 1), d AS (DELETE FROM users) SELECT 1;"
     )
     assert intent.action == "delete"
     assert intent.resource == "table/users"
+    assert (other.action, other.resource) == ("update", "table/accounts")
 
 
 def test_cte_plain_select_still_reads():
@@ -1320,3 +1322,348 @@ def test_cte_delete_with_extra_reads_still_blocked_end_to_end():
     (delete, read) = from_sql("WITH d AS (DELETE FROM users RETURNING *) SELECT * FROM d, logs;")
     assert interceptor.intercept(delete, now=NOW).verdict == "BLOCK"
     assert interceptor.intercept(read, now=NOW).verdict == "ALLOW"
+
+
+# --- 13. #58 review: one dialect-aware lexer ------------------------------------
+
+
+def _summary_in(sql: str, dialect: str) -> list[tuple[str, str]]:
+    return [(i.action, i.resource) for i in from_sql(sql, dialect=dialect)]
+
+
+@pytest.mark.parametrize("sql,dialect,expected", [
+    # E'' strings take \' as an escaped quote in every dialect
+    ("SELECT * FROM products WHERE a = E'x\\''; DROP TABLE users", "postgres",
+     [("read", "table/products"), ("delete", "table/users")]),
+    ("SELECT * FROM a WHERE x = E'x\\'' UNION SELECT * FROM users", "postgres",
+     [("read", "table/a"), ("read", "table/users")]),
+    ("SELECT E'foo\\'bar', x FROM secret", "postgres", [("read", "table/secret")]),
+    ("SELECT E'\\'' , (SELECT pw FROM users) , '' FROM products", "postgres",
+     [("read", "table/users"), ("read", "table/products")]),
+    ("SELECT e'it\\'s; FROM x' FROM t", "generic", [("read", "table/t")]),
+    # every MySQL string, single- or double-quoted
+    ("SELECT * FROM products WHERE a = 'x\\''; DROP TABLE users", "mysql",
+     [("read", "table/products"), ("delete", "table/users")]),
+    ('SELECT * FROM products WHERE a = "x\\""; DROP TABLE users', "mysql",
+     [("read", "table/products"), ("delete", "table/users")]),
+    ("SELECT * FROM t WHERE a = 'x\\' UNION SELECT * FROM users'", "mysql",
+     [("read", "table/t")]),
+    # ... but a plain '...' is standard SQL elsewhere: \ is an ordinary character
+    ("SELECT * FROM products WHERE a = 'x\\' UNION SELECT * FROM users", "postgres",
+     [("read", "table/products"), ("read", "table/users")]),
+    ("SELECT * FROM products WHERE a = 'x\\' UNION SELECT * FROM users", "sqlite",
+     [("read", "table/products"), ("read", "table/users")]),
+    ("SELECT * FROM products WHERE a = 'C:\\'; DROP TABLE users", "generic",
+     [("read", "table/products"), ("delete", "table/users")]),
+])
+def test_backslash_escapes_follow_the_dialect(sql, dialect, expected):
+    assert _summary_in(sql, dialect) == expected
+
+
+def test_backslash_escape_through_the_cli_wrappers():
+    sql = "SELECT * FROM products WHERE a = E'x\\''; DROP TABLE users"
+    intents = from_psql(["psql", "-c", sql])
+    assert ("delete", "table/users") in [(i.action, i.resource) for i in intents]
+    intents = from_mysql(["mysql", "-e", sql.replace("E'", "'")])
+    assert ("delete", "table/users") in [(i.action, i.resource) for i in intents]
+
+
+@pytest.mark.parametrize("sql,dialect,expected", [
+    ("SELECT * FROM allowed WHERE x = $$--$$ UNION SELECT * FROM secret", "postgres",
+     [("read", "table/allowed"), ("read", "table/secret")]),
+    ("SELECT * FROM allowed WHERE x = $$/*$$ UNION SELECT * FROM secret", "postgres",
+     [("read", "table/allowed"), ("read", "table/secret")]),
+    ("SELECT * FROM allowed WHERE x = $t1$ ; ' -- $t1$ UNION SELECT * FROM secret", "postgres",
+     [("read", "table/allowed"), ("read", "table/secret")]),
+    # no dollar quoting in MySQL or SQLite: what follows $$ is SQL
+    ("SELECT $$ FROM secret", "mysql", [("read", "table/secret")]),
+    ("SELECT $$; DROP TABLE users; $$", "sqlite",
+     [("read", "table/*"), ("delete", "table/users"), ("update", "unknown/*")]),
+])
+def test_dollar_quotes_are_strings_and_comments_inside_them_are_not(sql, dialect, expected):
+    assert _summary_in(sql, dialect) == expected
+
+
+@pytest.mark.parametrize("sql,dialect,expected", [
+    # MySQL runs the body of an executable comment: read it as SQL, any dialect
+    ("SELECT * FROM products /*!50000 UNION SELECT * FROM users */", "mysql",
+     [("read", "table/products"), ("read", "table/users")]),
+    ("SELECT * FROM products /*! UNION SELECT * FROM users */", "postgres",
+     [("read", "table/products"), ("read", "table/users")]),
+    ("SELECT * FROM products /*M!100100 UNION SELECT * FROM users */", "mysql",
+     [("read", "table/products"), ("read", "table/users")]),
+    ("SELECT 1 /*!; DROP TABLE users */", "mysql",
+     [("read", "table/*"), ("delete", "table/users")]),
+    # an ordinary comment still hides its body
+    ("SELECT * FROM products /* UNION SELECT * FROM users */", "mysql",
+     [("read", "table/products")]),
+    # MySQL: '--' starts a comment only before whitespace; '#' starts one
+    ("SELECT * FROM a WHERE 1--1 UNION SELECT * FROM users", "mysql",
+     [("read", "table/a"), ("read", "table/users")]),
+    ("SELECT 1 # it's a comment\nFROM users", "mysql", [("read", "table/users")]),
+    ("SELECT * FROM a -- UNION SELECT * FROM users", "mysql", [("read", "table/a")]),
+])
+def test_comment_forms(sql, dialect, expected):
+    assert _summary_in(sql, dialect) == expected
+
+
+@pytest.mark.parametrize("sql,resource,raw", [
+    ("SET \"role\" = 'admin'", "role/admin", "SET ROLE"),
+    ('SET "role" TO admin', "role/admin", "SET ROLE"),
+    ('SET SESSION "role" = admin', "role/admin", "SET ROLE"),
+    ('SET LOCAL "ROLE" = admin', "role/admin", "SET ROLE"),
+    ("SET SESSION \"session_authorization\" = 'admin'", "role/admin",
+     "SET SESSION AUTHORIZATION"),
+    ('RESET "role"', "role/*", "RESET ROLE"),
+])
+def test_quoted_setting_names_are_identity_changes(sql, resource, raw):
+    (intent,) = from_sql(sql, dialect="postgres")
+    assert (intent.action, intent.resource) == ("update", resource)
+    assert intent.params["privilege"] is True
+    assert intent.params["raw_action"] == raw
+
+
+@pytest.mark.parametrize("sql,resource", [
+    ("SELECT pg_catalog.set_config('role', 'admin', false)", "role/admin"),
+    ("SELECT pg_catalog.\"set_config\"('role', 'admin', false)", "role/admin"),
+    ("SELECT \"set_config\"('role', 'admin', false)", "role/admin"),
+    ("SELECT set_config(('role'), ('admin'), false)", "role/admin"),
+    ("SELECT set_config('session_authorization', 'admin', false)", "role/admin"),
+    # not a plain literal: it may name the role setting, so fail safe
+    ("SELECT set_config(lower('ROLE'), 'admin', false)", "role/*"),
+    ("SELECT set_config(concat('ro', 'le'), 'admin', false)", "role/*"),
+    ("SELECT set_config(name, 'admin', false) FROM t", "role/*"),
+    ("SELECT set_config('role', (SELECT 'admin'), false)", "role/*"),
+])
+def test_set_config_variants_are_role_changes(sql, resource):
+    roles = [i for i in from_sql(sql, dialect="postgres") if i.resource.startswith("role/")]
+    assert [(i.action, i.resource) for i in roles] == [("update", resource)]
+    assert roles[0].params["privilege"] is True
+
+
+def test_set_config_of_another_setting_is_not_a_role_change():
+    assert _summary("SELECT set_config('search_path', 'public', false)") == [("read", "table/*")]
+
+
+def test_dml_in_ctes_and_main_statement_are_all_reported():
+    assert _summary("WITH x AS (DELETE FROM allowed RETURNING *) DELETE FROM secret") == [
+        ("delete", "table/allowed"), ("delete", "table/secret")
+    ]
+    assert _summary(
+        "WITH d AS (DELETE FROM t RETURNING *) INSERT INTO archive SELECT * FROM d"
+    ) == [("delete", "table/t"), ("put", "table/archive")]
+    intents = from_sql("WITH a AS (INSERT INTO log VALUES (1)), b AS (UPDATE s SET x = 1 WHERE y) "
+                       "DELETE FROM t WHERE id = 2")
+    assert [(i.action, i.resource, i.params.get("unbounded")) for i in intents] == [
+        ("delete", "table/t", False), ("update", "table/s", False), ("put", "table/log", None)
+    ]
+    assert all(i.params["cte"] is True for i in intents)
+
+
+@pytest.mark.parametrize("sql,expected", [
+    ("WITH x AS (SELECT 1) UPDATE users AS u SET pw = 'x'", [("update", "table/users")]),
+    ("WITH x AS (SELECT 1) UPDATE ONLY users SET pw = 'x'", [("update", "table/users")]),
+    ("WITH x AS (SELECT 1) UPDATE users u SET pw = 'x' FROM secrets",
+     [("update", "table/users"), ("read", "table/secrets")]),
+    ("WITH s AS (SELECT * FROM src) MERGE INTO users u USING s ON u.id = s.id "
+     "WHEN MATCHED THEN DELETE", [("delete", "table/users"), ("read", "table/src")]),
+    ("MERGE INTO users u USING src s ON u.id = s.id WHEN MATCHED THEN UPDATE SET a = 1 "
+     "WHEN NOT MATCHED THEN INSERT VALUES (1)", [("update", "table/users"), ("read", "table/src")]),
+    ("MERGE INTO users USING src ON true WHEN NOT MATCHED THEN INSERT VALUES (1)",
+     [("put", "table/users"), ("read", "table/src")]),
+    # a DML keyword whose target can't be read is still a write
+    ("WITH x AS (SELECT 1) UPDATE SET a = 1", [("update", "unknown/*")]),
+])
+def test_with_main_statement_dml_is_a_write(sql, expected):
+    assert _summary(sql) == expected
+
+
+@pytest.mark.parametrize("alias", ["qualify", "set", "lock", "procedure", "minus", '"where"'])
+def test_clause_words_used_as_aliases_do_not_end_a_comma_join(alias):
+    assert _reads(f"SELECT * FROM products {alias}, users") == ["table/products", "table/users"]
+    assert _reads(f"SELECT * FROM products AS {alias}, users") == [
+        "table/products", "table/users"
+    ]
+    assert _reads(f"SELECT * FROM (SELECT * FROM a) {alias}, users") == [
+        "table/a", "table/users"
+    ]
+    assert _reads(f"SELECT * FROM generate_series(1, 2) {alias}, users") == ["table/users"]
+
+
+def test_mysql_lock_in_share_mode_after_a_table_still_locks():
+    (intent,) = from_sql("SELECT * FROM t LOCK IN SHARE MODE", dialect="mysql")
+    assert intent.params["lock_strength"] == "share"
+
+
+@pytest.mark.parametrize("sql,expected", [
+    ("SELECT 1 AS update INTO t FROM users", [("create", "table/t"), ("read", "table/users")]),
+    ("SELECT 1 AS delete, 2 AS insert INTO t FROM users",
+     [("create", "table/t"), ("read", "table/users")]),
+    ("SELECT a AS into FROM users", [("read", "table/users")]),
+    ("SELECT a, update FROM users", [("read", "table/users")]),
+    ("SELECT t.update, t.delete FROM t", [("read", "table/t")]),
+])
+def test_keywords_as_column_labels_are_identifiers(sql, expected):
+    assert _summary(sql) == expected
+
+
+def test_dual_is_a_table_outside_mysql():
+    assert _summary_in("SELECT * FROM allowed, dual", "postgres") == [
+        ("read", "table/allowed"), ("read", "table/dual")
+    ]
+    assert _summary_in("SELECT 1 FROM dual", "mysql") == [("read", "table/*")]
+
+
+@pytest.mark.parametrize("sql,dialect,expected", [
+    ("DELETE FROM ONLY users", "postgres", [("delete", "table/users")]),
+    ("WITH x AS (SELECT 1) DELETE FROM ONLY users WHERE id = 1", "postgres",
+     [("delete", "table/users")]),
+    ("DELETE IGNORE FROM users", "mysql", [("delete", "table/users")]),
+    ("DELETE LOW_PRIORITY QUICK IGNORE FROM users WHERE id = 1", "mysql",
+     [("delete", "table/users")]),
+    ("DELETE t1, t2 FROM t1 JOIN t2 ON t1.id = t2.id", "mysql",
+     [("delete", "table/t1"), ("delete", "table/t2")]),
+    ("TRUNCATE ONLY users", "postgres", [("delete", "table/users")]),
+    ("TRUNCATE TABLE a, ONLY b *, s.c", "postgres",
+     [("delete", "table/a"), ("delete", "table/b"), ("delete", "table/s.c")]),
+    ("UPDATE LOW_PRIORITY IGNORE users SET a = 1", "mysql", [("update", "table/users")]),
+    ("UPDATE t1 JOIN t2 ON t1.id = t2.id SET t1.a = t2.b", "mysql",
+     [("update", "table/t1"), ("update", "table/t2")]),
+    ("INSERT IGNORE INTO users VALUES (1)", "mysql", [("put", "table/users")]),
+    ("INSERT OR REPLACE INTO users VALUES (1)", "sqlite", [("put", "table/users")]),
+    ("ALTER TABLE ONLY users ADD COLUMN x int", "postgres", [("update", "table/users")]),
+])
+def test_dml_modifiers_are_not_table_names(sql, dialect, expected):
+    assert _summary_in(sql, dialect) == expected
+
+
+def test_delete_modifier_keeps_unbounded_flag():
+    (intent,) = from_sql("DELETE IGNORE FROM users", dialect="mysql")
+    assert intent.params["unbounded"] is True
+    (intent,) = from_sql("DELETE FROM ONLY users WHERE id = 1")
+    assert intent.params["unbounded"] is False
+
+
+def test_unbounded_ignores_where_in_strings_and_subqueries():
+    (intent,) = from_sql("DELETE FROM users RETURNING 'WHERE'")
+    assert intent.params["unbounded"] is True
+    (intent, _read) = from_sql("UPDATE t SET a = (SELECT 1 FROM s WHERE x)")
+    assert intent.params["unbounded"] is True
+
+
+@pytest.mark.parametrize("sql,expected", [
+    ("DESCRIBE SELECT * FROM users", [("read", "table/users")]),
+    ("DESC SELECT * FROM users JOIN orders ON true",
+     [("read", "table/users"), ("read", "table/orders")]),
+    ("DESCRIBE FORMAT=JSON SELECT * FROM users", [("read", "table/users")]),
+    ("DESCRIBE users", [("read", "table/users")]),
+])
+def test_describe_of_a_statement_is_explain(sql, expected):
+    assert _summary_in(sql, "mysql") == expected
+
+
+def test_describe_analyze_runs_the_statement():
+    (intent,) = from_sql("DESC ANALYZE DELETE FROM users", dialect="mysql")
+    assert (intent.action, intent.resource) == ("delete", "table/users")
+    assert intent.params["explain_analyze"] is True
+
+
+@pytest.mark.parametrize("sql,expected", [
+    ("WITH d AS (UPDATE logs SET a = 1 RETURNING *) SELECT * INTO newt FROM d",
+     [("update", "table/logs"), ("create", "table/newt")]),
+    ("WITH x AS (SELECT 'DELETE FROM users') SELECT * FROM x", [("read", "table/*")]),
+    ("SELECT 'UPDATE users SET a = 1' FROM t", [("read", "table/t")]),
+    ("SELECT * FROM t WHERE note = 'x' || 'INSERT INTO users'", [("read", "table/t")]),
+])
+def test_dml_found_by_tokens_not_inside_strings(sql, expected):
+    assert _summary(sql) == expected
+
+
+def test_rows_from_is_not_a_table():
+    assert _reads("SELECT * FROM products, ROWS FROM (generate_series(1, 3)) g") == [
+        "table/products"
+    ]
+
+
+def test_create_materialized_view():
+    intents = from_sql("CREATE MATERIALIZED VIEW mv AS SELECT * FROM users")
+    assert [(i.action, i.resource) for i in intents] == [
+        ("create", "view/mv"), ("read", "table/users")
+    ]
+    assert intents[0].params["raw_action"] == "CREATE MATERIALIZED VIEW"
+
+
+def test_insert_from_table_statement_reads_the_table():
+    assert _summary("INSERT INTO t TABLE users") == [("put", "table/t"), ("read", "table/users")]
+
+
+def test_into_outfile_double_quoted_path():
+    (write, _read) = from_sql('SELECT * FROM users INTO OUTFILE "/tmp/x"', dialect="mysql")
+    assert write.resource == "file//tmp/x"
+
+
+@pytest.mark.parametrize("sql,expected", [
+    ("TABLE users", [("read", "table/users")]),
+    ("VALUES (1), (2)", [("read", "table/*")]),
+    ("((SELECT * FROM a) UNION (SELECT * FROM b))", [("read", "table/a"), ("read", "table/b")]),
+    ("(SELECT * FROM a) UNION ALL TABLE b", [("read", "table/a"), ("read", "table/b")]),
+])
+def test_top_level_query_forms_are_reads(sql, expected):
+    assert _summary(sql) == expected
+
+
+def test_comment_only_statement_stays_unclassified():
+    assert _summary("SELECT 1; -- trailing") == [("read", "table/*"), ("update", "unknown/*")]
+
+
+# --- size and nesting: linear, no recursion ---
+
+
+def _timed(sql: str) -> tuple[float, list]:
+    import time
+
+    start = time.perf_counter()
+    intents = from_sql(sql, dialect="postgres")
+    return time.perf_counter() - start, intents
+
+
+def test_one_megabyte_of_with_is_fast_and_fails_safe():
+    elapsed, intents = _timed("WITH " * 200_000)
+    assert elapsed < 1.0
+    assert any(i.params.get("unclassified") for i in intents)
+
+
+def test_twenty_thousand_ctes_are_fast():
+    sql = "WITH " + ", ".join(
+        f"c{i} AS (SELECT * FROM {'base' if i == 0 else f'c{i - 1}'})" for i in range(20_000)
+    ) + " SELECT * FROM c19999"
+    elapsed, intents = _timed(sql)
+    assert elapsed < 1.0
+    assert ("read", "table/base") in [(i.action, i.resource) for i in intents]
+
+
+def test_statement_over_the_token_cap_adds_an_unclassified_write():
+    sql = "INSERT INTO t VALUES " + ", ".join(["(1)"] * 40_000)
+    intents = from_sql(sql)
+    assert intents[0].resource == "table/t"
+    assert intents[-1].params["unclassified"] is True
+    assert intents[-1].params["too_large"] is True
+
+
+def test_deep_nesting_does_not_recurse():
+    elapsed, intents = _timed("SELECT * FROM " + "(" * 10_000)
+    assert elapsed < 1.0
+    assert [i.action for i in intents] == ["read"]
+    sql = "SELECT * FROM " + "(SELECT * FROM " * 10_000 + "t" + ")" * 10_000
+    elapsed, intents = _timed(sql)
+    assert elapsed < 1.0
+    assert [i.resource for i in intents] == ["table/t"]
+    elapsed, intents = _timed("SELECT " + "set_config(" * 5_000 + "'role'" + ")" * 5_000)
+    assert elapsed < 1.0
+
+
+def test_repeated_explain_analyze_does_not_recurse():
+    (intent,) = from_sql("EXPLAIN ANALYZE " * 1000 + "DELETE FROM users")
+    assert (intent.action, intent.resource) == ("delete", "table/users")
+    (intent,) = from_sql("EXPLAIN " * 1000 + "DELETE FROM users")
+    assert (intent.action, intent.resource) == ("read", "table/users")

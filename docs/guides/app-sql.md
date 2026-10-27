@@ -41,10 +41,16 @@ delete, a schema change, a permission change, or something it cannot classify (a
 `EXPLAIN ANALYZE DELETE …` are deletes. `SELECT … INTO new_table` creates a table, and `SET ROLE`
 is a permission change. A statement it cannot classify counts as a write.
 
-A read is reported once for every table it reads: the `FROM` table, each `JOIN`, subqueries,
-`UNION` branches and `WITH` bodies. A rule can therefore name a table (`resource_pattern:
-table/customers`) and catch a query that reaches it through a JOIN. `SELECT … FOR UPDATE` stays a
-read, marked `locking: true` for a rule that wants to match it.
+A read is reported once for each table Aegis can see in it: the `FROM` table, each `JOIN`,
+subqueries, `UNION` branches and `WITH` bodies. A rule can therefore name a table
+(`resource_pattern: table/customers`) and catch a query that reaches it through a JOIN. Tables
+read inside a function, view or procedure the query calls are not seen. `SELECT … FOR UPDATE`
+stays a read, marked `locking: true` for a rule that wants to match it.
+
+Pass the gate the dialect your database speaks (`SqlGate(..., dialect="postgres")`, `"mysql"`
+or `"sqlite"`): it decides how strings are read. A backslash escapes a quote inside a MySQL
+string or a Postgres `E'…'` string, as the server reads it. The body of a MySQL `/*! … */`
+comment is checked as SQL, since MySQL runs it.
 
 One rule allows reads only:
 
@@ -105,7 +111,7 @@ def search(generated_sql: str):
         return conn.execute(generated_sql).fetchall()
 ```
 
-Loading took 0.6 ms and a check 25 µs on an Apple M4 Pro (one rule, a typical search query).
+Loading took 0.6 ms and a check 22 µs on an Apple M4 Pro (one rule, a typical search query).
 
 ## What it catches, and what it does not
 
@@ -125,11 +131,11 @@ Loading took 0.6 ms and a check 25 µs on an Apple M4 Pro (one rule, a typical s
 | A read of the right table for the wrong customer | runs | row-level security |
 
 So the Aegis check guarantees the statement type ("this app's model only ever reads"), under a
-rule nobody can loosen without the signing key and the `configuration` authority. Aegis names every
-table a read touches, so you can add a rule that blocks reads of `table/users`; that is a list you
-keep up to date, while the role's grants fail closed on any table you forgot. Which tables and
-columns a read may reach is still up to the database, and Aegis does not look inside functions a
-query calls. Search engines (Elasticsearch, OpenSearch, Algolia, Solr) and other query languages
+rule nobody can loosen without the signing key and the `configuration` authority. Aegis names the
+tables it can see in a read, so you can add a rule that blocks reads of `table/users`; that is a
+list you keep up to date, and a parser can miss a table, while the role's grants fail closed on
+any table you forgot. The database role's grants are the backstop: which tables and columns a
+read may reach is still up to the database. Search engines (Elasticsearch, OpenSearch, Algolia, Solr) and other query languages
 are not covered.
 
 ## When this is worth it

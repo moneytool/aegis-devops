@@ -16,29 +16,54 @@ behaviour.
 
 ### Fixed
 - SQL classifier (`psql -c`, `mysql -e`, `sqlite3`, `aegis check sql` and `from_sql`) (#58):
-  - A statement now yields a `read` intent for every table it reads, not only the first one after
-    `FROM`: each `JOIN` and comma-joined table, subqueries, `UNION`/`INTERSECT`/`EXCEPT` branches,
-    `TABLE t` and `WITH` bodies (a CTE's own name is not a table; functions in `FROM` are not
-    tables). Writes keep their own intent first and add a read of each other table they read
-    (`INSERT … SELECT`, `UPDATE … FROM`, `DELETE … USING`, `CREATE TABLE|VIEW … AS SELECT`, a
-    `WITH` holding DML). `EXPLAIN <stmt>` reads every table `<stmt>` names.
+  - A statement now yields a `read` intent for each table the classifier can see in it, not only
+    the first one after `FROM`: each `JOIN` and comma-joined table, subqueries,
+    `UNION`/`INTERSECT`/`EXCEPT` branches, `TABLE t` and `WITH` bodies (a CTE's own name is not a
+    table; functions in `FROM` are not tables). Tables read inside functions, views or procedures
+    a query calls are not seen; the database role's grants are the backstop. Writes add a read of
+    each other table they name (`INSERT … SELECT`, `UPDATE … FROM`, `DELETE … USING`,
+    `CREATE TABLE|VIEW … AS SELECT`). `EXPLAIN <stmt>` and MySQL `DESCRIBE <stmt>` read every table
+    `<stmt>` names.
+  - Every DML operation in a statement is reported, each with its own target: the top-level one and
+    each one inside a `WITH` body (it was only the strongest one inside a CTE, and a `WITH … UPDATE
+    t AS u`, `UPDATE ONLY` or `MERGE` main statement could be read as a SELECT). MySQL multi-table
+    `DELETE t1, t2 FROM …` and `UPDATE t1 JOIN t2 … SET` write each listed table. `MERGE INTO t` is
+    the strongest of its `WHEN … THEN` actions. `ONLY` and MySQL's `IGNORE`/`LOW_PRIORITY`/`QUICK`
+    are no longer read as the table name (`DELETE FROM ONLY users` was `table/ONLY`).
+    `TRUNCATE a, b` deletes both. `unbounded` now means no `WHERE` in the operation itself, not
+    anywhere in the text.
+  - Strings, comments and dollar quotes are read by one dialect-aware lexer, used for splitting
+    statements as well as classifying them, so the two agree. A backslash escapes a quote inside
+    Postgres `E'…'` strings and every MySQL string (`E'x\''; DROP TABLE users` was one read); a
+    plain `'…'` keeps the standard reading for `postgres`, `sqlite` and `generic`. A comment marker
+    inside a `$$` string no longer hides the rest of the statement. MySQL `#` comments are
+    comments, and `--` not followed by a space is not one in MySQL. The body of a MySQL executable
+    comment (`/*! … */`, `/*!50000 … */`) is read as SQL in every dialect, since MySQL runs it.
+    `dual` is a pseudo-table only in MySQL.
   - `SELECT … INTO t` is a `create` of `table/t` (as `CREATE TABLE … AS SELECT` already was), not a
     read. MySQL `SELECT … INTO OUTFILE|DUMPFILE` is an opaque, unclassified `update` of
     `file/<path>`; `SELECT … INTO @var` stays a read.
-  - `SET ROLE`, `SET SESSION AUTHORIZATION`, `SET role = …`, `RESET ROLE`, MySQL `SET DEFAULT ROLE`
-    and `SET PASSWORD`, and `SELECT set_config('role', …)` are an `update` of `role/<name>` with
-    `privilege: true`, like `GRANT`/`REVOKE`, instead of a `session/*` read. Other `SET`s stay
-    reads.
+  - `SET ROLE`, `SET SESSION AUTHORIZATION`, `SET role = …` / `SET "role" = …`, `RESET ROLE`, MySQL
+    `SET DEFAULT ROLE` and `SET PASSWORD`, and `[pg_catalog.]set_config('role', …)` are an `update`
+    of `role/<name>` with `privilege: true`, like `GRANT`/`REVOKE`, instead of a `session/*` read.
+    A `set_config` whose first argument is not a plain string literal is an update of `role/*`.
+    Other `SET`s stay reads.
   - `SELECT … FOR UPDATE|NO KEY UPDATE|SHARE|KEY SHARE` (and MySQL `LOCK IN SHARE MODE`) stay
     reads, now with `locking: true`, `lock_strength` and `nowait`/`skip_locked`, so a rule can
     match them with `scope: {locking: true}`.
   - `EXPLAIN (ANALYZE[, …]) <stmt>` is classified as `<stmt>`, as `EXPLAIN ANALYZE <stmt>` already
-    was; it was a read.
+    was; it was a read. `CREATE MATERIALIZED VIEW mv` is `view/mv`.
+  - A top-level `TABLE t`, `VALUES …` or parenthesised `(SELECT …) UNION (SELECT …)` is a read
+    (it was unclassified).
+  - Classification is linear and never recurses: deeply nested SQL, thousands of CTEs or repeated
+    `EXPLAIN` prefixes no longer take seconds or raise `RecursionError`. A statement over 100,000
+    tokens is classified from its first part plus an unclassified `update` (`too_large`).
 
   **Behaviour change:** a statement can now produce more intents than before. Where a rule matches
-  one of the newly visible tables, or `create`/`update` on `table/*` or `role/*`, a command that
-  used to be ALLOWed is now BLOCKed or ESCALATEd. That is the intended fix; review rules on reads
-  of specific tables, and any `actions: [create, update]` rule on `*`, before upgrading. The
+  one of the newly visible tables or writes, or `create`/`update` on `table/*` or `role/*`, a
+  command that used to be ALLOWed is now BLOCKed or ESCALATEd. That is the intended fix; review
+  rules on reads of specific tables, and any `actions: [create, update]` rule on `*`, before
+  upgrading. Pass the right `dialect` to `from_sql`: it now changes how strings are read. The
   example policies and their signatures are unchanged.
 
 ## [1.2.1] — 2026-10-24
