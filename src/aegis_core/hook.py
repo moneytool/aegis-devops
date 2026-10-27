@@ -71,9 +71,12 @@ from aegis_core import config as config_module
 from aegis_core.shell import (
     _KNOWN_BINARIES,
     _SHELLS,
+    ARGS_ONLY_PROGRAMS,
+    GLOB_REASON,
     ShellRejected,
     _basename,
     _interpreter,
+    find_heredoc,
     intents_from_command,
     loose_argv,
     loose_code_reader,
@@ -274,7 +277,6 @@ SCRIPT_SCAN_LIMIT = 64 * 1024
 # At most this many of its lines may name an infrastructure tool; more asks.
 SCRIPT_SCAN_MAX_LINES = 64
 _SHELL_SUFFIXES = (".sh", ".bash", ".zsh", ".ksh")
-_HEREDOC_RE = re.compile(r"<<(-?)\s*(['\"]?)([A-Za-z_][\w.-]*)\2")
 _CD_RE = re.compile(r"(?:^|[;&|(\n]\s*|\s)(?:cd|pushd|popd)(?:\s|$|;)")
 
 
@@ -316,6 +318,8 @@ def _precheck(command: str, config_dir: Path, extra_args: list[str] | None,
     try:
         intents = intents_from_command(command)
     except ShellRejected as exc:
+        if exc.reason == GLOB_REASON:
+            return _glob_denied(command)
         if rebuilt:  # cannot happen: every part of a rebuilt command parsed on its own
             return _rejected(command, exc.reason, config_dir, extra_args, cwd,
                              scan=scan, escalate_scripts=escalate_scripts)
@@ -324,6 +328,7 @@ def _precheck(command: str, config_dir: Path, extra_args: list[str] | None,
         if isinstance(part, HookVerdict):
             return part
         checkable, asks = part
+        # the rebuilt command keeps every literal `cd DIR`, so it starts from cwd too
         inner = _precheck(checkable, config_dir, extra_args, cwd, scan=scan, rebuilt=True)
         if isinstance(inner, HookVerdict):
             return _with_asks(inner, asks)
@@ -348,21 +353,94 @@ def _precheck(command: str, config_dir: Path, extra_args: list[str] | None,
             if verdict.decision == "deny":
                 return verdict
             asks.append(verdict.reason)
-    here: Path | None = cwd
     for intent in intents:
-        if intent.provider != "shell":
-            continue
-        argv = intent.params.get("argv") or []
-        if argv and _basename(argv[0]) in ("cd", "pushd", "popd"):
-            here = None if rebuilt else _cd(here, argv)
-        runs = intent.params.get("runs_code")
-        if runs is not None and runs["kind"] == "script" and scan:
-            verdict = _scan_script(runs, config_dir, extra_args, here)
+        verdict = _hidden_infra_program(intent)
+        if verdict is not None:
+            return verdict
+    if scan:
+        for runs, here in _scripts_with_directory(command, cwd):
+            verdict = _scan_script(runs, config_dir, extra_args, here, command=command)
             if verdict is not None:
                 if verdict.decision == "deny":
                     return verdict
                 asks.append(verdict.reason)
     return command, asks
+
+
+# Programs whose first argument may be an infrastructure tool's name without
+# running it (documentation, package managers, search and editors).
+_NAMES_WITHOUT_RUNNING = frozenset({
+    "man", "info", "which", "whereis", "type", "tldr", "help", "apropos", "brew", "apt",
+    "apt-get", "yum", "dnf", "apk", "pacman", "port", "snap", "choco", "winget", "scoop",
+    "asdf", "mise", "rg", "ag", "ack", "fd", "locate", "less", "more", "vim", "vi", "nano",
+    "code", "open", "bat", "touch", "mkdir", "cd", "ls", "rm", "cp", "mv", "ln", "tee",
+    "sort", "read", "install", "uninstall",
+})
+
+
+def _glob_denied(command: str) -> HookVerdict:
+    return HookVerdict(
+        "deny", f"aegis: cannot check this command statically ({GLOB_REASON}): the shell "
+        "may expand the program word into another program's name; spell the program out",
+        unchecked=True)
+
+
+def _hidden_infra_program(intent) -> HookVerdict | None:
+    """An unknown program whose first argument is an infrastructure tool
+    (``setpriv kubectl …``, a launcher the parser does not unwrap): the tool
+    runs, but its argv cannot be checked through the launcher."""
+    if intent.provider != "shell":
+        return None
+    argv = intent.params.get("argv") or []
+    if not argv:
+        return None
+    name = _basename(argv[0])
+    if name in ARGS_ONLY_PROGRAMS or name in _NAMES_WITHOUT_RUNNING or name in INFRA_BINARIES:
+        return None
+    for tok in argv[1:]:
+        if tok.startswith("-"):
+            continue
+        words = tok.split()
+        if words and _basename(words[0]) in INFRA_BINARIES:
+            return HookVerdict(
+                "deny", f"aegis: {name} runs {_basename(words[0])}, which cannot be checked "
+                "through it; run the infrastructure command on its own", unchecked=True)
+        return None
+    return None
+
+
+def _scripts_with_directory(command: str, cwd: Path | None) -> list[tuple[dict, Path | None]]:
+    """Every script a parsable command runs, with the directory it is run from:
+    ``cwd``, moved by each literal ``cd DIR`` in front of it. A ``cd`` that runs
+    in the background or in a pipeline (a subshell), one to a computed place,
+    ``env -C``/``sudo -D`` and a ``cd`` inside ``sh -c`` make it unknown."""
+    found: list[tuple[dict, Path | None]] = []
+    here = cwd
+    segments = split_segments(command) or [(command, "")]
+    previous_sep = ""
+    for text, sep in segments:
+        subshell = sep in ("&", "|", "|&") or previous_sep in ("|", "|&")
+        previous_sep = sep
+        loose = loose_argv(text) or []
+        if loose and _basename(loose[0]) in ("cd", "pushd", "popd"):
+            here = None if subshell else _cd(here, loose)
+            continue
+        try:
+            intents = intents_from_command(text)
+        except ValueError:
+            continue
+        words = set(text.split())
+        chdir = bool(words & {"-C", "--chdir", "-D"}) or "--chdir=" in text
+        for intent in intents:
+            if intent.provider != "shell":
+                continue
+            argv = intent.params.get("argv") or []
+            if argv and _basename(argv[0]) in ("cd", "pushd", "popd"):
+                here = None  # a cd inside sh -c "…"
+            runs = intent.params.get("runs_code")
+            if runs is not None and runs["kind"] == "script":
+                found.append((runs, None if chdir else here))
+    return found
 
 
 def _cd(here: Path | None, argv: list[str]) -> Path | None:
@@ -470,7 +548,7 @@ def _rejected(command: str, reason: str, config_dir: Path, extra_args: list[str]
     if scan:
         here = None if _CD_RE.search(command) else cwd
         for runs in scripts:
-            verdict = _scan_script(runs, config_dir, extra_args, here)
+            verdict = _scan_script(runs, config_dir, extra_args, here, command=command)
             if verdict is not None:
                 return verdict
     if escalate_scripts and scripts:
@@ -503,14 +581,19 @@ def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
     asks: list[str] = []
     opaque: tuple[str, str] | None = None
     here = cwd
+    previous_sep = ""
     for text, sep in segments:
         loose = loose_argv(text)
         if loose and _basename(loose[0]) in ("cd", "pushd", "popd"):
-            here = _cd(here, loose)
+            subshell = sep in ("&", "|", "|&") or previous_sep in ("|", "|&")
+            here = None if subshell else _cd(here, loose)
+        previous_sep = sep
         try:
             intents_from_command(text)
         except ShellRejected as seg_exc:
             reason = seg_exc.reason
+            if reason == GLOB_REASON:
+                return _glob_denied(command)
         except ValueError:  # a parser error: kept, so the full check reports it
             kept.append((text, sep))
             continue
@@ -527,7 +610,8 @@ def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
             )
         sourced = None if runs_expansion(text) else _sourced_script(text)
         if sourced is not None:
-            verdict = _scan_script(sourced, config_dir, extra_args, here) if scan else None
+            verdict = _scan_script(sourced, config_dir, extra_args, here,
+                                   command=command) if scan else None
             if verdict is not None and verdict.decision == "deny":
                 return verdict
             if verdict is not None:
@@ -540,7 +624,9 @@ def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
         if binary is None:
             opaque = opaque or (shown, reason)
             continue
-        if binary:
+        if binary in ("cd", "pushd"):
+            kept.append(("cd -", sep))  # a cd to a place only known at run time
+        elif binary:
             kept.append((shlex.quote(binary), sep))
     if opaque is not None:
         if mentions_infra(command):
@@ -576,20 +662,25 @@ def _sourced_script(segment: str) -> dict[str, str] | None:
 
 def _script_lines(text: str) -> list[tuple[int, str, str | None]]:
     """``(line_number, command_text, ask_reason)`` for a script: continuations
-    joined (backslash-newline removed, as the shell does), comments dropped,
-    and here-document bodies treated as what reads them -- as commands when a
-    shell reads them, as unreadable code (``ask_reason``) when another
-    interpreter does and they name an infrastructure tool, else skipped."""
-    raw = text.splitlines()
+    joined (backslash-newline removed, as the shell does, but not at the end of
+    a comment, which ends at the newline), comments dropped, and here-document
+    bodies treated as what reads them: as commands when a shell reads them,
+    directly or through a pipe (``cat <<EOF | sh``); as unreadable code
+    (``ask_reason``) when another interpreter reads one that names an
+    infrastructure tool, or when an unquoted tag lets a ``$(…)`` in the body
+    that names one run; otherwise as data, skipped."""
     joined: list[tuple[int, str]] = []
     pending, start = "", 0
-    for number, line in enumerate(raw, 1):
+    for number, line in enumerate(text.splitlines(), 1):
         if not pending:
             start = number
-        if line.endswith("\\") and not line.endswith("\\\\"):
-            pending += line[:-1]
+        candidate = pending + line
+        code = strip_comment(candidate)
+        trailing = len(code) - len(code.rstrip("\\"))
+        if code == candidate and trailing % 2 == 1:
+            pending = candidate[:-1]
             continue
-        joined.append((start, pending + line))
+        joined.append((start, candidate))
         pending = ""
     if pending:
         joined.append((start, pending))
@@ -600,11 +691,11 @@ def _script_lines(text: str) -> list[tuple[int, str, str | None]]:
         i += 1
         if line.lstrip().startswith("#"):
             continue
-        match = _HEREDOC_RE.search(line) if "<<<" not in line else None
-        if match is None:
+        heredoc = find_heredoc(line)
+        if heredoc is None:
             out.append((number, strip_comment(line), None))
             continue
-        dash, _quote, tag = match.groups()
+        begin, end, dash, tag, quoted = heredoc
         body: list[tuple[int, str]] = []
         while i < len(joined):
             n, body_line = joined[i]
@@ -612,29 +703,69 @@ def _script_lines(text: str) -> list[tuple[int, str, str | None]]:
             if (body_line.lstrip("\t") if dash else body_line) == tag:
                 break
             body.append((n, body_line))
-        command = strip_comment(line[: match.start()] + line[match.end():])
+        command = strip_comment(line[:begin] + line[end:])
         out.append((number, command, None))
-        reader = loose_argv(line[: match.start()]) or []
+        reader = loose_argv(line[:begin]) or []
         name = _basename(reader[0]) if reader else ""
-        if name in _SHELLS:
+        if name in _SHELLS or loose_code_reader(command) is not None:
             out.extend((n, strip_comment(b), None) for n, b in body)
         elif _interpreter(name) and any(mentions_infra(b) for _n, b in body):
-            reason = (f"{name} reads a here-document that names an infrastructure tool, "
-                      "which the hook cannot check")
-            out.append((number, line, reason))
+            out.append((number, line, f"{name} reads a here-document that names an "
+                                      "infrastructure tool, which the hook cannot check"))
+        elif not quoted:
+            for n, b in body:
+                if runs_expansion(b) and mentions_infra(b):
+                    out.append((n, b, "the here-document runs a command substitution that "
+                                      "names an infrastructure tool, which the hook cannot "
+                                      "check"))
     return out
 
 
+def _written_by_command(file: Path, command: str, cwd: Path | None) -> bool:
+    """True when ``file`` is named more than once in ``command``: besides the
+    run itself, as a redirection target or an argument of another command
+    (``printf … > x.sh; bash x.sh``, ``cp a x.sh; bash x.sh``, ``chmod +x
+    nuke; ./nuke``), so what runs may not be what is on disk now."""
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        tokens = command.split()
+    target = os.path.normpath(file)
+    try:
+        resolved = file.resolve() if file.exists() else None
+    except OSError:
+        resolved = None
+    count = 0
+    for token in tokens:
+        if not token or set(token) <= set("();<>|&"):
+            continue
+        path = Path(token).expanduser()
+        if not path.is_absolute():
+            if cwd is None:
+                continue
+            path = cwd / path
+        same = os.path.normpath(path) == target
+        if not same and resolved is not None:
+            try:
+                same = path.exists() and path.resolve() == resolved
+            except OSError:
+                same = False
+        count += same
+    return count > 1
+
+
 def _scan_script(runs: dict, config_dir: Path, extra_args: list[str] | None,
-                 cwd: Path | None) -> HookVerdict | None:
+                 cwd: Path | None, *, command: str = "") -> HookVerdict | None:
     """Reads a local shell script that a command runs (``bash x.sh``, ``sh <
     x.sh``, ``./x``, ``source x.sh``; issue #56) and checks every line that
     names an infrastructure tool as a command against the policy. ``None``
     when there is nothing to say: not a shell script, no such line, or every
     such line allowed. A blocked line (or a block only the lines together
     reach) denies; a line that cannot be checked asks; so does a script that is
-    missing (it may be written by the same command), unreadable, not a regular
-    file, larger than :data:`SCRIPT_SCAN_LIMIT`, with more than
+    missing, written by the same ``command``, unreadable, not a regular file,
+    holding a NUL byte, larger than :data:`SCRIPT_SCAN_LIMIT`, with more than
     :data:`SCRIPT_SCAN_MAX_LINES` such lines, or whose directory is unknown (a
     ``cd`` to a computed place came first). What the script sources or runs in
     turn is not read."""
@@ -657,6 +788,9 @@ def _scan_script(runs: dict, config_dir: Path, extra_args: list[str] | None,
                                       "from (a cd to a computed place comes first), so its "
                                       "commands were not checked")
         file = cwd / file
+    if command and _written_by_command(file, command, cwd):
+        return HookVerdict("ask", f"aegis: {path} is written by this command, so its commands "
+                                  "cannot be checked; run it separately")
     try:
         if not file.exists():
             if shell_run or path.endswith(_SHELL_SUFFIXES):
@@ -674,19 +808,23 @@ def _scan_script(runs: dict, config_dir: Path, extra_args: list[str] | None,
     if len(data) > SCRIPT_SCAN_LIMIT:
         return HookVerdict("ask", f"aegis: {path} is larger than {SCRIPT_SCAN_LIMIT // 1024} "
                                   "KiB, so the commands in it were not checked")
-    if b"\0" in data:
-        return None  # a binary, not a shell script
     text = data.decode("utf-8", errors="replace")
-    if not interpreter:  # ./x: a shell script by its #! line, or with none (sh runs it)
-        first = text.split("\n", 1)[0]
-        if first.startswith("#!"):
-            words = first[2:].split()
-            program = _basename(words[0]) if words else ""
-            if program == "env":
-                rest = [w for w in words[1:] if not w.startswith("-") and "=" not in w]
-                program = _basename(rest[0]) if rest else ""
-            if program not in _SHELLS:
-                return None
+    first = text.split("\n", 1)[0]
+    shebang_shell: bool | None = None  # None: no #! line
+    if first.startswith("#!"):
+        words = first[2:].replace("\0", " ").split()
+        program = _basename(words[0]) if words else ""
+        if program == "env":
+            rest = [w for w in words[1:] if not w.startswith("-") and "=" not in w]
+            program = _basename(rest[0]) if rest else ""
+        shebang_shell = program in _SHELLS
+    if not interpreter and shebang_shell is False:
+        return None  # ./x with another interpreter's #! line
+    if "\0" in text:
+        if shell_run or shebang_shell:
+            return HookVerdict("ask", f"aegis: {path} contains a NUL byte, so its commands "
+                                      "were not checked")
+        return None  # ./x without #!: a binary, not a shell script
     lines = [(n, line, ask) for n, line, ask in _script_lines(text)
              if ask is not None or mentions_infra(line)]
     if not lines:
@@ -710,26 +848,30 @@ def _scan_script(runs: dict, config_dir: Path, extra_args: list[str] | None,
                 return HookVerdict("deny", f"aegis: {reason} ({located})")
             first_ask = first_ask or f"aegis: {located}: {reason}"
             continue
-        command, asks = pre
+        checked, asks = pre
         if asks:
             first_ask = first_ask or f"aegis: {located}: {asks[0].removeprefix('aegis: ')}"
-        if command.strip(" \t\n;&|"):
-            checkable.append((number, line, command))
+        if checked.strip(" \t\n;&|"):
+            checkable.append((number, line, checked))
     verdict = _policy("\n".join(c for _n, _l, c in checkable), config_dir, extra_args) \
         if checkable else HookVerdict("allow")
     if verdict.decision == "allow":
         return HookVerdict("ask", first_ask) if first_ask else None
-    # the first line at which the lines so far are no longer allowed (bisection:
-    # a handful of policy runs, not one per line)
+    # the first line at which the lines so far reach the verdict -- a deny for a
+    # deny, so an earlier ESCALATE line is not blamed for a BLOCK (bisection: a
+    # handful of policy runs, not one per line)
+    def reached(prefix: str) -> bool:
+        decision = _policy(prefix, config_dir, extra_args).decision
+        return decision == "deny" if verdict.decision == "deny" else decision != "allow"
+
     low, high = 1, len(checkable)
     while low < high:
         middle = (low + high) // 2
-        prefix = "\n".join(c for _n, _l, c in checkable[:middle])
-        if _policy(prefix, config_dir, extra_args).decision == "allow":
-            low = middle + 1
-        else:
+        if reached("\n".join(c for _n, _l, c in checkable[:middle])):
             high = middle
-    number, line, _command = checkable[low - 1]
+        else:
+            low = middle + 1
+    number, line, _checked = checkable[low - 1]
     located = f"{path} line {number}: {line.strip()!r}"
     if verdict.decision == "deny":
         return HookVerdict("deny", f"{verdict.reason} ({located})")

@@ -1110,7 +1110,8 @@ def test_a_missing_shell_script_asks(opted_in_project, command):
     if code == 2:  # names kubectl on the command line: refused outright
         assert "names an infrastructure tool" in err
         return
-    assert "does not exist yet" in _ask_reason(out)
+    reason = _ask_reason(out)
+    assert "does not exist yet" in reason or "is written by this command" in reason
 
 
 def test_a_script_is_read_after_a_literal_cd(opted_in_project):
@@ -1212,3 +1213,168 @@ def test_a_64_line_script_that_asks_needs_few_policy_runs(opted_in_project, monk
     code, out, err = run("claude", payload_for("claude", "bash x.sh"))
     assert code == 2 and "x.sh line 64" in err
     assert len(calls) <= 10
+
+
+# --- council round 2 ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize("command", [
+    # item 1: apostrophes inside double quotes are literal; $(…) and backticks still run
+    "export K=kubectl; echo \"'$($K delete nodes --all)'\"",
+    "export K=kubectl; echo \"it's `$K delete nodes --all`\"",
+    "export K=kubectl; echo \"'\" \"$(echo 'a\"b'; $K delete nodes --all)\"",
+    # item 9: sort runs --compress-program; cp/echo > can rewrite the kubeconfig
+    'sort --compress-program="$X" f; kubectl get ns',
+    'cp "$X" ~/.kube/config; kubectl get pods',
+    'echo "$X" > ~/.kube/config; kubectl get pods',
+    'printf -v KUBECONFIG %s "$X"; kubectl get pods',
+])
+def test_round2_unknown_parts_next_to_infra_are_denied(opted_in_project, command):
+    code, out, err = run("claude", payload_for("claude", command))
+    assert code == 2, out
+    assert "cannot check this command statically" in err
+
+
+@pytest.mark.parametrize("command", [
+    f"kubectl get ns # \\\n{BLOCK_COMMAND}",          # item 2: a comment ends at the newline
+    f"echo hi # note\n{BLOCK_COMMAND}",
+])
+def test_a_command_after_a_comment_line_is_checked(opted_in_project, command):
+    code, out, err = run("claude", payload_for("claude", command))
+    assert code == 2
+    assert BLOCK_REASON_SNIPPET in err
+
+
+@pytest.mark.parametrize("body", [
+    f"x=1 # \\\n{BLOCK_COMMAND}\n",                    # item 2
+    f"echo '<<EOF'\n{BLOCK_COMMAND}\n",                # item 4: not a here-doc operator
+    f"echo hi # <<EOF\n{BLOCK_COMMAND}\n",
+    f"cat <<EOF | sh\n{BLOCK_COMMAND}\nEOF\n",         # item 4: body piped on to a shell
+])
+def test_round2_script_bodies_are_denied(opted_in_project, body):
+    (opted_in_project / "x.sh").write_text(body)
+    code, out, err = run("claude", payload_for("claude", "bash x.sh"))
+    assert code == 2, out
+    assert BLOCK_REASON_SNIPPET in err
+
+
+def test_a_data_here_doc_that_runs_an_infra_substitution_asks(opted_in_project):
+    (opted_in_project / "x.sh").write_text("cat <<EOF\n$(kubectl delete node n1)\nEOF\n")
+    code, out, err = run("claude", payload_for("claude", "bash x.sh"))
+    assert "runs a command substitution" in _ask_reason(out)                 # item 6
+
+
+def test_a_quoted_data_here_doc_is_not_expanded(opted_in_project):
+    (opted_in_project / "x.sh").write_text("cat <<'EOF'\n$(kubectl delete node n1)\nEOF\n")
+    code, out, err = run("claude", payload_for("claude", "bash x.sh"))
+    assert (code, out) == (0, "")
+
+
+@pytest.mark.parametrize("command,name,body", [
+    ("bash x.sh", "x.sh", b"# \0 binary-looking comment\necho hi\n"),       # item 3
+    ("./x", "x", b"#!/bin/sh\n# \0\necho hi\n"),
+])
+def test_a_shell_script_with_a_nul_byte_asks(opted_in_project, command, name, body):
+    path = opted_in_project / name
+    path.write_bytes(body)
+    path.chmod(0o755)
+    code, out, err = run("claude", payload_for("claude", command))
+    assert "contains a NUL byte" in _ask_reason(out)
+
+
+@pytest.mark.parametrize("command", [                                     # item 5
+    "printf 'kubectl delete namespace prod\\n' > x.sh; bash x.sh",
+    "printf 'x\\n' >> x.sh; bash x.sh",
+    "cp other.sh x.sh; bash x.sh",
+    "mv other.sh x.sh && bash ./x.sh",
+    "ln -sf other.sh x.sh; source x.sh",
+    "sed -i s/a/b/ x.sh; bash x.sh",
+    "echo hi | tee x.sh; bash x.sh",
+    "printf 'x\\n' > nuke; chmod +x nuke; ./nuke",
+])
+def test_a_script_written_by_the_same_command_asks(opted_in_project, command):
+    for name in ("x.sh", "other.sh", "nuke"):
+        (opted_in_project / name).write_text("#!/bin/sh\necho hi\n")
+    code, out, err = run("claude", payload_for("claude", command))
+    assert "is written by this command" in _ask_reason(out)
+
+
+def test_a_block_is_not_blamed_on_an_earlier_escalate_line(opted_in_project):
+    (opted_in_project / "x.sh").write_text(f"{ESCALATE_COMMAND}\n{BLOCK_COMMAND}\n")  # item 7
+    code, out, err = run("claude", payload_for("claude", "bash x.sh"))
+    assert code == 2
+    assert "x.sh line 2" in err
+
+
+@pytest.mark.parametrize("command", [                                     # item 8
+    "cd ops & bash cleanup.sh",
+    "cd ops | bash cleanup.sh",
+    "env -C ops bash cleanup.sh",
+    "env --chdir=ops bash cleanup.sh",
+])
+def test_a_cd_in_a_subshell_or_env_chdir_makes_the_directory_unknown(opted_in_project, command):
+    (opted_in_project / "ops").mkdir()
+    (opted_in_project / "ops" / "cleanup.sh").write_text(CLEANUP_SCRIPT)
+    (opted_in_project / "cleanup.sh").write_text("echo hi\n")
+    code, out, err = run("claude", payload_for("claude", command))
+    assert "cannot tell which directory" in _ask_reason(out)
+
+
+def test_a_literal_cd_is_followed_in_a_command_with_an_expansion(opted_in_project):
+    (opted_in_project / "scripts").mkdir()                                 # item 8
+    (opted_in_project / "scripts" / "cleanup.sh").write_text(CLEANUP_SCRIPT)
+    code, out, err = run("claude", payload_for(
+        "claude", 'cd scripts && echo "$X" && bash cleanup.sh'))
+    assert code == 2
+    assert BLOCK_REASON_SNIPPET in err
+
+
+@pytest.mark.parametrize("command", [                                     # item 10
+    "watch kubectl delete namespace prod",
+    "watch -n 5 'kubectl delete namespace prod'",
+    "setsid kubectl delete namespace prod",
+    "stdbuf -oL kubectl delete namespace prod",
+    "doas kubectl delete namespace prod",
+    "ionice -c3 kubectl delete namespace prod",
+    "caffeinate -i kubectl delete namespace prod",
+    "unbuffer kubectl delete namespace prod",
+    "script -qc 'kubectl delete namespace prod' /dev/null",
+    "busybox sh -c 'kubectl delete namespace prod'",
+])
+def test_launchers_are_unwrapped(opted_in_project, command):
+    code, out, err = run("claude", payload_for("claude", command))
+    assert code == 2
+    assert "block-namespace-delete" in err
+
+
+def test_an_unknown_launcher_of_an_infra_tool_is_denied(opted_in_project):
+    code, out, err = run("claude", payload_for("claude", "setpriv kubectl delete ns prod"))
+    assert code == 2
+    assert "setpriv runs kubectl" in err
+
+
+@pytest.mark.parametrize("command", ["man kubectl", "rg kubectl", "brew install kubectl",
+                                     "grep -r kubectl .", "which terraform"])
+def test_naming_an_infra_tool_without_running_it_is_allowed(opted_in_project, command):
+    code, out, err = run("claude", payload_for("claude", command))
+    assert (code, out) == (0, "")
+
+
+@pytest.mark.parametrize("command", [                                     # item 11
+    "kube{,}ctl delete namespace prod",
+    "{kubectl,} delete namespace prod",
+    "kubec? delete namespace prod",
+    "kube[c]tl delete namespace prod",
+    "/usr/local/bin/k* get pods",
+    'echo "$X"; kube{,}ctl get pods',
+])
+def test_a_brace_or_glob_in_the_program_word_is_denied(opted_in_project, command):
+    code, out, err = run("claude", payload_for("claude", command))
+    assert code == 2
+    assert "brace/glob in program name" in err
+
+
+@pytest.mark.parametrize("command", ["ls *.txt", "[ -f x ] && echo y", "[[ -f x ]]"])
+def test_globs_in_arguments_and_tests_are_fine(opted_in_project, command):
+    code, out, err = run("claude", payload_for("claude", command))
+    assert (code, out) == (0, "")

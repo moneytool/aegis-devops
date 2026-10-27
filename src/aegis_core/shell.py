@@ -121,7 +121,8 @@ def _prescan(command: str) -> str:
     """Quote-aware pass over the raw string, before shlex sees it: rejects
     unquoted ``$`` and backticks (shlex would strip the quotes and lose the
     distinction), turns unquoted newlines into ``;``, removes backslash-newline
-    line continuations (outside single quotes, as the shell does), and marks a file
+    line continuations (outside single quotes and comments, as the shell does),
+    drops ``#`` comments up to the newline, and marks a file
     descriptor glued to a redirection (``2>&1`` -> ``\\x012>&1``) so it is
     not mistaken for an argument."""
     out: list[str] = []
@@ -164,6 +165,13 @@ def _prescan(command: str) -> str:
             out.append(" ; ")
             i += 1
             continue
+        elif c == "#" and (i == 0 or command[i - 1].isspace() or command[i - 1] in ";&|()"):
+            # a comment ends at the newline, whatever comes before it (a trailing
+            # backslash does not continue it); dropped here so that shlex never
+            # sees it run on past the "; " the newline becomes
+            while i < n and command[i] != "\n":
+                i += 1
+            continue
         elif c.isdigit() and (i == 0 or command[i - 1].isspace()):
             j = i
             while j < n and command[j].isdigit():
@@ -182,6 +190,9 @@ def _prescan(command: str) -> str:
 def _tokens(command: str) -> list[str]:
     lexer = shlex.shlex(_prescan(command), posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
+    # _prescan has dropped the real comments; shlex's own would also cut a word
+    # at a '#' inside it (`pods#x --as=admin` lost everything after the '#')
+    lexer.commenters = ""
     try:
         return list(lexer)
     except ValueError as exc:  # pragma: no cover - _prescan catches unbalanced quotes first
@@ -397,15 +408,23 @@ def loose_argv(segment: str) -> list[str] | None:
 # Anything else -- find -exec, watch, ssh, trap, awk system(), docker run,
 # npx, builtin, su -c, tmux, vim, flock, strace, sed's e command, … -- may, so
 # a part with an unknown argument and any other program stays unknown.
+# Left out on purpose: sort (--compress-program runs one), read and printf -v
+# (assign a variable such as KUBECONFIG), cp/mv/ln/tee/install (can overwrite
+# ~/.kube/config before kubectl runs). An output redirection to a computed or
+# configuration path makes any of these unknown too (:func:`plain_binary`).
 ARGS_ONLY_PROGRAMS = frozenset({
     "echo", "printf", "cat", "tac", "tail", "head", "grep", "egrep", "fgrep", "wc",
-    "date", "sleep", "test", "[", "true", "false", ":", "ls", "mkdir", "rmdir", "read",
-    "sort", "uniq", "cut", "tr", "basename", "dirname", "pwd", "cd", "touch", "rm", "cp",
-    "mv", "ln", "chmod", "stat", "file", "du", "df", "diff", "cmp", "comm", "tee",
+    "date", "sleep", "test", "[", "true", "false", ":", "ls", "mkdir", "rmdir",
+    "uniq", "cut", "tr", "basename", "dirname", "pwd", "cd", "touch", "rm",
+    "chmod", "stat", "file", "du", "df", "diff", "cmp", "comm",
     "which", "whoami", "id", "uname", "hostname", "realpath", "readlink", "seq", "nl",
     "rev", "fold", "paste", "base64", "md5sum", "sha1sum", "sha256sum", "shasum",
     "mktemp", "jq", "exit", "return", "shift", "unset",
 })
+# Output redirection targets that make a part unknown: computed, or a place an
+# infrastructure tool reads its configuration from.
+_CONFIG_TARGET_RE = re.compile(r"[$`]|\.kube|\.aws|\.config|\.azure|\.docker|\.ssh|"
+                               r"\.gitconfig|\.terraformrc|\.netrc|\.pgpass|\.my\.cnf")
 # Builtins that assign or declare: their NAME=value words count as assignments.
 _DECLARATION_BUILTINS = frozenset({"export", "declare", "typeset", "local", "readonly"})
 # Variables that change which program runs or which account/cluster it talks to.
@@ -417,6 +436,15 @@ _INFRA_ENV_NAMES = frozenset({"PATH", "ENV", "BASH_ENV", "LD_PRELOAD", "LD_LIBRA
                               "DYLD_INSERT_LIBRARIES", "HOME", "XDG_CONFIG_HOME"})
 
 
+GLOB_REASON = "brace/glob in program name"
+
+
+def _globbed(program: str) -> bool:
+    """True when the shell may expand a program word into another name
+    (``kube{,}ctl``, ``kubec?``, ``kube[c]tl``); ``[`` and ``[[`` are tests."""
+    return program not in ("[", "[[") and any(ch in program for ch in "{}*?[")
+
+
 def _infra_env(name: str) -> bool:
     return (name in _ENV_METADATA_KEYS or name in _INFRA_ENV_NAMES
             or name.startswith(_INFRA_ENV_PREFIXES))
@@ -425,8 +453,9 @@ def _infra_env(name: str) -> bool:
 def runs_expansion(segment: str) -> bool:
     """True when ``segment`` runs a command of its own through an expansion:
     ``$(…)`` (and ``$((…))``), backticks, ``<(…)`` or ``>(…)``, outside single
-    quotes."""
-    in_single = False
+    quotes (inside double quotes an apostrophe is literal and ``$(…)`` and
+    backticks still run)."""
+    in_single = in_double = False
     i, n = 0, len(segment)
     while i < n:
         c = segment[i]
@@ -434,12 +463,57 @@ def runs_expansion(segment: str) -> bool:
             in_single = c != "'"
         elif c == "\\":
             i += 1
+        elif c == "`" or segment.startswith("$(", i):
+            return True
+        elif in_double:
+            in_double = c != '"'
+        elif c == '"':
+            in_double = True
         elif c == "'":
             in_single = True
-        elif c == "`" or segment.startswith(("$(", "<(", ">("), i):
+        elif segment.startswith(("<(", ">("), i):
             return True
         i += 1
     return False
+
+
+def find_heredoc(line: str) -> tuple[int, int, bool, str, bool] | None:
+    """The first real here-document operator in ``line`` -- outside quotes and
+    comments, ``<<`` but not ``<<<`` -- as ``(start, end, dash, tag,
+    quoted)``: ``dash`` for ``<<-``, ``quoted`` when the tag is quoted (the
+    body is then not expanded). ``None`` when there is none."""
+    in_single = in_double = False
+    i, n = 0, len(line)
+    while i < n:
+        c = line[i]
+        if in_single:
+            in_single = c != "'"
+        elif c == "\\":
+            i += 1
+        elif in_double:
+            in_double = c != '"'
+        elif c == "'":
+            in_single = True
+        elif c == '"':
+            in_double = True
+        elif c == "#" and (i == 0 or line[i - 1].isspace() or line[i - 1] in ";&|("):
+            return None
+        elif line.startswith("<<", i) and not line.startswith("<<<", i) and (
+                i == 0 or line[i - 1] != "<"):
+            j = i + 2
+            dash = line.startswith("-", j)
+            j += 1 if dash else 0
+            while j < n and line[j] in " \t":
+                j += 1
+            k = j
+            while k < n and not line[k].isspace() and line[k] not in ";&|<>()":
+                k += 1
+            word = line[j:k]
+            quoted = any(q in word for q in "'\"\\")
+            tag = word.replace("'", "").replace('"', "").replace("\\", "")
+            return (i, k, dash, tag, quoted) if tag else None
+        i += 1
+    return None
 
 
 def strip_comment(line: str) -> str:
@@ -496,15 +570,24 @@ def plain_binary(segment: str) -> str | None:
         return None
     if words and len(assignments) == len(words):
         return ""
+    for k, w in enumerate(words):
+        target = None
+        match = re.match(r"^\d*(?:>>|>\||&>>|&>|>)(.*)$", w)
+        if match:
+            target = match.group(1) or (words[k + 1] if k + 1 < len(words) else "")
+        if target is not None and not target.startswith("&") and _CONFIG_TARGET_RE.search(target):
+            return None
     argv = loose_argv(segment)
     if not argv:
         return None
     head = argv[0]
-    if any(ch in head for ch in "$`()<>{}=\\'\""):
+    if any(ch in head for ch in "$`()<>{}=\\'\"") or _globbed(head):
         return None
     name = _basename(head)
     if head != name and not head.startswith(_SYSTEM_PREFIXES):
         return None  # ./echo is not echo
+    if name == "printf" and "-v" in argv[1:]:
+        return None
     return name if name in ARGS_ONLY_PROGRAMS else None
 
 
@@ -637,6 +720,79 @@ def _strip_nice(rest: list[str]) -> list[str]:
     return rest[i:]
 
 
+# More launchers: for each, (options that take a value, options without one).
+# An unrecognised option is rejected, so it cannot hide the program.
+_LAUNCHER_OPTIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
+    "setsid": (frozenset(), frozenset({"-c", "-f", "-w", "--ctty", "--fork", "--wait"})),
+    "stdbuf": (frozenset({"-i", "-o", "-e"}), frozenset()),
+    "doas": (frozenset({"-u", "-C"}), frozenset({"-n"})),
+    "ionice": (frozenset({"-c", "-n", "-p", "-P", "-u"}), frozenset({"-t"})),
+    "caffeinate": (frozenset({"-t", "-w"}), frozenset({"-d", "-i", "-m", "-s", "-u"})),
+    "unbuffer": (frozenset(), frozenset({"-p"})),
+    "chronic": (frozenset(), frozenset({"-e", "-v"})),
+    "busybox": (frozenset(), frozenset()),
+    "watch": (frozenset({"-n", "--interval", "-q", "--equexit"}),
+              frozenset({"-d", "--differences", "-t", "--no-title", "-g", "--chgexit",
+                         "-e", "--errexit", "-b", "--beep", "-c", "--color", "-p",
+                         "--precise", "-x", "--exec", "-w", "--no-wrap"})),
+    "script": (frozenset({"-c", "--command", "-t", "--timing", "-T", "-I", "-O", "-B",
+                          "-E", "--echo", "-m"}),
+               frozenset({"-q", "--quiet", "-a", "--append", "-e", "--return", "-f",
+                          "--flush"})),
+}
+
+
+def _strip_launcher(head: str, rest: list[str]) -> tuple[list[str], str | None]:
+    """``(argv, shell_string)`` after a launcher's options: ``shell_string``
+    is set for ``script -c CMD`` and for ``watch`` without ``-x``, whose
+    arguments are joined and run by ``sh -c``."""
+    valued, flags = _LAUNCHER_OPTIONS[head]
+    i, command, exec_mode = 0, None, False
+    while i < len(rest):
+        tok = rest[i]
+        if tok == "--":
+            i += 1
+            break
+        if not tok.startswith("-") or tok == "-":
+            break
+        key = tok.partition("=")[0]
+        if key in ("-c", "--command") and head == "script":
+            command = tok.partition("=")[2] or (rest[i + 1] if i + 1 < len(rest) else "")
+            i += 1 if "=" in tok else 2
+            continue
+        if key in ("-x", "--exec"):
+            exec_mode = True
+        if key in valued:
+            i += 1 if "=" in tok else 2
+            continue
+        if tok in flags:
+            i += 1
+            continue
+        if len(tok) > 2 and not tok.startswith("--"):  # -oL, -n5, -qc CMD, -dn 5
+            letters, step = tok[1:], 1
+            for k, letter in enumerate(letters):
+                if f"-{letter}" in flags:
+                    continue
+                if f"-{letter}" not in valued:
+                    raise ShellRejected(f"unrecognised {head} option {tok!r}")
+                value = letters[k + 1:] or (rest[i + 1] if i + 1 < len(rest) else "")
+                step = 1 if letters[k + 1:] else 2
+                if head == "script" and letter == "c":
+                    command = value
+                break
+            i += step
+            continue
+        raise ShellRejected(f"unrecognised {head} option {tok!r}")
+    rest = rest[i:]
+    if head == "script":
+        if command is None:
+            raise ShellRejected("script without -c opens a shell")
+        return [], command
+    if head == "watch" and not exec_mode and rest:
+        return [], " ".join(rest)
+    return rest, None
+
+
 def _shell_c_string(rest: list[str]) -> str | None:
     """For ``sh [opts] -c STRING [args…]`` returns STRING; ``None`` when the
     shell is not invoked with ``-c`` (``bash script.sh`` — an ordinary,
@@ -718,6 +874,18 @@ def _unwrap_inner(
             rest = argv[1:]
             if head == "time" and rest and rest[0] == "-p":
                 rest = rest[1:]
+            if not rest:
+                break
+            wrappers.append(head)
+            argv = rest
+            continue
+        if head in _LAUNCHER_OPTIONS:
+            rest, string = _strip_launcher(head, argv[1:])
+            if string is not None:  # watch "cmd args", script -c "cmd": a shell string
+                if depth >= 1:
+                    raise ShellRejected(f"nested {head} command string")
+                wrappers.append(head)
+                return argv, env, wrappers, string
             if not rest:
                 break
             wrappers.append(head)
@@ -1086,6 +1254,8 @@ def intents_from_command(command: str) -> list[InfrastructureIntent]:
         if not simple.argv:
             continue
         feeder, previous = (previous if simple.stdin_pipe else None), simple
+        if _globbed(simple.argv[0]):
+            raise ShellRejected(GLOB_REASON, command)
         name = _basename(simple.argv[0])
         destroy = (
             from_terraform_argv(simple.argv) if name in ("terraform", "tofu") else None

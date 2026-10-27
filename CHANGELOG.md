@@ -20,19 +20,33 @@ behaviour.
   command (#55). The hook judges a command it cannot parse part by part (`;`, `&&`, `||`, `|`,
   newline): `terraform plan 2>&1; echo "exit=$?"` checks `terraform plan` against the policy
   and lets the `echo` through. A part with an unknown argument stands in for its program only
-  when that program treats arguments as data (`echo`, `cat`, `tail`, `grep`, `ls`, `test`, …);
-  a part that only assigns a variable drops out, unless the variable steers an infrastructure
-  tool (`KUBECONFIG`, `AWS_*`, `PATH`, …, also after `export`/`declare`/`local`). Any other
-  unknown part (one that runs `$(…)`, backticks or `<(…)`, an unknown program, `find -exec`,
-  `watch`, `ssh`, `trap`, `eval`, …) is refused when the command names an infrastructure tool
-  anywhere; the message quotes the part. Here-docs are judged as a whole, as before.
+  when that program treats arguments as data (`echo`, `cat`, `tail`, `grep`, `ls`, `test`, …;
+  not `sort`, `cp`, `mv`, `ln`, `tee`, `read` or `printf -v`) and does not redirect output to a
+  computed path or a configuration directory (`~/.kube`, `~/.aws`, …); a part that only assigns
+  a variable drops out, unless the variable steers an infrastructure tool (`KUBECONFIG`,
+  `AWS_*`, `PATH`, …, also after `export`/`declare`/`local`). Any other unknown part (one that
+  runs `$(…)`, backticks or `<(…)`, also inside double quotes, an unknown program, `find
+  -exec`, `watch`, `ssh`, `trap`, `eval`, …) is refused when the command names an
+  infrastructure tool anywhere; the message quotes the part. This refuses `TS=$(date +%s);
+  kubectl …` on purpose: any command substitution next to an infrastructure command is.
+  Here-docs are judged as a whole, as before.
 - Shell parser: the reserved words `if`, `then`, `else`, `elif`, `do`, `while` and `until`, and
   `coproc`, in front of a command are stripped like `{` and `!`, so `if true; then kubectl
   delete namespace prod; fi` and `coproc kubectl …` are checked as the `kubectl` command they
   run (they were unknown binaries, and allowed). A lone `fi`/`done`/`esac` and a `for`/`select`
   header give no command; `function f { …; }` is rejected like `f() { …; }`. A backslash-newline
-  outside single quotes is removed as the shell removes it (`kubectl delete \` + newline +
-  `namespace prod` was checked with a stray newline argument).
+  outside single quotes and comments is removed as the shell removes it (`kubectl delete \` +
+  newline + `namespace prod` was checked with a stray newline argument).
+- Shell parser: a `#` comment ends at the newline. Before, the comment ran on past it, so
+  `echo hi # note` + newline + `kubectl delete …` hid the `kubectl` line; and a `#` inside a
+  word (`pods#x --as=admin`) cut off the rest of the command.
+- Shell parser: the launchers `watch` (its arguments run through `sh -c` unless `-x`),
+  `setsid`, `stdbuf`, `doas`, `ionice`, `caffeinate`, `unbuffer`, `chronic`, `busybox` and
+  `script -c` are unwrapped like `sudo` and `nohup`. A program word the shell could expand into
+  another name (`kube{,}ctl`, `kubec?`, `kube[c]tl`) is rejected ("brace/glob in program name")
+  and the hook refuses it whatever it names. The hook also refuses an unknown program whose
+  first argument is an infrastructure tool (`setpriv kubectl …`), except documentation, search
+  and package tools (`man`, `which`, `rg`, `brew`, …).
 - Agent hook: "names an infrastructure tool" also matches once quotes, backslashes and line
   continuations are removed (`kube''ctl`, `"kube"ctl`).
 - Agent hook: a local shell script is read before it runs (#56). For `bash x.sh`, `sh < x.sh`,
@@ -40,11 +54,17 @@ behaviour.
   each line that names an infrastructure tool is checked as a command against the policy, in
   one policy run (a few more find the line when it does not allow): a blocked line, or a block
   the lines only reach together, blocks and the message names the line; a line that cannot be
-  checked asks. Continuations are joined as the shell joins them, comments skipped, a here-doc
-  body checked only when a shell reads it. A script that does not exist yet (written by the same
-  command), cannot be read, is not a regular file, is over 64 KiB, names a tool on more than 64
-  lines, or follows a `cd` to a computed directory asks; a relative path follows a literal
-  `cd DIR` earlier in the command. A file with a NUL byte is a binary and not read. What a script
+  checked asks (the line is found by bisection on the verdict, so a BLOCK is not blamed on an
+  earlier ESCALATE line). A backslash at the end of a line joins the next as the shell does,
+  except at the end of a comment; comments are skipped; `<<` is a here-doc only outside quotes
+  and comments, and its body is checked when a shell reads it (also through `cat <<EOF | sh`),
+  asks when another interpreter reads one that names a tool or an unquoted body's `$(…)` names
+  one, and is data otherwise. A script that does not exist yet, is written, copied, moved,
+  linked, edited or otherwise named by the same command (`printf … > x.sh; bash x.sh`), cannot
+  be read, is not a regular file, holds a NUL byte (when a shell is named; a `./x` without `#!`
+  and with a NUL is a binary and not read), is over 64 KiB, names a tool on more than 64 lines,
+  or follows a `cd` the hook cannot follow (computed, in the background or a pipeline, `env
+  -C`) asks; a relative path follows a literal `cd DIR` earlier in the command. What a script
   sources or runs in turn is not read, nor are other interpreters' scripts (`python3 x.py`).
 
 ### Changed

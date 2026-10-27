@@ -719,3 +719,65 @@ def test_split_segments_gives_up_on_unbalanced_quoting(command):
 ])
 def test_plain_binary(segment, binary):
     assert plain_binary(segment) == binary
+
+
+@pytest.mark.parametrize("segment,runs", [
+    ("echo \"'$(x)'\"", True),            # round 2: ' is literal inside "…"
+    ("echo \"it's `x`\"", True),
+    ("echo \"$(echo 'a\"b')\"", True),
+    ("echo '$(x)' \"'\"", False),
+    ("echo \"'\" '$(x)'", False),
+    ("echo \\$(x)", False),
+    ("diff <(a) b", True),
+    ("echo \"<(a)\"", False),
+])
+def test_runs_expansion_tracks_quotes(segment, runs):
+    from aegis_core.shell import runs_expansion
+    assert runs_expansion(segment) is runs
+
+
+@pytest.mark.parametrize("command,argvs", [
+    ("kubectl get ns # \\\nkubectl delete node/w1",
+     [["kubectl", "get", "ns"], ["kubectl", "delete", "node/w1"]]),
+    ("echo hi # a comment\nkubectl delete node/w1",
+     [["echo", "hi"], ["kubectl", "delete", "node/w1"]]),
+    ("echo a#b", [["echo", "a#b"]]),
+    ("kubectl get pods#x -A --as=admin", [["kubectl", "get", "pods#x", "-A", "--as=admin"]]),
+    ("echo '# not a comment'; ls", [["echo", "# not a comment"], ["ls"]]),
+])
+def test_a_comment_ends_at_the_newline(command, argvs):
+    assert _argvs(command) == argvs
+
+
+@pytest.mark.parametrize("command,argv", [
+    ("watch -n 5 kubectl get pods", ["kubectl", "get", "pods"]),
+    ("watch -x kubectl get pods", ["kubectl", "get", "pods"]),
+    ("setsid -f kubectl get pods", ["kubectl", "get", "pods"]),
+    ("stdbuf -oL -eL kubectl get pods", ["kubectl", "get", "pods"]),
+    ("ionice -c 3 kubectl get pods", ["kubectl", "get", "pods"]),
+    ("script -q -c 'kubectl get pods' /dev/null", ["kubectl", "get", "pods"]),
+    ("busybox sh -c 'kubectl get pods'", ["kubectl", "get", "pods"]),
+])
+def test_more_launchers_are_unwrapped(command, argv):
+    (intent,) = intents_from_command(command)
+    assert intent.resource == "pod/*"
+    assert intent.metadata.get("wrappers")
+
+
+@pytest.mark.parametrize("program", ["kube{,}ctl", "kubec?", "kube[c]tl", "k*"])
+def test_a_brace_or_glob_program_is_rejected(program):
+    with pytest.raises(ShellRejected, match="brace/glob"):
+        intents_from_command(f"{program} get pods")
+
+
+@pytest.mark.parametrize("line,found", [
+    ("cat <<EOF", (4, 9, False, "EOF", False)),
+    ("cat <<-'END' | sh", (4, 12, True, "END", True)),
+    ("echo '<<EOF'", None),
+    ('echo "<<EOF"', None),
+    ("echo hi # <<EOF", None),
+    ("cat <<< word", None),
+])
+def test_find_heredoc_only_sees_real_operators(line, found):
+    from aegis_core.shell import find_heredoc
+    assert find_heredoc(line) == found

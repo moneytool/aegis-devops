@@ -53,16 +53,21 @@ a broken policy.
 
 **Compound commands** are judged part by part. In `terraform plan 2>&1; echo "exit=$?"` the
 `terraform plan` is checked against the policy and the `echo` runs. A part with an unknown
-argument passes only when its program treats arguments as data (`echo`, `printf`, `cat`,
-`tail`, `head`, `grep`, `wc`, `ls`, `test`, `rm`, `cp`, `mkdir`, `jq` and similar), or when it
-only assigns a variable that does not steer an infrastructure tool. Every other part with
-something unknown in it is refused when the command names an infrastructure tool anywhere:
-a part that runs its own command (`$(…)`, backticks, `<(…)`), one whose program is unknown
-(`$TOOL …`), runs other programs (`find -exec`, `watch`, `ssh`, `trap`, `awk`, `docker run`,
-`eval`, `bash -c`, …) or sets `KUBECONFIG`, `AWS_*`, `PATH` and the like (also through
-`export`/`declare`/`local`). The message quotes the part. Without an infrastructure tool in
-the command such parts run as before. `aegis check command` stays strict: it exits 64 for any
-command it cannot parse, and names the part that caused it.
+argument passes only when its program treats arguments as data (`echo`, `printf` without
+`-v`, `cat`, `tail`, `head`, `grep`, `wc`, `ls`, `test`, `rm`, `mkdir`, `jq` and similar; not
+`sort`, `cp`, `mv`, `ln`, `tee` or `read`) and it does not redirect output to a computed path
+or a configuration directory (`~/.kube`, `~/.aws`, `~/.config`, …), or when it only assigns a
+variable that does not steer an infrastructure tool. Every other part with something unknown
+in it is refused when the command names an infrastructure tool anywhere: a part that runs its
+own command (`$(…)`, backticks, `<(…)`, also inside double quotes), one whose program is
+unknown (`$TOOL …`), runs other programs (`find -exec`, `watch`, `ssh`, `trap`, `awk`,
+`docker run`, `eval`, `bash -c`, …) or sets `KUBECONFIG`, `AWS_*`, `PATH` and the like (also
+through `export`/`declare`/`local`). So `TS=$(date +%s); kubectl get pods` is refused on
+purpose: any command substitution next to an infrastructure command is. The message quotes
+the part. Without an infrastructure tool in the command such parts run as before. A program
+word the shell could expand into another name (`kube{,}ctl`, `kubec?`, `kube[c]tl`) is always
+refused. `aegis check command` stays strict: it exits 64 for any command it cannot parse, and
+names the part that caused it.
 
 **Escalations.** An ESCALATE verdict asks the user in Claude Code, Copilot, VS Code and Cursor.
 Codex has no "ask" for hooks (it treats an unknown decision as an error and runs the command),
@@ -85,7 +90,9 @@ a Python program, a Makefile, or calls a cloud SDK, gets past it. With the examp
 | `NS=prod; kubectl delete ns "$NS"` | blocked: the `kubectl` part cannot be checked (the message quotes it) |
 | `K=kubectl; $K delete namespace prod` | blocked: cannot be checked, names an infrastructure tool |
 | `TS=$(date +%s); kubectl get pods`, `C=…; kubectl get ns; find . -exec $C …` | blocked: a part runs a command the hook cannot see, next to an infrastructure tool |
-| `coproc kubectl …`, `kubectl delete \` + newline + `namespace prod` | checked like the plain command |
+| `coproc kubectl …`, `kubectl delete \` + newline + `namespace prod`, `watch`/`setsid`/`stdbuf`/`doas`/`ionice`/`caffeinate`/`unbuffer`/`busybox`/`script -c` `kubectl …` | checked like the plain command |
+| another program whose first argument is `kubectl` (`setpriv kubectl …`) | blocked: the tool cannot be checked through it (`man`, `which`, `rg`, package managers and the like excepted) |
+| `kube{,}ctl …`, `kubec? …` | blocked: brace/glob in program name |
 | `python3 -c "subprocess.run(['kubectl','delete','namespace','prod'])"` | blocked: inline code that names an infrastructure tool |
 | `node -e` / `--eval=…`, `python3 -Ic`, `perl -e` / `-lne`, `ruby -e`, `php -r` naming `kubectl` | blocked the same way |
 | `echo 'kubectl delete namespace prod' \| bash`, also `echo 'kube''ctl …' \| sh` | blocked: code piped into a shell that names an infrastructure tool |
@@ -95,7 +102,7 @@ a Python program, a Makefile, or calls a cloud SDK, gets past it. With the examp
 | `cat > nuke.sh <<'EOF' … EOF` (here-doc that names `kubectl`) | blocked: cannot be checked, names an infrastructure tool |
 | `bash nuke.sh`, `sh < nuke.sh`, `./nuke.sh`, `source nuke.sh`, where a line of `nuke.sh` is blocked | blocked by the policy (the message names the line) |
 | the same, where a line names `kubectl` but cannot be checked (`kubectl delete ns "$NS"`) | asks |
-| the same, where the script does not exist yet (`printf '…' > p.sh; bash p.sh`), cannot be read, is over 64 KiB, names a tool on more than 64 lines, or is run after a `cd` to a computed directory | asks |
+| the same, where the script does not exist yet or is written by the same command (`printf '…' > x.sh; bash x.sh`, `cp a x.sh; bash x.sh`, `chmod +x x; ./x`), cannot be read, holds a NUL byte, is over 64 KiB, names a tool on more than 64 lines, or is run after a `cd` the hook cannot follow | asks |
 | a script that `nuke.sh` sources or runs in turn | **runs**: only the script on the command line is read |
 | a script changed between the check and the run, or a symlink retargeted in between | **runs** the new content: the hook reads it once, before the command starts |
 | `python3 cleanup.py`, `make destroy`, `npm run teardown` | **runs** |
@@ -104,17 +111,24 @@ a Python program, a Makefile, or calls a cloud SDK, gets past it. With the examp
 
 A script is read when a shell runs it (`bash`, `sh`, `zsh`, `dash`, `ksh`, `ash`, `source`,
 `.`), or when it is run directly (`./x`) and its `#!` line names a shell (`#!/usr/bin/env -S
-bash` too) or it has no `#!` line at all (the shell then runs it). A file with a NUL byte is a
-binary and is not read; other bytes that are not UTF-8 are read anyway. A relative path is read
-from the agent's working directory, or from the directory a literal `cd DIR` earlier in the
-command moves to. Only lines that name an infrastructure tool are checked, each as a command of
-its own, against the same policy: comments (whole-line and trailing) are skipped, `\`
-continuations are joined as the shell joins them, and a here-doc body counts as commands only
-when a shell reads it (another interpreter reading one that names a tool asks; for `cat` and
-the like it is data). All checkable lines go to the policy in one run; only when that run is
-not an allow are a few more runs made to find the line (bisection), so a block that only the
-lines together reach (an aggregate rule) is still a block. `aegis check command` does not read
-files: this is the hook only.
+bash` too) or it has no `#!` line at all (the shell then runs it). Bytes that are not UTF-8 are
+read anyway. A NUL byte asks when a shell is named (`bash x.sh`, `source x.sh`, a shell `#!`
+line); only a `./x` with no `#!` line and a NUL byte is taken for a binary and not read. A
+script that the same command also writes, copies, moves, links, edits or names as an argument
+or redirection target asks, since what runs may not be what is on disk at check time. A
+relative path is read from the agent's working directory, or from the directory a literal
+`cd DIR` earlier in the command moves to; a `cd` in the background (`&`) or in a pipeline, to
+a computed place, or `env -C`/`sudo -D` make the directory unknown, which asks. Only lines that
+name an infrastructure tool are checked, each as a command of its own, against the same
+policy: comments (whole-line and trailing) are skipped; a backslash at the end of a line joins
+the next line as the shell does, except at the end of a comment, which ends at the newline;
+`<<` counts as a here-doc only outside quotes and comments; a here-doc body counts as commands
+when a shell reads it, directly or through a pipe (`cat <<EOF | sh`), asks when another
+interpreter reads one that names a tool or when an unquoted body's `$(…)` names one, and is
+data otherwise. All checkable lines go to the policy in one run; only when that run is not an
+allow are a few more runs made to find the line (bisection, on deny when the verdict is a
+deny), so a block that only the lines together reach (an aggregate rule) is still a block.
+`aegis check command` does not read files: this is the hook only.
 
 Piped code asks unless the stage feeding the shell or interpreter is a literal `echo` (no `-e`,
 no backslashes) or `printf` (one argument, no `%` directives, no escapes but `\n` and `\t`).
