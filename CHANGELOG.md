@@ -18,17 +18,27 @@ behaviour.
 ### Fixed
 - **kubectl boolean flags were "missing its value"** (#53). `kubectl get pods -n prod
   --no-headers` was a parse error, so the hook denied a read; `--no-headers pods` swallowed the
-  kind. kubectl's boolean flags (`--no-headers`, `--show-labels`, `--watch`, `--wait`, `--force`,
-  `--ignore-not-found`, `--overwrite`, `--server-side`, …, and `-f` on `logs`) now take no value,
-  and an unknown long flag followed by another option or by the end of argv is a boolean. Value
-  flags (`-n`, `-l`, `--field-selector`, `-o`, `--context`, `--kubeconfig`) still need theirs.
-- **Help and version probes were parse errors** (#54). `helm --help`, `argocd version --client`,
-  `kubectl version`, `<tool> --version`, `<tool> help`, `<tool> <verb> --help` (and `aws … help`)
-  for every binary the parsers know now give one read-only `cli/<tool>` intent with
-  `params.informational`, which the example policy allows. Only exact forms count: `--help` after
-  another option, after `--`, or after a plugin or alias is parsed as the command it sits in, so
-  `kubectl -n --help delete ns prod` is still a namespace delete. In a chain each command is
-  still checked: `argocd version --client && argocd app delete payments` escalates.
+  kind, and `delete ns --interactive prod staging` lost `prod`. The flag walker now knows which
+  kubectl flags are booleans and which take a value (kubectl 1.36's per-verb help): booleans
+  (`--no-headers`, `--watch`, `--interactive`, …, `-f` on `logs`) take no value, and value flags
+  take the next token even when it starts with `-`, as kubectl does (`--grace-period -1`;
+  `label ns prod --field-manager -n staging` labels `namespace/staging`, it does not set the
+  namespace). `-c`, `-L` and `-p` on `patch` keep their value instead of leaving it as a target.
+  An unknown long flag is a boolean at the end of argv, takes a following word as its value, and
+  is refused when another option follows it, since whether it takes that option as its value
+  decides the scope.
+- **Help and version probes were parse errors** (#54). These forms now give one read-only
+  `cli/<tool>` intent with `params.informational`, which the example policy allows: the tool's
+  lone help or version flag (`helm --help`, `psql -V`); `help [topic…]` for kubectl, helm,
+  argocd, flux, git, gh, gcloud and pulumi (flyway, rails: bare `help`); `version [options]` for
+  kubectl, helm, argocd, flux, gh and pulumi (git, az, gcloud, prisma, flyway, rails: bare
+  `version`); `<command words> --help` for built-in commands of kubectl (subcommands checked),
+  helm, argocd, flux, gh and pulumi, and for az, gcloud and prisma; `git <cmd> --help` and
+  `alembic <cmd> --help`; `aws [<service> [<operation>]] help` for common services. Anything
+  else (an option before `--help`, `--` before it, `git <cmd> -h`, a plugin or unknown
+  subcommand) is parsed as the command it is, so `kubectl -n --help delete ns prod` is still a
+  namespace delete. In a chain each command is still checked: `argocd version --client && argocd
+  app delete payments` escalates.
 
 ## [1.2.1] — 2026-10-24
 

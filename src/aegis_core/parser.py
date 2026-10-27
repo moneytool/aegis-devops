@@ -210,22 +210,58 @@ _RESOURCE_ALIASES = {
     "ev": "event",
 }
 
-# kubectl flags that are booleans (no value token follows) when given
-# without "=value".
+# kubectl flags that take no value token when given without "=value": the
+# boolean flags of every verb the parser handles (from kubectl 1.36's
+# per-verb --help), plus the string flags pflag gives a default for a bare
+# use (--cascade, --validate). "containers" and "prefix" are strings only
+# under "set env" / "set resources", which the parser does not accept.
 _KNOWN_BOOL_FLAGS = {
-    "force", "cascade", "all", "wait", "now", "ignore-not-found",
-    # kubectl drain
-    "ignore-daemonsets", "delete-emptydir-data", "delete-local-data", "disable-eviction",
-    # get / describe / logs output switches
-    "no-headers", "show-labels", "show-kind", "show-managed-fields", "show-events",
-    "watch", "watch-only", "output-watch-events", "server-print",
-    "allow-missing-template-keys", "follow", "previous", "timestamps", "all-containers",
-    "prefix", "ignore-errors", "recursive",
-    # apply / create / edit / label / annotate / run / exec
-    "overwrite", "local", "record", "validate", "save-config", "server-side",
-    "force-conflicts", "prune", "windows-line-endings", "edit", "list",
-    "stdin", "tty", "quiet", "rm", "attach", "leave-stdin-open", "privileged",
+    "all", "all-containers", "all-pods", "allow-missing-template-keys", "append-hash",
+    "append-server-path", "arguments-only", "as-current-user", "attach", "cached", "cascade",
+    "client", "command", "containers", "delete-emptydir-data", "delete-local-data",
+    "disable-eviction", "disable-filter", "edit", "enable-alpha-plugins", "enable-helm",
+    "expose", "flatten", "follow", "force", "force-conflicts", "helm-debug",
+    "ignore-daemonsets", "ignore-errors", "ignore-not-found",
+    "insecure-skip-tls-verify-backend", "interactive", "keep-annotations",
+    "keep-init-containers", "keep-labels", "keep-liveness", "keep-readiness", "keep-startup",
+    "leave-stdin-open", "list", "local", "merge", "minify", "namespaced", "network",
+    "no-headers", "no-preserve", "now", "openapi-patch", "output-patch",
+    "output-watch-events", "overwrite", "prefix", "previous", "privileged", "prune", "quiet",
+    "record", "recursive", "replace", "resolve", "rm", "same-node", "save-config",
+    "server-print", "server-side", "share-processes", "show-capacity", "show-events",
+    "show-kind", "show-labels", "show-managed-fields", "show-secrets", "show-swap", "stdin",
+    "sum", "timestamps", "tty", "use-protocol-buffers", "validate", "wait", "watch",
+    "watch-only", "windows-line-endings",
 }
+
+# kubectl flags that always take the next token as their value, even one
+# that starts with "-" (pflag does: "--field-manager -n x" sets the field
+# manager to "-n"). Recorded in params like any other flag value. Scope,
+# selector, manifest, impersonation and discarded global flags are handled
+# by name before this table is consulted.
+_KUBECTL_VALUE_FLAGS = {
+    "accept-hosts", "accept-paths", "address", "annotation", "annotations", "api-group",
+    "api-prefix", "api-version", "as-user-extra", "audience", "bound-object-kind",
+    "bound-object-name", "bound-object-uid", "categories", "chunk-size", "class",
+    "cluster-ip", "clusterip", "clusterrole", "concurrency", "container", "copy-to", "cpu",
+    "current-replicas", "custom", "default-backend", "detach-keys", "duration", "env",
+    "external-ip", "field-manager", "for", "from", "from-env-file", "from-file",
+    "from-literal", "grace-period", "group", "helm-api-versions", "helm-command",
+    "helm-kube-version", "image", "image-pull-policy", "keepalive", "keys", "kuberc",
+    "label-columns", "labels", "limit-bytes", "limits", "load-balancer-ip",
+    "load-restrictor", "max", "max-log-requests", "memory", "min", "mount", "name",
+    "network-name", "override-type", "overrides", "patch", "patch-file",
+    "pod-running-timeout", "pod-selector", "port", "protocol", "prune-allowlist", "raw",
+    "reject-methods", "reject-paths", "replicas", "requests", "resource-version", "restart",
+    "retries", "revision", "role", "rule", "schedule", "serviceaccount", "session-affinity",
+    "set-image", "since", "since-time", "skip-wait-for-delete-timeout", "sort-by",
+    "subresource", "tail", "target", "target-port", "tcp", "template", "timeout",
+    "to-revision", "type", "types", "unix-socket", "verbs", "vmodule", "www", "www-prefix",
+    # short forms: -c container, -L label-columns
+    "c", "L",
+}
+# Short value flags, recorded under their long name ("-p" only on patch).
+_KUBECTL_SHORT_VALUE_NAMES = {"c": "container", "L": "label-columns", "p": "patch"}
 
 # kubectl verbs whose short "-f" is the boolean --follow, not --filename.
 _KUBECTL_FOLLOW_VERBS = {"logs"}
@@ -277,7 +313,7 @@ _KUBECTL_GLOBAL_VALUE_FLAGS = _KUBECTL_IDENTITY_FLAGS | _DISCARD_VALUE_FLAGS | _
 _KUBECTL_GLOBAL_BOOL_FLAGS = {"A", "all-namespaces"} | _DISCARD_BOOL_FLAGS
 
 # Short flags that may be glued to their value: -nprod, -lapp=web, -fx.yaml.
-_KUBECTL_GLUED_SHORT_FLAGS = {"n", "l", "f", "o", "k", "s", "v"}
+_KUBECTL_GLUED_SHORT_FLAGS = {"n", "l", "f", "o", "k", "s", "v", "c", "L"}
 
 # Verbs whose "resource" is just the literal first positional token (a
 # path), not a kind/name pair to be normalised.
@@ -559,15 +595,31 @@ def _parse_flags(
                     val = _value_at(tokens, i, tok)
             elif key in _DISCARD_BOOL_FLAGS:
                 pass
-            elif key in _KNOWN_BOOL_FLAGS:
+            elif key in _KNOWN_BOOL_FLAGS or (key == "raw" and verb == "config"):
                 params[key] = _bool_param(val)
+            elif key in _KUBECTL_VALUE_FLAGS or (key == "p" and verb == "patch"):
+                # Always the next token, even "-1" or "--context": that is
+                # what kubectl does with it.
+                if val is None:
+                    i += 1
+                    val = _value_at(tokens, i, tok)
+                params[_KUBECTL_SHORT_VALUE_NAMES.get(key, key)] = _coerce(val)
             elif val is not None:
                 params[key] = _coerce(val)
-            elif is_long and _bare_flag(tokens, i):
-                # Unknown long flag followed by another option or by the end
-                # of argv: a boolean (--no-headers style), not a flag missing
-                # its value.
+            elif is_long and i + 1 >= len(tokens):
+                # Unknown long flag at the end of argv: a boolean, not a
+                # flag missing its value.
                 params[key] = True
+            elif is_long and _bare_flag(tokens, i):
+                # Unknown long flag followed by another option: if it takes a
+                # value, kubectl reads that option as the value, so the
+                # namespace, context or target it seems to set is not real.
+                # Neither reading is safe to guess, so the command is refused.
+                raise ValueError(
+                    f"kubectl: cannot tell whether {tok!r} takes a value "
+                    f"(next token {tokens[i + 1]!r}); write {tok}=<value> or "
+                    f"put {tok} last: {tokens!r}"
+                )
             elif is_long:
                 # Unknown long flag with no "=value": treat the next token
                 # as its value.
@@ -3012,7 +3064,7 @@ _INFO_VERB_HELP_BUILTINS: dict[str, frozenset[str] | None] = {
         "drain", "taint", "describe", "logs", "attach", "exec", "port-forward", "proxy",
         "cp", "auth", "debug", "events", "diff", "apply", "patch", "replace", "wait",
         "kustomize", "label", "annotate", "completion", "api-resources", "api-versions",
-        "config", "plugin", "version", "options", "alpha",
+        "config", "kuberc", "plugin", "version", "options",
     }),
     "helm": frozenset({
         "completion", "create", "dependency", "env", "get", "history", "install", "lint",
@@ -3045,10 +3097,74 @@ _INFO_VERB_HELP_BUILTINS: dict[str, frozenset[str] | None] = {
     "gcloud": None,
     "prisma": None,
 }
+# kubectl command groups and their built-in subcommands (kubectl 1.36, with
+# aliases): "kubectl create <x> --help" runs a kubectl-create-<x> plugin
+# when <x> is not one of these, so only these are help.
+_KUBECTL_SUBCOMMANDS: dict[tuple[str, ...], frozenset[str]] = {
+    ("create",): frozenset({
+        "clusterrole", "clusterrolebinding", "configmap", "cm", "cronjob", "cj", "deployment",
+        "deploy", "ingress", "ing", "job", "namespace", "ns", "poddisruptionbudget", "pdb",
+        "priorityclass", "pc", "quota", "resourcequota", "role", "rolebinding", "secret",
+        "service", "svc", "serviceaccount", "sa", "token",
+    }),
+    ("create", "secret"): frozenset({"docker-registry", "generic", "tls"}),
+    ("create", "service"): frozenset({"clusterip", "externalname", "loadbalancer", "nodeport"}),
+    ("create", "svc"): frozenset({"clusterip", "externalname", "loadbalancer", "nodeport"}),
+    ("set",): frozenset({"env", "image", "resources", "selector", "serviceaccount", "sa",
+                         "subject"}),
+    ("rollout",): frozenset({"history", "pause", "restart", "resume", "status", "undo"}),
+    ("certificate",): frozenset({"approve", "deny"}),
+    ("cluster-info",): frozenset({"dump"}),
+    ("top",): frozenset({"node", "nodes", "no", "pod", "pods", "po"}),
+    ("auth",): frozenset({"can-i", "reconcile", "whoami"}),
+    ("apply",): frozenset({"edit-last-applied", "set-last-applied", "view-last-applied"}),
+    ("config",): frozenset({
+        "current-context", "delete-cluster", "delete-context", "delete-user", "get-clusters",
+        "get-contexts", "get-users", "rename-context", "set", "set-cluster", "set-context",
+        "set-credentials", "unset", "use-context", "use", "view",
+    }),
+    ("kuberc",): frozenset({"set", "view"}),
+    ("plugin",): frozenset({"list"}),
+}
+
+# aws: "<service> [<operation>] help" only for these services (an alias in
+# ~/.aws/cli/alias may be any other word, and runs its own command).
+_AWS_HELP_SERVICES = frozenset({
+    "acm", "apigateway", "apigatewayv2", "application-autoscaling", "athena", "autoscaling",
+    "backup", "batch", "budgets", "ce", "cloudformation", "cloudfront", "cloudtrail",
+    "cloudwatch", "codebuild", "codecommit", "codedeploy", "codepipeline", "cognito-idp",
+    "configservice", "configure", "dynamodb", "ebs", "ec2", "ecr", "ecr-public", "ecs", "efs",
+    "eks", "elasticache", "elasticbeanstalk", "elb", "elbv2", "emr", "es", "events",
+    "firehose", "glacier", "glue", "guardduty", "iam", "kafka", "kinesis", "kms", "lambda",
+    "lightsail", "logs", "opensearch", "organizations", "rds", "redshift", "route53",
+    "route53domains", "s3", "s3api", "s3control", "sagemaker", "secretsmanager",
+    "securityhub", "ses", "sesv2", "sns", "sqs", "ssm", "sso", "stepfunctions",
+    "storagegateway", "sts", "transfer", "waf", "wafv2", "xray",
+})
+
 # One word, then the flag: the vcs tool rewrites "<cmd> --help" to
 # "help <cmd>" only with --help directly after the command; alembic
 # (argparse) exits on -h before running its command.
 _INFO_ONE_VERB_HELP_TOOLS = {"git", "alembic"}
+
+# The flags that make "<tool> <words...> <flag>" help, where narrower than
+# the tool's own help flags: "git <cmd> -h" is handed to an alias as is
+# (and is a real option of grep and ls-remote).
+_INFO_VERB_HELP_FLAGS = {"git": {"--help"}}
+
+
+def _kubectl_builtin_path(words: list[str]) -> bool:
+    """Whether every kubectl command-group word in ``words`` is followed by
+    one of that group's built-in subcommands (or by nothing)."""
+    path: tuple[str, ...] = ()
+    for word in words:
+        path = (*path, word)
+        parent = path[:-1]
+        if parent and parent in _KUBECTL_SUBCOMMANDS and word not in _KUBECTL_SUBCOMMANDS[parent]:
+            return False
+        if path not in _KUBECTL_SUBCOMMANDS:
+            return True  # a leaf command: what follows are its arguments
+    return True
 
 
 def _is_word(token: str) -> bool:
@@ -3077,10 +3193,13 @@ def _informational_kind(name: str, args: list[str]) -> str | None:
             not rest or (name == "git" and rest == ["--build-options"])
         ):
             return "version"
-    # aws: "aws [service [operation]] help"
+    # aws: "aws help", "aws <service> [<operation>] help"
     if name == "aws" and args[-1] == "help" and len(args) <= 3 and all(map(_is_word, args)):
-        return "help"
-    if args[-1] in ("--help", "-h") and args[-1] in _INFO_HELP_FLAGS.get(name, ()):
+        if len(args) == 1 or args[0] in _AWS_HELP_SERVICES:
+            return "help"
+        return None
+    verb_help_flags = _INFO_VERB_HELP_FLAGS.get(name, _INFO_HELP_FLAGS.get(name, set()))
+    if args[-1] in ("--help", "-h") and args[-1] in verb_help_flags:
         words = args[:-1]
         if not words or not all(_is_word(t) for t in words):
             return None
@@ -3088,6 +3207,8 @@ def _informational_kind(name: str, args: list[str]) -> str | None:
             return "help" if len(words) == 1 else None
         if name in _INFO_VERB_HELP_BUILTINS:
             builtins = _INFO_VERB_HELP_BUILTINS[name]
+            if name == "kubectl" and not _kubectl_builtin_path(words):
+                return None
             if builtins is None or words[0] in builtins:
                 return "help"
     return None

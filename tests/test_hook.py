@@ -865,6 +865,16 @@ def test_help_swallowed_as_a_value_is_still_a_delete(opted_in_project):
     assert "block-namespace-delete" in verdict.reason
 
 
+@pytest.mark.parametrize("command", [
+    # an unknown flag that may take "--context" as its value
+    "kubectl delete ns prod --some-new-option --context staging",
+    # --field-manager takes "-n": staging is a namespace being deleted
+    "kubectl delete ns prod --field-manager -n staging",
+])
+def test_scope_hidden_behind_a_flag_value_is_not_trusted(opted_in_project, command):
+    assert hook.decide(command, opted_in_project / ".aegis").decision == "deny"
+
+
 def test_value_flag_without_value_still_denied(opted_in_project):
     verdict = hook.decide("kubectl get pods -n", opted_in_project / ".aegis")
     assert verdict.decision == "deny"

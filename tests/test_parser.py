@@ -2662,11 +2662,12 @@ def test_aws_numeric_looking_names_stay_strings(argv, resource):
     ("kubectl logs -f api-0 -n prod", "pod/api-0", {"follow": True}),
     ("kubectl logs api-0 --follow -n prod", "pod/api-0", {"follow": True}),
     ("kubectl logs api-0 -f -n prod", "pod/api-0", {"follow": True}),
-    # not in the table: followed by another option or by the end of argv,
-    # it is a boolean rather than a flag missing its value
+    ("kubectl top pod --containers --sum -n prod", "pod/*", {"containers": True, "sum": True}),
+    ("kubectl apply -f x.yaml --openapi-patch --server-side", "manifest/x.yaml", None),
+    # not in the table: at the end of argv it is a boolean rather than a
+    # flag missing its value
     ("kubectl get pods -n prod --ignore-validation-errors", "pod/*",
      {"ignore-validation-errors": True}),
-    ("kubectl get pods --some-new-switch -n prod", "pod/*", {"some-new-switch": True}),
 ])
 def test_kubectl_boolean_flags_take_no_value(argv, resource, params):
     """#53: a boolean flag never swallows the next token, and at the end of
@@ -2675,9 +2676,71 @@ def test_kubectl_boolean_flags_take_no_value(argv, resource, params):
 
     intents = from_kubectl_multi(shlex.split(argv))
     assert [i.resource for i in intents] == [resource]
-    assert intents[0].params == params
+    if params is not None:
+        assert intents[0].params == params
     if "-n prod" in argv:
         assert intents[0].metadata["namespace"] == "prod"
+
+
+@pytest.mark.parametrize("argv, resources", [
+    ("kubectl delete ns --interactive prod staging", ["namespace/prod", "namespace/staging"]),
+    ("kubectl delete ns prod staging --interactive", ["namespace/prod", "namespace/staging"]),
+])
+def test_kubectl_delete_interactive_is_a_boolean(argv, resources):
+    """Council review of #53: --interactive (kubectl 1.27+) must not swallow
+    the first name."""
+    intents = from_kubectl_multi(argv.split())
+    named = [i.resource for i in intents if "cascade_from" not in i.params]
+    assert named == resources
+
+
+@pytest.mark.parametrize("argv, resources, namespace", [
+    # --resource-version takes "--context" as its value; staging is a name
+    ("kubectl scale deploy web --resource-version --context staging --replicas=0",
+     ["deployment/web", "deployment/staging"], None),
+    # --field-manager takes "-n"; staging is a namespace being labelled
+    ("kubectl label ns prod --field-manager -n staging env=x",
+     ["namespace/prod", "namespace/staging"], None),
+    ("kubectl annotate pods --all --field-manager -n staging a=b", ["pod/staging"], None),
+    ("kubectl delete pod web --grace-period -1 -n prod", ["pod/web"], "prod"),
+])
+def test_kubectl_value_flags_take_the_next_token_even_a_dash_one(argv, resources, namespace):
+    """Council review of #53: as pflag does, a known value flag takes the
+    next token even when it starts with '-', so an option that looks like a
+    scope is not mistaken for one."""
+    intents = from_kubectl_multi(argv.split())
+    assert [i.resource for i in intents] == resources
+    assert all(i.metadata.get("namespace") == namespace for i in intents)
+    assert all("context" not in i.metadata for i in intents)
+
+
+@pytest.mark.parametrize("argv, key, value", [
+    ("kubectl delete pod web --grace-period -1", "grace-period", -1),
+    ("kubectl logs api-0 --tail -1", "tail", -1),
+    ("kubectl logs api-0 --since -5m", "since", "-5m"),
+    ("kubectl logs api-0 -c app", "container", "app"),
+    ("kubectl logs api-0 -capp", "container", "app"),
+    ("kubectl get pods -L app", "label-columns", "app"),
+    ("kubectl patch deploy x -p {}", "patch", "{}"),
+])
+def test_kubectl_value_flag_values_are_kept(argv, key, value):
+    intents = from_kubectl_multi(argv.split())
+    assert len(intents) == 1
+    assert intents[0].params[key] == value
+
+
+@pytest.mark.parametrize("argv", [
+    "kubectl get pods --some-new-switch -n prod",
+    "kubectl delete pod web --some-new-option --context staging",
+    "kubectl delete pod web --some-new-option -A",
+    "kubectl delete pod web --some-new-option --dry-run",
+    "kubectl get pods --some-new-switch --no-headers",
+])
+def test_kubectl_unknown_long_flag_before_another_option_is_refused(argv):
+    """Council review of #53: whether an unknown flag takes the next option
+    as its value decides the namespace/context/target, so it is refused."""
+    with pytest.raises(ValueError, match="cannot tell whether"):
+        from_kubectl_multi(argv.split())
 
 
 @pytest.mark.parametrize("argv", [
@@ -2752,7 +2815,14 @@ def test_kubectl_dash_f_is_still_a_manifest_outside_logs():
     ("git version", "version"),
     ("git help push", "help"),
     ("git push --help", "help"),
-    ("git push -h", "help"),
+    ("git co --help", "help"),  # rewritten to "git help co", which shows the alias
+    ("git -h", "help"),
+    ("kubectl create deployment --help", "help"),
+    ("kubectl create deploy web --help", "help"),
+    ("kubectl create secret generic --help", "help"),
+    ("kubectl create svc nodeport --help", "help"),
+    ("kubectl top pod --help", "help"),
+    ("kubectl config use-context --help", "help"),
     ("aws --version", "version"),
     ("aws help", "help"),
     ("aws s3 help", "help"),
@@ -2819,8 +2889,21 @@ def test_help_and_version_probes_are_informational(argv, kind):
     # flyway runs every command word it is given
     "flyway version clean",
     "flyway help clean",
-    # the vcs tool: only "<cmd> --help" directly
+    # kubectl runs a kubectl-create-<x> plugin for an unknown create subcommand
+    "kubectl create nuke --help",
+    "kubectl create secret nuke --help",
+    "kubectl rollout nuke --help",
+    "kubectl alpha --help",
+    # the vcs tool: only "<cmd> --help" directly; "-h" goes to an alias as
+    # is, and is a real option of grep and ls-remote
     "git push origin main --help",
+    "git push -h",
+    "git co -h",
+    "git grep -h",
+    "git ls-remote -h",
+    # an aws alias (~/.aws/cli/alias) runs its own command
+    "aws nuke help",
+    "aws nuke now help",
     # -h is --host for psql / mysql
     "psql -h db.internal",
     "mysql -h db.internal",

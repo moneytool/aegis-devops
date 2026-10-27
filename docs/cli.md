@@ -302,11 +302,36 @@ aegis check command -- "kubectl get pods | grep x"                  # ALLOW, exi
 aegis check command -- 'kubectl delete $(cat x)'                    # exit 64: command rejected
 ```
 
-A help or version probe of a known binary (`helm --help`, `argocd version --client`,
-`kubectl delete --help`, `aws s3 help`, `psql --version`) produces one read-only intent,
-resource `cli/<tool>`, action `read`, `params.informational` `help` or `version`. Only exact
-forms count: `--help` after another option, after `--`, or after a plugin or alias name is
-parsed as the command it sits in.
+A help or version probe of a known binary produces one read-only intent, resource
+`cli/<tool>`, action `read`, `params.informational` `help` or `version`. Only these forms
+count:
+
+- the tool's help or version flag on its own: `helm --help`, `kubectl --version`, `psql -V`
+  (not `psql -h`, which is `--host`);
+- `<tool> help [topic…]` for kubectl, helm, argocd, flux, git, gh, gcloud and pulumi; a bare
+  `help` for flyway and rails;
+- `<tool> version [options]` for kubectl, helm, argocd, flux, gh and pulumi
+  (`argocd version --client`); a bare `version` for git, az, gcloud, prisma, flyway and rails;
+- `<command words…> --help` (or `-h`) for built-in commands of kubectl, helm, argocd, flux, gh
+  and pulumi, and for any command of az, gcloud and prisma (`kubectl delete --help`,
+  `gcloud compute instances delete --help`). kubectl's subcommands are checked too:
+  `kubectl create nuke --help` would run a `kubectl-create-nuke` plugin;
+- `git <command> --help` and `alembic <command> --help` (one word; `git <command> -h` is
+  passed to an alias as is);
+- `aws help` and `aws <service> [<operation>] help` for common service names.
+
+Anything else is parsed as the command it is: an option before the help flag
+(`kubectl -n --help delete ns prod` deletes namespace `prod`), `--` before it, a plugin,
+extension or unknown subcommand. Some real probes are therefore still refused, for example
+`gcloud version --format json`, `aws --profile x s3 help` and `alembic -c x.ini upgrade --help`.
+The git and aws parsers do not resolve aliases at all: `git co` is read as a git command, and
+an unknown aws service as that service.
+
+kubectl flags: booleans (`--no-headers`, `--watch`, `--interactive`, …) take no value; value
+flags take the next token even when it starts with `-`, as kubectl does. An unknown long flag
+is a boolean at the end of argv and takes a following word as its value. When another option
+follows it, the command is refused (`cannot tell whether '--x' takes a value`): write
+`--x=value` or put the flag last.
 
 Inside a pipeline an unknown binary (`| grep x`) produces nothing; on its own it produces a
 synthetic `shell` / `binary/<name>` / `exec` intent that `--fail-closed` escalates. When that
