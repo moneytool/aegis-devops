@@ -91,7 +91,8 @@ a Python program, a Makefile, or calls a cloud SDK, gets past it. With the examp
 | `K=kubectl; $K delete namespace prod` | blocked: cannot be checked, names an infrastructure tool |
 | `TS=$(date +%s); kubectl get pods`, `C=…; kubectl get ns; find . -exec $C …` | blocked: a part runs a command the hook cannot see, next to an infrastructure tool |
 | `coproc kubectl …`, `kubectl delete \` + newline + `namespace prod`, `watch`/`setsid`/`stdbuf`/`doas`/`ionice`/`caffeinate`/`unbuffer`/`busybox`/`script -c` `kubectl …` | checked like the plain command |
-| another program with a bare `kubectl` among its arguments (`setpriv kubectl …`, `chrt 0 kubectl …`, `tmux new -d 'kubectl …'`) | asks: it may run the tool where its arguments cannot be checked. Not for programs that only take a tool's name (`man`, `command -v`, `find`, `make`, `pkill`, `curl`, linters, package managers, …), nor for URLs, paths, file names and option values |
+| `find … -exec kubectl … \;` (also `-execdir`, `-ok`, `-okdir`, `… {} +`) | checked like the plain command; `{}` is an unknown file, so `kubectl delete -f {}` asks |
+| another program with `kubectl` among its arguments (`setpriv kubectl …`, `setpriv /usr/local/bin/kubectl …`, `proxychains -q kubectl …`, `chrt 0 kubectl …`, `tmux new -d 'kubectl …'`) | asks: it may run the tool where its arguments cannot be checked. Not for programs that only take a tool's name (`man`, `command -v`, `find`, `make`, `pkill`, `curl`, linters, `pip`/`apt-cache` and other package tools, …), unless an option of theirs runs a command that names a tool (`rsync -e`, `scp -o ProxyCommand=`, `nix-shell --run`); nor for URLs, file names such as `kubectl.yaml`, or `-d terraform` when `terraform/` is a directory |
 | `kube{,}ctl …`, `kubec? …`, `/usr/bin/k* …` | blocked: brace/glob in program name (a path pattern that cannot become a tool's name, such as `./scripts/*.sh`, asks) |
 | `python3 -c "subprocess.run(['kubectl','delete','namespace','prod'])"` | blocked: inline code that names an infrastructure tool |
 | `node -e` / `--eval=…`, `python3 -Ic`, `perl -e` / `-lne`, `ruby -e`, `php -r` naming `kubectl` | blocked the same way |
@@ -123,7 +124,8 @@ name an infrastructure tool are checked, each as a command of its own, against t
 policy: comments (whole-line and trailing) are skipped; a backslash at the end of a line joins
 the next line as the shell does, except at the end of a comment, which ends at the newline;
 `<<` counts as a here-doc only outside quotes and comments, and its delimiter is read as one
-shell word (`<<'END DATA'`; one the hook cannot read asks); a here-doc body counts as commands
+shell word (`<<'END DATA'`; one the hook cannot read, such as `<<$'EOF'`, asks and the lines
+after it are checked as commands); a here-doc body counts as commands
 when a shell reads it, directly or through a pipe (`cat <<EOF | sh`), asks when another
 interpreter reads one that names a tool or when an unquoted body's `$(…)` names one, and is
 data otherwise. All checkable lines go to the policy in one run; only when that run is not an

@@ -85,6 +85,7 @@ _PIPE_SEPARATORS = frozenset({"|", "|&"})
 _REDIRECT_OPS = frozenset({">", ">>", "<", ">&", "<&", "&>", "&>>", ">|", "<>"})
 _PUNCTUATION = frozenset("();<>|&")
 _FD_MARK = "\x01"
+_ESCAPE_MARK = "\x02"
 # Reserved words that only group or negate ("{ a; b; }", "! cmd") -- they
 # never change what runs, so they are dropped from the simple command.
 _GROUPING_WORDS = frozenset({"{", "}", "!"})
@@ -139,6 +140,12 @@ def _prescan(command: str) -> str:
         if c == "\\":
             if command.startswith("\n", i + 1):
                 i += 2  # a line continuation: the shell removes both characters
+                continue
+            if not in_double and i + 1 < n and command[i + 1] in _PUNCTUATION:
+                # `\;` is a literal ';' word (find -exec … \;), not a separator:
+                # quoted and marked so shlex keeps it a word that never equals ';'
+                out.append(f"'{_ESCAPE_MARK}{command[i + 1]}'")
+                i += 2
                 continue
             out.append(command[i : i + 2])
             i += 2
@@ -242,7 +249,7 @@ def split_compound(command: str) -> list[SimpleCommand]:
 
     for tok in _tokens(command):
         if pending_op is not None:
-            redirects.append(f"{pending_fd or ''}{pending_op}{tok}")
+            redirects.append(f"{pending_fd or ''}{pending_op}{tok.replace(_ESCAPE_MARK, '')}")
             pending_op = pending_fd = None
             continue
         if tok.startswith(_FD_MARK):
@@ -260,7 +267,7 @@ def split_compound(command: str) -> list[SimpleCommand]:
             continue
         if set(tok) <= _PUNCTUATION:
             raise ShellRejected(f"unsupported shell operator {tok!r}", command)
-        argv.append(tok)
+        argv.append(tok.replace(_ESCAPE_MARK, ""))
     flush(in_pipeline)
     return commands
 
@@ -482,8 +489,8 @@ def find_heredoc(line: str) -> tuple[int, int, bool, str, bool] | None:
     comments, ``<<`` but not ``<<<`` -- as ``(start, end, dash, tag,
     quoted)``: ``dash`` for ``<<-``, ``quoted`` when the tag is quoted (the
     body is then not expanded), ``tag`` the delimiter word with its quoting
-    removed, ``""`` when the word cannot be read (an unclosed quote, nothing
-    after ``<<``). ``None`` when there is none."""
+    removed, ``""`` when the word cannot be read (an unclosed quote, ``$'…'``
+    or ``$"…"`` quoting, nothing after ``<<``). ``None`` when there is none."""
     in_single = in_double = False
     i, n = 0, len(line)
     while i < n:
@@ -525,6 +532,8 @@ def find_heredoc(line: str) -> tuple[int, int, bool, str, bool] | None:
                         tag.append(line[k])
                     else:
                         tag.append(ch)
+                elif ch == "$" and k + 1 < n and line[k + 1] in "'\"":
+                    return (i, n, dash, "", True)  # $'…' / $"…": not decoded, so unknown
                 elif ch in "'\"":
                     quote, quoted = ch, True
                 elif ch == "\\":
@@ -1221,6 +1230,32 @@ _ENV_METADATA_KEYS = {
 }
 
 
+_FIND_EXEC_FLAGS = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
+
+
+def find_exec_commands(argv: list[str]) -> list[list[str]]:
+    """The commands ``find`` runs for each file: the words after ``-exec``,
+    ``-execdir``, ``-ok`` or ``-okdir`` up to ``;`` or ``+`` (``{}``, the file,
+    stays a literal argument). ``[]`` for anything but ``find``."""
+    if not argv or _basename(argv[0]) != "find":
+        return []
+    found: list[list[str]] = []
+    i = 1
+    while i < len(argv):
+        if argv[i] in _FIND_EXEC_FLAGS:
+            j = i + 1
+            while j < len(argv) and argv[j] not in (";", "+"):
+                j += 1
+            if j == len(argv):
+                raise ShellRejected(f"find {argv[i]} without ';' or '+'")
+            if j == i + 1:
+                raise ShellRejected(f"find {argv[i]} without a command")
+            found.append(argv[i + 1 : j])
+            i = j
+        i += 1
+    return found
+
+
 def _expand(
     command: str, depth: int
 ) -> Iterator[tuple[SimpleCommand, dict[str, str], list[str]]]:
@@ -1229,6 +1264,11 @@ def _expand(
         if string is None:
             yield (SimpleCommand(argv, simple.redirects, simple.in_pipeline, simple.stdin_pipe),
                    env, wrappers)
+            for inner_argv in find_exec_commands(argv):
+                for inner, inner_env, inner_wrappers in _expand(shlex.join(inner_argv),
+                                                                depth + 1):
+                    yield (SimpleCommand(inner.argv, inner.redirects),
+                           {**env, **inner_env}, [*wrappers, "find -exec", *inner_wrappers])
             continue
         for inner, inner_env, inner_wrappers in _expand(string, depth + 1):
             yield (

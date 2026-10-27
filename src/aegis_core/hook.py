@@ -387,7 +387,8 @@ _NAMES_WITHOUT_RUNNING = frozenset({
     "bat", "touch", "mkdir", "cd", "pushd", "popd", "ls", "rm", "cp", "mv", "ln", "tee",
     "sort", "read", "install", "uninstall", "make", "pgrep", "pkill", "killall", "kill",
     "lsof", "strings", "tflint", "checkov", "tfsec", "trivy", "curl", "wget", "aria2c",
-    "scp", "rsync", "git",
+    "scp", "rsync", "git", "apt-cache", "dpkg", "rpm", "pip", "pip3", "pipx", "uv", "cargo",
+    "go", "gem",
 })
 
 
@@ -424,15 +425,26 @@ def _hidden_infra_program(intent, cwd: Path | None) -> HookVerdict | None:
     arguments (``setpriv kubectl …``, ``chrt 0 kubectl …``, ``tmux new -d
     'kubectl …'``: a launcher the parser does not unwrap) may run that tool
     where its argv cannot be checked: asked. Not for programs that only take
-    a tool's name (:data:`_NAMES_WITHOUT_RUNNING`, ``command -v``), nor for
-    arguments that are URLs, paths or option values."""
+    a tool's name (:data:`_NAMES_WITHOUT_RUNNING`, ``command -v``) -- except
+    for the options with which they run a command (``rsync -e``, ``scp -o
+    ProxyCommand=``, ``nix-shell --run``) -- nor for URLs or a ``-d dir``
+    option value naming an existing directory. A path to a tool
+    (``/usr/local/bin/kubectl``, ``./kubectl``) counts as the tool."""
     if intent.provider != "shell":
         return None
     argv = intent.params.get("argv") or []
     if not argv:
         return None
     name = _basename(argv[0])
-    if name in ARGS_ONLY_PROGRAMS or name in _NAMES_WITHOUT_RUNNING or name in INFRA_BINARIES:
+    if name in ARGS_ONLY_PROGRAMS or name in INFRA_BINARIES:
+        return None
+    if name in _NAMES_WITHOUT_RUNNING:
+        # only the options that hand it a command to run are read
+        for option, value in _exec_option_values(name, argv[1:]):
+            if mentions_infra(value):
+                return HookVerdict(
+                    "ask", f"aegis: {name} {option} runs a command that names an "
+                    "infrastructure tool, which cannot be checked through it; run it on its own")
         return None
     after_option = False
     for tok in argv[1:]:
@@ -442,18 +454,43 @@ def _hidden_infra_program(intent, cwd: Path | None) -> HookVerdict | None:
             continue
         value, after_option = after_option, False
         words = tok.split()
-        if not words:
+        if not words or "://" in tok:
             continue
-        if len(words) == 1:  # one word: skip URLs, paths, file names, option values
-            if value or any(ch in tok for ch in "/.:") or (
-                    cwd is not None and (cwd / tok).exists()):
-                continue
-        tool = words[0]
-        if tool in INFRA_BINARIES:
-            return HookVerdict(
-                "ask", f"aegis: {name} may run {tool}, whose arguments cannot be checked "
-                f"through {name}; run {tool} on its own")
+        tool = _basename(words[0])  # /usr/local/bin/kubectl, ./kubectl: still kubectl
+        if tool not in INFRA_BINARIES:
+            continue
+        if len(words) == 1 and value and "/" not in tok and cwd is not None and (
+                cwd / tok).is_dir():
+            continue  # `-d terraform` with a terraform/ directory: an option value
+        return HookVerdict(
+            "ask", f"aegis: {name} may run {tool}, whose arguments cannot be checked "
+            f"through {name}; run {tool} on its own")
     return None
+
+
+# Options of exempt programs whose value is a command they run.
+_EXEC_OPTIONS = {
+    "rsync": ("-e", "--rsh"),
+    "scp": ("-o", "-S"),
+    "nix-shell": ("--run", "--command"),
+}
+
+
+def _exec_option_values(name: str, args: list[str]) -> list[tuple[str, str]]:
+    """``(option, value)`` for the options of ``name`` that take a command:
+    ``rsync -e CMD`` / ``--rsh=CMD``, ``scp -o ProxyCommand=CMD`` / ``-S CMD``,
+    ``nix-shell --run CMD`` / ``--command CMD``."""
+    options = _EXEC_OPTIONS.get(name, ())
+    found: list[tuple[str, str]] = []
+    for i, tok in enumerate(args):
+        key, eq, glued = tok.partition("=")
+        if key in options and key.startswith("--") and eq:
+            found.append((key, glued))
+        elif tok in options and i + 1 < len(args):
+            found.append((tok, args[i + 1]))
+        elif len(tok) > 2 and tok[:2] in options and not tok.startswith("--"):
+            found.append((tok[:2], tok[2:]))  # -oProxyCommand=…
+    return found
 
 
 def _scripts_with_directory(command: str, cwd: Path | None) -> list[tuple[dict, Path | None]]:

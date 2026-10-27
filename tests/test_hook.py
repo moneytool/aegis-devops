@@ -1354,6 +1354,15 @@ def test_launchers_are_unwrapped(opted_in_project, command):
     ("flock /tmp/l kubectl delete ns prod", "flock"),
     ("perf stat kubectl delete ns prod", "perf"),
     ("tmux new-session -d 'kubectl delete ns prod'", "tmux"),
+    # round 4: an option does not hide a tool name after it
+    ("proxychains -q kubectl delete node n1", "proxychains"),
+    ("systemd-run --user kubectl delete node n1", "systemd-run"),
+    ("firejail --quiet kubectl delete node n1", "firejail"),
+    ("valgrind -q kubectl delete node n1", "valgrind"),
+    ("frobnicate --tool kubectl", "frobnicate"),
+    # round 4: a path to the tool is the tool
+    ("setpriv /usr/local/bin/kubectl delete node n1", "setpriv"),
+    ("setpriv ./kubectl delete node n1", "setpriv"),
 ])
 def test_an_unknown_launcher_of_an_infra_tool_asks(opted_in_project, command, name):
     code, out, err = run("claude", payload_for("claude", command))
@@ -1370,7 +1379,12 @@ def test_an_unknown_launcher_of_an_infra_tool_asks(opted_in_project, command, na
     "pgrep -f kubectl", "lsof -c kubectl", "strings kubectl", "nix-shell -p kubectl",
     "curl -LO https://dl.k8s.io/release/v1.31.0/bin/linux/amd64/kubectl",
     "curl -Lo kubectl https://example.com/kubectl", "wget https://x/kubectl",
-    "frobnicate --tool kubectl", "frobnicate ./kubectl",
+    "frobnicate kubectl.yaml", "frobnicate https://x/kubectl",
+    # round 4: package tools
+    "apt-cache policy kubectl", "pip install kubectl", "pipx install kubectl",
+    "cargo install kubectl", "go install kubectl", "dpkg -L kubectl", "rpm -q kubectl",
+    # round 4: find without -exec, and rsync/scp without a command option
+    "find . -name kubectl -print", "rsync -av kubectl/ backup/", "scp kubectl host:/tmp/",
 ])
 def test_naming_an_infra_tool_without_running_it_is_allowed(opted_in_project, command):
     code, out, err = run("claude", payload_for("claude", command))
@@ -1412,6 +1426,59 @@ def test_reading_the_script_elsewhere_in_the_command_is_fine(opted_in_project, c
     (opted_in_project / "x.sh").write_text("echo hi\n")
     code, out, err = run("claude", payload_for("claude", command))
     assert (code, out) == (0, ""), out
+
+
+def test_a_tool_name_that_is_also_a_file_still_asks(opted_in_project):
+    (opted_in_project / "kubectl").write_text("not the binary\n")          # round 4, item 4
+    code, out, err = run("claude", payload_for("claude", "setpriv kubectl delete node n1"))
+    assert "setpriv may run kubectl" in _ask_reason(out)
+
+
+def test_an_option_value_naming_an_existing_directory_is_fine(opted_in_project):
+    (opted_in_project / "terraform").mkdir()                               # round 4, item 3
+    code, out, err = run("claude", payload_for("claude", "frobnicate -d terraform"))
+    assert (code, out) == (0, "")
+
+
+@pytest.mark.parametrize("command,option", [                              # round 4, item 5
+    ("rsync -e 'kubectl exec -i pod --' a b:/", "-e"),
+    ("rsync --rsh='kubectl exec -i pod --' a b:/", "--rsh"),
+    ("scp -o ProxyCommand='kubectl delete node n1' a b:/", "-o"),
+    ("scp -oProxyCommand='kubectl delete node n1' a b:/", "-o"),
+    ("nix-shell -p kubectl --run 'kubectl delete node n1'", "--run"),
+    ("nix-shell -p kubectl --command 'kubectl delete node n1'", "--command"),
+])
+def test_exec_options_of_exempt_programs_ask(opted_in_project, command, option):
+    code, out, err = run("claude", payload_for("claude", command))
+    assert f" {option} runs a command that names an infrastructure tool" in _ask_reason(out)
+
+
+@pytest.mark.parametrize("command", [                                     # round 4, item 2
+    "find . -exec kubectl delete nodes --all \\;",
+    "find . -execdir kubectl delete nodes --all \\;",
+    "find . -ok kubectl delete nodes --all \\;",
+    "find . -name x -exec kubectl delete nodes --all +",
+    "sudo find . -exec kubectl delete nodes --all \\;",
+])
+def test_find_exec_commands_are_checked(opted_in_project, command):
+    code, out, err = run("claude", payload_for("claude", command))
+    assert code == 2
+    assert BLOCK_REASON_SNIPPET in err
+
+
+def test_find_exec_with_the_file_as_argument_is_checked(opted_in_project):
+    command = "find manifests -name '*.yaml' -exec kubectl delete -f {} \\;"
+    code, out, err = run("claude", payload_for("claude", command))
+    assert code != 0 or json.loads(out)["hookSpecificOutput"]["permissionDecision"] == "ask"
+
+
+@pytest.mark.parametrize("delimiter", ["$'EOF'", '$"EOF"'])               # round 4, item 1
+def test_an_ansi_c_quoted_here_doc_delimiter_is_not_trusted(opted_in_project, delimiter):
+    body = f"cat <<{delimiter}\nhello\nEOF\n{BLOCK_COMMAND}\n"
+    (opted_in_project / "x.sh").write_text(body)
+    code, out, err = run("claude", payload_for("claude", "bash x.sh"))
+    assert code == 2
+    assert BLOCK_REASON_SNIPPET in err
 
 
 @pytest.mark.parametrize("command", ["./scripts/*.sh", "./scripts/build-{a,b}.sh"])

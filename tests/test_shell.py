@@ -639,6 +639,35 @@ def test_coproc_and_line_continuations(command, argvs):
     assert _argvs(command) == argvs
 
 
+@pytest.mark.parametrize("command,argvs", [
+    ("find . -name x -exec rm {} \\; -print",                 # round 4: \; is a word
+     [["find", ".", "-name", "x", "-exec", "rm", "{}", ";", "-print"]]),
+    ("echo a\\;b \\| c", [["echo", "a;b", "|", "c"]]),
+    ("echo a; ls", [["echo", "a"], ["ls"]]),
+])
+def test_escaped_punctuation_is_a_literal_word(command, argvs):
+    assert _argvs(command) == argvs
+
+
+@pytest.mark.parametrize("command,inner", [
+    ("find . -exec kubectl delete node/w1 \\;", [("node/w1", "delete")]),
+    ("find . -execdir kubectl delete node/w1 +", [("node/w1", "delete")]),
+    ("find m -name '*.yaml' -ok kubectl get pods \\; -print", [("pod/*", "get")]),
+])
+def test_find_exec_commands_become_intents(command, inner):
+    intents = intents_from_command(command)
+    assert intents[0].resource == "binary/find"
+    assert [(i.resource, i.action) for i in intents[1:]] == inner
+    assert "find -exec" in intents[1].metadata["wrappers"]
+
+
+@pytest.mark.parametrize("command", ["find . -exec kubectl get pods",
+                                     "find . -exec \\;"])
+def test_find_exec_without_terminator_or_command_is_rejected(command):
+    with pytest.raises(ShellRejected, match="find -exec"):
+        intents_from_command(command)
+
+
 def test_function_keyword_definition_is_rejected():
     with pytest.raises(ShellRejected, match="function definition"):
         split_compound("function f { kubectl delete node/w1; }; f")
@@ -780,6 +809,8 @@ def test_a_brace_or_glob_program_is_rejected(program):
     ("cat <<'END DATA'", (4, 16, False, "END DATA", True)),   # round 3: one shell word
     ('cat <<E"N D"\\ X | sh', (4, 15, False, "EN D X", True)),
     ("cat <<'END", (4, 10, False, "", True)),                 # unclosed: cannot tell
+    ("cat <<$'EOF'", (4, 12, False, "", True)),               # round 4: $'…' not decoded
+    ('cat <<$"EOF"', (4, 12, False, "", True)),
 ])
 def test_find_heredoc_only_sees_real_operators(line, found):
     from aegis_core.shell import find_heredoc
