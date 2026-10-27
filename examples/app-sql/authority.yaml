@@ -1,0 +1,3 @@
+# Which principal may assert which class of constraint.
+principals:
+  app_owner: [configuration]

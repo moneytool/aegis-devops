@@ -8,6 +8,13 @@ behaviour.
 
 ## [Unreleased]
 
+### Added
+- Guide (experimental): [check the SQL an LLM writes before your app runs it](docs/guides/app-sql.md),
+  with `examples/app_sql_gate.py` and a signed-rule template in `examples/app-sql/`. Aegis
+  enforces "reads only" on generated SQL; the guide is explicit that a read's tables, columns and
+  cost are the database role's job (the SQL classifier sees only a SELECT's first table, and
+  treats `SELECT … INTO` and `SET ROLE` as reads). Every Aegis result in its table is a test.
+
 ## [1.2.1] — 2026-10-24
 
 A coverage-report fix for `aegis compile kubernetes`.

@@ -1,0 +1,16 @@
+# Policy for an app that runs AI-generated SQL (docs/guides/app-sql.md).
+# Sign both files before use: aegis sign --key file:aegis-signing.key constraints.yaml authority.yaml
+constraints:
+- id: search-sql-read-only
+  provider: sql
+  resource_pattern: "*"
+  actions: [create, delete, put, update]
+  scope: {}
+  time_window: null
+  effect: BLOCK
+  constraint_class: configuration
+  principal: app_owner
+  source_ref: search-readonly-v1
+  source_timestamp: "2026-10-27T00:00:00+00:00"
+  rule_text: "Storefront search may only run reads: block every SQL statement that writes, changes the schema or permissions, or cannot be classified."
+  provenance_hash: 9a715281b558241c101b4684599bcf6df0a9a655dee0e57671b6d52abfa1693f
