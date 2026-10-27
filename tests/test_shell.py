@@ -777,6 +777,9 @@ def test_a_brace_or_glob_program_is_rejected(program):
     ('echo "<<EOF"', None),
     ("echo hi # <<EOF", None),
     ("cat <<< word", None),
+    ("cat <<'END DATA'", (4, 16, False, "END DATA", True)),   # round 3: one shell word
+    ('cat <<E"N D"\\ X | sh', (4, 15, False, "EN D X", True)),
+    ("cat <<'END", (4, 10, False, "", True)),                 # unclosed: cannot tell
 ])
 def test_find_heredoc_only_sees_real_operators(line, found):
     from aegis_core.shell import find_heredoc

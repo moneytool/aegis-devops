@@ -43,10 +43,14 @@ behaviour.
 - Shell parser: the launchers `watch` (its arguments run through `sh -c` unless `-x`),
   `setsid`, `stdbuf`, `doas`, `ionice`, `caffeinate`, `unbuffer`, `chronic`, `busybox` and
   `script -c` are unwrapped like `sudo` and `nohup`. A program word the shell could expand into
-  another name (`kube{,}ctl`, `kubec?`, `kube[c]tl`) is rejected ("brace/glob in program name")
-  and the hook refuses it whatever it names. The hook also refuses an unknown program whose
-  first argument is an infrastructure tool (`setpriv kubectl …`), except documentation, search
-  and package tools (`man`, `which`, `rg`, `brew`, …).
+  another name (`kube{,}ctl`, `kubec?`, `kube[c]tl`) is rejected ("brace/glob in program name");
+  the hook refuses it when it is a bare word or could become a tool's name, and asks for a path
+  pattern such as `./scripts/*.sh`. The hook asks (it does not refuse) when an unknown program
+  has a bare infrastructure tool name among its arguments (`setpriv kubectl …`, `chrt 0
+  kubectl …`, `tmux new -d 'kubectl …'`), except programs that only take a tool's name (`man`,
+  `command -v`, `hash`, `find`, `tree`, `make`, `pkill`, `lsof`, `curl`, `wget`, `tflint`,
+  `checkov`, package managers, …) and arguments that are URLs, paths, file names or option
+  values.
 - Agent hook: "names an infrastructure tool" also matches once quotes, backslashes and line
   continuations are removed (`kube''ctl`, `"kube"ctl`).
 - Agent hook: a local shell script is read before it runs (#56). For `bash x.sh`, `sh < x.sh`,
@@ -57,10 +61,12 @@ behaviour.
   checked asks (the line is found by bisection on the verdict, so a BLOCK is not blamed on an
   earlier ESCALATE line). A backslash at the end of a line joins the next as the shell does,
   except at the end of a comment; comments are skipped; `<<` is a here-doc only outside quotes
-  and comments, and its body is checked when a shell reads it (also through `cat <<EOF | sh`),
-  asks when another interpreter reads one that names a tool or an unquoted body's `$(…)` names
-  one, and is data otherwise. A script that does not exist yet, is written, copied, moved,
-  linked, edited or otherwise named by the same command (`printf … > x.sh; bash x.sh`), cannot
+  and comments, its delimiter is read as one shell word (`<<'END DATA'`; an unreadable one
+  asks), and its body is checked when a shell reads it (also through `cat <<EOF | sh`), asks
+  when another interpreter reads one that names a tool or an unquoted body's `$(…)` names one,
+  and is data otherwise. A script that does not exist yet, is written, copied, moved, linked,
+  edited or otherwise named by the same command (`printf … > x.sh; bash x.sh`, also spelled
+  `"$PWD/x.sh"` or `"$(pwd)/x.sh"`; reading it with `cat`, `grep`, `wc`, … does not count), cannot
   be read, is not a regular file, holds a NUL byte (when a shell is named; a `./x` without `#!`
   and with a NUL is a binary and not read), is over 64 KiB, names a tool on more than 64 lines,
   or follows a `cd` the hook cannot follow (computed, in the background or a pipeline, `env

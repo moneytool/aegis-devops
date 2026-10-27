@@ -1347,17 +1347,77 @@ def test_launchers_are_unwrapped(opted_in_project, command):
     assert "block-namespace-delete" in err
 
 
-def test_an_unknown_launcher_of_an_infra_tool_is_denied(opted_in_project):
-    code, out, err = run("claude", payload_for("claude", "setpriv kubectl delete ns prod"))
-    assert code == 2
-    assert "setpriv runs kubectl" in err
+@pytest.mark.parametrize("command,name", [
+    ("setpriv kubectl delete ns prod", "setpriv"),
+    ("chrt 0 kubectl delete ns prod", "chrt"),          # round 3: a value comes first
+    ("taskset 1 kubectl delete ns prod", "taskset"),
+    ("flock /tmp/l kubectl delete ns prod", "flock"),
+    ("perf stat kubectl delete ns prod", "perf"),
+    ("tmux new-session -d 'kubectl delete ns prod'", "tmux"),
+])
+def test_an_unknown_launcher_of_an_infra_tool_asks(opted_in_project, command, name):
+    code, out, err = run("claude", payload_for("claude", command))
+    assert f"{name} may run kubectl" in _ask_reason(out)
 
 
-@pytest.mark.parametrize("command", ["man kubectl", "rg kubectl", "brew install kubectl",
-                                     "grep -r kubectl .", "which terraform"])
+@pytest.mark.parametrize("command", [
+    "man kubectl", "rg kubectl", "brew install kubectl", "grep -r kubectl .", "which terraform",
+    # round 3: name lookups, file and process tools, linters, downloads
+    'find terraform -name "*.tf"', "tree terraform", "pushd terraform", "make terraform",
+    "tflint terraform", "checkov -d terraform", "command -v kubectl",
+    "command -v kubectl >/dev/null && kubectl get pods", "command -V terraform",
+    "hash kubectl", "whatis kubectl", "pkill kubectl", "killall terraform",
+    "pgrep -f kubectl", "lsof -c kubectl", "strings kubectl", "nix-shell -p kubectl",
+    "curl -LO https://dl.k8s.io/release/v1.31.0/bin/linux/amd64/kubectl",
+    "curl -Lo kubectl https://example.com/kubectl", "wget https://x/kubectl",
+    "frobnicate --tool kubectl", "frobnicate ./kubectl",
+])
 def test_naming_an_infra_tool_without_running_it_is_allowed(opted_in_project, command):
     code, out, err = run("claude", payload_for("claude", command))
-    assert (code, out) == (0, "")
+    assert (code, out) == (0, ""), (out, err)
+
+
+def test_a_here_doc_delimiter_with_quoted_whitespace(opted_in_project):
+    # round 3: the delimiter is the whole word 'END DATA', not END
+    body = f"cat <<'END DATA'\nhello\nEND\nEND DATA\n{BLOCK_COMMAND}\n"
+    (opted_in_project / "x.sh").write_text(body)
+    code, out, err = run("claude", payload_for("claude", "bash x.sh"))
+    assert code == 2
+    assert "x.sh line 5" in err
+
+
+def test_a_here_doc_delimiter_that_cannot_be_read_asks(opted_in_project):
+    (opted_in_project / "x.sh").write_text("cat <<'END\nkubectl get pods\n")
+    code, out, err = run("claude", payload_for("claude", "bash x.sh"))
+    assert "cannot tell where the here-document ends" in _ask_reason(out)
+
+
+@pytest.mark.parametrize("command", [
+    # round 3: computed spellings of the same path
+    'printf "x\\n" > "$PWD/scripts/overwrite.sh"; bash scripts/overwrite.sh',
+    'cp a "$(pwd)/scripts/overwrite.sh"; bash scripts/overwrite.sh',
+    "cp a $(pwd)/scripts/overwrite.sh; bash scripts/overwrite.sh",
+    "cat a > scripts/overwrite.sh; bash scripts/overwrite.sh",  # a reader's redirect counts
+])
+def test_a_script_written_under_a_computed_name_asks(opted_in_project, command):
+    (opted_in_project / "scripts").mkdir()
+    (opted_in_project / "scripts" / "overwrite.sh").write_text("echo hi\n")
+    code, out, err = run("claude", payload_for("claude", command))
+    assert "is written by this command" in _ask_reason(out)
+
+
+@pytest.mark.parametrize("command", ["bash x.sh; cat x.sh", "grep -n kube x.sh && bash x.sh",
+                                     "wc -l x.sh; bash x.sh"])
+def test_reading_the_script_elsewhere_in_the_command_is_fine(opted_in_project, command):
+    (opted_in_project / "x.sh").write_text("echo hi\n")
+    code, out, err = run("claude", payload_for("claude", command))
+    assert (code, out) == (0, ""), out
+
+
+@pytest.mark.parametrize("command", ["./scripts/*.sh", "./scripts/build-{a,b}.sh"])
+def test_a_path_glob_program_without_infra_asks(opted_in_project, command):
+    code, out, err = run("claude", payload_for("claude", command))     # round 3, item 6
+    assert "brace/glob in program name" in _ask_reason(out)
 
 
 @pytest.mark.parametrize("command", [                                     # item 11

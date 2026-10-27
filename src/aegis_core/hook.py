@@ -57,6 +57,7 @@ is a deny.
 from __future__ import annotations
 
 import contextlib
+import fnmatch
 import importlib.resources
 import io
 import json
@@ -319,7 +320,7 @@ def _precheck(command: str, config_dir: Path, extra_args: list[str] | None,
         intents = intents_from_command(command)
     except ShellRejected as exc:
         if exc.reason == GLOB_REASON:
-            return _glob_denied(command)
+            return _glob_denied(command, exc.command or "")
         if rebuilt:  # cannot happen: every part of a rebuilt command parsed on its own
             return _rejected(command, exc.reason, config_dir, extra_args, cwd,
                              scan=scan, escalate_scripts=escalate_scripts)
@@ -354,9 +355,9 @@ def _precheck(command: str, config_dir: Path, extra_args: list[str] | None,
                 return verdict
             asks.append(verdict.reason)
     for intent in intents:
-        verdict = _hidden_infra_program(intent)
+        verdict = _hidden_infra_program(intent, cwd)
         if verdict is not None:
-            return verdict
+            asks.append(verdict.reason)
     if scan:
         for runs, here in _scripts_with_directory(command, cwd):
             verdict = _scan_script(runs, config_dir, extra_args, here, command=command)
@@ -367,28 +368,64 @@ def _precheck(command: str, config_dir: Path, extra_args: list[str] | None,
     return command, asks
 
 
-# Programs whose first argument may be an infrastructure tool's name without
-# running it (documentation, package managers, search and editors).
+# Programs that take an infrastructure tool's *name* as an argument without
+# running it: documentation and name lookups, package managers and downloaders,
+# search, editors, process tools, linters, build tools, and file tools.
+#
+# This list answers a different question from shell.ARGS_ONLY_PROGRAMS, so do
+# not merge the two. ARGS_ONLY_PROGRAMS is "an unknown ($X) argument cannot
+# make this program run code or change what a later infra tool sees", which is
+# why sort (--compress-program), tee/cp/mv/ln (can overwrite ~/.kube/config)
+# and read (assigns KUBECONFIG) are left off it. Here the arguments are
+# literal and the only question is "does `prog kubectl` run kubectl?" -- for
+# sort, tee, cp, mv, ln and read it does not, so they belong here.
 _NAMES_WITHOUT_RUNNING = frozenset({
-    "man", "info", "which", "whereis", "type", "tldr", "help", "apropos", "brew", "apt",
-    "apt-get", "yum", "dnf", "apk", "pacman", "port", "snap", "choco", "winget", "scoop",
-    "asdf", "mise", "rg", "ag", "ack", "fd", "locate", "less", "more", "vim", "vi", "nano",
-    "code", "open", "bat", "touch", "mkdir", "cd", "ls", "rm", "cp", "mv", "ln", "tee",
-    "sort", "read", "install", "uninstall",
+    "man", "info", "which", "whereis", "whatis", "type", "hash", "command", "tldr", "help",
+    "apropos", "brew", "apt", "apt-get", "yum", "dnf", "apk", "pacman", "port", "snap",
+    "choco", "winget", "scoop", "asdf", "mise", "nix-shell", "nix-env", "rg", "ag", "ack",
+    "fd", "find", "locate", "tree", "less", "more", "vim", "vi", "nano", "code", "open",
+    "bat", "touch", "mkdir", "cd", "pushd", "popd", "ls", "rm", "cp", "mv", "ln", "tee",
+    "sort", "read", "install", "uninstall", "make", "pgrep", "pkill", "killall", "kill",
+    "lsof", "strings", "tflint", "checkov", "tfsec", "trivy", "curl", "wget", "aria2c",
+    "scp", "rsync", "git",
 })
 
 
-def _glob_denied(command: str) -> HookVerdict:
-    return HookVerdict(
-        "deny", f"aegis: cannot check this command statically ({GLOB_REASON}): the shell "
-        "may expand the program word into another program's name; spell the program out",
-        unchecked=True)
+def _glob_denied(command: str, word: str) -> HookVerdict:
+    """A program word the shell may expand (``kube{,}ctl``, ``k*``,
+    ``./scripts/*.sh``). Denied when it could expand to an infrastructure
+    tool's name, when it is a bare word (expanded against whatever files the
+    directory holds), or when the command names a tool; otherwise (a path
+    pattern such as ``./scripts/*.sh``) asked."""
+    reason = (f"aegis: cannot check this command statically ({GLOB_REASON}): the shell may "
+              "expand the program word into another program's name; spell the program out")
+    pattern = word.rsplit("/", 1)[-1]
+    could_be_infra = any(fnmatch.fnmatchcase(name, alternative)
+                         for alternative in _brace_alternatives(pattern)
+                         for name in INFRA_BINARIES)
+    if could_be_infra or "/" not in word or mentions_infra(command):
+        return HookVerdict("deny", reason, unchecked=True)
+    return HookVerdict("ask", reason)
 
 
-def _hidden_infra_program(intent) -> HookVerdict | None:
-    """An unknown program whose first argument is an infrastructure tool
-    (``setpriv kubectl …``, a launcher the parser does not unwrap): the tool
-    runs, but its argv cannot be checked through the launcher."""
+def _brace_alternatives(pattern: str) -> list[str]:
+    """``a{b,c}d`` -> ``["abd", "acd"]`` (one level per brace pair, enough to
+    tell whether a program word could become a tool's name)."""
+    match = re.search(r"\{([^{}]*)\}", pattern)
+    if match is None:
+        return [pattern]
+    head, tail = pattern[: match.start()], pattern[match.end():]
+    return [alt for part in match.group(1).split(",")
+            for alt in _brace_alternatives(head + part + tail)]
+
+
+def _hidden_infra_program(intent, cwd: Path | None) -> HookVerdict | None:
+    """An unknown program with an infrastructure tool's name among its
+    arguments (``setpriv kubectl …``, ``chrt 0 kubectl …``, ``tmux new -d
+    'kubectl …'``: a launcher the parser does not unwrap) may run that tool
+    where its argv cannot be checked: asked. Not for programs that only take
+    a tool's name (:data:`_NAMES_WITHOUT_RUNNING`, ``command -v``), nor for
+    arguments that are URLs, paths or option values."""
     if intent.provider != "shell":
         return None
     argv = intent.params.get("argv") or []
@@ -397,15 +434,25 @@ def _hidden_infra_program(intent) -> HookVerdict | None:
     name = _basename(argv[0])
     if name in ARGS_ONLY_PROGRAMS or name in _NAMES_WITHOUT_RUNNING or name in INFRA_BINARIES:
         return None
+    after_option = False
     for tok in argv[1:]:
         if tok.startswith("-"):
+            # a short option or a long one without "=" may take the next word
+            after_option = "=" not in tok
             continue
+        value, after_option = after_option, False
         words = tok.split()
-        if words and _basename(words[0]) in INFRA_BINARIES:
+        if not words:
+            continue
+        if len(words) == 1:  # one word: skip URLs, paths, file names, option values
+            if value or any(ch in tok for ch in "/.:") or (
+                    cwd is not None and (cwd / tok).exists()):
+                continue
+        tool = words[0]
+        if tool in INFRA_BINARIES:
             return HookVerdict(
-                "deny", f"aegis: {name} runs {_basename(words[0])}, which cannot be checked "
-                "through it; run the infrastructure command on its own", unchecked=True)
-        return None
+                "ask", f"aegis: {name} may run {tool}, whose arguments cannot be checked "
+                f"through {name}; run {tool} on its own")
     return None
 
 
@@ -593,7 +640,7 @@ def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
         except ShellRejected as seg_exc:
             reason = seg_exc.reason
             if reason == GLOB_REASON:
-                return _glob_denied(command)
+                return _glob_denied(command, seg_exc.command or "")
         except ValueError:  # a parser error: kept, so the full check reports it
             kept.append((text, sep))
             continue
@@ -696,6 +743,10 @@ def _script_lines(text: str) -> list[tuple[int, str, str | None]]:
             out.append((number, strip_comment(line), None))
             continue
         begin, end, dash, tag, quoted = heredoc
+        if not tag:  # the delimiter word cannot be read: ask, and check what follows
+            out.append((number, line, "cannot tell where the here-document ends, so the "
+                                      "lines after it were not checked as data or commands"))
+            continue
         body: list[tuple[int, str]] = []
         while i < len(joined):
             n, body_line = joined[i]
@@ -725,8 +776,12 @@ def _written_by_command(file: Path, command: str, cwd: Path | None) -> bool:
     """True when ``file`` is named more than once in ``command``: besides the
     run itself, as a redirection target or an argument of another command
     (``printf … > x.sh; bash x.sh``, ``cp a x.sh; bash x.sh``, ``chmod +x
-    nuke; ./nuke``), so what runs may not be what is on disk now."""
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    nuke; ./nuke``), so what runs may not be what is on disk now. A spelling
+    the hook cannot resolve (``"$PWD/x.sh"``, ``"$(pwd)/x.sh"``) counts when
+    its last component is the file's name. Arguments of programs that only
+    read files (``cat x.sh``, ``grep … x.sh``) do not count; redirection
+    targets always do."""
+    lexer = shlex.shlex(command.replace("\n", " ; "), posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
     try:
         tokens = list(lexer)
@@ -737,9 +792,26 @@ def _written_by_command(file: Path, command: str, cwd: Path | None) -> bool:
         resolved = file.resolve() if file.exists() else None
     except OSError:
         resolved = None
+    computed = any(ch in command for ch in "$`")
     count = 0
+    program: str | None = None  # the current simple command's program
+    redirect = False
     for token in tokens:
-        if not token or set(token) <= set("();<>|&"):
+        if not token:
+            continue
+        if set(token) <= set("();|&"):
+            program, redirect = None, False
+            continue
+        if set(token) <= set("<>&|"):
+            redirect = ">" in token
+            continue
+        was_redirect, redirect = redirect, False
+        if program is None and not _ASSIGNMENT_WORD.match(token):
+            program = _basename(token)
+        elif not was_redirect and program in _FILE_READERS:
+            continue
+        if any(ch in token for ch in "$`"):
+            count += token.rstrip("\"')").rsplit("/", 1)[-1] == file.name
             continue
         path = Path(token).expanduser()
         if not path.is_absolute():
@@ -752,8 +824,19 @@ def _written_by_command(file: Path, command: str, cwd: Path | None) -> bool:
                 same = path.exists() and path.resolve() == resolved
             except OSError:
                 same = False
+        if not same and computed and token.startswith("/"):
+            same = token.rsplit("/", 1)[-1] == file.name  # the tail of an unquoted $(pwd)/x
         count += same
     return count > 1
+
+
+_ASSIGNMENT_WORD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+# Programs whose file arguments are only read: naming the script there is not a write.
+_FILE_READERS = frozenset({
+    "cat", "head", "tail", "grep", "egrep", "fgrep", "rg", "less", "more", "wc", "diff",
+    "cmp", "file", "stat", "ls", "bat", "md5sum", "sha1sum", "sha256sum", "shasum",
+    "shellcheck",
+})
 
 
 def _scan_script(runs: dict, config_dir: Path, extra_args: list[str] | None,

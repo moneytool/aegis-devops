@@ -91,8 +91,8 @@ a Python program, a Makefile, or calls a cloud SDK, gets past it. With the examp
 | `K=kubectl; $K delete namespace prod` | blocked: cannot be checked, names an infrastructure tool |
 | `TS=$(date +%s); kubectl get pods`, `C=…; kubectl get ns; find . -exec $C …` | blocked: a part runs a command the hook cannot see, next to an infrastructure tool |
 | `coproc kubectl …`, `kubectl delete \` + newline + `namespace prod`, `watch`/`setsid`/`stdbuf`/`doas`/`ionice`/`caffeinate`/`unbuffer`/`busybox`/`script -c` `kubectl …` | checked like the plain command |
-| another program whose first argument is `kubectl` (`setpriv kubectl …`) | blocked: the tool cannot be checked through it (`man`, `which`, `rg`, package managers and the like excepted) |
-| `kube{,}ctl …`, `kubec? …` | blocked: brace/glob in program name |
+| another program with a bare `kubectl` among its arguments (`setpriv kubectl …`, `chrt 0 kubectl …`, `tmux new -d 'kubectl …'`) | asks: it may run the tool where its arguments cannot be checked. Not for programs that only take a tool's name (`man`, `command -v`, `find`, `make`, `pkill`, `curl`, linters, package managers, …), nor for URLs, paths, file names and option values |
+| `kube{,}ctl …`, `kubec? …`, `/usr/bin/k* …` | blocked: brace/glob in program name (a path pattern that cannot become a tool's name, such as `./scripts/*.sh`, asks) |
 | `python3 -c "subprocess.run(['kubectl','delete','namespace','prod'])"` | blocked: inline code that names an infrastructure tool |
 | `node -e` / `--eval=…`, `python3 -Ic`, `perl -e` / `-lne`, `ruby -e`, `php -r` naming `kubectl` | blocked the same way |
 | `echo 'kubectl delete namespace prod' \| bash`, also `echo 'kube''ctl …' \| sh` | blocked: code piped into a shell that names an infrastructure tool |
@@ -102,7 +102,7 @@ a Python program, a Makefile, or calls a cloud SDK, gets past it. With the examp
 | `cat > nuke.sh <<'EOF' … EOF` (here-doc that names `kubectl`) | blocked: cannot be checked, names an infrastructure tool |
 | `bash nuke.sh`, `sh < nuke.sh`, `./nuke.sh`, `source nuke.sh`, where a line of `nuke.sh` is blocked | blocked by the policy (the message names the line) |
 | the same, where a line names `kubectl` but cannot be checked (`kubectl delete ns "$NS"`) | asks |
-| the same, where the script does not exist yet or is written by the same command (`printf '…' > x.sh; bash x.sh`, `cp a x.sh; bash x.sh`, `chmod +x x; ./x`), cannot be read, holds a NUL byte, is over 64 KiB, names a tool on more than 64 lines, or is run after a `cd` the hook cannot follow | asks |
+| the same, where the script does not exist yet or is written by the same command (`printf '…' > x.sh; bash x.sh`, `cp a "$(pwd)/x.sh"; bash x.sh`, `chmod +x x; ./x`; reading it with `cat`, `grep`, `wc`, … does not count), cannot be read, holds a NUL byte, is over 64 KiB, names a tool on more than 64 lines, or is run after a `cd` the hook cannot follow | asks |
 | a script that `nuke.sh` sources or runs in turn | **runs**: only the script on the command line is read |
 | a script changed between the check and the run, or a symlink retargeted in between | **runs** the new content: the hook reads it once, before the command starts |
 | `python3 cleanup.py`, `make destroy`, `npm run teardown` | **runs** |
@@ -122,7 +122,8 @@ a computed place, or `env -C`/`sudo -D` make the directory unknown, which asks. 
 name an infrastructure tool are checked, each as a command of its own, against the same
 policy: comments (whole-line and trailing) are skipped; a backslash at the end of a line joins
 the next line as the shell does, except at the end of a comment, which ends at the newline;
-`<<` counts as a here-doc only outside quotes and comments; a here-doc body counts as commands
+`<<` counts as a here-doc only outside quotes and comments, and its delimiter is read as one
+shell word (`<<'END DATA'`; one the hook cannot read asks); a here-doc body counts as commands
 when a shell reads it, directly or through a pipe (`cat <<EOF | sh`), asks when another
 interpreter reads one that names a tool or when an unquoted body's `$(…)` names one, and is
 data otherwise. All checkable lines go to the policy in one run; only when that run is not an

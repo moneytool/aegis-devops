@@ -481,7 +481,9 @@ def find_heredoc(line: str) -> tuple[int, int, bool, str, bool] | None:
     """The first real here-document operator in ``line`` -- outside quotes and
     comments, ``<<`` but not ``<<<`` -- as ``(start, end, dash, tag,
     quoted)``: ``dash`` for ``<<-``, ``quoted`` when the tag is quoted (the
-    body is then not expanded). ``None`` when there is none."""
+    body is then not expanded), ``tag`` the delimiter word with its quoting
+    removed, ``""`` when the word cannot be read (an unclosed quote, nothing
+    after ``<<``). ``None`` when there is none."""
     in_single = in_double = False
     i, n = 0, len(line)
     while i < n:
@@ -505,13 +507,39 @@ def find_heredoc(line: str) -> tuple[int, int, bool, str, bool] | None:
             j += 1 if dash else 0
             while j < n and line[j] in " \t":
                 j += 1
-            k = j
-            while k < n and not line[k].isspace() and line[k] not in ";&|<>()":
+            # the delimiter is one shell word: quotes and backslashes join and
+            # escape (`'END DATA'`, `E"N"D`, `END\ X`), and are removed
+            k, tag, quoted, quote = j, [], False, ""
+            while k < n:
+                ch = line[k]
+                if quote == "'":
+                    if ch == "'":
+                        quote = ""
+                    else:
+                        tag.append(ch)
+                elif quote == '"':
+                    if ch == '"':
+                        quote = ""
+                    elif ch == "\\" and k + 1 < n and line[k + 1] in '"\\$`':
+                        k += 1
+                        tag.append(line[k])
+                    else:
+                        tag.append(ch)
+                elif ch in "'\"":
+                    quote, quoted = ch, True
+                elif ch == "\\":
+                    quoted = True
+                    if k + 1 < n:
+                        k += 1
+                        tag.append(line[k])
+                elif ch.isspace() or ch in ";&|<>()":
+                    break
+                else:
+                    tag.append(ch)
                 k += 1
-            word = line[j:k]
-            quoted = any(q in word for q in "'\"\\")
-            tag = word.replace("'", "").replace('"', "").replace("\\", "")
-            return (i, k, dash, tag, quoted) if tag else None
+            if quote or (k == j):
+                return (i, n, dash, "", quoted)  # cannot tell where it ends
+            return (i, k, dash, "".join(tag), quoted)
         i += 1
     return None
 
@@ -1255,7 +1283,7 @@ def intents_from_command(command: str) -> list[InfrastructureIntent]:
             continue
         feeder, previous = (previous if simple.stdin_pipe else None), simple
         if _globbed(simple.argv[0]):
-            raise ShellRejected(GLOB_REASON, command)
+            raise ShellRejected(GLOB_REASON, simple.argv[0])  # .command: the program word
         name = _basename(simple.argv[0])
         destroy = (
             from_terraform_argv(simple.argv) if name in ("terraform", "tofu") else None
