@@ -137,7 +137,7 @@ from aegis_core.parsers.sql import (
 )
 from aegis_core.plan import PlanConstraintStore, evaluate_plan
 from aegis_core.provenance import FileSourceFetcher
-from aegis_core.shell import ShellRejected, intents_from_command
+from aegis_core.shell import ShellRejected, intents_from_command, split_segments
 from aegis_core.signing import SignatureError
 from aegis_core.store import ConstraintStore, StoreHealth
 
@@ -777,7 +777,24 @@ def _intents_from_shell_string(command: str) -> list[InfrastructureIntent]:
     try:
         return intents_from_command(command)
     except ShellRejected as exc:
-        raise UsageError(f"command rejected: {exc.reason}") from None
+        raise UsageError(f"command rejected: {exc.reason}{_rejected_part(command)}") from None
+
+
+def _rejected_part(command: str) -> str:
+    """`` in 'echo "exit=$?"'`` for the first part of a compound command that
+    cannot be checked, so the caller knows which one to change; ``""`` for a
+    simple command."""
+    segments = split_segments(command) or []
+    if len([text for text, _sep in segments if text.strip()]) < 2:
+        return ""
+    for text, _sep in segments:
+        try:
+            intents_from_command(text)
+        except ShellRejected:
+            return f" in {text.strip()!r}"
+        except ValueError:
+            continue
+    return ""
 
 
 # --- signing key resolution ------------------------------------------------------

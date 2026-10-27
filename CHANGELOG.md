@@ -15,6 +15,34 @@ behaviour.
   cost are the database role's job (the SQL classifier sees only a SELECT's first table, and
   treats `SELECT … INTO` and `SET ROLE` as reads). Every Aegis result in its table is a test.
 
+### Fixed
+- Agent hook: a shell expansion in one part of a compound command no longer refuses the whole
+  command (#55). The hook judges a command it cannot parse part by part (`;`, `&&`, `||`, `|`,
+  newline): `terraform plan 2>&1; echo "exit=$?"` checks `terraform plan` against the policy
+  and lets the `echo` through. A part that cannot be checked and names an infrastructure tool is
+  still refused, and the message now quotes it; so is a part whose program is itself unknown
+  (`$TOOL …`, `eval …`, `bash -c "$X"`) in a command that names an infrastructure tool anywhere.
+  Here-docs are judged as a whole, as before.
+- Shell parser: the reserved words `if`, `then`, `else`, `elif`, `do`, `while` and `until` in
+  front of a command are stripped like `{` and `!`, so `if true; then kubectl delete namespace
+  prod; fi` is checked as the `kubectl` command it runs (it was an unknown binary `then`, and
+  allowed). A lone `fi`/`done`/`esac` and a `for`/`select` header give no command.
+- Agent hook: a local shell script is read before it runs (#56). For `bash x.sh`, `sh < x.sh`,
+  `./x.sh` (a `#!` shell, or `.sh` without `#!`), `source x.sh` and `. x.sh`, each line that names
+  an infrastructure tool is checked as a command against the policy: a blocked line blocks (the
+  message names the line), a line that cannot be checked asks. A script that cannot be read, is
+  over 64 KiB, or names a tool on more than 64 lines asks; what it sources or runs in turn is not
+  read. Other interpreters' scripts (`python3 x.py`) are not read.
+
+### Changed
+- Agent hook: code piped into a shell or interpreter from anything but a literal `echo` or
+  `printf` (`curl … | sh`, `echo … | base64 -d | sh`, `cat x.py | python3`) asks instead of
+  running (#56); Codex, Gemini CLI and OpenCode, which cannot ask, block it. Piped code that
+  names an infrastructure tool is still blocked. Shell intents' `params.runs_code` for a pipe now
+  carries `producer`, the program feeding it.
+- `aegis check command` still exits 64 for a command it cannot parse; for a compound command the
+  message now ends with the part that caused it (`… inside double quotes in 'echo "exit=$?"'`).
+
 ## [1.2.1] — 2026-10-24
 
 A coverage-report fix for `aegis compile kubernetes`.

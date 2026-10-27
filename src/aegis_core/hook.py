@@ -25,7 +25,18 @@ signature, degraded store) or the command cannot be analysed statically
 (``$(...)``, ``$VAR``, ``eval`` ...), the hook blocks only commands that
 involve infrastructure tooling -- one of the binaries Aegis has a parser
 for, or terraform/tofu -- and allows the rest: ``ls`` has nothing to do
-with a broken policy. The block message says what is wrong.
+with a broken policy. The block message says what is wrong. A compound
+command is judged part by part: ``terraform plan 2>&1; echo "exit=$?"``
+checks ``terraform plan`` and lets ``echo`` through; only a part that cannot
+be checked and names an infrastructure tool (or whose binary is itself
+unknown, in a command that names one) is refused, by name.
+
+**Code the command does not show.** A shell or interpreter reading code from
+a pipe whose producer is not a literal ``echo``/``printf`` (``curl … | sh``,
+``base64 -d | sh``) asks. A local shell script (``bash x.sh``, ``sh < x.sh``,
+``./x.sh``, ``source x.sh``) is read, up to 64 KiB and without following
+what it sources, and its lines that name an infrastructure tool are checked
+as commands: a blocked line blocks, a line that cannot be checked asks.
 
 **Replies.** A block is exit code 2 with the reason on stderr, which
 Claude Code, Codex, Copilot and VS Code all treat as "deny". Cursor is the
@@ -56,7 +67,9 @@ from aegis_core.shell import (
     _KNOWN_BINARIES,
     ShellRejected,
     intents_from_command,
+    plain_binary,
     script_runs_loosely,
+    split_segments,
 )
 
 AGENTS = ("claude", "codex", "copilot", "cursor", "gemini", "opencode", "vscode")
@@ -124,6 +137,8 @@ class HookRequest:
 class HookVerdict:
     decision: str  # "allow" | "deny" | "ask"
     reason: str = ""
+    # a deny because (part of) the command could not be checked, not a policy BLOCK
+    unchecked: bool = False
 
 
 # --- reading the payload ---------------------------------------------------------
@@ -233,35 +248,53 @@ def _is_gated(command: str) -> bool:
     return False
 
 
-def decide(command: str, config_dir: Path, extra_args: list[str] | None = None) -> HookVerdict:
-    """Runs ``aegis check command`` against ``config_dir`` and maps the
-    result to allow / deny / ask. Tool errors deny only gated commands."""
-    from aegis_core import cli  # local: cli imports this module
+# A local shell script is read up to this size; a bigger one asks.
+SCRIPT_SCAN_LIMIT = 64 * 1024
+# At most this many of its lines may name an infrastructure tool; more asks.
+SCRIPT_SCAN_MAX_LINES = 64
+# Producers whose output is the literal text on the command line.
+_LITERAL_PRODUCERS = frozenset({"echo", "printf"})
+_SHELL_SUFFIXES = (".sh", ".bash", ".zsh", ".ksh")
 
+
+def decide(command: str, config_dir: Path, extra_args: list[str] | None = None, *,
+           cwd: str | Path | None = None) -> HookVerdict:
+    """Runs ``aegis check command`` against ``config_dir`` and maps the
+    result to allow / deny / ask. Tool errors deny only gated commands.
+    ``cwd`` is where the command will run (relative script paths are read
+    from there; default: the current directory)."""
+    where = Path(cwd) if cwd else Path.cwd()
+    return _decide(command, config_dir, extra_args, where, scan=True)
+
+
+def _with_asks(verdict: HookVerdict, asks: list[str]) -> HookVerdict:
+    """An allow becomes the first pending ask; a deny or ask stands."""
+    if verdict.decision == "allow" and asks:
+        return HookVerdict("ask", asks[0])
+    return verdict
+
+
+def _decide(command: str, config_dir: Path, extra_args: list[str] | None, cwd: Path, *,
+            scan: bool, rebuilt: bool = False) -> HookVerdict:
     escalate_scripts = "--escalate-scripts" in (extra_args or [])
     try:
         intents = intents_from_command(command)
     except ShellRejected as exc:
-        if mentions_infra(command):
-            return HookVerdict(
-                "deny",
-                f"aegis: cannot check this command statically ({exc.reason}); "
-                "run the infrastructure command on its own, without shell expansion",
-            )
-        generated = _GENERATED_CODE_RE.search(command)
-        if generated:
-            return HookVerdict(
-                "ask",
-                f"aegis: {generated.group(1)} runs code that is only produced when the command "
-                "runs, so it cannot be checked; run the commands directly instead",
-            )
-        if escalate_scripts and script_runs_loosely(command):
-            return HookVerdict(
-                "ask", "aegis: this runs a local script, which the hook cannot read "
-                "(--escalate-scripts)")
-        return HookVerdict("allow")
+        if rebuilt:  # cannot happen: every part of a rebuilt command parsed on its own
+            return _rejected(command, exc.reason, config_dir, extra_args, cwd,
+                             scan=scan, escalate_scripts=escalate_scripts)
+        part = _checkable_part(command, exc, config_dir, extra_args, cwd,
+                               scan=scan, escalate_scripts=escalate_scripts)
+        if isinstance(part, HookVerdict):
+            return part
+        checkable, asks = part
+        if not checkable.strip(" \t\n;&|"):
+            return _with_asks(HookVerdict("allow"), asks)
+        verdict = _decide(checkable, config_dir, extra_args, cwd, scan=scan, rebuilt=True)
+        return _with_asks(verdict, asks)
     except ValueError as exc:  # a known binary with an argv its parser rejects
         return HookVerdict("deny", f"aegis: cannot parse this command: {exc}")
+    asks: list[str] = []
     for intent in intents:
         runs = intent.params.get("runs_code") if intent.provider == "shell" else None
         if runs is None:
@@ -274,6 +307,237 @@ def decide(command: str, config_dir: Path, extra_args: list[str] | None = None) 
                 f"aegis: cannot check code passed to {runs['interpreter']} {how}, and it "
                 "names an infrastructure tool; run the infrastructure command on its own",
             )
+        producer = runs.get("producer")
+        if runs["kind"] == "stdin" and producer and (
+                rebuilt or producer not in _LITERAL_PRODUCERS):
+            # In a rebuilt command an echo may stand for `echo "$X"`, so it is opaque too.
+            asks.append(
+                f"aegis: {runs['interpreter']} runs code piped from {producer}, which the "
+                "hook cannot read; save it to a file and run that, so its commands are checked")
+        if runs["kind"] == "script" and scan:
+            verdict = _scan_script(runs, config_dir, extra_args, cwd)
+            if verdict is not None:
+                if verdict.decision == "deny":
+                    return verdict
+                asks.append(verdict.reason)
+    return _with_asks(_policy(command, config_dir, extra_args), asks)
+
+
+def _rejected(command: str, reason: str, config_dir: Path, extra_args: list[str] | None,
+              cwd: Path, *, scan: bool, escalate_scripts: bool) -> HookVerdict:
+    """A command (or a part of it) that cannot be parsed, judged as a whole:
+    deny when it names an infrastructure tool, ask for code generated at run
+    time, check the local shell scripts it names, else allow."""
+    if mentions_infra(command):
+        return HookVerdict(
+            "deny",
+            f"aegis: cannot check this command statically ({reason}); "
+            "run the infrastructure command on its own, without shell expansion",
+            unchecked=True,
+        )
+    generated = _GENERATED_CODE_RE.search(command)
+    if generated:
+        return HookVerdict(
+            "ask",
+            f"aegis: {generated.group(1)} runs code that is only produced when the command "
+            "runs, so it cannot be checked; run the commands directly instead",
+        )
+    scripts = script_runs_loosely(command)
+    if scan:
+        for runs in scripts:
+            verdict = _scan_script(runs, config_dir, extra_args, cwd)
+            if verdict is not None:
+                return verdict
+    if escalate_scripts and scripts:
+        return HookVerdict(
+            "ask", "aegis: this runs a local script, which the hook cannot read "
+            "(--escalate-scripts)")
+    return HookVerdict("allow")
+
+
+def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
+                    extra_args: list[str] | None, cwd: Path, *, scan: bool,
+                    escalate_scripts: bool) -> HookVerdict | tuple[str, list[str]]:
+    """For a command that cannot be parsed as a whole (issue #55): judges it
+    part by part (``;``, ``&&``, ``||``, ``|``, newline). A part that cannot be
+    checked and names an infrastructure tool is a deny that names it. A part
+    whose binary is a plain, known name (``echo "exit=$?"``, ``tail -n "$N"``)
+    stands in as that bare binary; one that only assigns variables, or sources a
+    local script (read like ``bash x.sh``), drops out. Returns the command
+    rebuilt from the parts that can be checked, plus pending asks -- or a
+    verdict, when a part's binary is itself unknown (``$K …``, ``eval …``,
+    ``bash -c "$X"``): deny when the command names an infrastructure tool
+    anywhere, else the whole-command rules of :func:`_rejected`."""
+    # a here-doc's body lines are data, not commands: judged as a whole, as before
+    segments = None if "<<" in command else split_segments(command)
+    if not segments:
+        return _rejected(command, exc.reason, config_dir, extra_args, cwd,
+                         scan=scan, escalate_scripts=escalate_scripts)
+    pieces: list[str] = []
+    asks: list[str] = []
+    opaque: tuple[str, str] | None = None
+    for text, sep in segments:
+        try:
+            intents_from_command(text)
+        except ShellRejected as seg_exc:
+            reason = seg_exc.reason
+        except ValueError:  # a parser error: kept, so the full check reports it
+            pieces.append(text + sep)
+            continue
+        else:
+            pieces.append(text + sep)
+            continue
+        shown = text.strip()
+        if mentions_infra(text):
+            return HookVerdict(
+                "deny",
+                f"aegis: cannot check this command statically ({reason}) in {shown!r}; "
+                "run the infrastructure command on its own, without shell expansion",
+                unchecked=True,
+            )
+        sourced = _sourced_script(text)
+        if sourced is not None:
+            verdict = _scan_script(sourced, config_dir, extra_args, cwd) if scan else None
+            if verdict is not None and verdict.decision == "deny":
+                return verdict
+            if verdict is not None:
+                asks.append(verdict.reason)
+            elif escalate_scripts:
+                asks.append("aegis: this runs a local script, which the hook cannot read "
+                            "(--escalate-scripts)")
+            pieces.append(sep)
+            continue
+        binary = plain_binary(text)
+        if binary is None:
+            opaque = opaque or (shown, reason)
+            continue
+        pieces.append((shlex.quote(binary) if binary else "") + sep)
+    if opaque is not None:
+        if mentions_infra(command):
+            return HookVerdict(
+                "deny",
+                f"aegis: cannot check this command statically ({opaque[1]}) in {opaque[0]!r}, "
+                "and the command names an infrastructure tool; run the infrastructure command "
+                "on its own, without shell expansion",
+                unchecked=True,
+            )
+        return _with_asks(
+            _rejected(command, exc.reason, config_dir, extra_args, cwd,
+                      scan=scan, escalate_scripts=escalate_scripts),
+            asks)
+    return "".join(pieces), asks
+
+
+def _sourced_script(segment: str) -> dict[str, str] | None:
+    """``source x.sh`` / ``. x.sh`` with a literal path, as a ``runs_code``
+    record; else ``None``."""
+    try:
+        words = shlex.split(segment, comments=True)
+    except ValueError:
+        return None
+    if len(words) >= 2 and words[0] in ("source", ".") and not any(
+            ch in words[1] for ch in "$`<>()"):
+        return {"kind": "script", "interpreter": words[0], "path": words[1]}
+    return None
+
+
+def _logical_lines(text: str) -> list[tuple[int, str]]:
+    """``(line_number, line)`` with backslash-newline continuations joined."""
+    out: list[tuple[int, str]] = []
+    pending, start = "", 0
+    for number, line in enumerate(text.splitlines(), 1):
+        if not pending:
+            start = number
+        if line.endswith("\\") and not line.endswith("\\\\"):
+            pending += line[:-1] + " "
+            continue
+        out.append((start, pending + line))
+        pending = ""
+    if pending:
+        out.append((start, pending))
+    return out
+
+
+def _scan_script(runs: dict, config_dir: Path, extra_args: list[str] | None,
+                 cwd: Path) -> HookVerdict | None:
+    """Reads a local shell script that a command runs (``bash x.sh``, ``sh <
+    x.sh``, ``./x.sh``, ``source x.sh``; issue #56) and checks every line that
+    names an infrastructure tool as a command of its own. ``None`` when there
+    is nothing to say: not a shell script, no such file, or no such line, or
+    every such line allowed. A blocked line denies; a line that cannot be
+    checked, a file that cannot be read or is larger than
+    :data:`SCRIPT_SCAN_LIMIT`, or more than :data:`SCRIPT_SCAN_MAX_LINES` such
+    lines, asks. What the script sources or runs in turn is not read."""
+    from aegis_core.shell import _SHELLS, _basename
+
+    interpreter = _basename(runs.get("interpreter", "") or "")
+    path = runs.get("path", "") or ""
+    if path.startswith("< "):
+        path = path[2:]
+    if interpreter and interpreter not in _SHELLS and interpreter not in ("source", "."):
+        return None
+    if not path or path.startswith("-") or any(ch in path for ch in "$`"):
+        return None
+    file = Path(path).expanduser()
+    if not file.is_absolute():
+        file = cwd / file
+    try:
+        if not file.is_file():
+            return None
+        with file.open("rb") as handle:
+            data = handle.read(SCRIPT_SCAN_LIMIT + 1)
+    except OSError as exc:
+        return HookVerdict("ask", f"aegis: cannot read {path} to check the commands in it "
+                                  f"({exc.strerror or exc})")
+    if len(data) > SCRIPT_SCAN_LIMIT:
+        return HookVerdict("ask", f"aegis: {path} is larger than {SCRIPT_SCAN_LIMIT // 1024} "
+                                  "KiB, so the commands in it were not checked")
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None  # a binary, not a shell script
+    if not interpreter:  # ./x: a shell script only by its #! line or name
+        first = text.split("\n", 1)[0]
+        if first.startswith("#!"):
+            words = first[2:].split()
+            program = _basename(words[0]) if words else ""
+            if program == "env" and len(words) > 1:
+                program = _basename(words[1])
+            if program not in _SHELLS:
+                return None
+        elif not path.endswith(_SHELL_SUFFIXES):
+            return None
+    lines = [(n, line) for n, line in _logical_lines(text)
+             if not line.lstrip().startswith("#") and mentions_infra(line)]
+    if not lines:
+        return None
+    if len(lines) > SCRIPT_SCAN_MAX_LINES:
+        return HookVerdict("ask", f"aegis: {path} names an infrastructure tool on more than "
+                                  f"{SCRIPT_SCAN_MAX_LINES} lines, so they were not checked")
+    combined = _decide("\n".join(line for _n, line in lines), config_dir, extra_args, cwd,
+                       scan=False)
+    if combined.decision == "allow":
+        return None
+    first_ask: HookVerdict | None = None
+    for number, line in lines:
+        verdict = _decide(line, config_dir, extra_args, cwd, scan=False)
+        if verdict.decision == "allow":
+            continue
+        located = f"{path} line {number}: {line.strip()!r}"
+        if verdict.decision == "deny" and not verdict.unchecked:
+            return HookVerdict("deny", f"{verdict.reason} ({located})")
+        if first_ask is None:
+            reason = verdict.reason.removeprefix("aegis: ")
+            first_ask = HookVerdict("ask", f"aegis: {located}: {reason}")
+    if first_ask is not None:
+        return first_ask
+    return HookVerdict(combined.decision if not combined.unchecked else "ask",
+                       f"{combined.reason} ({path})")
+
+
+def _policy(command: str, config_dir: Path, extra_args: list[str] | None) -> HookVerdict:
+    """``aegis check command`` on a command that parses."""
+    from aegis_core import cli  # local: cli imports this module
 
     argv = [
         "check", "command", "--config-dir", str(config_dir), "--exit-style", "claude-hook",
@@ -451,7 +715,8 @@ def run_hook(agent: str, stdin_text: str, *, escalate_as: str = "ask",
         if not has_command and not has_budget:
             return _allow(agent)
 
-        verdict = decide(request.command, config_dir, extra_args) if has_command \
+        verdict = decide(request.command, config_dir, extra_args, cwd=request.cwd) \
+            if has_command \
             else HookVerdict("allow")
         if verdict.decision == "deny":
             return render(agent, verdict, escalate_as=escalate_as)

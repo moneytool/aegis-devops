@@ -70,11 +70,12 @@ class SimpleCommand:
     ``||`` / ``|`` / ``&`` / newline. ``redirects`` holds the redirections
     stripped from ``argv`` (``"2>&1"``, ``">/tmp/x"``); ``in_pipeline`` is
     True when the command reads from or writes to another command through
-    ``|``."""
+    ``|``; ``stdin_pipe`` only when it reads from one (``a | b``: ``b``)."""
 
     argv: list[str]
     redirects: list[str] = field(default_factory=list)
     in_pipeline: bool = False
+    stdin_pipe: bool = False
 
 
 # --- tokenising --------------------------------------------------------------
@@ -87,6 +88,24 @@ _FD_MARK = "\x01"
 # Reserved words that only group or negate ("{ a; b; }", "! cmd") -- they
 # never change what runs, so they are dropped from the simple command.
 _GROUPING_WORDS = frozenset({"{", "}", "!"})
+# Reserved words in front of a command ("if kubectl get ns x; then kubectl delete
+# ns x; fi" runs both kubectl commands) are dropped the same way. A word that only
+# closes a construct, or a "for x in a b" header (its words are literal here, any
+# expansion has been rejected), leaves nothing to run.
+_LEADING_RESERVED = frozenset({"if", "then", "else", "elif", "do", "while", "until"})
+_CLOSING_RESERVED = frozenset({"fi", "done", "esac"})
+_HEADER_RESERVED = frozenset({"for", "select"})
+
+
+def _strip_reserved(argv: list[str]) -> list[str]:
+    """``argv`` without the grouping and reserved words in front of it; ``[]``
+    for a closing word (``fi``, ``done``) or a ``for``/``select`` header."""
+    while argv and (argv[0] in _GROUPING_WORDS or argv[0] in _LEADING_RESERVED):
+        argv = argv[1:]
+    if argv and (argv[0] in _HEADER_RESERVED
+                 or (argv[0] in _CLOSING_RESERVED and len(argv) == 1)):
+        return []
+    return argv
 
 
 def _prescan(command: str) -> str:
@@ -171,8 +190,11 @@ def split_compound(command: str) -> list[SimpleCommand]:
     Tokenises with ``shlex`` (POSIX quoting, ``punctuation_chars``) after
     the quote-aware :func:`_prescan`; splits on ``;``, ``&&``, ``||``,
     ``|``, ``|&``, ``&`` and unquoted newlines; strips redirections into
-    :attr:`SimpleCommand.redirects` and the grouping words ``{`` / ``}`` /
-    ``!`` (a brace group's body is checked command by command). Quoted
+    :attr:`SimpleCommand.redirects`, the grouping words ``{`` / ``}`` /
+    ``!`` (a brace group's body is checked command by command) and the reserved
+    words in front of a command (``if`` / ``then`` / ``do`` / ...); a closing
+    ``fi`` / ``done`` / ``esac`` and a ``for`` / ``select`` header give no
+    command. Quoted
     metacharacters (``--set 'a=b;c'``) never split. Raises :class:`ShellRejected` for the
     constructs listed in the module docstring, including a simple command
     whose binary is ``eval`` / ``exec`` / ``source`` / ``.`` / ``xargs``.
@@ -188,11 +210,10 @@ def split_compound(command: str) -> list[SimpleCommand]:
         nonlocal argv, redirects
         if pending_op is not None:
             raise ShellRejected(f"redirection {pending_op!r} without a target", command)
-        while argv and argv[0] in _GROUPING_WORDS:
-            argv = argv[1:]
+        argv = _strip_reserved(argv)
         if argv:
             _check_builtin(argv)
-            commands.append(SimpleCommand(argv, redirects, pipeline))
+            commands.append(SimpleCommand(argv, redirects, pipeline, in_pipeline))
         argv, redirects = [], []
 
     for tok in _tokens(command):
@@ -218,6 +239,175 @@ def split_compound(command: str) -> list[SimpleCommand]:
         argv.append(tok)
     flush(in_pipeline)
     return commands
+
+
+def split_segments(command: str) -> list[tuple[str, str]] | None:
+    """Splits a command string on its top-level ``;``, ``&&``, ``||``, ``|``,
+    ``|&``, ``&`` and newlines *without* rejecting anything, for a caller that
+    wants to know which part of a rejected command is the problem. Returns
+    ``[(segment_text, separator_after_it), …]`` -- joining ``text + separator``
+    gives back the command -- or ``None`` when the quoting does not balance.
+    Nothing inside quotes, ``$(…)``, ``${…}``, backticks, ``(…)`` or a
+    ``#`` comment splits; ``2>&1``, ``&>`` and ``>|`` are redirections, not
+    separators."""
+    top = _top_level(command)
+    if top is None:
+        return None
+    segments: list[tuple[str, str]] = []
+    start = 0
+    i, n = 0, len(command)
+    while i < n:
+        c = command[i]
+        if top[i] and c in ";\n|&":
+            prev = command[i - 1] if i else ""
+            nxt = command[i + 1] if i + 1 < n else ""
+            if c == "&" and ((prev and prev in "<>") or nxt == ">"):
+                i += 1  # 2>&1, <&3, &>file, &>>file
+                continue
+            if c == "|" and prev == ">":
+                i += 1  # >| noclobber
+                continue
+            width = 2 if command[i : i + 2] in ("&&", "||", "|&", ";;") else 1
+            segments.append((command[start:i], command[i : i + width]))
+            i += width
+            start = i
+            continue
+        i += 1
+    segments.append((command[start:], ""))
+    return segments
+
+
+def _top_level(command: str) -> list[bool] | None:
+    """For each character of ``command``: True when it stands at the top level
+    -- outside quotes, ``$(…)``, ``${…}``, backticks, ``(…)``, a backslash
+    escape and a ``#`` comment -- where the shell would split on it. ``None``
+    when the quoting or parentheses do not balance."""
+    flags = [False] * len(command)
+    stack: list[str] = []  # open contexts: ' " $( ( ${ `
+    i, n = 0, len(command)
+    while i < n:
+        c = command[i]
+        ctx = stack[-1] if stack else ""
+        if ctx == "'":
+            if c == "'":
+                stack.pop()
+            i += 1
+            continue
+        if c == "\\":
+            i += 2
+            continue
+        if ctx == "`":
+            if c == "`":
+                stack.pop()
+            i += 1
+            continue
+        if ctx == '"':
+            if c == '"':
+                stack.pop()
+            elif command.startswith(("$(", "${"), i):
+                stack.append(command[i : i + 2])
+                i += 1
+            elif c == "`":
+                stack.append("`")
+            i += 1
+            continue
+        if ctx == "${":
+            if c == "}":
+                stack.pop()
+            i += 1
+            continue
+        # top level, or inside $( … ) / ( … )
+        if c in "'\"`":
+            stack.append(c)
+        elif command.startswith(("$(", "${"), i):
+            stack.append(command[i : i + 2])
+            i += 1
+        elif c in "<>" and command.startswith("(", i + 1):
+            stack.append("(")  # process substitution
+            i += 1
+        elif c == "(":
+            stack.append("(")
+        elif c == ")":
+            if not stack:
+                return None
+            stack.pop()
+        elif c == "#" and (i == 0 or command[i - 1].isspace() or command[i - 1] in ";&|("):
+            while i < n and command[i] != "\n":
+                i += 1
+            continue
+        elif not stack:
+            flags[i] = True
+        i += 1
+    return None if stack else flags
+
+
+def _top_level_words(segment: str) -> list[str] | None:
+    """The words of ``segment`` split on top-level whitespace only, quotes and
+    expansions kept as written (``TS=$(date +%s)`` is one word)."""
+    top = _top_level(segment)
+    if top is None:
+        return None
+    words, current = [], ""
+    for ch, at_top in zip(segment, top, strict=True):
+        if at_top and ch.isspace():
+            if current:
+                words.append(current)
+            current = ""
+        else:
+            current += ch
+    if current:
+        words.append(current)
+    return words
+
+
+def loose_argv(segment: str) -> list[str] | None:
+    """The words of one segment, unexpanded (``"$X"`` stays ``$X``), after the
+    grouping/reserved words and the launchers in front; ``None`` when the
+    words cannot be split or the launchers are themselves opaque."""
+    try:
+        argv = shlex.split(segment, comments=True)
+    except ValueError:
+        return None
+    argv = [t for t in argv if not t.startswith(("<", ">", "0<", "1>", "2>", "&>"))]
+    argv = _strip_reserved(argv)
+    if not argv:
+        return []
+    try:
+        argv, _env, _wrappers, _string = _unwrap_inner(argv, 1)
+    except ShellRejected:
+        return None
+    return argv
+
+
+def plain_binary(segment: str) -> str | None:
+    """For one segment of a command that was rejected: the binary it runs when
+    that is a literal name and the binary runs no code of its own -- ``echo``
+    for ``echo "exit=$?"``, ``tail`` for ``tail -n "$N"`` -- so only its
+    arguments are unknown. ``None`` when the binary itself is unknown (``$X
+    …``, ``"$(which k)" …``, a subshell), is a launcher, ``eval``/``source``/
+    a shell ``-c``, or runs code (:func:`code_run`: an interpreter, a script, a
+    task runner). ``""`` for a segment that only assigns variables (``TS=$(date
+    +%s)``): no binary of its own runs."""
+    words = _top_level_words(segment)
+    if words is None:
+        return None
+    if words and all(_ASSIGNMENT_RE.match(w) for w in words):
+        # KUBECONFIG=… and friends are usually exported already, so assigning
+        # one changes what a later kubectl/aws/… talks to
+        if any(w.partition("=")[0] in _ENV_METADATA_KEYS for w in words):
+            return None
+        return ""
+    argv = loose_argv(segment)
+    if not argv:
+        return None
+    head = argv[0]
+    if any(ch in head for ch in "$`()<>{}") or "=" in head:
+        return None
+    if _basename(head) in _REJECTED_BUILTINS:
+        return None
+    if code_run(SimpleCommand(argv)) is not None or _interpreter(_basename(head)):
+        return None
+    return _basename(head)
 
 
 # --- unwrapping launchers ----------------------------------------------------------
@@ -676,7 +866,8 @@ def _expand(
     for simple in split_compound(command):
         argv, env, wrappers, string = _unwrap_inner(simple.argv, depth)
         if string is None:
-            yield SimpleCommand(argv, simple.redirects, simple.in_pipeline), env, wrappers
+            yield (SimpleCommand(argv, simple.redirects, simple.in_pipeline, simple.stdin_pipe),
+                   env, wrappers)
             continue
         for inner, inner_env, inner_wrappers in _expand(string, depth + 1):
             yield (
@@ -684,6 +875,7 @@ def _expand(
                     inner.argv,
                     [*simple.redirects, *inner.redirects],
                     simple.in_pipeline or inner.in_pipeline,
+                    simple.stdin_pipe or inner.stdin_pipe,
                 ),
                 {**env, **inner_env},
                 [*wrappers, *inner_wrappers],
@@ -724,9 +916,11 @@ def intents_from_command(command: str) -> list[InfrastructureIntent]:
     sense of — both are the caller's cue to fail closed.
     """
     intents: list[InfrastructureIntent] = []
+    previous: SimpleCommand | None = None
     for simple, env, wrappers in _expand(command, 0):
         if not simple.argv:
             continue
+        feeder, previous = (previous if simple.stdin_pipe else None), simple
         name = _basename(simple.argv[0])
         destroy = (
             from_terraform_argv(simple.argv) if name in ("terraform", "tofu") else None
@@ -741,6 +935,8 @@ def intents_from_command(command: str) -> list[InfrastructureIntent]:
                 continue
             params: dict[str, Any] = {"argv": list(simple.argv)}
             if runs is not None:
+                if runs["kind"] == "stdin" and feeder is not None:
+                    runs = {**runs, "producer": _basename(feeder.argv[0])}
                 params["runs_code"] = runs
             produced = [
                 InfrastructureIntent(

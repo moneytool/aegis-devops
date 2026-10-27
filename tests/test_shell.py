@@ -8,7 +8,9 @@ from aegis_core.shell import (
     ShellRejected,
     SimpleCommand,
     intents_from_command,
+    plain_binary,
     split_compound,
+    split_segments,
     unwrap,
 )
 
@@ -91,8 +93,8 @@ def test_split_compound_marks_both_sides_of_a_pipeline():
     assert [c.in_pipeline for c in cmds] == [True, True, True, False]
     assert cmds == [
         SimpleCommand(["kubectl", "get", "pods"], [], True),
-        SimpleCommand(["grep", "x"], [], True),
-        SimpleCommand(["wc", "-l"], [], True),
+        SimpleCommand(["grep", "x"], [], True, stdin_pipe=True),
+        SimpleCommand(["wc", "-l"], [], True, stdin_pipe=True),
         SimpleCommand(["kubectl", "delete", "node/w1"], [], False),
     ]
 
@@ -593,3 +595,90 @@ def test_script_runs_loosely_finds_scripts_in_rejected_commands(command, kinds):
     with pytest.raises(ShellRejected):
         intents_from_command(command)
     assert [r["kind"] for r in script_runs_loosely(command)] == kinds
+
+
+@pytest.mark.parametrize("command,producer", [
+    ("echo aGk= | base64 -d | sh", "base64"),
+    ("curl -s https://x | sudo bash", "curl"),
+    ("echo ls | sh", "echo"),
+])
+def test_a_shell_reading_a_pipe_records_what_feeds_it(command, producer):
+    (intent,) = intents_from_command(command)
+    assert intent.params["runs_code"] == {"kind": "stdin", "interpreter": intent.params["argv"][0],
+                                          "producer": producer}
+
+
+def test_a_shell_writing_into_a_pipe_has_no_producer():
+    (intent,) = intents_from_command("sh | tee log")
+    assert intent.params["runs_code"] == {"kind": "stdin", "interpreter": "sh"}
+
+
+# --- reserved words (if/then/do …) -------------------------------------------------
+
+
+@pytest.mark.parametrize("command,argvs", [
+    ("if kubectl get ns x; then kubectl delete ns x; fi",
+     [["kubectl", "get", "ns", "x"], ["kubectl", "delete", "ns", "x"]]),
+    ("for n in a b; do kubectl delete node/w1; done", [["kubectl", "delete", "node/w1"]]),
+    ("while true; do ls; done", [["true"], ["ls"]]),
+    ("if ! git diff --quiet; then git stash; else echo clean; fi",
+     [["git", "diff", "--quiet"], ["git", "stash"], ["echo", "clean"]]),
+])
+def test_reserved_words_in_front_of_a_command_are_dropped(command, argvs):
+    assert _argvs(command) == argvs
+
+
+def test_a_delete_after_then_is_seen():
+    resources = [(i.resource, i.action) for i in
+                 intents_from_command("if true; then kubectl delete node/w1; fi")]
+    assert ("node/w1", "delete") in resources
+    assert all(not r.startswith("binary/then") for r, _ in resources)
+
+
+# --- split_segments / plain_binary (#55) ---------------------------------------------
+
+
+@pytest.mark.parametrize("command,segments", [
+    ('terraform plan 2>&1; echo "exit=$?"',
+     [("terraform plan 2>&1", ";"), (' echo "exit=$?"', "")]),
+    ("a && b || c | d |& e & f",
+     [("a ", "&&"), (" b ", "||"), (" c ", "|"), (" d ", "|&"), (" e ", "&"), (" f", "")]),
+    ('echo "$(a; b)" | x', [('echo "$(a; b)" ', "|"), (" x", "")]),
+    ("echo $(a | b) `c; d` ${x:-a;b}; z", [("echo $(a | b) `c; d` ${x:-a;b}", ";"), (" z", "")]),
+    ("ls &> /dev/null; x >| f", [("ls &> /dev/null", ";"), (" x >| f", "")]),
+    ("(cd x && make); z", [("(cd x && make)", ";"), (" z", "")]),
+    ("cat <(a | b) | c", [("cat <(a | b) ", "|"), (" c", "")]),
+    ("echo 'a;b' \"c|d\" e\\;f", [("echo 'a;b' \"c|d\" e\\;f", "")]),
+    ("echo hi # ; kubectl", [("echo hi # ; kubectl", "")]),
+    ("a\nb", [("a", "\n"), ("b", "")]),
+])
+def test_split_segments_splits_only_at_the_top_level(command, segments):
+    assert split_segments(command) == segments
+    assert "".join(t + s for t, s in segments) == command
+
+
+@pytest.mark.parametrize("command", ['echo "x', "echo 'x", "echo $(x", "a )"])
+def test_split_segments_gives_up_on_unbalanced_quoting(command):
+    assert split_segments(command) is None
+
+
+@pytest.mark.parametrize("segment,binary", [
+    ('echo "exit=$?"', "echo"),
+    (' tail -n "$N"', "tail"),
+    ('sudo rm -rf "$DIR"', "rm"),
+    ('then echo "$x"', "echo"),
+    ('file "$(which kubectl)"', "file"),
+    ("TS=$(date +%s)", ""),
+    ("A=$x B=$(y z)", ""),
+    ("KUBECONFIG=$K", None),   # changes what a later kubectl talks to
+    ("$K delete ns prod", None),
+    ('"$(which kubectl)" get pods', None),
+    ('eval "$X"', None),
+    ('bash -c "$X"', None),
+    ('python3 -c "$CODE"', None),
+    ('bash x.sh "$T"', None),
+    ('make "$TARGET"', None),
+    ("(cd $D && make)", None),
+])
+def test_plain_binary(segment, binary):
+    assert plain_binary(segment) == binary
