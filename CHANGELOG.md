@@ -29,20 +29,32 @@ behaviour.
     t AS u`, `UPDATE ONLY` or `MERGE` main statement could be read as a SELECT). MySQL multi-table
     `DELETE t1, t2 FROM …` and `UPDATE t1 JOIN t2 … SET` write each listed table. `MERGE INTO t` is
     the strongest of its `WHEN … THEN` actions. `ONLY` and MySQL's `IGNORE`/`LOW_PRIORITY`/`QUICK`
-    are no longer read as the table name (`DELETE FROM ONLY users` was `table/ONLY`).
-    `TRUNCATE a, b` deletes both. `unbounded` now means no `WHERE` in the operation itself, not
-    anywhere in the text.
+    are no longer read as the table name (`DELETE FROM ONLY users` was `table/ONLY`), nor is
+    SQLite's `UPDATE OR IGNORE`. A MySQL `DELETE s FROM secret AS s …` resolves the alias to
+    `secret` (a target naming no table or alias deletes from every table in `FROM`). An upsert
+    (`ON CONFLICT … DO UPDATE`, `ON DUPLICATE KEY UPDATE`) is a `put` and an `update`.
+    `DROP TABLE|VIEW|INDEX|… a, b` and `TRUNCATE a, b` delete every name (`DROP TABLE tmp_x, users`
+    deleted only `tmp_x`), and `DROP SCHEMA a, b` cascades for each. `unbounded` now means no
+    `WHERE` in the operation itself, not anywhere in the text.
   - Strings, comments and dollar quotes are read by one dialect-aware lexer, used for splitting
     statements as well as classifying them, so the two agree. A backslash escapes a quote inside
     Postgres `E'…'` strings and every MySQL string (`E'x\''; DROP TABLE users` was one read); a
     plain `'…'` keeps the standard reading for `postgres`, `sqlite` and `generic`. A comment marker
-    inside a `$$` string no longer hides the rest of the statement. MySQL `#` comments are
-    comments, and `--` not followed by a space is not one in MySQL. The body of a MySQL executable
-    comment (`/*! … */`, `/*!50000 … */`) is read as SQL in every dialect, since MySQL runs it.
-    `dual` is a pseudo-table only in MySQL.
+    inside a `$$` string no longer hides the rest of the statement. Postgres block comments nest
+    (`/* a /* b */ ' */; DROP TABLE secret` hid the DROP). `E'…'` and `U&'…'`/`U&"…"` (with
+    `UESCAPE`) are decoded, and an escaped literal is never taken as a plain setting name
+    (`set_config(U&'\0072ole', …)` is a role change). SQLite `[name]` is an identifier. MySQL `#`
+    comments are comments, and `--` not followed by a space is not one in MySQL. The body of a MySQL
+    executable comment (`/*! … */`, `/*!50000 … */`) is read as SQL in every dialect, since MySQL
+    runs it. MySQL index hints (`FORCE INDEX FOR ORDER BY (i)`) no longer end a `FROM` list. `dual`
+    is a pseudo-table only in MySQL. With the default `--dialect generic`, a statement whose
+    quoting or comments MySQL and Postgres would read differently (a backslash before a quote, a
+    comment inside a comment) also yields an unclassified `update` (`ambiguous_escape` /
+    `ambiguous_comment`).
   - `SELECT … INTO t` is a `create` of `table/t` (as `CREATE TABLE … AS SELECT` already was), not a
     read. MySQL `SELECT … INTO OUTFILE|DUMPFILE` is an opaque, unclassified `update` of
-    `file/<path>`; `SELECT … INTO @var` stays a read.
+    `file/<path>` wherever it appears (`TABLE t INTO OUTFILE …`, `(SELECT …) INTO OUTFILE …`);
+    `SELECT … INTO @var` stays a read. `(SELECT * INTO t FROM …)` is a create too.
   - `SET ROLE`, `SET SESSION AUTHORIZATION`, `SET role = …` / `SET "role" = …`, `RESET ROLE`, MySQL
     `SET DEFAULT ROLE` and `SET PASSWORD`, and `[pg_catalog.]set_config('role', …)` are an `update`
     of `role/<name>` with `privilege: true`, like `GRANT`/`REVOKE`, instead of a `session/*` read.
@@ -52,19 +64,28 @@ behaviour.
     reads, now with `locking: true`, `lock_strength` and `nowait`/`skip_locked`, so a rule can
     match them with `scope: {locking: true}`.
   - `EXPLAIN (ANALYZE[, …]) <stmt>` is classified as `<stmt>`, as `EXPLAIN ANALYZE <stmt>` already
-    was; it was a read. `CREATE MATERIALIZED VIEW mv` is `view/mv`.
+    was; it was a read. `CREATE MATERIALIZED VIEW mv` is `view/mv`; `CREATE INDEX CONCURRENTLY`,
+    MySQL `CREATE … ALGORITHM=… / DEFINER=… / SQL SECURITY …` views and routines, and
+    `SHOW TABLES FROM db` (now `table/*`; only `SHOW COLUMNS|INDEX FROM t` names a table) no longer
+    take a keyword for the name. A DML statement opening a `BEGIN ATOMIC` function body is
+    reported; the body is still split on `;`, so the trailing `END` is unclassified.
   - A top-level `TABLE t`, `VALUES …` or parenthesised `(SELECT …) UNION (SELECT …)` is a read
     (it was unclassified).
   - Classification is linear and never recurses: deeply nested SQL, thousands of CTEs or repeated
     `EXPLAIN` prefixes no longer take seconds or raise `RecursionError`. A statement over 100,000
-    tokens is classified from its first part plus an unclassified `update` (`too_large`).
+    tokens is classified from its first part plus an unclassified `update` (`too_large`). An
+    unclosed `set_config(` no longer takes seconds per thousand repeats.
+  - `aegis check sql --dialect` is documented ([CLI reference](docs/cli.md#sql-and---dialect)).
 
   **Behaviour change:** a statement can now produce more intents than before. Where a rule matches
   one of the newly visible tables or writes, or `create`/`update` on `table/*` or `role/*`, a
   command that used to be ALLOWed is now BLOCKed or ESCALATEd. That is the intended fix; review
   rules on reads of specific tables, and any `actions: [create, update]` rule on `*`, before
-  upgrading. Pass the right `dialect` to `from_sql`: it now changes how strings are read. The
-  example policies and their signatures are unchanged.
+  upgrading. Pass the right `dialect` to `from_sql` and `aegis check sql`: it now changes how
+  strings and comments are read, and `generic` turns an ambiguous statement into an extra
+  unclassified write. Known limits: tables read inside functions, views or procedures a query calls
+  are not seen, and MySQL `"…"` is read with string escapes even under `ANSI_QUOTES`. The example
+  policies and their signatures are unchanged.
 
 ## [1.2.1] — 2026-10-24
 

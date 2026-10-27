@@ -1667,3 +1667,253 @@ def test_repeated_explain_analyze_does_not_recurse():
     assert (intent.action, intent.resource) == ("delete", "table/users")
     (intent,) = from_sql("EXPLAIN " * 1000 + "DELETE FROM users")
     assert (intent.action, intent.resource) == ("read", "table/users")
+
+
+# --- 14. #58 review, round 2 --------------------------------------------------
+
+
+@pytest.mark.parametrize("sql,expected", [
+    # Postgres block comments nest: the comment ends at the second */
+    ("SELECT 1 /* outer /* inner */ ' */; DROP TABLE secret; -- '",
+     [("read", "table/*"), ("delete", "table/secret"), ("update", "unknown/*")]),
+    ("SELECT 1 /* a /* b /* c */ */ */ ; SELECT * FROM users",
+     [("read", "table/*"), ("read", "table/users")]),
+    ("SELECT 1 /* a /* b */ still comment */ FROM users", [("read", "table/users")]),
+])
+def test_postgres_block_comments_nest(sql, expected):
+    assert _summary_in(sql, "postgres") == expected
+
+
+def test_mysql_and_sqlite_block_comments_do_not_nest():
+    sql = "SELECT 1 /* a /* b */ FROM users"
+    assert _summary_in(sql, "mysql") == [("read", "table/users")]
+    assert _summary_in(sql, "sqlite") == [("read", "table/users")]
+
+
+def test_generic_nested_comment_is_ambiguous():
+    intents = from_sql("SELECT 1 /* outer /* inner */ ' */; DROP TABLE secret; -- '")
+    flagged = [i for i in intents if i.params.get("ambiguous_comment")]
+    assert [(i.action, i.resource) for i in flagged] == [("update", "unknown/*")]
+    assert flagged[0].params["unclassified"] is True
+
+
+@pytest.mark.parametrize("setting", [
+    "U&'\\0072ole'", "E'rol\\145'", "E'\\x72ole'", "U&'rol\\0065'", "U&'rol!0065' UESCAPE '!'",
+    "U&'\\+000072ole'", "E'search_path'",
+])
+def test_escaped_set_config_setting_fails_safe(setting):
+    intents = from_sql(f"SELECT set_config({setting}, 'admin', false)", dialect="postgres")
+    roles = [(i.action, i.resource) for i in intents if i.resource.startswith("role/")]
+    assert roles == [("update", "role/*")]
+
+
+@pytest.mark.parametrize("sql,resource", [
+    ("SELECT set_config('role', U&'\\0061dmin', false)", "role/admin"),
+    ("SELECT set_config('role', E'adm\\151n', false)", "role/admin"),
+    ("SET ROLE U&'\\0061dmin'", "role/admin"),
+    ("SET ROLE E'adm\\x69n'", "role/admin"),
+    ("SET ROLE U&'!0061dmin' UESCAPE '!'", "role/admin"),
+])
+def test_escaped_role_names_are_decoded(sql, resource):
+    intents = from_sql(sql, dialect="postgres")
+    assert [i.resource for i in intents if i.resource.startswith("role/")] == [resource]
+
+
+@pytest.mark.parametrize("sql", [
+    'SELECT * FROM U&"\\0073ecret"',
+    "SELECT * FROM U&\"!0073ecret\" UESCAPE '!'",
+    'SELECT * FROM allowed JOIN U&"secr\\0065t" ON true',
+])
+def test_unicode_escaped_identifiers_are_decoded(sql):
+    assert "table/secret" in _reads(sql)
+
+
+@pytest.mark.parametrize("sql,expected", [
+    ("DELETE s FROM secret AS s JOIN allowed AS a ON s.id = a.id",
+     [("delete", "table/secret"), ("read", "table/allowed")]),
+    ("DELETE s FROM secret s JOIN allowed a ON s.id = a.id",
+     [("delete", "table/secret"), ("read", "table/allowed")]),
+    ("DELETE s, a FROM secret s JOIN allowed a ON s.id = a.id",
+     [("delete", "table/secret"), ("delete", "table/allowed")]),
+    ("DELETE FROM a1 USING t1 AS a1 JOIN t2", [("delete", "table/t1"), ("read", "table/t2")]),
+    ("DELETE t1 FROM t1 JOIN t2 ON true", [("delete", "table/t1"), ("read", "table/t2")]),
+    # names no table or alias: every FROM table may be the target
+    ("DELETE x FROM secret JOIN allowed ON true",
+     [("delete", "table/secret"), ("delete", "table/allowed")]),
+])
+def test_mysql_delete_aliases_resolve_to_tables(sql, expected):
+    assert _summary_in(sql, "mysql") == expected
+
+
+@pytest.mark.parametrize("sql,dialect,raw", [
+    ("INSERT INTO secret(id) VALUES (1) ON CONFLICT (id) DO UPDATE SET id = 2", "postgres",
+     "ON CONFLICT DO UPDATE"),
+    ("INSERT INTO secret VALUES (1) ON DUPLICATE KEY UPDATE id = 2", "mysql",
+     "ON DUPLICATE KEY UPDATE"),
+    ("INSERT INTO secret VALUES (1) ON CONFLICT(id) DO UPDATE SET a = 1", "sqlite",
+     "ON CONFLICT DO UPDATE"),
+])
+def test_upserts_are_also_updates(sql, dialect, raw):
+    put, update = from_sql(sql, dialect=dialect)
+    assert (put.action, put.resource) == ("put", "table/secret")
+    assert (update.action, update.resource) == ("update", "table/secret")
+    assert update.params["upsert"] is True
+    assert update.params["raw_action"] == raw
+
+
+def test_on_conflict_do_nothing_is_only_a_put():
+    assert _summary("INSERT INTO t VALUES (1) ON CONFLICT DO NOTHING") == [("put", "table/t")]
+
+
+@pytest.mark.parametrize("sql,dialect,expected", [
+    ("TABLE users INTO OUTFILE '/tmp/x'", "mysql",
+     [("update", "file//tmp/x"), ("read", "table/users")]),
+    ("VALUES ROW(1) INTO OUTFILE '/tmp/x'", "mysql", [("update", "file//tmp/x")]),
+    ("(SELECT * FROM users) INTO OUTFILE '/tmp/x'", "mysql",
+     [("update", "file//tmp/x"), ("read", "table/users")]),
+    ("SELECT * FROM (SELECT * FROM users INTO OUTFILE '/tmp/x') s", "mysql",
+     [("update", "file//tmp/x"), ("read", "table/users")]),
+    ("(SELECT * INTO t FROM users)", "postgres", [("create", "table/t"), ("read", "table/users")]),
+    ("((SELECT * INTO t FROM users))", "postgres",
+     [("create", "table/t"), ("read", "table/users")]),
+    # a subquery can't SELECT INTO: no create
+    ("SELECT * FROM (SELECT * INTO t FROM x) s", "postgres", [("read", "table/x")]),
+])
+def test_into_after_table_values_and_parens(sql, dialect, expected):
+    assert _summary_in(sql, dialect) == expected
+
+
+@pytest.mark.parametrize("sql,expected", [
+    ("DROP TABLE tmp_x, users", [("delete", "table/tmp_x"), ("delete", "table/users")]),
+    ("DROP TABLE IF EXISTS a, s.users CASCADE",
+     [("delete", "table/a"), ("delete", "table/s.users")]),
+    ("DROP VIEW v1, v2", [("delete", "view/v1"), ("delete", "view/v2")]),
+    ("DROP INDEX CONCURRENTLY IF EXISTS i1, i2",
+     [("delete", "index/i1"), ("delete", "index/i2")]),
+    ("DROP MATERIALIZED VIEW mv", [("delete", "view/mv")]),
+    ("DROP TEMPORARY TABLE t", [("delete", "table/t")]),
+    ("DROP FUNCTION f(int, text), g()", [("delete", "function/f"), ("delete", "function/g")]),
+])
+def test_drop_lists_delete_every_name(sql, expected):
+    assert _summary(sql) == expected
+
+
+def test_drop_list_with_cascade_marks_every_name():
+    intents = from_sql("DROP TABLE a, users CASCADE")
+    assert all(i.params["cascade"] is True and i.params["unbounded"] is True for i in intents)
+    assert intents[1].metadata.get("schema") is None
+
+
+def test_drop_schema_list_cascades_each_schema():
+    intents = from_sql("DROP SCHEMA a, prod CASCADE")
+    assert [(i.action, i.resource, i.metadata.get("schema")) for i in intents] == [
+        ("delete", "schema/a", None), ("delete", "table/*", "a"),
+        ("delete", "schema/prod", None), ("delete", "table/*", "prod"),
+    ]
+
+
+def test_drop_list_is_blocked_end_to_end():
+    interceptor = AegisInterceptor(_load_example_store())
+    intents = from_sql("DROP DATABASE a, prod")
+    verdicts = [interceptor.intercept(i, now=NOW).verdict for i in intents]
+    assert verdicts.count("BLOCK") >= 2
+
+
+def test_unclosed_set_config_is_fast_and_fails_safe():
+    elapsed, intents = _timed("SELECT " + "set_config(" * 50_000)
+    assert elapsed < 1.0
+    assert ("update", "role/*") in [(i.action, i.resource) for i in intents]
+
+
+@pytest.mark.parametrize("piece", [
+    "set_config(", "WITH x AS (", "FOR UPDATE (", "UPDATE t ", "DELETE x, ", "EXPLAIN (",
+    "INTO OUTFILE ", "USE INDEX (", "THEN DELETE ", "DROP TABLE a, ", "/* /* ", "[a] ",
+])
+def test_repeated_fragments_stay_linear(piece):
+    for dialect in ("postgres", "mysql", "sqlite", "generic"):
+        import time
+
+        start = time.perf_counter()
+        from_sql("SELECT " + piece * 50_000, dialect=dialect)
+        assert time.perf_counter() - start < 1.0, (piece, dialect)
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT * FROM products, [users]",
+    "SELECT * FROM products JOIN [users] ON 1",
+])
+def test_bracket_identifiers(sql):
+    assert _summary_in(sql, "sqlite") == [("read", "table/products"), ("read", "table/users")]
+    assert _summary_in(sql, "generic") == [("read", "table/products"), ("read", "table/users")]
+
+
+def test_postgres_array_subscript_is_not_a_table():
+    assert _summary_in("SELECT a[1] FROM t", "postgres") == [("read", "table/t")]
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT * FROM products x FORCE INDEX FOR ORDER BY (i), users",
+    "SELECT * FROM products USE INDEX FOR JOIN (i) JOIN users ON true",
+    "SELECT * FROM products IGNORE KEY FOR GROUP BY (i), users",
+    "SELECT * FROM products FORCE INDEX (i), users",
+])
+def test_mysql_index_hints_do_not_end_the_from_list(sql):
+    assert _summary_in(sql, "mysql") == [("read", "table/products"), ("read", "table/users")]
+
+
+@pytest.mark.parametrize("sql,expected", [
+    ("UPDATE OR IGNORE products SET a = 1", [("update", "table/products")]),
+    ("UPDATE OR REPLACE products SET a = 1 WHERE id = 1", [("update", "table/products")]),
+])
+def test_sqlite_update_or_conflict_clause(sql, expected):
+    assert _summary_in(sql, "sqlite") == expected
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT * FROM products WHERE a = 'x\\''; DROP TABLE users",
+    'SELECT * FROM products WHERE a = "x\\""; DROP TABLE users',
+])
+def test_generic_backslash_before_quote_is_ambiguous(sql):
+    intents = from_sql(sql)  # dialect generic
+    flagged = [i for i in intents if i.params.get("ambiguous_escape")]
+    assert [(i.action, i.resource) for i in flagged] == [("update", "unknown/*")]
+    assert flagged[0].params["unclassified"] is True
+
+
+@pytest.mark.parametrize("sql,dialect", [
+    ("SELECT 'C:\\path' FROM t", "generic"),
+    ("SELECT E'x\\'' FROM t", "generic"),
+    ("SELECT 'x\\'' FROM t", "mysql"),
+    ("SELECT 'x\\' FROM t", "postgres"),
+])
+def test_unambiguous_backslashes_are_not_flagged(sql, dialect):
+    assert not any(i.params.get("ambiguous_escape") for i in from_sql(sql, dialect=dialect))
+
+
+@pytest.mark.parametrize("sql,dialect,expected", [
+    ("CREATE INDEX CONCURRENTLY idx ON t (a)", "postgres", [("create", "index/idx")]),
+    ("CREATE OR REPLACE ALGORITHM=MERGE VIEW v AS SELECT * FROM users", "mysql",
+     [("create", "view/v"), ("read", "table/users")]),
+    ("CREATE DEFINER='root'@'%' PROCEDURE p() BEGIN END", "mysql", [("create", "procedure/p")]),
+    ("CREATE DEFINER = CURRENT_USER SQL SECURITY INVOKER VIEW v AS SELECT 1", "mysql",
+     [("create", "view/v")]),
+    ("SHOW TABLES FROM db", "mysql", [("read", "table/*")]),
+    ("SHOW FULL COLUMNS FROM users", "mysql", [("read", "table/users")]),
+    ("SHOW INDEX IN users", "mysql", [("read", "table/users")]),
+])
+def test_create_and_show_forms(sql, dialect, expected):
+    assert _summary_in(sql, dialect) == expected
+
+
+def test_begin_atomic_body_dml_is_reported():
+    sql = ("CREATE FUNCTION f() RETURNS int LANGUAGE sql "
+           "BEGIN ATOMIC DELETE FROM t; SELECT 1; END")
+    summary = _summary_in(sql, "postgres")
+    assert summary[:2] == [("create", "function/f"), ("delete", "table/t")]
+    # the body is split on ';' (safe side): the trailing END is unclassified
+    assert summary[-1] == ("update", "unknown/*")
+
+
+def test_begin_atomic_does_not_swallow_a_following_statement():
+    intents = from_sql("SELECT begin atomic; DROP TABLE users", dialect="postgres")
+    assert ("delete", "table/users") in [(i.action, i.resource) for i in intents]

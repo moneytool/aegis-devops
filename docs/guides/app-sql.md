@@ -48,9 +48,13 @@ read inside a function, view or procedure the query calls are not seen. `SELECT 
 stays a read, marked `locking: true` for a rule that wants to match it.
 
 Pass the gate the dialect your database speaks (`SqlGate(..., dialect="postgres")`, `"mysql"`
-or `"sqlite"`): it decides how strings are read. A backslash escapes a quote inside a MySQL
-string or a Postgres `E'…'` string, as the server reads it. The body of a MySQL `/*! … */`
-comment is checked as SQL, since MySQL runs it.
+or `"sqlite"`): it decides how strings and comments are read, and so where each statement ends.
+A backslash escapes a quote inside a MySQL string or a Postgres `E'…'` string, and Postgres block
+comments nest, as each server reads them. The body of a MySQL `/*! … */` comment is checked as
+SQL, since MySQL runs it. On the command line this is `aegis check sql --dialect …`
+([CLI reference](../cli.md#sql-and---dialect)). The default, `generic`, also counts as a write any
+statement that two databases would split differently (a backslash before a quote, a comment
+inside a comment), so under this guide's rule it is rejected.
 
 One rule allows reads only:
 
@@ -111,7 +115,7 @@ def search(generated_sql: str):
         return conn.execute(generated_sql).fetchall()
 ```
 
-Loading took 0.6 ms and a check 22 µs on an Apple M4 Pro (one rule, a typical search query).
+Loading took 0.6 ms and a check 25 µs on an Apple M4 Pro (one rule, a typical search query).
 
 ## What it catches, and what it does not
 

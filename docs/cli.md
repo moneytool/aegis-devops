@@ -14,6 +14,31 @@ their canonical forms; a leading option Aegis does not recognise is an error (ex
 guess at where the verb starts. `kubectl delete namespace prod` additionally emits a synthetic
 `*/*` delete intent scoped to that namespace, so namespace-scoped deletion rules fire on it.
 
+### SQL and `--dialect`
+
+`aegis check sql "<statements>"` classifies raw SQL; `psql`, `mysql` and `sqlite3` invocations
+are classified the same way with their dialect set for you. With `aegis check sql`, pass the
+dialect your database speaks:
+
+```bash
+aegis check sql --dialect postgres "…"     # or mysql, sqlite; the default is generic
+```
+
+The dialect decides how strings and comments are read, which decides where a statement ends:
+
+| | `postgres` | `mysql` | `sqlite` | `generic` |
+|---|---|---|---|---|
+| `\'` ends a `'…'` string? | only in `E'…'` | no, it escapes the quote (also in `"…"`) | yes | yes, plus an unclassified write (`ambiguous_escape`) |
+| block comments nest? | yes | no | no | no, plus an unclassified write (`ambiguous_comment`) when a `/*` is inside one |
+| `$$…$$` is a string? | yes | no | no | yes |
+| `#` starts a comment? | no | yes | no | no |
+| `[name]` is an identifier? | no | no | yes | read as one in `FROM` |
+
+The body of a MySQL `/*! … */` comment is read as SQL in every dialect. Each statement yields one
+intent per table it reads and per write it makes (see the
+[app SQL guide](guides/app-sql.md#what-it-catches-and-what-it-does-not)); a statement Aegis
+cannot classify is an `update` of `unknown/*` with `unclassified: true`.
+
 ### Exit codes
 
 The exit code is the worst verdict across all evaluated intents, or a tool error. Verdict codes

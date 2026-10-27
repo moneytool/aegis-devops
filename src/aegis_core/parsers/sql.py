@@ -67,16 +67,24 @@ Issue #58 -- what a statement reads, and statements that were weaker than they l
   dialect) and inside every MySQL string, single- or double-quoted, as the
   server reads them, while a plain ``'...'`` keeps the standard reading in
   ``postgres``/``sqlite``/``generic``. ``$$``/``$tag$`` bodies are strings
-  (not in MySQL or SQLite). MySQL ``#`` and ``-- `` comments are comments;
-  ``--`` not followed by whitespace is not, in MySQL. The body of a MySQL
+  (not in MySQL or SQLite). ``E'...'`` and ``U&'...'``/``U&"..."`` (with
+  ``UESCAPE``) are decoded; an escaped literal is never compared to a
+  keyword as plain text (``set_config(U&'\\0072ole', ...)`` fails safe).
+  SQLite ``[name]`` is an identifier. MySQL ``#`` and ``-- `` comments are
+  comments; ``--`` not followed by whitespace is not, in MySQL. Postgres
+  block comments nest; MySQL's and SQLite's do not. The body of a MySQL
   executable comment (``/*! ... */``, ``/*!50000 ...``, ``/*M! ...``) is read
   as SQL in every dialect -- MySQL runs it, and over-reporting is the safe
-  side. The keyword regexes run on the statement with comments removed and
-  every string literal blanked, so nothing inside a string can match.
+  side. ``generic`` can't know which reading applies, so a backslash before
+  a quote in a plain string, or a ``/*`` inside a block comment, adds an
+  ``unknown/*`` ``update`` (``ambiguous_escape`` / ``ambiguous_comment``).
+  The keyword regexes run on the statement with comments removed and every
+  string literal blanked, so nothing inside a string can match.
 * Every table the scan can see becomes its own ``read`` intent
   (deduplicated, in order): ``FROM`` and every ``JOIN`` target, comma joins
-  (a clause word used as an alias -- ``products set, users`` -- does not end
-  the list), subqueries, ``UNION``/``INTERSECT``/``EXCEPT`` branches, ``TABLE
+  (a clause word used as an alias -- ``products set, users`` -- and a MySQL
+  index hint -- ``FORCE INDEX FOR ORDER BY (i)`` -- do not end the list),
+  subqueries, ``UNION``/``INTERSECT``/``EXCEPT`` branches, ``TABLE
   t`` and ``WITH`` bodies. A CTE's name is not a table (except inside its own
   non-recursive body); a function in ``FROM`` (``generate_series(...)``,
   ``ROWS FROM (...)``) is not a table, and neither is ``dual`` in MySQL.
@@ -87,7 +95,12 @@ Issue #58 -- what a statement reads, and statements that were weaker than they l
   each with its own target (``params["cte"]`` when the statement starts with
   ``WITH``). ``ONLY`` and MySQL's ``LOW_PRIORITY``/``QUICK``/``IGNORE``/
   ``DELAYED`` are not table names; MySQL multi-table ``DELETE t1, t2 FROM``
-  and ``UPDATE t1 JOIN t2 ... SET`` write every listed table. ``MERGE INTO
+  and ``UPDATE t1 JOIN t2 ... SET`` write every listed table, a target that
+  is an alias resolving to its table (one naming no table or alias deletes
+  from every table in ``FROM``). An upsert (``ON CONFLICT ... DO UPDATE``,
+  ``ON DUPLICATE KEY UPDATE``) is a ``put`` and an ``update``
+  (``params["upsert"]``). ``DROP <kind> a, b`` and ``TRUNCATE a, b`` delete
+  every name (a schema or database each with its ``table/*``). ``MERGE INTO
   t`` is the strongest of its ``WHEN ... THEN`` actions (``update`` if none
   is found). A DML keyword whose target can't be read is ``unknown/*``
   ``update``, unclassified. ``unbounded`` means no ``WHERE`` in the
@@ -102,7 +115,11 @@ Issue #58 -- what a statement reads, and statements that were weaker than they l
   ``params["select_into"]``), like ``CREATE TABLE t AS SELECT``, plus its
   reads. MySQL ``SELECT ... INTO OUTFILE|DUMPFILE`` writes a file: ``update``
   of ``file/<path>`` with ``params["opaque"] = params["unclassified"] = True``.
-  ``SELECT ... INTO @var`` only sets a variable and stays a read.
+  ``SELECT ... INTO @var`` only sets a variable and stays a read. ``INTO
+  OUTFILE`` is a file write wherever it appears (after ``TABLE``, ``VALUES``
+  or a parenthesised query too); ``(SELECT ... INTO t ...)`` is a create.
+* A ``BEGIN ATOMIC`` function body is still split on ``;`` (merging it would
+  let a later statement hide inside), but its first DML is reported.
 * ``SET [SESSION|LOCAL] ROLE``, ``SET SESSION AUTHORIZATION``, ``SET
   role|"role"|session_authorization = ...``, ``RESET ROLE|SESSION
   AUTHORIZATION``, MySQL ``SET DEFAULT ROLE`` and ``SET PASSWORD``, and
@@ -140,29 +157,40 @@ from aegis_core.parser import _basename, _coerce  # noqa: F401  (re-exported con
 #
 # * ``'...'`` strings take ``''`` as an escaped quote everywhere, and also
 #   ``\x`` in ``E'...'`` strings (any dialect) and in every MySQL string
-#   (single- or double-quoted), as the server reads them.
+#   (single- or double-quoted), as the server reads them. ``E'...'`` and
+#   ``U&'...'`` (with ``UESCAPE``) bodies are decoded; such a literal is
+#   marked ``escaped`` so a check that compares it to a keyword (``role``)
+#   treats it as not-a-plain-literal and fails safe.
 # * ``"..."`` is a quoted identifier (in MySQL its body follows the string
-#   escape rules above); `` `...` `` is a MySQL identifier.
+#   escape rules above), ``U&"..."`` a decoded one; `` `...` `` is a MySQL
+#   identifier and ``[...]`` a SQLite one.
 # * ``$$...$$`` / ``$tag$...$tag$`` are strings (not in MySQL or SQLite, which
 #   have no dollar quoting); ``$1`` is a parameter.
 # * ``--`` comments (MySQL: only ``--`` followed by whitespace), MySQL ``#``
-#   comments and ``/* */`` comments are dropped. An executable comment
-#   ``/*! ... */`` (``/*!50000``, MariaDB ``/*M!``) is not a comment to MySQL:
-#   only its markers are dropped and its body is read as SQL, in every dialect
-#   (reporting more than a server runs is the safe side).
+#   comments and ``/* */`` comments are dropped; Postgres block comments
+#   nest. An executable comment ``/*! ... */`` (``/*!50000``, MariaDB
+#   ``/*M!``) is not a comment to MySQL: only its markers are dropped and its
+#   body is read as SQL, in every dialect (reporting more than a server runs
+#   is the safe side).
+# * ``generic`` cannot know which reading the server uses, so a backslash
+#   before a quote in a plain string, or a ``/*`` inside a block comment,
+#   marks the statement ambiguous: it then also yields an unclassified write.
 
 
 class _T(NamedTuple):
     kind: str  # word, qident, str, var, param, num, punct
-    value: str  # unquoted identifier / string contents / the text itself
+    value: str  # unquoted identifier / decoded string contents / the text itself
     raw: str
     gap: bool  # whitespace or a comment came before it
+    escaped: bool = False  # an E'', U&'' or backslash-escaped literal
 
 
 _WS_RE = re.compile(r"\s+")
 _EXEC_OPEN_RE = re.compile(r"/\*M?!\d*")
+_COMMENT_MARK_RE = re.compile(r"/\*|\*/")
 _DOLLAR_OPEN_RE = re.compile(r"\$(?:[^\W\d][\w]*)?\$")
 _CHARSET_PREFIX_RE = re.compile(r"_[A-Za-z0-9]+(?=')")
+_UESCAPE_RE = re.compile(r"\s*UESCAPE\s*'(.)'", re.IGNORECASE | re.DOTALL)
 _WORD_RE = re.compile(r"[^\W\d][\w$]*")
 _NUM_RE = re.compile(r"\d+(?:\.\d*)?(?:[eE][+-]?\d+)?|\.\d+")
 _PARAM_RE = re.compile(r"\$\d+")
@@ -175,24 +203,77 @@ _BODY_RE = {
     ("`", False): re.compile(r"(?:[^`]|``)*", re.DOTALL),
 }
 _BACKSLASH_ESCAPE_RE = re.compile(r"\\(.)", re.DOTALL)
+_E_ESCAPE_RE = re.compile(
+    r"\\(?:([0-7]{1,3})|x([0-9A-Fa-f]{1,2})|u([0-9A-Fa-f]{4})|U([0-9A-Fa-f]{8})|(.))|''",
+    re.DOTALL,
+)
+_E_SIMPLE = {"b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t"}
+
+
+def _chr(code: int) -> str:
+    try:
+        return chr(code)
+    except (ValueError, OverflowError):
+        return "�"
+
+
+def _decode_e_string(body: str) -> str:
+    """Postgres ``E'...'`` escapes: ``\\n``, ``\\145`` (octal), ``\\x65``,
+    ``\\u0065``, ``\\U00000065``, ``\\<c>`` and ``''``."""
+    def repl(m: re.Match[str]) -> str:
+        octal, hx, u4, u8, other = m.groups()
+        if m.group(0) == "''":
+            return "'"
+        if octal:
+            return _chr(int(octal, 8))
+        if hx:
+            return _chr(int(hx, 16))
+        if u4 or u8:
+            return _chr(int(u4 or u8, 16))
+        return _E_SIMPLE.get(other, other)
+    return _E_ESCAPE_RE.sub(repl, body)
+
+
+def _decode_unicode(body: str, esc: str) -> str:
+    """``U&'...'`` / ``U&"..."``: ``<esc>XXXX``, ``<esc>+XXXXXX``, ``<esc><esc>``."""
+    e = re.escape(esc)
+    pattern = re.compile(rf"{e}(?:{e}|\+([0-9A-Fa-f]{{6}})|([0-9A-Fa-f]{{4}}))")
+
+    def repl(m: re.Match[str]) -> str:
+        code = m.group(1) or m.group(2)
+        return esc if code is None else _chr(int(code, 16))
+    return pattern.sub(repl, body)
+
 
 # Statements longer than this are scanned only up to it, plus an unclassified
 # write for the rest: the scan is linear, the cap only bounds its cost.
 _MAX_STATEMENT_TOKENS = 100_000
 
+_Statement = tuple[list[_T], bool, frozenset[str]]
 
-def _lex(sql: str, dialect: str) -> list[tuple[list[_T], bool]]:
-    """Lexes ``sql`` and splits it on ``;``: a list of (tokens, had_comment)
-    per non-empty statement. A statement with no tokens but a comment is kept
-    (it is classified as unknown, never dropped)."""
+
+def _lex(sql: str, dialect: str) -> list[_Statement]:
+    """Lexes ``sql`` and splits it on ``;``: a list of (tokens, had_comment,
+    flags) per non-empty statement. A statement with no tokens but a comment
+    is kept (it is classified as unknown, never dropped). ``flags`` holds
+    ``ambiguous_escape`` / ``ambiguous_comment`` (``generic`` only)."""
     mysql = dialect == "mysql"
+    generic = dialect == "generic"
+    nested_comments = dialect == "postgres"
     dollar_quotes = dialect not in ("mysql", "sqlite")
-    statements: list[tuple[list[_T], bool]] = []
+    statements: list[_Statement] = []
     toks: list[_T] = []
+    flags: set[str] = set()
     had_comment = False
     gap = False
     exec_open = 0
     i, n = 0, len(sql)
+
+    def emit(kind: str, value: str, raw: str, escaped: bool = False) -> None:
+        nonlocal gap
+        toks.append(_T(kind, value, raw, gap, escaped))
+        gap = False
+
     while i < n:
         ch = sql[i]
         if ch.isspace():
@@ -215,9 +296,23 @@ def _lex(sql: str, dialect: str) -> list[tuple[list[_T], bool]]:
             if em:
                 exec_open += 1
                 i = em.end()
+            elif nested_comments:
+                level, j = 1, i + 2
+                while level and j < n:
+                    cm = _COMMENT_MARK_RE.search(sql, j)
+                    if cm is None:
+                        j = n
+                        break
+                    level += 1 if cm.group(0) == "/*" else -1
+                    j = cm.end()
+                i = j
+                had_comment = True
             else:
                 j = sql.find("*/", i + 2)
-                i = n if j == -1 else j + 2
+                end = n if j == -1 else j + 2
+                if generic and sql.find("/*", i + 2, end) != -1:
+                    flags.add("ambiguous_comment")  # Postgres would nest it
+                i = end
                 had_comment = True
             gap = True
             continue
@@ -225,31 +320,48 @@ def _lex(sql: str, dialect: str) -> list[tuple[list[_T], bool]]:
         start = i
         quote = ""
         backslash = mysql
+        e_string = unicode = False
         if ch in "'\"`":
             quote = ch
         elif ch in "EeNnBbXx" and sql[i + 1 : i + 2] == "'":
-            quote, backslash = "'", backslash or ch in "Ee"
+            quote, e_string = "'", ch in "Ee"
             i += 1
-        elif ch in "Uu" and sql.startswith("&'", i + 1):
-            quote = "'"
+        elif ch in "Uu" and sql[i + 1 : i + 2] == "&" and sql[i + 2 : i + 3] in ("'", '"'):
+            quote, unicode, backslash = sql[i + 2], True, False
             i += 2
         elif ch == "_" and mysql:
             cm = _CHARSET_PREFIX_RE.match(sql, i)
             if cm:
                 quote = "'"
                 i = cm.end()
+        elif ch == "[" and dialect == "sqlite":
+            j = sql.find("]", i + 1)
+            end = n if j == -1 else j
+            i = n if j == -1 else j + 1
+            emit("qident", sql[start + 1 : end], sql[start:i])
+            continue
         if quote:
-            body_re = _BODY_RE[(quote, backslash and quote != "`")]
-            bm = body_re.match(sql, i + 1)
+            slash = (backslash or e_string) and quote != "`"
+            bm = _BODY_RE[(quote, slash)].match(sql, i + 1)
             end = bm.end()  # type: ignore[union-attr]
             body = sql[i + 1 : end]
             i = end + 1 if end < n else n
-            if backslash and quote != "`":
-                body = _BACKSLASH_ESCAPE_RE.sub(r"\1", body)
-            body = body.replace(quote + quote, quote)
-            kind = "str" if quote == "'" else "qident"
-            toks.append(_T(kind, body, sql[start:i], gap))
-            gap = False
+            escaped = e_string or unicode or (slash and "\\" in body)
+            if generic and not e_string and not unicode and "\\" + quote in body:
+                flags.add("ambiguous_escape")  # MySQL would end the string later
+            if unicode:
+                esc = "\\"
+                um = _UESCAPE_RE.match(sql, i)
+                if um:
+                    esc, i = um.group(1), um.end()
+                body = _decode_unicode(body.replace(quote + quote, quote), esc)
+            elif e_string:
+                body = _decode_e_string(body)
+            else:
+                if slash:
+                    body = _BACKSLASH_ESCAPE_RE.sub(r"\1", body)
+                body = body.replace(quote + quote, quote)
+            emit("str" if quote == "'" else "qident", body, sql[start:i], escaped)
             continue
 
         if ch == "$":
@@ -259,44 +371,38 @@ def _lex(sql: str, dialect: str) -> list[tuple[list[_T], bool]]:
                 end = sql.find(tag, dm.end())
                 body_end = n if end == -1 else end
                 i = n if end == -1 else end + len(tag)
-                toks.append(_T("str", sql[dm.end() : body_end], sql[start:i], gap))
-                gap = False
+                emit("str", sql[dm.end() : body_end], sql[start:i])
                 continue
             pm = _PARAM_RE.match(sql, i)
             if pm:
                 i = pm.end()
-                toks.append(_T("param", pm.group(0), pm.group(0), gap))
-                gap = False
+                emit("param", pm.group(0), pm.group(0))
                 continue
         if ch == "@":
             vm = _VAR_RE.match(sql, i)
             if vm:
                 i = vm.end()
-                toks.append(_T("var", vm.group(0), vm.group(0), gap))
-                gap = False
+                emit("var", vm.group(0), vm.group(0))
                 continue
         wm = _WORD_RE.match(sql, i)
         if wm:
             i = wm.end()
-            toks.append(_T("word", wm.group(0), wm.group(0), gap))
-            gap = False
+            emit("word", wm.group(0), wm.group(0))
             continue
         nm = _NUM_RE.match(sql, i)
         if nm:
             i = nm.end()
-            toks.append(_T("num", nm.group(0), nm.group(0), gap))
-            gap = False
+            emit("num", nm.group(0), nm.group(0))
             continue
         i += 1
         if ch == ";":
             if toks or had_comment:
-                statements.append((toks, had_comment))
-            toks, had_comment, gap = [], False, False
+                statements.append((toks, had_comment, frozenset(flags)))
+            toks, had_comment, gap, flags = [], False, False, set()
             continue
-        toks.append(_T("punct", ch, ch, gap))
-        gap = False
+        emit("punct", ch, ch)
     if toks or had_comment:
-        statements.append((toks, had_comment))
+        statements.append((toks, had_comment, frozenset(flags)))
     return statements
 
 
@@ -355,26 +461,28 @@ def _split_schema(raw: str) -> tuple[str, str | None]:
 
 # --- statement classification -------------------------------------------------
 
-_DROP_RE = re.compile(
-    r"\A\s*DROP\s+(?P<kind>TABLE|DATABASE|SCHEMA|INDEX|VIEW|SEQUENCE|FUNCTION|PROCEDURE|TRIGGER)"
-    rf"\s+(?:IF\s+EXISTS\s+)?{_QUALIFIED_NAME_RE}",
-    re.IGNORECASE,
-)
 _ALTER_RE = re.compile(
     rf"\A\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?{_QUALIFIED_NAME_RE}", re.IGNORECASE
 )
 _CREATE_RE = re.compile(
-    r"\A\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:(?:GLOBAL|LOCAL)\s+)?(?:TEMP(?:ORARY)?\s+)?"
+    r"\A\s*CREATE\s+(?:OR\s+REPLACE\s+)?"
+    # MySQL view/routine options: ALGORITHM=x DEFINER=u SQL SECURITY x
+    r"(?:ALGORITHM\s*=\s*\w+\s+)?(?:DEFINER\s*=\s*\S+\s+)?(?:SQL\s+SECURITY\s+\w+\s+)?"
+    r"(?:(?:GLOBAL|LOCAL)\s+)?(?:TEMP(?:ORARY)?\s+)?"
     r"(?:UNLOGGED\s+)?(?:UNIQUE\s+)?(?P<mat>MATERIALIZED\s+)?"
     r"(?P<kind>TABLE|DATABASE|SCHEMA|INDEX|VIEW|SEQUENCE|FUNCTION|PROCEDURE|TRIGGER)"
-    rf"\s+(?:IF\s+NOT\s+EXISTS\s+)?{_QUALIFIED_NAME_RE}",
+    rf"\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?{_QUALIFIED_NAME_RE}",
     re.IGNORECASE,
 )
 _CREATE_FALLBACK_RE = re.compile(
     rf"\A\s*CREATE\s+(?P<kind>[A-Za-z_]+)\s+(?:IF\s+NOT\s+EXISTS\s+)?{_QUALIFIED_NAME_RE}",
     re.IGNORECASE,
 )
-_SHOW_FROM_RE = re.compile(rf"\bFROM\s+{_QUALIFIED_NAME_RE}", re.IGNORECASE)
+_SHOW_FROM_RE = re.compile(
+    r"\A\s*SHOW\s+(?:(?:FULL|EXTENDED)\s+)*(?:COLUMNS|FIELDS|INDEX|INDEXES|KEYS)\s+(?:FROM|IN)\s+"
+    rf"{_QUALIFIED_NAME_RE}",
+    re.IGNORECASE,
+)
 _DESCRIBE_TARGET_RE = re.compile(rf"\A\s*(?:DESCRIBE|DESC)\s+{_QUALIFIED_NAME_RE}", re.IGNORECASE)
 _GRANT_TO_RE = re.compile(rf"\bTO\s+{_QUALIFIED_NAME_RE}", re.IGNORECASE)
 _REVOKE_FROM_RE = re.compile(rf"\bFROM\s+{_QUALIFIED_NAME_RE}", re.IGNORECASE)
@@ -428,7 +536,7 @@ _SEARCH_LIMIT = 256  # how far an UPDATE looks ahead for its SET
 
 
 class _Op:
-    __slots__ = ("action", "targets", "raw", "index", "unbounded")
+    __slots__ = ("action", "targets", "raw", "index", "unbounded", "upsert")
 
     def __init__(self, action: str | None, raw: str, index: int) -> None:
         self.action = action  # None: an unparseable DML statement
@@ -436,6 +544,7 @@ class _Op:
         self.raw = raw
         self.index = index
         self.unbounded: bool | None = None
+        self.upsert: str | None = None  # ON CONFLICT DO UPDATE / ON DUPLICATE KEY UPDATE
 
 
 class _Scan:
@@ -547,19 +656,31 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
             m += 2
         return parts, m
 
+    lead = 0  # leading '(' of a parenthesised top-level query
+    while lead < n and _is_punct(toks[lead], "("):
+        lead += 1
+
     seen: set[tuple[str, ...]] = set()
     alias_pos: set[int] = set()
+    alias_of: dict[str, list[str]] = {}  # alias -> table it names
     skip_dual = dialect in ("mysql", "oracle")
     from_list: dict[int, bool] = {}
 
-    def mark_alias(m: int) -> None:
+    def mark_alias(m: int, table: list[str] | None = None) -> None:
         t = tok(m)
         if _is_word(t, "AS"):
-            alias_pos.add(m + 1)
-        elif t is not None and (
+            m += 1
+            t = tok(m)
+            if not _is_name(t):
+                return
+        elif t is None or not (
             t.kind == "qident" or (t.kind == "word" and t.value.upper() not in _NOT_ALIAS)
         ):
-            alias_pos.add(m)
+            return
+        assert t is not None
+        alias_pos.add(m)
+        if table is not None:
+            alias_of[t.value.lower()] = table
 
     def parse_ref(j: int) -> None:
         while True:
@@ -575,26 +696,32 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
                 return
             from_list[depth[j] + 1] = True
             j += 1
-        if not _is_name(t):
-            return
-        assert t is not None
-        upper = t.value.upper() if t.kind == "word" else ""
-        if upper in ("SELECT", "WITH", "VALUES") or (upper == "DUAL" and skip_dual):
-            return
-        if upper == "ROWS" and _is_word(tok(j + 1), "FROM"):
-            return  # ROWS FROM (f(...), g(...))
-        parts, m = name_parts(j)
-        if _is_punct(tok(m), "("):
-            return  # a function in FROM (generate_series(...), unnest(...))
-        if _is_punct(tok(m), "*"):
-            m += 1  # ONLY t *
-        mark_alias(m)
-        if len(parts) == 1 and is_cte(_norm_ident(t), j):
-            return
+        if _is_punct(t, "[") and _is_name(tok(j + 1)) and _is_punct(tok(j + 2), "]"):
+            # [name]: a SQLite/SQL Server identifier read in another dialect
+            parts, m = [toks[j + 1]], j + 3
+        else:
+            if not _is_name(t):
+                return
+            assert t is not None
+            upper = t.value.upper() if t.kind == "word" else ""
+            if upper in ("SELECT", "WITH", "VALUES") or (upper == "DUAL" and skip_dual):
+                return
+            if upper == "ROWS" and _is_word(tok(j + 1), "FROM"):
+                return  # ROWS FROM (f(...), g(...))
+            parts, m = name_parts(j)
+            if _is_punct(tok(m), "("):
+                return  # a function in FROM (generate_series(...), unnest(...))
+            if _is_punct(tok(m), "*"):
+                m += 1  # ONLY t *
+            if len(parts) == 1 and is_cte(_norm_ident(t), j):
+                mark_alias(m)
+                return
+        table = [p.value for p in parts]
+        mark_alias(m, table)
         key = tuple(_norm_ident(p) for p in parts)
         if key not in seen:
             seen.add(key)
-            scan.tables.append([p.value for p in parts])
+            scan.tables.append(table)
 
     def target_at(j: int) -> tuple[list[str] | None, int]:
         while _is_word(tok(j), "ONLY"):
@@ -639,6 +766,8 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
         elif u == "UPDATE":
             while _is_word(tok(j), "LOW_PRIORITY", "IGNORE"):
                 j += 1
+            if _is_word(tok(j), "OR") and tok(j + 1) is not None:  # SQLite UPDATE OR ...
+                j += 2
             op = _Op("update", "UPDATE", i)
             target, m = target_at(j)
             if target:
@@ -686,9 +815,13 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
     last_kw: dict[int, str] = {}
     using_done: dict[int, bool] = {}
     merge_at: dict[int, _Op] = {}
+    insert_at: dict[int, _Op] = {}
     idents: set[int] = set()  # keyword-looking words used as identifiers
+    skip_until = -1  # end of a MySQL index hint being skipped
 
     for i, t in enumerate(toks):
+        if i <= skip_until:
+            continue
         d = depth[i]
         prev = tok(i - 1)
         if t.kind == "punct":
@@ -698,6 +831,7 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
                 using_done[d + 1] = False
                 last_kw.pop(d + 1, None)
                 merge_at.pop(d + 1, None)
+                insert_at.pop(d + 1, None)
             elif t.value == ")" and from_list.get(d):
                 mark_alias(i + 1)  # (SELECT ...) alias / f(...) alias
             elif t.value == "," and from_list.get(d):
@@ -710,6 +844,18 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
         if t.kind != "word":
             continue
         u = t.value.upper()
+
+        if u in ("USE", "FORCE", "IGNORE") and from_list.get(d) and _is_word(
+            tok(i + 1), "INDEX", "KEY"
+        ):
+            # MySQL index hint: USE|FORCE|IGNORE INDEX|KEY [FOR JOIN|ORDER BY|
+            # GROUP BY] (names) -- none of it is a table or a clause.
+            j = i + 2
+            if _is_word(tok(j), "FOR"):
+                j += 2 if _is_word(tok(j + 1), "JOIN") else 3
+            if _is_punct(tok(j), "(") and j in close_of:
+                skip_until = close_of[j]
+            continue
 
         if i in alias_pos or _is_punct(prev, ".") or (
             _is_word(prev, "AS") and u not in _SUBQUERY_START  # CREATE ... AS SELECT
@@ -728,12 +874,24 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
             from_list[d] = False
             continue
         if u in _DML:
-            if prev is None or _is_punct(prev, "(") or _is_punct(prev, ")"):
-                # A statement keyword (top level, a CTE body, after a CTE list).
+            if u == "UPDATE" and d in insert_at and (
+                _is_word(prev, "DO")
+                or (_is_word(prev, "KEY") and _is_word(tok(i - 2), "DUPLICATE"))
+            ):
+                insert_at[d].upsert = (
+                    "ON CONFLICT DO UPDATE" if _is_word(prev, "DO") else "ON DUPLICATE KEY UPDATE"
+                )
+            elif prev is None or _is_punct(prev, "(") or _is_punct(prev, ")") or _is_word(
+                prev, "ATOMIC"
+            ):
+                # A statement keyword (top level, a CTE body, after a CTE
+                # list, the first one in a BEGIN ATOMIC function body).
                 op = parse_op(i, u)
                 scan.ops.append(op)
                 if u == "MERGE":
                     merge_at[d] = op
+                elif u == "INSERT":
+                    insert_at[d] = op
                 query_at[d] = True
                 last_kw[d] = u
                 from_list[d] = False
@@ -772,25 +930,33 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
             parse_ref(i + 1)
             continue
 
-        if u in _FROM_LIST_END:
+        if u in _FROM_LIST_END and (
+            # MySQL index hints (FORCE INDEX FOR JOIN (i)) keep the list going
+            u != "FOR" or _is_word(tok(i + 1), "UPDATE", "SHARE", "NO", "KEY")
+        ):
             from_list[d] = False
 
+        if u == "INTO" and _is_word(tok(i + 1), "OUTFILE", "DUMPFILE"):
+            # A file write wherever it appears (after TABLE, VALUES, a
+            # parenthesised query, ...).
+            path = tok(i + 2)
+            if scan.into is None or scan.into[0] != "file":
+                scan.into = (
+                    "file", path.value if path and path.kind in ("str", "qident") else None
+                )
+            continue
         if (
             u == "INTO"
-            and d == 0
             and scan.into is None
-            and last_kw.get(0) == "SELECT"
+            and encl[i] < lead  # top level, or inside the statement's leading parens
+            and last_kw.get(d) == "SELECT"
+            and first_word in ("SELECT", "WITH")
         ):
             j = i + 1
             while _is_word(tok(j), "TEMP", "TEMPORARY", "UNLOGGED", "TABLE"):
                 j += 1
             target = tok(j)
-            if _is_word(target, "OUTFILE", "DUMPFILE"):
-                path = tok(j + 1)
-                scan.into = (
-                    "file", path.value if path and path.kind in ("str", "qident") else None
-                )
-            elif target is not None and target.kind == "var":
+            if target is not None and target.kind == "var":
                 scan.into = ("var", None)
             elif _is_name(target):
                 parts, _m = name_parts(j)
@@ -834,17 +1000,35 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
         if u == "SET_CONFIG" and _is_punct(tok(i + 1), "("):
             _set_config(toks, i, close_of, depth, scan)
 
+    # MySQL ``DELETE s FROM secret AS s ...``: a single-part target may be an
+    # alias; one that names no table or alias here deletes from them all.
+    known = {p[-1].lower() for p in scan.tables}
+    for op in scan.ops:
+        if op.action != "delete":
+            continue
+        resolved: list[list[str]] = []
+        for target in op.targets:
+            key = target[0].lower()
+            if len(target) == 1 and key in alias_of:
+                resolved.append(alias_of[key])
+            elif len(target) == 1 and op.raw == "DELETE" and key not in known:
+                resolved.extend(scan.tables or [target])
+            else:
+                resolved.append(target)
+        op.targets = resolved
     return scan
 
 
-def _plain_string_arg(toks: list[_T], close_of: dict[int, int], lo: int, hi: int) -> str | None:
+def _plain_string_arg(
+    toks: list[_T], close_of: dict[int, int], lo: int, hi: int, *, decoded: bool = False
+) -> str | None:
     """The value of tokens ``lo..hi`` (exclusive) when they are one string
     literal, possibly in parentheses (``('role')``); else None."""
     while hi - lo >= 3 and _is_punct(toks[lo], "(") and close_of.get(lo) == hi - 1:
         lo, hi = lo + 1, hi - 1
-    if hi - lo == 1 and toks[lo].kind == "str":
+    if hi - lo == 1 and toks[lo].kind == "str" and (decoded or not toks[lo].escaped):
         return toks[lo].value
-    return None
+    return None  # an expression, or an E''/U&'' literal: not compared as text
 
 
 def _set_config(
@@ -854,7 +1038,10 @@ def _set_config(
     ``pg_catalog.`` qualifier before it does not matter). A role change when
     the setting is ``role``/``session_authorization`` -- or when it isn't a
     plain string literal, since it then might be (fail-safe: ``role/*``)."""
-    close = close_of.get(i + 1, len(toks))
+    if i + 1 not in close_of:
+        scan.roles.append(None)  # unclosed call: fail safe, and stay linear
+        return
+    close = close_of[i + 1]
     args: list[tuple[int, int]] = []
     start = j = i + 2
     while j < close and len(args) < 2:
@@ -873,7 +1060,7 @@ def _set_config(
         return
     value = None
     if setting is not None and len(args) > 1:
-        value = _plain_string_arg(toks, close_of, *args[1])
+        value = _plain_string_arg(toks, close_of, *args[1], decoded=True)
     scan.roles.append(value)
 
 
@@ -918,6 +1105,9 @@ def _scan_results(
             if cte:
                 params["cte"] = True
             results.append((resource, action, params, "dml", op.raw, meta))
+            if op.upsert:
+                upsert: dict[str, Any] = {"upsert": True, **({"cte": True} if cte else {})}
+                results.append((resource, "update", upsert, "dml", op.upsert, meta))
 
     if scan.into is not None:
         into_kind, value = scan.into
@@ -1086,6 +1276,67 @@ def _strip_explain(toks: list[_T]) -> tuple[list[_T], bool]:
     return toks[j:], analyze
 
 
+_DROP_KINDS = frozenset({
+    "TABLE", "DATABASE", "SCHEMA", "INDEX", "VIEW", "SEQUENCE", "FUNCTION", "PROCEDURE", "TRIGGER",
+})
+
+
+def _classify_drop(toks: list[_T]) -> list[_Classification]:
+    """``DROP [TEMPORARY|MATERIALIZED] <kind> [CONCURRENTLY] [IF EXISTS] a, b,
+    ...``: one unbounded delete per name, and for a schema or database also a
+    synthetic ``table/*`` delete (see module docstring). Empty when the kind
+    isn't one of ``_DROP_KINDS``."""
+    n = len(toks)
+    j = 1
+    mat = ""
+    while j < n and _is_word(toks[j], "TEMPORARY", "MATERIALIZED"):
+        if _is_word(toks[j], "MATERIALIZED"):
+            mat = "MATERIALIZED "
+        j += 1
+    if j >= n or not _is_word(toks[j], *_DROP_KINDS):
+        return []
+    kind = toks[j].value.lower()
+    j += 1
+    if j < n and _is_word(toks[j], "CONCURRENTLY"):
+        j += 1
+    if j + 1 < n and _is_word(toks[j], "IF") and _is_word(toks[j + 1], "EXISTS"):
+        j += 2
+    params: dict[str, Any] = {"unbounded": True, "ddl": True}
+    if any(_is_word(t, "CASCADE") for t in toks):
+        params["cascade"] = True
+    raw = f"DROP {mat}{kind.upper()}"
+    results: list[_Classification] = []
+    while j < n and _is_name(toks[j]) and not _is_word(toks[j], "CASCADE", "RESTRICT"):
+        parts = [toks[j].value]
+        j += 1
+        while j + 1 < n and _is_punct(toks[j], ".") and _is_name(toks[j + 1]):
+            parts.append(toks[j + 1].value)
+            j += 2
+        if j < n and _is_punct(toks[j], "("):  # DROP FUNCTION f(int)
+            level = 0
+            while j < n:
+                if _is_punct(toks[j], "("):
+                    level += 1
+                elif _is_punct(toks[j], ")"):
+                    level -= 1
+                    if level == 0:
+                        j += 1
+                        break
+                j += 1
+        meta: dict[str, Any] = {"schema": parts[-2]} if len(parts) >= 2 else {}
+        results.append((f"{kind}/" + ".".join(parts), "delete", dict(params), "ddl", raw, meta))
+        if kind in ("schema", "database"):
+            results.append(
+                ("table/*", "delete", {"unbounded": True}, "ddl", f"DROP {kind.upper()} (cascade)",
+                 {"schema": parts[-1]})
+            )
+        if j < n and _is_punct(toks[j], ","):
+            j += 1
+            continue
+        break
+    return results
+
+
 def _classify_tokens(toks: list[_T], dialect: str) -> list[_Classification]:
     """Returns a list of (resource, action, params, statement_class,
     raw_action, extra_metadata) for one statement."""
@@ -1094,7 +1345,7 @@ def _classify_tokens(toks: list[_T], dialect: str) -> list[_Classification]:
     truncated = len(toks) > _MAX_STATEMENT_TOKENS
     if truncated:
         toks = toks[:_MAX_STATEMENT_TOKENS]
-        results = _classify_tokens(toks, dialect)
+        results = list(_classify_tokens(toks, dialect))
         return [*results, ("unknown/*", "update", {"unclassified": True, "too_large": True},
                            "dml", "UNKNOWN", {})]
 
@@ -1129,31 +1380,10 @@ def _classify_tokens(toks: list[_T], dialect: str) -> list[_Classification]:
 
     body = _render(toks)
 
-    m = _DROP_RE.match(body)
-    if m:
-        kind = m.group("kind").lower()
-        resource, extra_meta = _resource_and_metadata(m.group("name"), kind)
-        rest = body[m.end() :]
-        params: dict[str, Any] = {"unbounded": True, "ddl": True}
-        if _CASCADE_RE.search(rest):
-            params["cascade"] = True
-        results: list[_Classification] = [
-            (resource, "delete", params, "ddl", f"DROP {kind.upper()}", extra_meta)
-        ]
-        if kind in ("schema", "database"):
-            qualified_name, _schema = _split_schema(m.group("name"))
-            target_name = qualified_name.rsplit(".", 1)[-1]
-            results.append(
-                (
-                    "table/*",
-                    "delete",
-                    {"unbounded": True},
-                    "ddl",
-                    f"DROP {kind.upper()} (cascade)",
-                    {"schema": target_name},
-                )
-            )
-        return results
+    if first_word == "DROP":
+        dropped = _classify_drop(toks)
+        if dropped:
+            return dropped
 
     if first_word == "TRUNCATE":
         truncated_tables: list[_Classification] = []
@@ -1210,7 +1440,7 @@ def _classify_tokens(toks: list[_T], dialect: str) -> list[_Classification]:
     if first_word in ("SHOW", "DESCRIBE", "DESC"):
         resource, extra_meta = "table/*", {}
         dm = (_DESCRIBE_TARGET_RE.match(body) if first_word in ("DESCRIBE", "DESC")
-              else _SHOW_FROM_RE.search(body))  # SHOW COLUMNS|INDEX FROM t
+              else _SHOW_FROM_RE.match(body))  # SHOW COLUMNS|INDEX FROM t
         if dm:
             resource, extra_meta = _resource_and_metadata(dm.group("name"), "table")
         return [(resource, "read", {}, "dql", first_word, extra_meta)]
@@ -1266,10 +1496,13 @@ def from_sql(
     ``sqlite``, ``generic``) decides how strings, comments and dollar quotes
     are read."""
     intents = []
-    for toks, _comment in _lex(sql, dialect):
-        for resource, action, params, statement_class, raw_action, extra_meta in (
-            _classify_tokens(toks, dialect)
-        ):
+    for toks, _comment, flags in _lex(sql, dialect):
+        results = list(_classify_tokens(toks, dialect))
+        for flag in sorted(flags):  # generic: the server may read it differently
+            results.append(
+                ("unknown/*", "update", {"unclassified": True, flag: True}, "dml", "AMBIGUOUS", {})
+            )
+        for resource, action, params, statement_class, raw_action, extra_meta in results:
             params = dict(params)
             params["statement_class"] = statement_class
             params["raw_action"] = raw_action
@@ -1798,4 +2031,13 @@ evasion: list[str] = [
     "FROM t <clause word as alias>, other (#58)",
     "DELETE FROM ONLY t / DELETE IGNORE FROM t / TRUNCATE ONLY t (#58)",
     "DESCRIBE SELECT ... (#58)",
+    "/* a /* b */ ' */; DROP ... (Postgres nested comment, #58)",
+    "set_config(U&'\\0072ole', ...) / E'rol\\145' (escaped setting name, #58)",
+    "FROM U&\"\\0073ecret\" (Unicode-escaped identifier, #58)",
+    "DELETE s FROM secret AS s JOIN ... (MySQL delete via alias, #58)",
+    "INSERT ... ON CONFLICT DO UPDATE / ON DUPLICATE KEY UPDATE (#58)",
+    "TABLE t INTO OUTFILE / (SELECT ...) INTO OUTFILE (#58)",
+    "DROP TABLE harmless, users (#58)",
+    "FROM a FORCE INDEX FOR ORDER BY (i), users (#58)",
+    "FROM a, [users] (SQLite brackets, #58)",
 ]

@@ -481,7 +481,10 @@ def _build_parser() -> argparse.ArgumentParser:
     sql_parser = check_sub.add_parser("sql", help="Evaluate raw SQL text (one or more statements)")
     _add_common_options(sql_parser)
     sql_parser.add_argument("--database", default=None)
-    sql_parser.add_argument("--dialect", default="generic")
+    sql_parser.add_argument(
+        "--dialect", default="generic",
+        help="postgres, mysql, sqlite or generic (default): how strings and comments are read",
+    )
     sql_parser.add_argument("sql", help="SQL text, or '-' to read from stdin")
 
     for name, help_text in (
