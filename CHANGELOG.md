@@ -26,7 +26,8 @@ behaviour.
   namespace). `-c`, `-L` and `-p` on `patch` keep their value instead of leaving it as a target.
   An unknown long flag is a boolean at the end of argv, takes a following word as its value, and
   is refused when another option follows it, since whether it takes that option as its value
-  decides the scope.
+  decides the scope; write unknown flags as `--flag=value`, or put them last.
+  `kubectl get --raw <path>` is still refused (a URI path can read any kind).
 - **Help and version probes were parse errors** (#54). These forms now give one read-only
   `cli/<tool>` intent with `params.informational`, which the example policy allows: the tool's
   lone help or version flag (`helm --help`, `psql -V`); `help [topic…]` for kubectl, helm,
@@ -34,7 +35,8 @@ behaviour.
   kubectl, helm, argocd, flux, gh and pulumi (git, az, gcloud, prisma, flyway, rails: bare
   `version`); `<command words> --help` for built-in commands of kubectl (subcommands checked),
   helm, argocd, flux, gh and pulumi, and for az, gcloud and prisma; `git <cmd> --help` and
-  `alembic <cmd> --help`; `aws [<service> [<operation>]] help` for common services. Anything
+  `alembic <cmd> --help`; for aws only `aws --version` (an alias in `~/.aws/cli/alias` can
+  replace `help` and any service name, so `aws s3 help` is parsed as an aws command). Anything
   else (an option before `--help`, `--` before it, `git <cmd> -h`, a plugin or unknown
   subcommand) is parsed as the command it is, so `kubectl -n --help delete ns prod` is still a
   namespace delete. In a chain each command is still checked: `argocd version --client && argocd

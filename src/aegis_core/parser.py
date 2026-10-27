@@ -3022,7 +3022,9 @@ _INFO_PROVIDER = {
 }
 
 # The single token that alone prints help / the version, per tool. psql and
-# mysql have no "-h" here (it is --host there).
+# mysql have no "-h" here (it is --host there). aws has no help form at all:
+# a [toplevel] alias in ~/.aws/cli/alias can replace "help" and any service
+# name ("s3 = !cmd" makes "aws s3 help" run cmd); only --version is built in.
 _INFO_HELP_FLAGS = {
     "kubectl": {"--help", "-h"}, "aws": set(), "az": {"--help", "-h"},
     "gcloud": {"--help", "-h"}, "gsutil": {"--help"}, "helm": {"--help", "-h"},
@@ -3127,21 +3129,6 @@ _KUBECTL_SUBCOMMANDS: dict[tuple[str, ...], frozenset[str]] = {
     ("plugin",): frozenset({"list"}),
 }
 
-# aws: "<service> [<operation>] help" only for these services (an alias in
-# ~/.aws/cli/alias may be any other word, and runs its own command).
-_AWS_HELP_SERVICES = frozenset({
-    "acm", "apigateway", "apigatewayv2", "application-autoscaling", "athena", "autoscaling",
-    "backup", "batch", "budgets", "ce", "cloudformation", "cloudfront", "cloudtrail",
-    "cloudwatch", "codebuild", "codecommit", "codedeploy", "codepipeline", "cognito-idp",
-    "configservice", "configure", "dynamodb", "ebs", "ec2", "ecr", "ecr-public", "ecs", "efs",
-    "eks", "elasticache", "elasticbeanstalk", "elb", "elbv2", "emr", "es", "events",
-    "firehose", "glacier", "glue", "guardduty", "iam", "kafka", "kinesis", "kms", "lambda",
-    "lightsail", "logs", "opensearch", "organizations", "rds", "redshift", "route53",
-    "route53domains", "s3", "s3api", "s3control", "sagemaker", "secretsmanager",
-    "securityhub", "ses", "sesv2", "sns", "sqs", "ssm", "sso", "stepfunctions",
-    "storagegateway", "sts", "transfer", "waf", "wafv2", "xray",
-})
-
 # One word, then the flag: the vcs tool rewrites "<cmd> --help" to
 # "help <cmd>" only with --help directly after the command; alembic
 # (argparse) exits on -h before running its command.
@@ -3193,11 +3180,6 @@ def _informational_kind(name: str, args: list[str]) -> str | None:
             not rest or (name == "git" and rest == ["--build-options"])
         ):
             return "version"
-    # aws: "aws help", "aws <service> [<operation>] help"
-    if name == "aws" and args[-1] == "help" and len(args) <= 3 and all(map(_is_word, args)):
-        if len(args) == 1 or args[0] in _AWS_HELP_SERVICES:
-            return "help"
-        return None
     verb_help_flags = _INFO_VERB_HELP_FLAGS.get(name, _INFO_HELP_FLAGS.get(name, set()))
     if args[-1] in ("--help", "-h") and args[-1] in verb_help_flags:
         words = args[:-1]

@@ -2824,9 +2824,6 @@ def test_kubectl_dash_f_is_still_a_manifest_outside_logs():
     ("kubectl top pod --help", "help"),
     ("kubectl config use-context --help", "help"),
     ("aws --version", "version"),
-    ("aws help", "help"),
-    ("aws s3 help", "help"),
-    ("aws s3 rm help", "help"),
     ("az --version", "version"),
     ("az version", "version"),
     ("az vm delete --help", "help"),
@@ -2901,14 +2898,17 @@ def test_help_and_version_probes_are_informational(argv, kind):
     "git co -h",
     "git grep -h",
     "git ls-remote -h",
-    # an aws alias (~/.aws/cli/alias) runs its own command
+    # an aws [toplevel] alias (~/.aws/cli/alias) can replace "help" and any
+    # service name, "s3 = !cmd" included, and runs its own command
+    "aws help",
+    "aws help topics",
+    "aws s3 help",
+    "aws s3 rm help",
     "aws nuke help",
-    "aws nuke now help",
+    "aws s3 cp src help extra",
     # -h is --host for psql / mysql
     "psql -h db.internal",
     "mysql -h db.internal",
-    # aws: help must be the last of at most three words
-    "aws s3 cp src help extra",
 ])
 def test_mutating_or_ambiguous_forms_are_not_informational(argv):
     try:
@@ -2916,6 +2916,31 @@ def test_mutating_or_ambiguous_forms_are_not_informational(argv):
     except ValueError:
         return  # a parse error fails closed
     assert not any(i.params.get("informational") for i in intents)
+
+
+def test_aws_help_is_never_informational_an_alias_can_replace_it():
+    """Council review of #54: with "[toplevel] s3 = !cmd" in
+    ~/.aws/cli/alias, "aws s3 help" runs cmd. Such forms go to the aws
+    parser, as before; only --version is built in."""
+    for argv in ("aws s3 help", "aws s3 rm help", "aws help"):
+        try:
+            intents = from_argv(argv.split())
+        except ValueError:
+            continue  # a parse error fails closed, as on main
+        assert not any(i.params.get("informational") for i in intents)
+    (intent,) = from_argv(["aws", "--version"])
+    assert intent.params["informational"] == "version"
+
+
+@pytest.mark.parametrize("argv", [
+    "kubectl get --raw /api/v1/namespaces/prod/secrets",
+    "kubectl get --raw=/api/v1/namespaces/prod/secrets",
+])
+def test_kubectl_get_raw_is_still_refused(argv):
+    """A raw URI path can read any kind (secrets included), which no
+    kind-based rule would match, so it stays a parse error (fail closed)."""
+    with pytest.raises(ValueError, match="could not find a target resource"):
+        from_kubectl_multi(argv.split())
 
 
 @pytest.mark.parametrize("argv", [
