@@ -628,6 +628,22 @@ def test_reserved_words_in_front_of_a_command_are_dropped(command, argvs):
     assert _argvs(command) == argvs
 
 
+@pytest.mark.parametrize("command,argvs", [
+    ("coproc kubectl delete node/w1", [["kubectl", "delete", "node/w1"]]),
+    ("coproc NAME { kubectl delete node/w1; }", [["kubectl", "delete", "node/w1"]]),
+    ("kubectl delete \\\nnode/w1", [["kubectl", "delete", "node/w1"]]),
+    ("kube\\\nctl delete node/w1", [["kubectl", "delete", "node/w1"]]),
+    ("echo 'a\\\nb'", [["echo", "a\\\nb"]]),  # inside single quotes it stays
+])
+def test_coproc_and_line_continuations(command, argvs):
+    assert _argvs(command) == argvs
+
+
+def test_function_keyword_definition_is_rejected():
+    with pytest.raises(ShellRejected, match="function definition"):
+        split_compound("function f { kubectl delete node/w1; }; f")
+
+
 def test_a_delete_after_then_is_seen():
     resources = [(i.resource, i.action) for i in
                  intents_from_command("if true; then kubectl delete node/w1; fi")]
@@ -667,10 +683,31 @@ def test_split_segments_gives_up_on_unbalanced_quoting(command):
     (' tail -n "$N"', "tail"),
     ('sudo rm -rf "$DIR"', "rm"),
     ('then echo "$x"', "echo"),
-    ('file "$(which kubectl)"', "file"),
-    ("TS=$(date +%s)", ""),
-    ("A=$x B=$(y z)", ""),
+    ('file "$HOME/x"', "file"),
+    ('[ -f "$F" ]', "["),
+    ("A=$x B=${y:-z}", ""),
+    ('export X="$HOME"', ""),
+    ("local -r X=$Y", ""),
+    # round 1: an expansion that runs a command is never reduced or dropped
+    ('file "$(which kubectl)"', None),
+    ("TS=$(date +%s)", None),
+    ("echo `whoami`", None),
+    ("diff <(a) b", None),
+    ("echo $((1 + 2))", None),
+    # round 1: only args-only programs stand in as a bare name
+    ("find . -exec $C \\;", None),
+    ("watch $C", None),
+    ("ssh host $C", None),
+    ('trap "$C" EXIT', None),
+    ("builtin $C", None),
+    ('awk "$P"', None),
+    ('sed "$S" f', None),
+    ("./echo $X", None),
     ("KUBECONFIG=$K", None),   # changes what a later kubectl talks to
+    ("export KUBECONFIG=$K", None),
+    ("declare -x AWS_PROFILE=$P", None),
+    ("readonly PATH=$P", None),
+    ("typeset TF_VAR_x=$X", None),
     ("$K delete ns prod", None),
     ('"$(which kubectl)" get pods', None),
     ('eval "$X"', None),

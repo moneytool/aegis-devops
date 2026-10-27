@@ -19,27 +19,43 @@ behaviour.
 - Agent hook: a shell expansion in one part of a compound command no longer refuses the whole
   command (#55). The hook judges a command it cannot parse part by part (`;`, `&&`, `||`, `|`,
   newline): `terraform plan 2>&1; echo "exit=$?"` checks `terraform plan` against the policy
-  and lets the `echo` through. A part that cannot be checked and names an infrastructure tool is
-  still refused, and the message now quotes it; so is a part whose program is itself unknown
-  (`$TOOL …`, `eval …`, `bash -c "$X"`) in a command that names an infrastructure tool anywhere.
-  Here-docs are judged as a whole, as before.
-- Shell parser: the reserved words `if`, `then`, `else`, `elif`, `do`, `while` and `until` in
-  front of a command are stripped like `{` and `!`, so `if true; then kubectl delete namespace
-  prod; fi` is checked as the `kubectl` command it runs (it was an unknown binary `then`, and
-  allowed). A lone `fi`/`done`/`esac` and a `for`/`select` header give no command.
+  and lets the `echo` through. A part with an unknown argument stands in for its program only
+  when that program treats arguments as data (`echo`, `cat`, `tail`, `grep`, `ls`, `test`, …);
+  a part that only assigns a variable drops out, unless the variable steers an infrastructure
+  tool (`KUBECONFIG`, `AWS_*`, `PATH`, …, also after `export`/`declare`/`local`). Any other
+  unknown part (one that runs `$(…)`, backticks or `<(…)`, an unknown program, `find -exec`,
+  `watch`, `ssh`, `trap`, `eval`, …) is refused when the command names an infrastructure tool
+  anywhere; the message quotes the part. Here-docs are judged as a whole, as before.
+- Shell parser: the reserved words `if`, `then`, `else`, `elif`, `do`, `while` and `until`, and
+  `coproc`, in front of a command are stripped like `{` and `!`, so `if true; then kubectl
+  delete namespace prod; fi` and `coproc kubectl …` are checked as the `kubectl` command they
+  run (they were unknown binaries, and allowed). A lone `fi`/`done`/`esac` and a `for`/`select`
+  header give no command; `function f { …; }` is rejected like `f() { …; }`. A backslash-newline
+  outside single quotes is removed as the shell removes it (`kubectl delete \` + newline +
+  `namespace prod` was checked with a stray newline argument).
+- Agent hook: "names an infrastructure tool" also matches once quotes, backslashes and line
+  continuations are removed (`kube''ctl`, `"kube"ctl`).
 - Agent hook: a local shell script is read before it runs (#56). For `bash x.sh`, `sh < x.sh`,
-  `./x.sh` (a `#!` shell, or `.sh` without `#!`), `source x.sh` and `. x.sh`, each line that names
-  an infrastructure tool is checked as a command against the policy: a blocked line blocks (the
-  message names the line), a line that cannot be checked asks. A script that cannot be read, is
-  over 64 KiB, or names a tool on more than 64 lines asks; what it sources or runs in turn is not
-  read. Other interpreters' scripts (`python3 x.py`) are not read.
+  `./x` (a `#!` shell, `#!/usr/bin/env -S bash`, or no `#!` line), `source x.sh` and `. x.sh`,
+  each line that names an infrastructure tool is checked as a command against the policy, in
+  one policy run (a few more find the line when it does not allow): a blocked line, or a block
+  the lines only reach together, blocks and the message names the line; a line that cannot be
+  checked asks. Continuations are joined as the shell joins them, comments skipped, a here-doc
+  body checked only when a shell reads it. A script that does not exist yet (written by the same
+  command), cannot be read, is not a regular file, is over 64 KiB, names a tool on more than 64
+  lines, or follows a `cd` to a computed directory asks; a relative path follows a literal
+  `cd DIR` earlier in the command. A file with a NUL byte is a binary and not read. What a script
+  sources or runs in turn is not read, nor are other interpreters' scripts (`python3 x.py`).
 
 ### Changed
-- Agent hook: code piped into a shell or interpreter from anything but a literal `echo` or
-  `printf` (`curl … | sh`, `echo … | base64 -d | sh`, `cat x.py | python3`) asks instead of
-  running (#56); Codex, Gemini CLI and OpenCode, which cannot ask, block it. Piped code that
-  names an infrastructure tool is still blocked. Shell intents' `params.runs_code` for a pipe now
-  carries `producer`, the program feeding it.
+- Agent hook: code piped into a shell or interpreter, or fed to one by a here-string or here-doc
+  in a command that cannot be parsed, asks instead of running (#56): `curl … | sh`, `echo … |
+  base64 -d | sh`, `base64 -d <<< … | sh`, `cat x.py | python3`. Codex, Gemini CLI and OpenCode,
+  which cannot ask, block it. Only a literal `echo` (no `-e`, no backslashes) or `printf` (one
+  argument, no `%`) is read: its text blocks when it names an infrastructure tool, and code for
+  a shell is checked like a command. Piped code in a command that names an infrastructure tool
+  is still blocked. Shell intents' `params.runs_code` for a pipe now carries `producer`, the
+  program feeding it.
 - `aegis check command` still exits 64 for a command it cannot parse; for a compound command the
   message now ends with the part that caused it (`… inside double quotes in 'echo "exit=$?"'`).
 

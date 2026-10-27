@@ -98,10 +98,19 @@ _HEADER_RESERVED = frozenset({"for", "select"})
 
 
 def _strip_reserved(argv: list[str]) -> list[str]:
-    """``argv`` without the grouping and reserved words in front of it; ``[]``
-    for a closing word (``fi``, ``done``) or a ``for``/``select`` header."""
-    while argv and (argv[0] in _GROUPING_WORDS or argv[0] in _LEADING_RESERVED):
-        argv = argv[1:]
+    """``argv`` without the grouping and reserved words in front of it, and
+    without ``coproc`` (and the NAME of ``coproc NAME { …; }``); ``[]`` for a
+    closing word (``fi``, ``done``) or a ``for``/``select`` header. A
+    ``function NAME`` definition is rejected, like ``f() { …; }``."""
+    while argv:
+        if argv[0] in _GROUPING_WORDS or argv[0] in _LEADING_RESERVED:
+            argv = argv[1:]
+        elif argv[0] == "coproc":
+            argv = argv[2:] if len(argv) > 2 and argv[2] == "{" else argv[1:]
+        else:
+            break
+    if argv and argv[0] == "function":
+        raise ShellRejected("function definition")
     if argv and (argv[0] in _HEADER_RESERVED
                  or (argv[0] in _CLOSING_RESERVED and len(argv) == 1)):
         return []
@@ -111,7 +120,8 @@ def _strip_reserved(argv: list[str]) -> list[str]:
 def _prescan(command: str) -> str:
     """Quote-aware pass over the raw string, before shlex sees it: rejects
     unquoted ``$`` and backticks (shlex would strip the quotes and lose the
-    distinction), turns unquoted newlines into ``;``, and marks a file
+    distinction), turns unquoted newlines into ``;``, removes backslash-newline
+    line continuations (outside single quotes, as the shell does), and marks a file
     descriptor glued to a redirection (``2>&1`` -> ``\\x012>&1``) so it is
     not mistaken for an argument."""
     out: list[str] = []
@@ -126,6 +136,9 @@ def _prescan(command: str) -> str:
             i += 1
             continue
         if c == "\\":
+            if command.startswith("\n", i + 1):
+                i += 2  # a line continuation: the shell removes both characters
+                continue
             out.append(command[i : i + 2])
             i += 2
             continue
@@ -369,45 +382,130 @@ def loose_argv(segment: str) -> list[str] | None:
     except ValueError:
         return None
     argv = [t for t in argv if not t.startswith(("<", ">", "0<", "1>", "2>", "&>"))]
-    argv = _strip_reserved(argv)
-    if not argv:
-        return []
     try:
+        argv = _strip_reserved(argv)
+        if not argv:
+            return []
         argv, _env, _wrappers, _string = _unwrap_inner(argv, 1)
     except ShellRejected:
         return None
     return argv
 
 
+# Programs that only ever treat their arguments as data: an unknown argument
+# (``echo "exit=$?"``, ``tail -n "$N"``) cannot make them run another program.
+# Anything else -- find -exec, watch, ssh, trap, awk system(), docker run,
+# npx, builtin, su -c, tmux, vim, flock, strace, sed's e command, … -- may, so
+# a part with an unknown argument and any other program stays unknown.
+ARGS_ONLY_PROGRAMS = frozenset({
+    "echo", "printf", "cat", "tac", "tail", "head", "grep", "egrep", "fgrep", "wc",
+    "date", "sleep", "test", "[", "true", "false", ":", "ls", "mkdir", "rmdir", "read",
+    "sort", "uniq", "cut", "tr", "basename", "dirname", "pwd", "cd", "touch", "rm", "cp",
+    "mv", "ln", "chmod", "stat", "file", "du", "df", "diff", "cmp", "comm", "tee",
+    "which", "whoami", "id", "uname", "hostname", "realpath", "readlink", "seq", "nl",
+    "rev", "fold", "paste", "base64", "md5sum", "sha1sum", "sha256sum", "shasum",
+    "mktemp", "jq", "exit", "return", "shift", "unset",
+})
+# Builtins that assign or declare: their NAME=value words count as assignments.
+_DECLARATION_BUILTINS = frozenset({"export", "declare", "typeset", "local", "readonly"})
+# Variables that change which program runs or which account/cluster it talks to.
+_INFRA_ENV_PREFIXES = (
+    "KUBE", "AWS_", "CLOUDSDK_", "GOOGLE_", "GCLOUD_", "AZURE_", "ARM_", "HELM_", "TF_",
+    "PULUMI_", "ARGOCD_", "FLUX", "GIT_", "GH_", "PG", "MYSQL", "MONGO", "DATABASE_",
+)
+_INFRA_ENV_NAMES = frozenset({"PATH", "ENV", "BASH_ENV", "LD_PRELOAD", "LD_LIBRARY_PATH",
+                              "DYLD_INSERT_LIBRARIES", "HOME", "XDG_CONFIG_HOME"})
+
+
+def _infra_env(name: str) -> bool:
+    return (name in _ENV_METADATA_KEYS or name in _INFRA_ENV_NAMES
+            or name.startswith(_INFRA_ENV_PREFIXES))
+
+
+def runs_expansion(segment: str) -> bool:
+    """True when ``segment`` runs a command of its own through an expansion:
+    ``$(…)`` (and ``$((…))``), backticks, ``<(…)`` or ``>(…)``, outside single
+    quotes."""
+    in_single = False
+    i, n = 0, len(segment)
+    while i < n:
+        c = segment[i]
+        if in_single:
+            in_single = c != "'"
+        elif c == "\\":
+            i += 1
+        elif c == "'":
+            in_single = True
+        elif c == "`" or segment.startswith(("$(", "<(", ">("), i):
+            return True
+        i += 1
+    return False
+
+
+def strip_comment(line: str) -> str:
+    """``line`` without a trailing ``# comment`` (a ``#`` that starts a word,
+    outside quotes)."""
+    in_single = in_double = False
+    i, n = 0, len(line)
+    while i < n:
+        c = line[i]
+        if in_single:
+            in_single = c != "'"
+        elif c == "\\":
+            i += 1
+        elif in_double:
+            in_double = c != '"'
+        elif c == "'":
+            in_single = True
+        elif c == '"':
+            in_double = True
+        elif c == "#" and (i == 0 or line[i - 1].isspace() or line[i - 1] in ";&|("):
+            return line[:i].rstrip()
+        i += 1
+    return line
+
+
 def plain_binary(segment: str) -> str | None:
-    """For one segment of a command that was rejected: the binary it runs when
-    that is a literal name and the binary runs no code of its own -- ``echo``
-    for ``echo "exit=$?"``, ``tail`` for ``tail -n "$N"`` -- so only its
-    arguments are unknown. ``None`` when the binary itself is unknown (``$X
-    …``, ``"$(which k)" …``, a subshell), is a launcher, ``eval``/``source``/
-    a shell ``-c``, or runs code (:func:`code_run`: an interpreter, a script, a
-    task runner). ``""`` for a segment that only assigns variables (``TS=$(date
-    +%s)``): no binary of its own runs."""
+    """For one segment of a command that was rejected: the program it runs when
+    that is a literal name from :data:`ARGS_ONLY_PROGRAMS` -- ``echo`` for
+    ``echo "exit=$?"``, ``tail`` for ``tail -n "$N"`` -- so only its arguments
+    are unknown and none of them can run anything. ``""`` for a segment that
+    only assigns (``X=$HOME``, ``export X=$Y``): no program of its own runs.
+    ``None`` (unknown) for anything else: a segment that runs an expansion
+    (:func:`runs_expansion`), a program outside the list, a program that is
+    itself an expansion, and an assignment to a variable that changes what a
+    later infrastructure tool runs or talks to (``KUBECONFIG``, ``AWS_*``,
+    ``PATH``, … -- also after ``export``/``declare``/``local``/…)."""
+    if runs_expansion(segment):
+        return None
     words = _top_level_words(segment)
     if words is None:
         return None
-    if words and all(_ASSIGNMENT_RE.match(w) for w in words):
-        # KUBECONFIG=… and friends are usually exported already, so assigning
-        # one changes what a later kubectl/aws/… talks to
-        if any(w.partition("=")[0] in _ENV_METADATA_KEYS for w in words):
-            return None
+    try:
+        words = _strip_reserved(words)
+    except ShellRejected:
+        return None
+    assigning = words[1:] if words and words[0] in _DECLARATION_BUILTINS else words
+    assignments = [w for w in assigning if _ASSIGNMENT_RE.match(w)]
+    if any(_infra_env(w.partition("=")[0]) for w in assignments):
+        return None
+    if words and words[0] in _DECLARATION_BUILTINS:
+        if all(_ASSIGNMENT_RE.match(w) or re.fullmatch(r"[A-Za-z_]\w*|-[a-zA-Z]+", w)
+               for w in words[1:]):
+            return ""
+        return None
+    if words and len(assignments) == len(words):
         return ""
     argv = loose_argv(segment)
     if not argv:
         return None
     head = argv[0]
-    if any(ch in head for ch in "$`()<>{}") or "=" in head:
+    if any(ch in head for ch in "$`()<>{}=\\'\""):
         return None
-    if _basename(head) in _REJECTED_BUILTINS:
-        return None
-    if code_run(SimpleCommand(argv)) is not None or _interpreter(_basename(head)):
-        return None
-    return _basename(head)
+    name = _basename(head)
+    if head != name and not head.startswith(_SYSTEM_PREFIXES):
+        return None  # ./echo is not echo
+    return name if name in ARGS_ONLY_PROGRAMS else None
 
 
 # --- unwrapping launchers ----------------------------------------------------------
@@ -848,6 +946,73 @@ def script_runs_loosely(command: str) -> list[dict[str, str]]:
         if runs is not None:
             found.append(runs)
     return found
+
+
+def stdin_feeders(command: str) -> list[tuple[list[str], list[str] | None]]:
+    """For a command that parses: ``(reader_argv, feeder_argv)`` for each shell
+    or interpreter reading its code from a pipe; ``feeder_argv`` is the command
+    writing into that pipe (``None`` when the reader only writes into one)."""
+    found: list[tuple[list[str], list[str] | None]] = []
+    previous: SimpleCommand | None = None
+    for simple, _env, _wrappers in _expand(command, 0):
+        if not simple.argv:
+            continue
+        feeder, previous = (previous if simple.stdin_pipe else None), simple
+        runs = code_run(simple)
+        if runs is not None and runs["kind"] == "stdin":
+            found.append((simple.argv, feeder.argv if feeder is not None else None))
+    return found
+
+
+_HEREDOC_OPS = ("<<<", "<<-", "<<")
+
+
+def loose_code_reader(command: str) -> str | None:
+    """Best effort for a command the parser rejected: when a shell or
+    interpreter with no script or inline-code argument reads its code from a
+    pipe or a here-document/here-string (``base64 -d <<< … | sh``, ``sh <<<
+    "$(…)"``, ``cat <<EOF | bash``), what feeds it (the program before the
+    pipe, or ``"a here-document"``); else ``None``. Never raises."""
+    segments = split_segments(command)
+    if segments is None:
+        match = re.search(r"(?:^|[|;&(\s])((?:ba|z|da|k|a)?sh|python[\d.]*|node|perl|ruby)"
+                          r"(?:\s+-\S+)*\s*<<", command)
+        return "a here-document" if match else None
+    after_pipe = False
+    previous = ""
+    for text, sep in segments:
+        try:
+            words = shlex.split(text, comments=False)
+        except ValueError:
+            words = []
+        heredoc = any(w.startswith(_HEREDOC_OPS) for w in words)
+        argv: list[str] = []
+        skip = False
+        for w in words:
+            if skip:
+                skip = False
+                continue
+            if w in _HEREDOC_OPS or w in _REDIRECT_OPS:
+                skip = True
+                continue
+            if w.startswith(("<", ">", "0<", "1>", "2>", "&>")):
+                continue
+            argv.append(w)
+        reader = None
+        try:
+            argv = _strip_reserved(argv)
+            if argv:
+                argv, _env, _wrappers, _string = _unwrap_inner(argv, 1)
+                name = _basename(argv[0])
+                if _interpreter(name) and code_run(SimpleCommand(argv)) is None:
+                    reader = name
+        except ShellRejected:
+            pass
+        if reader and (heredoc or after_pipe):
+            return "a here-document" if heredoc else (previous or "a pipe")
+        after_pipe = sep in _PIPE_SEPARATORS
+        previous = _basename(argv[0]) if argv else ""
+    return None
 
 
 _ENV_METADATA_KEYS = {

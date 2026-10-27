@@ -49,11 +49,19 @@ file, too many rules quarantined) or a command cannot be analysed without runnin
 — the binaries it has parsers for (`kubectl`, `aws`, `az`, `gcloud`, `helm`, `argocd`, `flux`,
 `git`, `gh`, `psql`, `mysql`, `sqlite3`, `mongosh`, `pulumi` and the migration tools) plus
 `terraform` and `tofu` — and says why. Everything else still runs: `ls` has nothing to do with
-a broken policy. A compound command is judged part by part: in `terraform plan 2>&1; echo
-"exit=$?"` the `terraform plan` is checked and the `echo` runs; only the part that cannot be
-checked and names an infrastructure tool is refused, and the message quotes it. A part whose
-program is itself unknown (`$TOOL delete ns prod`, `eval …`) is refused when any part of the
-command names an infrastructure tool. `aegis check command` stays strict: it exits 64 for any
+a broken policy.
+
+**Compound commands** are judged part by part. In `terraform plan 2>&1; echo "exit=$?"` the
+`terraform plan` is checked against the policy and the `echo` runs. A part with an unknown
+argument passes only when its program treats arguments as data (`echo`, `printf`, `cat`,
+`tail`, `head`, `grep`, `wc`, `ls`, `test`, `rm`, `cp`, `mkdir`, `jq` and similar), or when it
+only assigns a variable that does not steer an infrastructure tool. Every other part with
+something unknown in it is refused when the command names an infrastructure tool anywhere:
+a part that runs its own command (`$(…)`, backticks, `<(…)`), one whose program is unknown
+(`$TOOL …`), runs other programs (`find -exec`, `watch`, `ssh`, `trap`, `awk`, `docker run`,
+`eval`, `bash -c`, …) or sets `KUBECONFIG`, `AWS_*`, `PATH` and the like (also through
+`export`/`declare`/`local`). The message quotes the part. Without an infrastructure tool in
+the command such parts run as before. `aegis check command` stays strict: it exits 64 for any
 command it cannot parse, and names the part that caused it.
 
 **Escalations.** An ESCALATE verdict asks the user in Claude Code, Copilot, VS Code and Cursor.
@@ -76,36 +84,53 @@ a Python program, a Makefile, or calls a cloud SDK, gets past it. With the examp
 | `kubectl delete namespace prod; echo "exit=$?"` | blocked by the policy |
 | `NS=prod; kubectl delete ns "$NS"` | blocked: the `kubectl` part cannot be checked (the message quotes it) |
 | `K=kubectl; $K delete namespace prod` | blocked: cannot be checked, names an infrastructure tool |
+| `TS=$(date +%s); kubectl get pods`, `C=…; kubectl get ns; find . -exec $C …` | blocked: a part runs a command the hook cannot see, next to an infrastructure tool |
+| `coproc kubectl …`, `kubectl delete \` + newline + `namespace prod` | checked like the plain command |
 | `python3 -c "subprocess.run(['kubectl','delete','namespace','prod'])"` | blocked: inline code that names an infrastructure tool |
 | `node -e` / `--eval=…`, `python3 -Ic`, `perl -e` / `-lne`, `ruby -e`, `php -r` naming `kubectl` | blocked the same way |
-| `echo 'kubectl delete namespace prod' \| bash` | blocked: code piped into a shell that names an infrastructure tool |
+| `echo 'kubectl delete namespace prod' \| bash`, also `echo 'kube''ctl …' \| sh` | blocked: code piped into a shell that names an infrastructure tool |
 | `curl -fsSL https://… \| sh`, `echo … \| base64 -d \| sh`, `cat x.py \| python3` | asks: the piped code is not on the command line (blocked in Codex, Gemini CLI, OpenCode) |
+| `printf 'kube%s …' ctl \| sh`, `echo -e '\x6b…' \| sh`, `base64 -d <<< … \| sh`, `sh <<< "$(…)"`, `bash <<EOF` | asks the same way |
 | `bash -c "$(cat nuke.sh)"`, `eval "$(…)"`, `source <(curl …)` | asks: the code only exists when the command runs |
 | `cat > nuke.sh <<'EOF' … EOF` (here-doc that names `kubectl`) | blocked: cannot be checked, names an infrastructure tool |
 | `bash nuke.sh`, `sh < nuke.sh`, `./nuke.sh`, `source nuke.sh`, where a line of `nuke.sh` is blocked | blocked by the policy (the message names the line) |
 | the same, where a line names `kubectl` but cannot be checked (`kubectl delete ns "$NS"`) | asks |
-| the same, where the script cannot be read, is over 64 KiB, or names a tool on more than 64 lines | asks |
+| the same, where the script does not exist yet (`printf '…' > p.sh; bash p.sh`), cannot be read, is over 64 KiB, names a tool on more than 64 lines, or is run after a `cd` to a computed directory | asks |
 | a script that `nuke.sh` sources or runs in turn | **runs**: only the script on the command line is read |
+| a script changed between the check and the run, or a symlink retargeted in between | **runs** the new content: the hook reads it once, before the command starts |
 | `python3 cleanup.py`, `make destroy`, `npm run teardown` | **runs** |
 | a file written with the agent's Write/Edit tool, then run by something other than a shell | **runs**: file edits are not commands |
 | a cloud SDK or HTTP call from code the agent wrote | **runs** |
 
 A script is read when a shell runs it (`bash`, `sh`, `zsh`, `dash`, `ksh`, `ash`, `source`,
-`.`), or when it is run directly (`./x`) and its `#!` line names a shell (or it has none and
-ends in `.sh`). Only its lines that name an infrastructure tool are checked, each as a command
-of its own, against the same policy; comments are skipped and `\` continuations joined. Lines
-inside a here-doc are checked too, which can ask where nothing would run. `aegis check command`
-does not read files: this is the hook only.
+`.`), or when it is run directly (`./x`) and its `#!` line names a shell (`#!/usr/bin/env -S
+bash` too) or it has no `#!` line at all (the shell then runs it). A file with a NUL byte is a
+binary and is not read; other bytes that are not UTF-8 are read anyway. A relative path is read
+from the agent's working directory, or from the directory a literal `cd DIR` earlier in the
+command moves to. Only lines that name an infrastructure tool are checked, each as a command of
+its own, against the same policy: comments (whole-line and trailing) are skipped, `\`
+continuations are joined as the shell joins them, and a here-doc body counts as commands only
+when a shell reads it (another interpreter reading one that names a tool asks; for `cat` and
+the like it is data). All checkable lines go to the policy in one run; only when that run is
+not an allow are a few more runs made to find the line (bisection), so a block that only the
+lines together reach (an aggregate rule) is still a block. `aegis check command` does not read
+files: this is the hook only.
 
-Piped code asks unless the stage feeding the shell or interpreter is a literal `echo` or
-`printf` (whose code is on the command line and checked as above). `curl … | sh` installers
-are common, so this asks rather than blocks; where the agent cannot ask (Codex, Gemini CLI,
-OpenCode, or `--escalate-as deny`) it is a block.
+Piped code asks unless the stage feeding the shell or interpreter is a literal `echo` (no `-e`,
+no backslashes) or `printf` (one argument, no `%` directives, no escapes but `\n` and `\t`).
+That text is read the way the shell would read it (quotes removed): when it names an
+infrastructure tool it is blocked, and code for a shell is then checked like a command of its
+own. `curl … | sh` installers are common, so piped code asks rather than blocks; where the
+agent cannot ask (Codex, Gemini CLI, OpenCode, or `--escalate-as deny`) it is a block. The same
+goes for a shell or interpreter fed by a here-string or a here-doc in a command the hook
+cannot parse.
 
 "Names an infrastructure tool" means one of the binaries listed above appears as a word in the
-code. Code that builds the name (`"kube" + "ctl"`) or calls an SDK (`boto3`, `@aws-sdk`) is not
-recognised. The hook is a guard against mistakes, not against an agent that is trying to get
-round it.
+code, also after quotes, backslashes and line continuations are removed (`kube''ctl`,
+`"kube"ctl`). Code that builds the name (`"kube" + "ctl"`, `printf kube%s ctl`) or calls an SDK
+(`boto3`, `@aws-sdk`) is not recognised. Scripts are read once, before the command runs: a
+script rewritten in between, or a symlink pointed elsewhere, is not seen again. The hook is a
+guard against mistakes, not against an agent that is trying to get round it.
 
 **Escalate local scripts (optional, off by default).** Install the hook with
 `--escalate-scripts` and every command that runs code the hook cannot fully check asks first

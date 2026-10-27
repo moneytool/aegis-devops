@@ -145,6 +145,7 @@ def test_escalate_scripts_install_blocks_scripts(env):
 def test_plain_install_lets_scripts_run(env):
     main(["init", str(env["project"] / ".aegis")])
     assert 'const CHECK_ARGS = []' in env["plugin"].read_text()
+    (env["project"] / "nuke.sh").write_text("echo hi\n")  # a missing script asks (#56)
     assert _call(env, "bash nuke.sh") == {"allowed": True}
 
 
