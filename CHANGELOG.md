@@ -15,6 +15,21 @@ behaviour.
   cost are the database role's job (the SQL classifier sees only a SELECT's first table, and
   treats `SELECT … INTO` and `SET ROLE` as reads). Every Aegis result in its table is a test.
 
+### Fixed
+- **kubectl boolean flags were "missing its value"** (#53). `kubectl get pods -n prod
+  --no-headers` was a parse error, so the hook denied a read; `--no-headers pods` swallowed the
+  kind. kubectl's boolean flags (`--no-headers`, `--show-labels`, `--watch`, `--wait`, `--force`,
+  `--ignore-not-found`, `--overwrite`, `--server-side`, …, and `-f` on `logs`) now take no value,
+  and an unknown long flag followed by another option or by the end of argv is a boolean. Value
+  flags (`-n`, `-l`, `--field-selector`, `-o`, `--context`, `--kubeconfig`) still need theirs.
+- **Help and version probes were parse errors** (#54). `helm --help`, `argocd version --client`,
+  `kubectl version`, `<tool> --version`, `<tool> help`, `<tool> <verb> --help` (and `aws … help`)
+  for every binary the parsers know now give one read-only `cli/<tool>` intent with
+  `params.informational`, which the example policy allows. Only exact forms count: `--help` after
+  another option, after `--`, or after a plugin or alias is parsed as the command it sits in, so
+  `kubectl -n --help delete ns prod` is still a namespace delete. In a chain each command is
+  still checked: `argocd version --client && argocd app delete payments` escalates.
+
 ## [1.2.1] — 2026-10-24
 
 A coverage-report fix for `aegis compile kubernetes`.

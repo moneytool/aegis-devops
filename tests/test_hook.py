@@ -823,3 +823,49 @@ def test_escalate_scripts_leaves_ordinary_commands_alone(opted_in_project, comma
 def test_escalate_scripts_on_check_command():
     rc = cli_module.main(["check", "command", "--escalate-scripts", "--", "bash nuke.sh"])
     assert rc == 2  # ESCALATE
+
+
+# --- #53 / #54: boolean flags and help/version probes ----------------------------
+
+
+@pytest.mark.parametrize("command", [
+    # #53
+    "kubectl get pods -n prod --no-headers",
+    "kubectl get pods -n prod --no-headers | wc -l",
+    "kubectl get pods --show-labels --ignore-not-found -n prod",
+    "kubectl get pods -A --watch",
+    "kubectl logs -f api-0 -n prod",
+    # #54
+    "helm --help",
+    "argocd version --client",
+    "kubectl version",
+    "kubectl --version",
+    "kubectl delete --help",
+    "flux version --client",
+    "gh help pr",
+    "psql --version",
+    "argocd version --client && argocd app get payments && argocd app delete --help",
+])
+def test_read_only_probes_are_allowed(opted_in_project, command):
+    assert hook.decide(command, opted_in_project / ".aegis").decision == "allow"
+    assert cli_module.main(["check", "command", "--", command]) == 0
+
+
+def test_probe_chained_with_a_real_delete_still_escalates(opted_in_project):
+    command = "argocd version --client && argocd app delete payments"
+    verdict = hook.decide(command, opted_in_project / ".aegis")
+    assert verdict.decision == "ask"
+    assert "escalate-argocd-app-delete" in verdict.reason
+    assert cli_module.main(["check", "command", "--", command]) == 2  # ESCALATE
+
+
+def test_help_swallowed_as_a_value_is_still_a_delete(opted_in_project):
+    verdict = hook.decide("kubectl -n --help delete ns prod", opted_in_project / ".aegis")
+    assert verdict.decision == "deny"
+    assert "block-namespace-delete" in verdict.reason
+
+
+def test_value_flag_without_value_still_denied(opted_in_project):
+    verdict = hook.decide("kubectl get pods -n", opted_in_project / ".aegis")
+    assert verdict.decision == "deny"
+    assert "missing its value" in verdict.reason

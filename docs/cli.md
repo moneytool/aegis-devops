@@ -302,6 +302,12 @@ aegis check command -- "kubectl get pods | grep x"                  # ALLOW, exi
 aegis check command -- 'kubectl delete $(cat x)'                    # exit 64: command rejected
 ```
 
+A help or version probe of a known binary (`helm --help`, `argocd version --client`,
+`kubectl delete --help`, `aws s3 help`, `psql --version`) produces one read-only intent,
+resource `cli/<tool>`, action `read`, `params.informational` `help` or `version`. Only exact
+forms count: `--help` after another option, after `--`, or after a plugin or alias name is
+parsed as the command it sits in.
+
 Inside a pipeline an unknown binary (`| grep x`) produces nothing; on its own it produces a
 synthetic `shell` / `binary/<name>` / `exec` intent that `--fail-closed` escalates. When that
 binary runs code Aegis cannot read (a script file, `make` or `npm run`, `python3 -c` code, a

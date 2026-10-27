@@ -2639,3 +2639,206 @@ def test_aws_numeric_looking_names_stay_strings(argv, resource):
 
     (intent,) = from_aws_multi(shlex.split(argv))
     assert intent.resource == resource
+
+
+# --- #53: kubectl boolean flags ---------------------------------------------------
+
+
+@pytest.mark.parametrize("argv, resource, params", [
+    ("kubectl get pods -n prod --no-headers", "pod/*", {"no-headers": True}),
+    ("kubectl get --no-headers pods -n prod", "pod/*", {"no-headers": True}),
+    ("kubectl get pods --show-labels -n prod", "pod/*", {"show-labels": True}),
+    ("kubectl get pods -n prod --watch", "pod/*", {"watch": True}),
+    ("kubectl get --watch pods -n prod", "pod/*", {"watch": True}),
+    ("kubectl get pods -n prod -w", "pod/*", {}),
+    ("kubectl get pods --all-namespaces --no-headers", "pod/*", {"no-headers": True}),
+    ("kubectl get pods -A --no-headers", "pod/*", {"no-headers": True}),
+    ("kubectl get pod web --ignore-not-found -n prod", "pod/web", {"ignore-not-found": True}),
+    ("kubectl delete pod web --force -n prod", "pod/web", {"force": True}),
+    ("kubectl delete pod web --wait -n prod", "pod/web", {"wait": True}),
+    ("kubectl delete pod web --wait=false -n prod", "pod/web", {"wait": False}),
+    ("kubectl delete pod web --dry-run -n prod", "pod/web", {"dry_run": True}),
+    ("kubectl get pods --no-headers=false -n prod", "pod/*", {"no-headers": False}),
+    ("kubectl logs -f api-0 -n prod", "pod/api-0", {"follow": True}),
+    ("kubectl logs api-0 --follow -n prod", "pod/api-0", {"follow": True}),
+    ("kubectl logs api-0 -f -n prod", "pod/api-0", {"follow": True}),
+    # not in the table: followed by another option or by the end of argv,
+    # it is a boolean rather than a flag missing its value
+    ("kubectl get pods -n prod --ignore-validation-errors", "pod/*",
+     {"ignore-validation-errors": True}),
+    ("kubectl get pods --some-new-switch -n prod", "pod/*", {"some-new-switch": True}),
+])
+def test_kubectl_boolean_flags_take_no_value(argv, resource, params):
+    """#53: a boolean flag never swallows the next token, and at the end of
+    argv it is not 'missing its value'."""
+    import shlex
+
+    intents = from_kubectl_multi(shlex.split(argv))
+    assert [i.resource for i in intents] == [resource]
+    assert intents[0].params == params
+    if "-n prod" in argv:
+        assert intents[0].metadata["namespace"] == "prod"
+
+
+@pytest.mark.parametrize("argv", [
+    "kubectl get pods -n",
+    "kubectl get pods --namespace",
+    "kubectl get pods -l",
+    "kubectl get pods --field-selector",
+    "kubectl get pods -o",
+    "kubectl get pods --context",
+    "kubectl get pods --kubeconfig",
+])
+def test_kubectl_value_flags_still_need_their_value(argv):
+    with pytest.raises(ValueError, match="missing its value"):
+        from_kubectl_multi(argv.split())
+
+
+@pytest.mark.parametrize("argv, namespace, params", [
+    ("kubectl get pods --no-headers -n --watch", "--watch", {"no-headers": True}),
+    ("kubectl get pods -nprod --no-headers", "prod", {"no-headers": True}),
+    ("kubectl get pods --namespace=prod --no-headers", "prod", {"no-headers": True}),
+    ("kubectl get pods --no-headers -l app=web -n prod", "prod",
+     {"no-headers": True, "selector": "app=web"}),
+    ("kubectl get pods --no-headers -o name -n prod", "prod", {"no-headers": True}),
+])
+def test_kubectl_value_flags_keep_their_value_next_to_booleans(argv, namespace, params):
+    """A value flag still takes the next token, even one starting with '-';
+    glued and '=' forms are unchanged."""
+    (intent,) = from_kubectl_multi(argv.split())
+    assert intent.metadata["namespace"] == namespace
+    assert intent.params == params
+
+
+def test_kubectl_unknown_long_flag_before_a_word_still_takes_it_as_value():
+    (intent,) = from_kubectl_multi(["kubectl", "get", "pods", "--sort-by", "name", "-n", "prod"])
+    assert intent.resource == "pod/*"
+    assert intent.params == {"sort-by": "name"}
+
+
+def test_kubectl_dash_f_is_still_a_manifest_outside_logs():
+    (intent,) = from_kubectl_multi(["kubectl", "apply", "-f", "app.yaml"])
+    assert intent.resource == "manifest/app.yaml"
+
+
+# --- #54: help / version probes ---------------------------------------------------
+
+
+@pytest.mark.parametrize("argv, kind", [
+    ("helm --help", "help"),
+    ("helm -h", "help"),
+    ("helm help install", "help"),
+    ("helm version --short", "version"),
+    ("helm install --help", "help"),
+    ("argocd version --client", "version"),
+    ("argocd version --client --short", "version"),
+    ("argocd app delete --help", "help"),
+    ("argocd app delete payments --help", "help"),
+    ("kubectl version", "version"),
+    ("kubectl version --client -o json", "version"),
+    ("kubectl --version", "version"),
+    ("kubectl --help", "help"),
+    ("kubectl help delete", "help"),
+    ("kubectl delete --help", "help"),
+    ("kubectl delete -h", "help"),
+    ("kubectl rollout restart --help", "help"),
+    ("flux version --client", "version"),
+    ("flux reconcile kustomization --help", "help"),
+    ("gh --version", "version"),
+    ("gh version", "version"),
+    ("gh pr merge --help", "help"),
+    ("gh help pr", "help"),
+    ("git --version", "version"),
+    ("git version", "version"),
+    ("git help push", "help"),
+    ("git push --help", "help"),
+    ("git push -h", "help"),
+    ("aws --version", "version"),
+    ("aws help", "help"),
+    ("aws s3 help", "help"),
+    ("aws s3 rm help", "help"),
+    ("az --version", "version"),
+    ("az version", "version"),
+    ("az vm delete --help", "help"),
+    ("gcloud --version", "version"),
+    ("gcloud version", "version"),
+    ("gcloud help compute", "help"),
+    ("gcloud compute instances delete --help", "help"),
+    ("gsutil version", "version"),
+    ("gsutil --help", "help"),
+    ("psql --version", "version"),
+    ("psql -V", "version"),
+    ("psql --help", "help"),
+    ("mysql --version", "version"),
+    ("mysql --help", "help"),
+    ("sqlite3 --version", "version"),
+    ("sqlite3 -help", "help"),
+    ("mongosh --version", "version"),
+    ("mongosh --help", "help"),
+    ("pulumi version", "version"),
+    ("pulumi --version", "version"),
+    ("pulumi destroy --help", "help"),
+    ("alembic --version", "version"),
+    ("alembic --help", "help"),
+    ("alembic downgrade --help", "help"),
+    ("flyway --version", "version"),
+    ("flyway -v", "version"),
+    ("flyway version", "version"),
+    ("flyway help", "help"),
+    ("rails --version", "version"),
+    ("rails -v", "version"),
+    ("rails --help", "help"),
+    ("prisma --version", "version"),
+    ("prisma version", "version"),
+    ("prisma migrate deploy --help", "help"),
+    ("/usr/local/bin/helm --help", "help"),
+])
+def test_help_and_version_probes_are_informational(argv, kind):
+    """#54: informational probes are one read-only cli/<tool> intent, not a
+    parse error."""
+    (intent,) = from_argv(argv.split())
+    tool = argv.split()[0].rsplit("/", 1)[-1]
+    assert intent.resource == f"cli/{tool}"
+    assert intent.action == "read"
+    assert intent.params["informational"] == kind
+
+
+@pytest.mark.parametrize("argv", [
+    # --help as the value of an option: kubectl deletes namespace prod
+    "kubectl -n --help delete ns prod",
+    "kubectl delete ns prod -n --help",
+    # an option before the probe flag: left to the provider parser
+    "kubectl delete ns prod --force --help",
+    "argocd app delete payments --cascade --help",
+    # after "--" the flag belongs to the wrapped command
+    "kubectl exec api-0 -- rm -rf /data --help",
+    # plugins / extensions / aliases receive --help themselves
+    "kubectl nuke --help",
+    "helm diff --help",
+    "gh my-alias --help",
+    # flyway runs every command word it is given
+    "flyway version clean",
+    "flyway help clean",
+    # the vcs tool: only "<cmd> --help" directly
+    "git push origin main --help",
+    # -h is --host for psql / mysql
+    "psql -h db.internal",
+    "mysql -h db.internal",
+    # aws: help must be the last of at most three words
+    "aws s3 cp src help extra",
+])
+def test_mutating_or_ambiguous_forms_are_not_informational(argv):
+    try:
+        intents = from_argv(argv.split())
+    except ValueError:
+        return  # a parse error fails closed
+    assert not any(i.params.get("informational") for i in intents)
+
+
+@pytest.mark.parametrize("argv", [
+    "kubectl -n --help delete ns prod",
+    "kubectl delete ns prod --force --help",
+])
+def test_kubectl_help_next_to_a_delete_is_still_a_delete(argv):
+    intents = from_argv(argv.split())
+    assert ("namespace/prod", "delete") in [(i.resource, i.action) for i in intents]
