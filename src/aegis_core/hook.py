@@ -288,7 +288,8 @@ _SHELL_SUFFIXES = (".sh", ".bash", ".zsh", ".ksh")
 # and the working-directory options of env and sudo (`env -C dir`, `sudo -D dir`).
 _CD_RE = re.compile(
     r"(?:^|[;&|(\n\s'\"])\\?['\"]?(?:cd|pushd|popd)['\"]?(?![\w.-])"
-    r"|(?<![\w.-])env\s(?:[^;&|\n]*\s)?(?:-C|--chdir)|(?<![\w.-])sudo\s(?:[^;&|\n]*\s)?-D(?!\S)")
+    r"|(?<![\w.-])env\s++(?:(?:-(?!\w*C)\w+|\w+=\S*)\s++)*+(?:-\w*C|--chdir)"
+    r"|(?<![\w.-])sudo\s++(?:-(?!D(?!\S))\w+\s++)*+-D(?!\S)")  # env's own -C, not make -C
 
 
 def decide(command: str, config_dir: Path, extra_args: list[str] | None = None, *,
@@ -364,6 +365,10 @@ def _stdin_redirects(command: str, config_dir: Path, extra_args: list[str] | Non
                     "copied or read-write file descriptor (<&N, <>), which the hook cannot "
                     "follow; use `bash FILE` or `sh < FILE`")
     readers = [m.start() for m in _READER_WORD_RE.finditer(command)]
+    if any(m.group("generated") and string_reader(m.group(1)[1:-1])
+           for m in _C_STRING_STDIN_RE.finditer(command)):
+        asks.append("aegis: a shell's -c string reads code from a process substitution or "
+                    "here-string, which the hook cannot check")
     if readers and any(  # exec: a reader after it; a group or loop: a reader inside it
             m.end() <= readers[-1] if m.group("exec") else readers[0] < m.start()
             for m in _GENERATED_STDIN_RE.finditer(command)):
@@ -759,10 +764,11 @@ def _cd(here: Path | None, argv: list[str]) -> Path | None:
     args = [a for a in argv[1:] if a not in ("-P", "-L", "-e", "--")]
     if here is None or _basename(argv[0]) == "popd" or len(args) > 1:
         return None
-    if not args:
-        return Path.home() if _basename(argv[0]) == "cd" else None
+    if not args:  # cd: to HOME, unknown when the command changes it
+        return Path.home() if _basename(argv[0]) == "cd" and not _home_changed("") else None
     target = args[0]
-    if target.startswith("-") or any(ch in target for ch in "$`"):
+    if target.startswith("-") or any(ch in target for ch in "$`") or (
+            target.startswith("~") and _home_changed("")):
         return None
     try:
         path = Path(target).expanduser()
@@ -1018,11 +1024,13 @@ _GROUP_STDIN_RE = re.compile(
 _EXEC_STDIN_RE = re.compile(
     rf"(?:^|[;&|\n('\"]\s*|\s)exec\s+{_OTHER_REDIRECTS}0?<(?![<&(>])\s*([^\s;&|)<>]+)")
 _C_STRING_STDIN_RE = re.compile(
-    r"(?<![\w.-])(?:\S*/)?(?:ba|z|da|k|a|mk|po)?sh(?:\s+-\w+)*\s+-c\s+('[^']*'|\"[^\"]*\")"
-    rf"\s*{_OTHER_REDIRECTS}0?<(?![<&(>])\s*([^\s;&|)<>]+)")
+    r"(?<![^\s;&|()`])(?:[^\s;&|()<>]*/)?(?:ba|z|da|k|a|mk|po)?sh"
+    r"(?:\s+(?:-[a-zA-Z]+|--[\w-]+|[-+]o\s+[\w-]+))*?\s+-[a-zA-Z]*c[a-zA-Z]*\s+\$?"
+    r"('[^']*'|\"[^\"]*\")(?:\s+[^\s;&|<>()]++)*+"
+    rf"\s*{_OTHER_REDIRECTS}0?<(?:(?![<&(>])\s*([^\s;&|)<>]+)|\s*(?P<generated><\(|<<))")
 # A pipe into a group, subshell, loop or if: every command in it shares the pipe.
 _PIPED_COMPOUND_RE = re.compile(
-    r"(?<!\|)\|(?!\|)&?\s*(?:[{(]|(?:if|while|until|for|select|case)\b)")
+    r"(?<!\|)\|(?!\|)&?\s*(?:time\s+(?:-p\s+)?|!\s*)?(?:[{(]|(?:if|while|until|for|select|case)\b)")
 # A process substitution or here-string as the standard input of exec or of a
 # group, subshell, if or loop: `exec < <(curl …); sh`, `{ sh; } <<< "$x"`.
 _GENERATED_STDIN_RE = re.compile(
@@ -1041,7 +1049,10 @@ def _bare_reader(command: str, start: int, end: int) -> bool:
     for m in _READER_WORD_RE.finditer(command, start, end):
         shell = _basename(m.group(0)) in _SHELLS
         words = []
-        for raw in re.findall(r"\S+", command[m.end():end][:200]):
+        line = command[m.end():end][:200].split("\n", 1)[0]  # a reader ends its line
+        for raw in re.findall(r"\S+", line):
+            if raw.startswith("#"):
+                break
             word = raw.rstrip(";&|)}")
             if word:
                 words.append(word)
@@ -1054,12 +1065,13 @@ def _bare_reader(command: str, start: int, end: int) -> bool:
                 k += 2 if _REDIRECT_WORD_RE.fullmatch(words[k]) else 1
                 continue
             option = words[k]
-            if option in ("-c", "-m") or (not shell and option[:2] in ("-e", "-E", "-r")):
-                break  # code or a module on the command line
+            if option in ("-c", "-m", "--version", "--help") or (not shell and (
+                    option[:2] in ("-e", "-E", "-r") or option in ("-V", "-v", "-h"))):
+                break  # code or a module on the command line, or a version/help check
             k += 2 if option in ("-o", "+o", "-O", "+O") else 1
         else:
             word = words[k] if k < len(words) else ""
-            if not word or word in ("-", "--"):
+            if not word or word in ("-", "--") or word in _STDIN_PATHS:  # python3 /dev/stdin
                 return True
     return False
 
@@ -1068,7 +1080,8 @@ def _bare_reader(command: str, start: int, end: int) -> bool:
 _FD_STDIN_RE = re.compile(r"(?:^|[\s;&|])0?(?:<&\s*(?!-)\S|<>)")  # <&3, <&$fd, <>
 _READER_WORDS = "|".join(sorted(_SHELLS))
 _READER_WORD_RE = re.compile(
-    rf"(?<![\w./-])(?:{_READER_WORDS}|python[\d.]*|perl|ruby|node|php|lua)(?![\w.-])")
+    rf"(?<![^\s;&|()<>'\"`{{}}])(?:[^\s;&|()<>'\"`]*/)?(?:{_READER_WORDS}|python[\d.]*|perl|ruby|node|php|lua)"
+    r"(?![\w.-])")  # sh, /bin/sh, /usr/bin/python3
 
 
 def _group_stdin_files(command: str) -> list[str]:
@@ -1081,7 +1094,7 @@ def _group_stdin_files(command: str) -> list[str]:
              for match in _GROUP_STDIN_RE.finditer(command, readers[0])]
     # bash -c 'eval sh' < FILE: a reader inside the string reads FILE
     files += [match.group(2) for match in _C_STRING_STDIN_RE.finditer(command)
-              if string_reader(match.group(1)[1:-1])]
+              if match.group(2) and string_reader(match.group(1)[1:-1])]
     # exec < FILE: the rest of the shell reads FILE as its standard input
     files += [match.group(1).strip("'\"") for match in _EXEC_STDIN_RE.finditer(command)
               if match.end() <= readers[-1]]
@@ -1306,8 +1319,9 @@ def _written_by_command(file: Path, command: str, cwd: Path | None) -> bool:
             run_position = args == 1 and (program in _SHELLS or program in ("source", "."))
         if file.name not in token:
             continue  # cannot name the file (the checks below are per word, per script)
-        if any(ch in token for ch in "$`") or ("://" in token and program == "wget") or (
-                "://" in token and program == "curl" and _REMOTE_NAME_RE.search(command)):
+        downloaded = "://" in token and program != "git" and (
+            program != "curl" or _REMOTE_NAME_RE.search(command))  # aws s3 cp, wget, curl -O
+        if any(ch in token for ch in "$`") or downloaded:
             # computed, or a URL a download names the file after (curl -O, wget)
             count += token.rstrip("\"')/").rsplit("/", 1)[-1] == file.name
             continue

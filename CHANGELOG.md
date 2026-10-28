@@ -158,6 +158,22 @@ behaviour.
   joined once (it was quadratic) and followed to four levels; a redirection after a shell reading a
   pipe (`sh 2>/dev/null`) no longer counts as its script. A URL counts as naming a script only for
   `wget` and `curl -O`/`-J`.
+- Agent hook: a shell or interpreter given by path (`/bin/sh`, `/usr/bin/python3`) counts as a reader
+  in the pipe, group-redirect, `exec <` and descriptor checks; `bash -ec '…' < x.sh` and a `-c` string
+  followed by its arguments are read; `--version`/`--help` (and `-V`/`-v`/`-h` of an interpreter) are
+  not stdin readers; only env's own `-C`/`--chdir` counts as a directory change (`env FOO=1 make -C
+  build` does not).
+- Agent hook: the regexes that find shells by path only start at a word, so long runs of `/` stay
+  linear (they took over 30 s); an unquoted `<<< $(…)` or `` <<< `…` `` is a here-string, not a
+  script argument; `bash -lc`, `--norc`, `-o pipefail` and trailing arguments before `< FILE` are
+  read, and a `-c` string reading a process substitution or here-string asks; `| time (sh)` is a
+  piped compound; a URL download other than `git clone` and `curl` without `-O` counts as naming a
+  script.
+- Agent hook: a shell that ends its line inside a piped loop or `if` (the usual multi-line form)
+  reads the pipe; `bash -ec`, `-o pipefail`, `--norc` and `$'…'` `-c` strings are read on their own;
+  a bare `cd` or `cd ~` after the command changes HOME makes the directory unknown; `python3
+  /dev/stdin` reads the pipe; `env -iC` counts as a directory change; many `env`/`sudo` words stay
+  linear.
 - Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
   own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
   policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a

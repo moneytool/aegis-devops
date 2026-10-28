@@ -1485,7 +1485,8 @@ _LOOSE_SPLIT_RE = re.compile(r"(\|\||&&|;;|\$\(|[<>]\(|[;|&\n()`])")
 
 
 _QUOTED_C_STRING_RE = re.compile(
-    r"(?<![\w.-])(?:[^\s;&|()]*/)?(?:ba|z|da|k|a|mk|po|rba)?sh(?:\s+-[a-zA-Z]+)*\s+-c\s+"
+    r"(?<![^\s;&|()`])(?:[^\s;&|()]*/)?(?:ba|z|da|k|a|mk|po|rba)?sh"
+    r"(?:\s+(?:-[a-zA-Z]+|--[\w-]+|[-+]o\s+[\w-]+))*?\s+-[a-zA-Z]*c[a-zA-Z]*\s+\$?"
     r"('([^']*)'|\"((?:[^\"\\]|\\.)*)\")")
 
 
@@ -1663,14 +1664,22 @@ def loose_code_reader(command: str, _depth: int = 0) -> str | None:
         heredoc = any(w.startswith(_HEREDOC_OPS) for w in words)
         argv: list[str] = []
         skip = False
+        depth = 0  # inside a redirection target's $(…) / `…`: <<< $(cat x.sh)
         for w in words:
+            if depth:
+                depth = max(0, depth + w.count("(") - w.count(")")
+                            + (1 if w.count("`") % 2 else 0) * (-1 if depth else 1))
+                continue
             if skip:
                 skip = False
+                depth = max(0, w.count("(") - w.count(")")) + (w.count("`") % 2)
                 continue
             if w in _HEREDOC_OPS or w in _REDIRECT_OPS:
                 skip = True
                 continue
             if w.startswith(("<", ">", "0<", "1>", "2>", "&>")):
+                target = w.lstrip("0123456789<>&")
+                depth = max(0, target.count("(") - target.count(")")) + (target.count("`") % 2)
                 continue
             argv.append(w)
         reader = _stdin_reader(argv)
