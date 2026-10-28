@@ -59,7 +59,9 @@ or another Unicode space is part of a name, as the servers read it. Under `sqlit
 reads table `t`.
 
 The body of a MySQL `/*! … */` comment is read as SQL under `mysql` and `generic` and skipped as
-a comment under `postgres` and `sqlite`; under `generic` (and `mysql`, for a versioned
+a comment under `postgres` and `sqlite`; under `mysql` and `generic` SQL with versioned (`/*!NNNNN`) or
+MariaDB-only (`/*M!`) comments is also read once per version, as a server of that version (or
+Oracle MySQL, which skips `/*M!`) would, and `generic` also reads every `/*!` as skipped; under `generic` (and `mysql`, for a versioned
 `/*!NNNNN`), a quote, `--`, `#` or `/*` inside it is an unclassified write (`ambiguous_comment`). `generic` does not flag
 `$$` quotes, `--x` comments or `#`, because they are too common in ordinary SQL: under
 `generic`, MySQL SQL that uses `$$` as text, `--x` as arithmetic or `#` as a comment is read the
@@ -408,3 +410,10 @@ print(decision.verdict, decision.citations, decision.covered)
 `notes` (`fail-closed: …`, `rate-limit: …`), `latency_ms`, `dry_run`, and `would_be`.
 `store.health` is the `StoreHealth` the CLI prints; `AegisInterceptor(store, fail_closed=True)`
 is the library form of `--fail-closed`.
+
+In the agent hook, the SQL of one command has a budget: 1 MiB of script files read, 2 MiB of
+SQL classified (texts and each run of a file) and 50,000 statements. Past it the hook refuses the
+command (`cannot parse`), since unclassified SQL may be allowed by a policy. Outside the hook
+(`aegis check sql`, `aegis check command`) each client call has its own budget. SQL a client loads
+from a start-up file (`~/.psqlrc`, `~/.my.cnf`, `~/.sqliterc`) is not read; a command that sets
+`PSQLRC`, `MYSQL_HOME` or `HOME` for a SQL client asks.

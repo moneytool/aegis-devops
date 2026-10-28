@@ -206,6 +206,9 @@ _WS_RE = re.compile(r"[ \t\n\r\f\v]+")
 _EXEC_OPEN_RE = re.compile(r"/\*M?!\d*")
 # An executable comment some servers skip: versioned, or MariaDB-only.
 _VERSIONED_OPEN_RE = re.compile(r"/\*(?:M!\d*|!\d+)")
+_VERSION_NUMBER_RE = re.compile(r"/\*M?!(\d+)")
+# Distinct comment versions read one by one; past this many the text is flagged.
+_MAX_VERSION_READINGS = 4
 # Text in a /*! … */ body that would move where another reader ends it.
 _BODY_MARKER_RE = re.compile(r"['\"`#$]|--|/\*")
 _COMMENT_MARK_RE = re.compile(r"/\*|\*/")
@@ -352,7 +355,8 @@ _MAX_STATEMENT_TOKENS = 100_000
 _Statement = tuple[list[_T], bool, frozenset[str]]
 
 
-def _lex(sql: str, dialect: str, skip_versioned: bool = False) -> list[_Statement]:
+def _lex(sql: str, dialect: str, version: float = float("inf"),
+         mariadb: bool = True) -> list[_Statement]:
     """Lexes ``sql`` and splits it on ``;``: a list of (tokens, had_comment,
     flags) per non-empty statement. A statement with no tokens but a comment
     is kept (it is classified as unknown, never dropped). ``flags`` holds
@@ -402,8 +406,9 @@ def _lex(sql: str, dialect: str, skip_versioned: bool = False) -> list[_Statemen
             continue
         if ch == "/" and sql.startswith("/*", i):
             em = _EXEC_OPEN_RE.match(sql, i) if dialect in ("mysql", "generic") else None
-            if em and skip_versioned and _VERSIONED_OPEN_RE.fullmatch(em.group(0)):
-                em = None  # the reading of a server that skips it: a plain comment
+            if em and (("M" in em.group(0) and not mariadb)
+                       or int(em.group(0).lstrip("/*M!") or 0) > version):
+                em = None  # a server of that version (or Oracle MySQL) skips it
             if em:
                 # MySQL runs the body of /*! … */ (unless its version is newer than the
                 # server's); other servers skip to the first */. When text in the body
@@ -2042,24 +2047,45 @@ def from_sql(
     and ``sqlite3`` name their dialect), and any other value is read as
     ``generic``, which flags what a server could read differently."""
     dialect = normalize_dialect(dialect)
-    intents = _intents_of(sql, dialect, database, skip_versioned=False)
-    if dialect in ("mysql", "generic") and _VERSIONED_OPEN_RE.search(sql):
-        # /*!99999 select 1 */ drop table users: an older server (or Oracle MySQL,
-        # for /*M!) skips the comment and runs what follows; keep both readings
+    intents = _intents_of(sql, dialect, database)
+    if (dialect == "mysql" and _VERSIONED_OPEN_RE.search(sql)) or (
+            dialect == "generic" and _EXEC_OPEN_RE.search(sql)):
+        # a server runs the /*!N comments up to its own version and skips the rest
+        # (Oracle MySQL skips /*M! too): /*!99999 select 1 */ drop table users. One
+        # reading per version threshold, with and without the MariaDB-only ones.
+        versions = sorted({int(v) for v in _VERSION_NUMBER_RE.findall(sql)})
+        if len(versions) > _MAX_VERSION_READINGS:
+            versions = [versions[0], versions[-1]]  # too many to read each: flagged
+            intents.append(InfrastructureIntent(
+                resource="unknown/*", action="update", provider="sql",
+                params={"unclassified": True, "ambiguous_comment": True,
+                        "statement_class": "dml", "raw_action": "AMBIGUOUS"},
+                metadata={"dialect": dialect, **({"database": database} if database else {})}))
         seen = {_intent_key(i) for i in intents}
-        for intent in _intents_of(sql, dialect, database, skip_versioned=True):
-            if _intent_key(intent) not in seen:
-                seen.add(_intent_key(intent))
-                intents.append(intent)
+        # generic: Postgres and SQLite skip even an unversioned /*! … */ (-1 skips all)
+        for version in [*([-1] if dialect == "generic" else []), 0, *versions]:
+            for mariadb in (True, False):
+                for intent in _intents_of(sql, dialect, database, version=version,
+                                          mariadb=mariadb):
+                    if _intent_key(intent) not in seen:
+                        seen.add(_intent_key(intent))
+                        intents.append(intent)
     return intents
 
 
 def _intents_of(sql: str, dialect: str, database: str | None, *,
-                skip_versioned: bool) -> list[InfrastructureIntent]:
+                version: float = float("inf"), mariadb: bool = True) -> list[InfrastructureIntent]:
     intents = []
-    for toks, _comment, flags in _lex(sql, dialect, skip_versioned):
-        if skip_versioned and not toks and not flags:
-            continue  # only the skipped comment: /*!40101 SET NAMES utf8 */;
+    reading_all = version == float("inf") and mariadb
+    statements = _lex(sql, dialect, version, mariadb)
+    reads = _FILE_READS.get()
+    if reads is not None:  # many tiny statements (x;x;x;…) cost as much as a big one
+        reads["statements"] = reads.get("statements", 0) + len(statements)
+        if reads["statements"] > _MAX_DECISION_STATEMENTS:
+            raise SqlBudgetExceeded("more SQL statements than can be checked in one command")
+    for toks, _comment, flags in statements:
+        if not reading_all and not toks and not flags:
+            continue  # only a skipped comment: /*!40101 SET NAMES utf8 */;
         results = list(_classify_tokens(toks, dialect))
         for flag in sorted(flags):  # generic: the server may read it differently
             results.append(
@@ -2137,8 +2163,8 @@ def _parse_db_cli_tokens(
     short_files = {f[1] for f in file_flags if len(f) == 2} if short_valued else set()
     # the clients accept any unique prefix of a long option (psql --comm, mysql --exec)
     # psql and mysql (not sqlite3) accept any unique prefix of a long option
-    # (psql --comm, mysql --exec); mysql also reads `_` as `-` and drops a
-    # `--loose-` or `--maximum-` prefix (--loose-init_command)
+    # (psql --comm, mysql --exec); mysql also ignores case, reads `_` as `-` and
+    # drops stacked loose-/maximum-/skip-/enable-/disable- prefixes
     long_options = sorted({f for f in (*command_flags, *file_flags, *database_flags,
                                        *value_flags, "--host") if f.startswith("--")})
     i, n = 0, len(tokens)
@@ -2147,8 +2173,7 @@ def _parse_db_cli_tokens(
         if short_valued and tok.startswith("--") and len(tok) > 2:
             name, eq, value = tok.partition("=")
             if mysql_spelling:
-                name = "--" + name[2:].replace("_", "-").removeprefix("loose-").removeprefix(
-                    "maximum-")
+                name = _mysql_option_name(name)
             matches = [f for f in long_options if f.startswith(name)]
             if name in long_options:
                 tok = name + eq + value
@@ -2234,8 +2259,16 @@ _SQL_FILE_LIMIT = 1024 * 1024
 # The most SQL classified in all: -c/-e texts and script files, a file once per
 # run of it (psql -f x.sql && psql -f x.sql && …); past it the SQL is unknown.
 _SQL_FILE_USE_LIMIT = 2 * _SQL_FILE_LIMIT
+# The most statements classified in one hook decision, all readings counted.
+_MAX_DECISION_STATEMENTS = 50_000
 _FILE_READS: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
     "aegis_sql_file_reads", default=None)
+
+
+class SqlBudgetExceeded(ValueError):
+    """More SQL in one call (or, inside shared_file_budget(), one hook decision)
+    than the classifier reads: the caller fails closed, as for SQL it cannot
+    parse -- unclassified SQL may be allowed by a policy."""
 
 
 @contextlib.contextmanager
@@ -2290,7 +2323,7 @@ def _build_cli_intents(
     elif sql_texts:
         for k, text in enumerate(sql_texts):
             if text is not None and len(text) > reads["uses"]:
-                sql_texts[k] = None  # past the total for this decision: unknown SQL
+                raise SqlBudgetExceeded("more SQL than can be checked in one command")
             elif text is not None:
                 reads["uses"] -= len(text)
         for text in sql_texts:
@@ -2316,34 +2349,34 @@ def _build_cli_intents(
                 if _intent_key(intent) not in seen:
                     seen.add(_intent_key(intent))
                     intents.append(intent)
-        elif dialect == "mysql" and len(texts) > 1:  # the joined reading was not made
-            intents.append(InfrastructureIntent(
-                resource="unknown/*", action="update", provider="sql",
-                params={"unclassified": True, "statement_class": "dml",
-                        "raw_action": "TOO_LARGE", "too_large": True},
-                metadata={"dialect": dialect, **({"database": database} if database else {})}))
+        elif dialect == "mysql" and len(texts) > 1:  # the joined reading cannot be made
+            raise SqlBudgetExceeded("more SQL than can be checked in one command")
     for file_path in file_paths:
         from pathlib import Path
 
         text = None
+        key = ""
+        too_large = False
         try:
             path = Path(file_path)
-            key = str(path.resolve())
             if reads["skip"]:
                 pass  # this pass does not need the file's SQL
-            elif key in reads["files"]:
+            elif (key := str(path.resolve())) in reads["files"]:
                 text = reads["files"][key]  # read already in this decision
             elif path.is_file():
                 with path.open("rb") as handle:
                     data = handle.read(reads["left"] + 1)
-                if len(data) <= reads["left"]:
+                too_large = len(data) > reads["left"]
+                if not too_large:
                     reads["left"] -= len(data)
                     text = data.decode("utf-8", errors="replace")
                 reads["files"][key] = text
-        except OSError:
+        except (OSError, ValueError):  # unreadable, or a NUL in the name
             text = None
+        if too_large:  # past what one command may have read: fail closed, not opaque
+            raise SqlBudgetExceeded(f"{file_path} is more SQL than can be checked in one command")
         if text is not None and len(text) > reads["uses"]:
-            text = None  # past the total for this decision: opaque
+            raise SqlBudgetExceeded("more SQL than can be checked in one command")
         if text is not None:
             reads["uses"] -= len(text)
             # a file run again in the same decision is classified once
@@ -2406,6 +2439,61 @@ def from_psql(argv: list[str]) -> list[InfrastructureIntent]:
     )
 
 
+_MYSQL_OPTION_PREFIXES = ("loose-", "maximum-", "skip-", "enable-", "disable-")
+
+
+def _mysql_option_name(name: str) -> str:
+    """A mysql long option's name as my_getopt reads it: case folded, `_` as
+    `-`, the loose-/maximum-/skip-/enable-/disable- prefixes dropped however
+    often they are stacked (`--Maximum-Loose_Execute` -> `--execute`)."""
+    base = name[2:].lower().replace("_", "-")
+    while base.startswith(_MYSQL_OPTION_PREFIXES):
+        base = base.split("-", 1)[1]
+    return "--" + base
+
+
+def _mysql_side_options(tokens: list[str]) -> tuple[str | None, list[str]]:
+    """The statement delimiter a mysql call sets (``--delimiter=//``) and the
+    option files it names (``--defaults-file``, ``--defaults-extra-file``)."""
+    delimiter, files = None, []
+    for k, tok in enumerate(tokens):
+        if not tok.startswith("--"):
+            continue
+        name, eq, value = tok.partition("=")
+        name = _mysql_option_name(name)
+        if not eq:
+            value = tokens[k + 1] if k + 1 < len(tokens) else ""
+        if len(name) >= 5 and "--delimiter".startswith(name):
+            delimiter = value
+        elif name in ("--defaults-file", "--defaults-extra-file"):
+            files.append(value)
+    return delimiter, files
+
+
+def _option_file_sql(path: str) -> list[str] | None:
+    """The SQL a mysql option file runs (its ``execute`` and ``init-command``
+    settings, however spelt); ``None`` when it cannot be read."""
+    from pathlib import Path
+
+    try:
+        with Path(path).expanduser().open("rb") as handle:
+            data = handle.read(_OPTION_FILE_LIMIT + 1)
+    except (OSError, ValueError, RuntimeError):
+        return None
+    if len(data) > _OPTION_FILE_LIMIT:
+        return None
+    found = []
+    for line in data.decode("utf-8", errors="replace").splitlines():
+        key, eq, value = line.strip().partition("=")
+        if eq and _mysql_option_name("--" + key.strip()) in (
+                "--execute", "--init-command", "--init-command-add"):
+            found.append(value.strip().strip("'\""))
+    return found
+
+
+_OPTION_FILE_LIMIT = 64 * 1024
+
+
 def from_mysql(argv: list[str]) -> list[InfrastructureIntent]:
     """Parses a ``mysql`` invocation, extracting ``-e``/``--execute`` SQL and the
     database from ``-D``/``--database`` or a trailing positional. The mysql
@@ -2421,13 +2509,35 @@ def from_mysql(argv: list[str]) -> list[InfrastructureIntent]:
         database_flags={"-D", "--database"},
         file_flags=frozenset(),
         short_valued=_MYSQL_SHORT_VALUED, mysql_spelling=True,
+        value_flags=frozenset({"--delimiter", "--defaults-file", "--defaults-extra-file"}),
     )
     if database is None and positional:
         database = positional[0]
-    return _build_cli_intents(
+    delimiter, option_files = _mysql_side_options(tokens)
+    unreadable = []
+    for option_file in option_files:  # [client] init-command=… runs on connect
+        file_sql = _option_file_sql(option_file)
+        if file_sql is None:
+            unreadable.append(option_file)
+        else:
+            sql_texts = [*file_sql, *sql_texts]
+    if delimiter and delimiter != ";":
+        # --delimiter=// ends statements at // instead of ;: read it that way too
+        sql_texts = [*sql_texts, *(t.replace(delimiter, ";") for t in sql_texts
+                                   if t is not None and delimiter in t)]
+    if not sql_texts and unreadable:
+        sql_texts = [None]
+    intents = _build_cli_intents(
         sql_texts=sql_texts, file_paths=file_paths, database=database, host=host,
         dialect="mysql", argv=argv,
     )
+    for option_file in unreadable:  # an option file the hook cannot read may hold SQL
+        intents.append(InfrastructureIntent(
+            resource=f"script/{_basename(option_file)}", action="update", provider="sql",
+            params={"raw_action": "file", "unclassified": True, "unreadable": True,
+                    "opaque": True, "file": option_file},
+            metadata={"dialect": "mysql", **({"database": database} if database else {})}))
+    return intents
 
 
 # sqlite3 options that take a value (sqlite3 options are single-dash words:

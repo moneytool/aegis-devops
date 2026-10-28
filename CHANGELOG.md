@@ -125,12 +125,25 @@ behaviour.
     prefix and `--init-command-add`; sqlite3 takes no prefixes. A versioned `/*!NNNNN … */` or
     MariaDB `/*M! … */` comment under `mysql`/`generic` is classified both with its body and without
     it, since an older server (or Oracle MySQL, for `/*M!`) skips it: `/*!99999 select 1 */ drop table
-    users` reports the delete. `SELECT STRAIGHT_JOIN a` reads no table `a`. In the agent hook, SQL
+    users` reports the delete. It is read once per version threshold (the comments up to each version
+    run), with and without the `/*M!` ones; past four versions it is also an unclassified
+    `ambiguous_comment`. `SELECT STRAIGHT_JOIN a` reads no table `a`. In the agent hook, SQL
     script files share one budget per decision: 1 MiB read in all, and 2 MiB classified counting
     each run of a file (`psql -f x.sql && psql -f x.sql && …`); past it a file is opaque. The `-c`/`-e`
     texts count against the same 2 MiB, past which they are unknown SQL, and the hook's first parse
     (which only looks for shell code) classifies no SQL. `--maximum-` is dropped like `--loose-`.
     CTE scope lookups are logarithmic (many same-name CTEs with many references were quadratic).
+  - mysql option names are matched as my_getopt matches them: without case and with stacked
+    `loose-`/`maximum-`/`skip-`/`enable-`/`disable-` prefixes (`--EXECUTE`, `--maximum-loose-execute`).
+    `--delimiter=//` also splits the `-e` texts on `//`, and the `execute`/`init-command` settings of a
+    `--defaults-file`/`--defaults-extra-file` are read as SQL (an option file the hook cannot read is
+    an unclassified script).
+  - Past the per-decision budget (1 MiB of script files read, 2 MiB of SQL classified, 50,000
+    statements) the hook fails closed (`cannot parse`) instead of reporting unclassified SQL, which a
+    policy may allow: a filler file could hide a later `DROP`. A script file over 1 MiB is therefore
+    refused in the agent hook. Under `generic`, an unversioned `/*! … */` is also read as a plain
+    comment (Postgres and SQLite skip it). The hook asks when the command sets `PSQLRC`, `MYSQL_HOME`
+    or `HOME` for a SQL client: the start-up file it names is not read.
   - `SET @a = (SELECT … FROM users)` reports the tables its subqueries read beside the `session/*`
     read. Nested `UPDATE a JOIN (…` groups are read in linear time (they were quadratic: 20,000
     levels took minutes). A trailing `-d`/`-h` with no value is ignored instead of an error. MySQL

@@ -2510,13 +2510,15 @@ def test_many_mysql_g_commands_on_one_line_stay_linear():
     assert time.perf_counter() - start < 5
 
 
-def test_script_files_past_the_shared_limit_are_opaque(tmp_path):
+def test_script_files_past_the_shared_limit_fail_closed(tmp_path):
+    from aegis_core.parsers.sql import SqlBudgetExceeded
+
     big = tmp_path / "big.sql"
     big.write_text("SELECT 1;\n" * 70000)  # 700 KB
     second = tmp_path / "drop.sql"
     second.write_text("SELECT 2;\n" * 40000 + "DROP TABLE users;\n")  # 400 KB
-    intents = from_psql(["psql", "-f", str(big), "-f", str(second)])
-    assert any(i.resource == "script/drop.sql" and i.params.get("unclassified") for i in intents)
+    with pytest.raises(SqlBudgetExceeded):
+        from_psql(["psql", "-f", str(big), "-f", str(second)])
 
 
 @pytest.mark.parametrize("argv", [["psql", "--comm", "DROP TABLE users", "-c", "SELECT 1"],
@@ -2550,7 +2552,9 @@ def test_sqlite3_nonce_and_dump():
 
 @pytest.mark.parametrize("option", ["--init_command", "--loose-init-command", "--loose-execute",
                                     "--init-command-add", "--init_comm", "--maximum-execute",
-                                    "--loose_execute"])
+                                    "--loose_execute", "--EXECUTE", "--Init-Command",
+                                    "--maximum-loose-execute", "--loose-loose-execute",
+                                    "--skip-maximum-execute"])
 def test_mysql_option_spellings_are_read(option):
     intents = from_mysql(["mysql", f"{option}=DROP TABLE users", "-e", "SELECT 1"])
     assert ("delete", "table/users") in _actions(intents)
@@ -2586,3 +2590,43 @@ def test_many_same_name_cte_scopes_stay_fast():
     intents = from_sql(f"{stmt}; {stmt}; DROP TABLE users;", dialect="postgres")
     assert time.perf_counter() - start < 10
     assert ("delete", "table/users") in _actions(intents)
+
+
+@pytest.mark.parametrize("sql", [
+    "select 1 /*!40000 ; */ /*!99999 select 1 from */ drop table users",
+    "/*!40000 ; */ /*M!40000 select 1 from */ drop table users"])
+@pytest.mark.parametrize("dialect", ["mysql", "generic"])
+def test_each_version_threshold_is_read(sql, dialect):
+    assert ("delete", "table/users") in _actions(from_sql(sql, dialect=dialect))
+
+
+def test_many_comment_versions_are_flagged():
+    sql = " ".join(f"/*!{v} x */" for v in range(10000, 10010)) + " select 1"
+    assert any(i.params.get("ambiguous_comment") for i in from_sql(sql, dialect="mysql"))
+
+
+def test_a_script_name_with_a_nul_is_opaque():
+    intents = from_psql(["psql", "-f", "a\x00b"])
+    assert intents and intents[0].params.get("unclassified")
+
+
+@pytest.mark.parametrize("argv", [
+    ["--delimiter=//", "-e", "SELECT 1 // DROP TABLE users // SELECT 2"],
+    ["--delimiter", "$", "-e", "SELECT 1 $ DROP TABLE users"]])
+def test_mysql_delimiter_splits_statements(argv):
+    intents = from_mysql(["mysql", *argv])
+    assert ("delete", "table/users") in _actions(intents)
+    assert all(i.metadata.get("database") is None for i in intents)
+
+
+def test_mysql_option_files_are_read(tmp_path):
+    cnf = tmp_path / "x.cnf"
+    cnf.write_text("[client]\ninit_command = DROP TABLE users\n")
+    intents = from_mysql(["mysql", f"--defaults-extra-file={cnf}", "-e", "SELECT 1"])
+    assert ("delete", "table/users") in _actions(intents)
+    missing = from_mysql(["mysql", "--defaults-file=/nonexistent.cnf", "-e", "SELECT 1"])
+    assert any(i.resource == "script/nonexistent.cnf" and i.params["unclassified"] for i in missing)
+
+
+def test_generic_reads_an_unversioned_executable_comment_both_ways():
+    assert ("delete", "table/users") in _actions(from_sql("/*! select 1 from */ drop table users"))

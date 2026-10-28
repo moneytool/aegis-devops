@@ -233,6 +233,13 @@ def _is_gated(command: str) -> bool:
     return False
 
 
+# Variables that name a file of SQL or client commands a SQL client runs at
+# start-up: psql's PSQLRC, mysql's MYSQL_HOME (its my.cnf), and HOME
+# (~/.psqlrc, ~/.my.cnf, ~/.sqliterc).
+_STARTUP_SQL_RE = re.compile(r"(?<![\w$.-])(?:PSQLRC|MYSQL_HOME|HOME)=")
+_SQL_CLIENT_RE = re.compile(r"(?<![\w.-])(?:psql|mysql|mariadb|sqlite3)(?![\w.-])")
+
+
 def decide(command: str, config_dir: Path, extra_args: list[str] | None = None) -> HookVerdict:
     """Runs ``aegis check command`` against ``config_dir`` and maps the
     result to allow / deny / ask. Tool errors deny only gated commands. SQL
@@ -286,6 +293,11 @@ def _decide_command(command: str, config_dir: Path,
                 "names an infrastructure tool; run the infrastructure command on its own",
             )
 
+    if _STARTUP_SQL_RE.search(command) and _SQL_CLIENT_RE.search(command):
+        return HookVerdict(
+            "ask", "aegis: this sets the file a SQL client loads at start-up (PSQLRC, "
+            "MYSQL_HOME, HOME for ~/.sqliterc), which the hook does not read; run the client "
+            "without it")
     argv = [
         "check", "command", "--config-dir", str(config_dir), "--exit-style", "claude-hook",
         *(extra_args or []), "--", command,

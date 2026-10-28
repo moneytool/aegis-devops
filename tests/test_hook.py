@@ -847,3 +847,28 @@ def test_one_sql_text_budget_per_decision(opted_in_project):
     code, out, err = run("claude", payload_for("claude", command))
     assert code == 2
     assert time.monotonic() - started < 20
+
+
+@pytest.mark.parametrize("command", [
+    "psql -f filler.sql; psql -f filler.sql; psql -c 'DROP TABLE users'",
+    "psql -f filler.sql ; psql -f drop.sql",
+    "psql -f xx.sql ; psql -f xx.sql ; psql -c 'DROP TABLE users'",
+])
+def test_sql_past_the_decision_budget_fails_closed(opted_in_project, command):
+    import time
+
+    (opted_in_project / "filler.sql").write_text("SELECT 1 FROM t;\n" * (1048566 // 17))
+    (opted_in_project / "drop.sql").write_text("DROP TABLE users;\n")
+    (opted_in_project / "xx.sql").write_text("x;" * (1048000 // 2))
+    started = time.monotonic()
+    code, out, err = run("claude", payload_for("claude", command))
+    assert code == 2, (out, err)
+    assert time.monotonic() - started < 20
+
+
+@pytest.mark.parametrize("command", ["PSQLRC=r.sql psql -c 'SELECT 1'",
+                                     "env PSQLRC=r.sql psql -c 'SELECT 1'",
+                                     "HOME=/tmp/x sqlite3 db 'SELECT 1 FROM t'"])
+def test_startup_sql_files_named_in_the_environment_ask(opted_in_project, command):
+    code, out, err = run("claude", payload_for("claude", command))
+    assert '"ask"' in out, (code, out, err)
