@@ -28,7 +28,8 @@ behaviour.
     each one inside a `WITH` body (it was only the strongest one inside a CTE, and a `WITH … UPDATE
     t AS u`, `UPDATE ONLY` or `MERGE` main statement could be read as a SELECT). MySQL multi-table
     `DELETE t1, t2 FROM …` and `UPDATE t1 JOIN t2 … SET` write each listed table. `MERGE INTO t` is
-    the strongest of its `WHEN … THEN` actions. `ONLY` and MySQL's `IGNORE`/`LOW_PRIORITY`/`QUICK`
+    each of its `WHEN … THEN` actions (an `UPDATE` and an `INSERT` branch give an `update` and a
+    `put`). `ONLY` and MySQL's `IGNORE`/`LOW_PRIORITY`/`QUICK`
     are no longer read as the table name (`DELETE FROM ONLY users` was `table/ONLY`), nor is
     SQLite's `UPDATE OR IGNORE`. A MySQL `DELETE s FROM secret AS s …` resolves the alias to
     `secret`, using only the aliases of the DELETE's own query block, never a subquery's (a
@@ -82,10 +83,21 @@ behaviour.
     unclosed `set_config(` no longer takes seconds per thousand repeats.
   - `aegis check sql --dialect` is documented ([CLI reference](docs/cli.md#sql-and---dialect)).
     Dialect names are matched without case (`postgresql`, `mariadb` and `sqlite3` name their
-    dialect); `--dialect` rejects any other name, and `from_sql` reads one as `generic`.
-  - Each `psql -c` / `mysql -e` text and each `sqlite3` SQL argument is classified on its own, as
-    the client runs them: a trailing `--` or `#` comment, or an open quote, in one no longer hides
-    the next (`psql -c "SELECT 1 --" -c "DROP TABLE users"` was a read).
+    dialect); any other name is read as `generic` (`aegis check sql` says so on stderr; its exit
+    codes are unchanged).
+  - A `--` comment ends at a carriage return as well as a newline in `postgres` and `generic`, as
+    Postgres reads it (`SELECT 1 -- c` + CR + `; DROP TABLE x` was a read).
+  - Each `psql -c` text and each `sqlite3` SQL argument is classified on its own, as the client
+    runs them: a trailing `--` comment or an open quote in one no longer hides the next (`psql -c
+    "SELECT 1 --" -c "DROP TABLE users"` was a read). The `mysql` client joins its `-e` texts with
+    a space, so they are classified both joined and one by one. `mysql --init-command` and `psql
+    -v` values next to a `-f` script are classified as SQL.
+  - Client commands: `\g`/`\G` end a statement (`SELECT 1\G DELETE FROM users` hid the delete),
+    and other mysql/psql backslash commands (`\!`, `\.`, `\i`, `\copy`, `\gexec`, …) and `sqlite3`
+    dot-commands (`.shell`, `.system`, …) are unclassified writes (`client_command`). MySQL
+    identifiers that start with a digit or `$` (`2fa_codes`, `app.2fa_codes`) are read as names,
+    `FROM { OJ … }` reports its tables, and only `START TRANSACTION` is a session read (`START
+    REPLICA` is unclassified).
   - A statement that changes how the server reads later strings is an unclassified `update`
     (`changes_lexing`): `SET sql_mode` (`NO_BACKSLASH_ESCAPES`, `ANSI_QUOTES`), `SET
     standard_conforming_strings`, `SET backslash_quote`, `SET NAMES` / `CHARACTER SET` /
@@ -101,6 +113,16 @@ behaviour.
     delete FROM t`) no longer hides the table; a DML after a CTE `SEARCH … SET col` / `CYCLE …
     USING col` clause, and `WITH … TABLE t`, are recognised; `JOIN b USING (id)` in a MySQL
     `DELETE` no longer reads a table `id`; `SELECT … INTO STRICT x` is a variable assignment.
+  - The action of a `CREATE RULE … DO [INSTEAD|ALSO] …` is reported (`DO INSTEAD DELETE FROM
+    secret` deletes from `secret`), and `SELECT … INTO LOCAL|GLOBAL TEMP t` creates `t`.
+  - Every `psql -f`/`--file` script is read, also next to `-c` (only the last one was, and none
+    when a `-c` was given), as are `sqlite3 -init` scripts next to SQL arguments; `mysql -f` is
+    `--force`, not a script (`mysql -f -e "DROP …"` lost the DROP). In `generic`, a string whose
+    body ends in a backslash is ambiguous too (`'C:\' -- '; DROP …`). SQLite `EXPLAIN QUERY PLAN`
+    keeps the table it explains; `UPDATE … JOIN t2 USING (id)` no longer writes a table `id`.
+  - `psql`/`mysql` bundled and attached command options are read (`psql -Atc 'SQL'`, `-c'SQL'`,
+    `mysql -BNe 'SQL'`; `-dcars`, `-psecret` are option values), and a `-c` with nothing after it
+    is unknown SQL (an unclassified `update`) instead of an error.
   - Multi-table `DELETE` targets and repeated `LOCK IN SHARE MODE` are resolved in linear time
     (thousands of either took tens of seconds).
 
@@ -111,7 +133,9 @@ behaviour.
   upgrading. Pass the right `dialect` to `from_sql` and `aegis check sql`: it now changes how
   strings and comments are read, and `generic` turns an ambiguous statement into an extra
   unclassified write. Known limits: tables read inside functions, views or procedures a query calls
-  are not seen; MySQL `"…"` is read with string escapes even under `ANSI_QUOTES`, and `\'` as an
+  are not seen, and a function with side effects is a read (`SELECT dblink_exec('DELETE …')`,
+  `lo_export(…)`, `pg_terminate_backend(…)`, the sqlite3 shell's `writefile(…)`); an `UPDATE
+  pg_settings …` that changes the role is a table update, not a `privilege` change; MySQL `"…"` is read with string escapes even under `ANSI_QUOTES`, and `\'` as an
   escaped quote even under `NO_BACKSLASH_ESCAPES`, when the mode is set outside the command (a
   `SET` in the command itself is flagged); and `generic`
   reads `$$`, `--x` and `#` the Postgres way without flagging them (see the CLI reference). The example

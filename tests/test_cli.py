@@ -1919,3 +1919,14 @@ def test_dry_run_uncovered_message_is_not_would_be_none(capsys):
     assert "would be None" not in out
     if "dry-run" in out:
         assert "uncovered" in out or "would be" in out
+
+
+@pytest.mark.parametrize("dialect", ["MySQL", "mariadb", "PostgreSQL", "oracle", "mssql"])
+def test_check_sql_accepts_any_dialect_name(capsys, dialect):
+    # round 5: unknown names are read as generic, as before; exit codes are unchanged
+    code = main(["check", "sql", "--constraints", CONSTRAINTS, "--authority", AUTHORITY,
+                     "--dialect", dialect, "SELECT 1"])
+    assert code == 0
+    err = capsys.readouterr().err
+    assert ("reading the SQL as generic" in err) is (dialect in ("oracle", "mssql"))
+

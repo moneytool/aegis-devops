@@ -832,12 +832,10 @@ def test_from_mysql_collects_all_execute_flags_in_order():
     assert intents[1].action == "read"
 
 
-def test_from_mysql_missing_file_is_opaque_unreadable():
-    (intent,) = from_mysql(["mysql", "-D", "shop", "-f", "definitely_missing_7213.sql"])
-    assert intent.resource == "script/definitely_missing_7213.sql"
-    assert intent.action == "update"
-    assert intent.params["unreadable"] is True
-    assert intent.params["opaque"] is True
+def test_from_mysql_has_no_script_option():
+    # round 5: mysql's -f is --force; a script comes in on stdin, which argv does not show
+    with pytest.raises(ValueError, match="could not find SQL text"):
+        from_mysql(["mysql", "-D", "shop", "-f", "definitely_missing_7213.sql"])
 
 
 # --- 9. mongosh: getCollection / bracket access / chained find().forEach() ------
@@ -1353,8 +1351,9 @@ def _summary_in(sql: str, dialect: str) -> list[tuple[str, str]]:
      [("read", "table/products"), ("read", "table/users")]),
     ("SELECT * FROM products WHERE a = 'x\\' UNION SELECT * FROM users", "sqlite",
      [("read", "table/products"), ("read", "table/users")]),
+    # round 5: a body ending in a backslash is also ambiguous under generic
     ("SELECT * FROM products WHERE a = 'C:\\'; DROP TABLE users", "generic",
-     [("read", "table/products"), ("delete", "table/users")]),
+     [("read", "table/products"), ("update", "unknown/*"), ("delete", "table/users")]),
 ])
 def test_backslash_escapes_follow_the_dialect(sql, dialect, expected):
     assert _summary_in(sql, dialect) == expected
@@ -1468,7 +1467,8 @@ def test_dml_in_ctes_and_main_statement_are_all_reported():
     ("WITH s AS (SELECT * FROM src) MERGE INTO users u USING s ON u.id = s.id "
      "WHEN MATCHED THEN DELETE", [("delete", "table/users"), ("read", "table/src")]),
     ("MERGE INTO users u USING src s ON u.id = s.id WHEN MATCHED THEN UPDATE SET a = 1 "
-     "WHEN NOT MATCHED THEN INSERT VALUES (1)", [("update", "table/users"), ("read", "table/src")]),
+     "WHEN NOT MATCHED THEN INSERT VALUES (1)",
+     [("update", "table/users"), ("put", "table/users"), ("read", "table/src")]),
     ("MERGE INTO users USING src ON true WHEN NOT MATCHED THEN INSERT VALUES (1)",
      [("put", "table/users"), ("read", "table/src")]),
     # a DML keyword whose target can't be read is still a write
@@ -2143,5 +2143,176 @@ def test_round4_inputs_stay_linear(sql):
     import time
     start = time.perf_counter()
     from_sql(sql, dialect="mysql")
+    assert time.perf_counter() - start < 3
+
+
+# --- council round 5 ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize("sql,expected", [
+    ("MERGE INTO a USING b ON a.id=b.id WHEN MATCHED THEN UPDATE SET x=1 "
+     "WHEN NOT MATCHED THEN INSERT VALUES (1)",
+     [("update", "table/a"), ("put", "table/a"), ("read", "table/b")]),
+    ("MERGE INTO a USING b ON true WHEN MATCHED THEN DELETE "
+     "WHEN NOT MATCHED THEN INSERT VALUES (1)",
+     [("delete", "table/a"), ("put", "table/a"), ("read", "table/b")]),
+    ("MERGE INTO a USING b ON true WHEN MATCHED THEN UPDATE SET x=1 WHEN NOT MATCHED THEN "
+     "INSERT VALUES (1) WHEN NOT MATCHED BY SOURCE THEN DELETE",
+     [("delete", "table/a"), ("update", "table/a"), ("put", "table/a"), ("read", "table/b")]),
+])
+def test_merge_reports_each_when_action(sql, expected):
+    assert _summary_in(sql, "postgres") == expected
+
+
+@pytest.mark.parametrize("dialect,deleted", [
+    ("postgres", True), ("generic", True), ("mysql", False), ("sqlite", False),
+])
+def test_a_carriage_return_ends_a_line_comment_in_postgres(dialect, deleted):
+    summary = _summary_in("SELECT 1 -- c\r; DROP TABLE x", dialect)
+    assert (("delete", "table/x") in summary) is deleted
+
+
+@pytest.mark.parametrize("sql,expected", [
+    ("CREATE RULE r AS ON SELECT TO a DO INSTEAD DELETE FROM secret",
+     [("create", "rule/r"), ("delete", "table/secret")]),
+    ("CREATE RULE r AS ON INSERT TO a DO ALSO INSERT INTO log VALUES (1)",
+     [("create", "rule/r"), ("put", "table/log")]),
+    ("SELECT a INTO LOCAL TEMP t FROM b", [("create", "table/t"), ("read", "table/b")]),
+])
+def test_round5_rule_actions_and_into_targets(sql, expected):
+    assert _summary_in(sql, "postgres") == expected
+
+
+@pytest.mark.parametrize("argv", [
+    ["psql", "-Atc", "DROP TABLE x"], ["psql", "-cDROP TABLE x"],
+    ["psql", "-At", "-c", "DROP TABLE x"], ["mysql", "-BNe", "DROP TABLE x"],
+    ["mysql", "-eDROP TABLE x"], ["mysql", "-uroot", "-e", "DROP TABLE x"],
+])
+def test_bundled_and_attached_command_options(argv):
+    parse = from_psql if argv[0] == "psql" else from_mysql
+    assert ("delete", "table/x") in [(i.action, i.resource) for i in parse(argv)]
+
+
+def test_an_option_value_bundle_is_not_a_command_option():
+    # -dcars is the database "cars", -psecret a password: no SQL in them
+    assert [(i.action, i.resource) for i in from_psql(["psql", "-dcars", "-c", "SELECT 1"])] \
+        == [("read", "table/*")]
+    assert [(i.action, i.resource) for i in from_mysql(["mysql", "-psecret", "-e", "SELECT 1"])] \
+        == [("read", "table/*")]
+
+
+def test_a_trailing_command_option_is_unknown_sql():
+    intents = from_psql(["psql", "-c", "SELECT 1", "-c"])
+    assert intents[-1].resource == "unknown/*"
+    assert intents[-1].params["unclassified"] is True
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT 'a\\'; SELECT 1 FROM t'; DROP TABLE users",
+    'SELECT "a\\"; SELECT 1',
+    "SELECT * FROM t WHERE p = 'C:\\' -- '; DROP TABLE users",
+])
+def test_generic_string_ending_in_a_backslash_is_ambiguous(sql):
+    assert any(i.params.get("ambiguous_escape") for i in from_sql(sql))
+
+
+def test_generic_even_backslashes_are_not_ambiguous():
+    assert _summary_in("SELECT 'a\\\\' FROM t", "generic") == [("read", "table/t")]
+
+
+@pytest.mark.parametrize("argv", [
+    ["psql", "-c", "SELECT 1", "-f", "drop.sql"], ["psql", "-f", "drop.sql", "-c", "SELECT 1"],
+    ["psql", "-c", "SELECT 1", "--file=drop.sql"], ["psql", "-f", "drop.sql", "-f", "none.sql"],
+    ["sqlite3", "-init", "drop.sql", "db", "SELECT 1"],
+])
+def test_every_script_file_is_read(tmp_path, monkeypatch, argv):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "drop.sql").write_text("DROP TABLE users;\n")
+    parse = from_psql if argv[0] == "psql" else from_sqlite3
+    assert ("delete", "table/users") in [(i.action, i.resource) for i in parse(argv)]
+
+
+def test_mysql_dash_f_is_force_not_a_file():
+    intents = from_mysql(["mysql", "-f", "-e", "DROP TABLE users"])
+    assert [(i.action, i.resource) for i in intents] == [("delete", "table/users")]
+
+
+@pytest.mark.parametrize("sql,expected", [
+    ("EXPLAIN QUERY PLAN SELECT * FROM users", [("read", "table/users")]),
+])
+def test_sqlite_explain_query_plan(sql, expected):
+    assert _summary_in(sql, "sqlite") == expected
+
+
+def test_update_join_using_columns_are_not_tables():
+    assert _summary_in("UPDATE t1 LEFT JOIN t2 USING (id) SET t1.a = 1, t2.b = 2", "mysql") \
+        == [("update", "table/t1"), ("update", "table/t2")]
+
+
+def test_many_dml_ops_stay_linear():
+    import time
+    sql = "WITH " + ", ".join(f"c{i} AS (DELETE FROM t{i} RETURNING 1)" for i in range(12000))
+    start = time.perf_counter()
+    from_sql(sql + " SELECT 1", dialect="postgres")
+    assert time.perf_counter() - start < 3
+
+
+def test_mysql_joins_its_execute_texts():
+    # the client joins every -e with a space: a quote open in one runs into the next
+    intents = from_mysql(["mysql", "t", "-e", "SELECT 'a", "-e",
+                          "SELECT '; DELETE FROM users; -- '"])
+    assert ("delete", "table/users") in [(i.action, i.resource) for i in intents]
+
+
+@pytest.mark.parametrize("sql,dialect,deleted", [
+    ("SELECT 1\\G DELETE FROM users", "mysql", True),
+    ("SELECT 1 \\g\nDELETE FROM users;", "postgres", True),
+])
+def test_client_statement_ends(sql, dialect, deleted):
+    assert (("delete", "table/users") in _summary_in(sql, dialect)) is deleted
+
+
+@pytest.mark.parametrize("sql,dialect", [
+    ("SELECT 1 \\! echo x", "mysql"), ("SELECT 1 \\! echo x", "postgres"),
+    ("\\copy t to x", "postgres"), ("SELECT 1 \\g |rm x", "postgres"),
+    ("\\. evil.sql", "mysql"), (".shell rm -rf x", "sqlite"),
+])
+def test_client_commands_are_unclassified(sql, dialect):
+    assert any(i.params.get("client_command") for i in from_sql(sql, dialect=dialect))
+
+
+@pytest.mark.parametrize("sql,expected", [
+    ("SELECT * FROM users u JOIN 2fa_codes c ON c.uid=u.id",
+     [("read", "table/users"), ("read", "table/2fa_codes")]),
+    ("SELECT * FROM app.2fa_codes", [("read", "table/app.2fa_codes")]),
+    ("SELECT 1, 2.5, 1e5, 0x1F, .5 FROM t", [("read", "table/t")]),
+    ("SELECT * FROM { OJ users LEFT OUTER JOIN secret ON 1=1 }",
+     [("read", "table/users"), ("read", "table/secret")]),
+    ("START REPLICA", [("update", "unknown/*")]),
+    ("START TRANSACTION", [("read", "session/*")]),
+])
+def test_round5_mysql_names_and_statements(sql, expected):
+    assert _summary_in(sql, "mysql") == expected
+
+
+def test_mysql_init_command_is_sql():
+    intents = from_mysql(["mysql", "t", "--init-command=DELETE FROM users", "-e", "SELECT 1"])
+    assert ("delete", "table/users") in [(i.action, i.resource) for i in intents]
+
+
+def test_psql_variables_next_to_a_script_are_sql():
+    intents = from_psql(["psql", "-v", "x=1; DELETE FROM users", "-f", "q.sql"])
+    assert ("delete", "table/users") in [(i.action, i.resource) for i in intents]
+
+
+@pytest.mark.parametrize("sql,dialect", [
+    ("WITH " + ", ".join(f"c{i} AS (DELETE zz FROM t{i})" for i in range(3000)) + " SELECT 1",
+     "mysql"),
+    ("SELECT " + "(WITH a AS (SELECT 1) SEARCH " * 4000 + "1" + ")" * 4000, "postgres"),
+])
+def test_round5_inputs_stay_linear(sql, dialect):
+    import time
+    start = time.perf_counter()
+    from_sql(sql, dialect=dialect)
     assert time.perf_counter() - start < 3
 

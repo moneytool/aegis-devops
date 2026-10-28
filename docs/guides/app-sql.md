@@ -44,7 +44,9 @@ is a permission change. A statement it cannot classify counts as a write.
 A read is reported once for each table Aegis can see in it: the `FROM` table, each `JOIN`,
 subqueries, `UNION` branches and `WITH` bodies. A rule can therefore name a table
 (`resource_pattern: table/customers`) and catch a query that reaches it through a JOIN. Tables
-read inside a function, view or procedure the query calls are not seen. `SELECT … FOR UPDATE`
+read inside a function, view or procedure the query calls are not seen, and a function with side
+effects counts as a read (`dblink_exec('DELETE …')`, `lo_export(…)`, `pg_terminate_backend(…)`):
+the database role, not Aegis, has to deny those. `SELECT … FOR UPDATE`
 stays a read, marked `locking: true` for a rule that wants to match it.
 
 Pass the gate the dialect your database speaks (`SqlGate(..., dialect="postgres")`, `"mysql"`
