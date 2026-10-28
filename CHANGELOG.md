@@ -113,10 +113,14 @@ behaviour.
     x.db .tables` (and `.schema`, `.indexes`) is a read; `sqlite3` with `-cmd`/`-init` input but no SQL
     argument then reads SQL from stdin, which is unclassified (with no SQL at all it is refused, as
     before). A `-f`/`-init`
-    file that is a directory, unreadable or over 8 MiB is an opaque, unclassified script instead
+    file that is a directory, unreadable or past 1 MiB (for all the script files of a call together) is an opaque, unclassified script instead
     of an error. Under `sqlite`, `x IN t` (a table on the right of `IN`) reads `t`, and `WITH …
     REPLACE INTO t …` is a write like `WITH … INSERT OR REPLACE`. `aegis check sql --dialect
     NAME` with an unknown name now records `"dialect": "generic"` in the intent metadata.
+  - Unique prefixes of the clients' long options are read like the full name (`psql --comm 'SQL'`,
+    `--fil x.sql`, `mysql --exec 'SQL'`, `--init 'SQL'`), as psql and mysql accept them. A line of
+    many mysql `\g`, many `/*!` comments and many sqlite dot-commands are lexed in linear time.
+    `sqlite3 -nonce` takes a value; `.dump` is a read.
   - `SET @a = (SELECT … FROM users)` reports the tables its subqueries read beside the `session/*`
     read. Nested `UPDATE a JOIN (…` groups are read in linear time (they were quadratic: 20,000
     levels took minutes). A trailing `-d`/`-h` with no value is ignored instead of an error. MySQL

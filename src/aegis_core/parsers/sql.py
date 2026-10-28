@@ -270,12 +270,22 @@ _LINE_END_RE = re.compile(r"[\n\r]")
 _START_TRANSACTION_RE = re.compile(r"\s*START\s+TRANSACTION\b", re.IGNORECASE)
 _CLIENT_COMMAND_RE = re.compile(r"\\([A-Za-z]+|[!.?#])")
 _DOT_COMMAND_RE = re.compile(r"\.([A-Za-z]+)")
+_PIPE_AFTER_RE = re.compile(r"[ \t]*\|")
 # sqlite3 dot-commands that only set how results are shown, or show the schema.
 _FORMAT_DOT_COMMANDS = frozenset({
     "mode", "headers", "header", "separator", "nullvalue", "width", "timeout", "bail",
     "echo", "changes", "timer", "eqp", "explain", "stats", "prompt", "tables", "schema",
-    "indexes", "indices", "databases", "help",
+    "indexes", "indices", "databases", "help", "dump",
 })
+
+
+def _at_line_start(sql: str, i: int) -> bool:
+    """Whether only spaces or tabs come between the start of ``sql`` or of a
+    line and position ``i`` (each run of them is walked once per dot)."""
+    k = i - 1
+    while k >= 0 and sql[k] in " \t":
+        k -= 1
+    return k < 0 or sql[k] in "\n\r"
 
 
 def _line_comment_end(sql: str, i: int, cr: bool) -> int:
@@ -531,6 +541,13 @@ def _lex(sql: str, dialect: str) -> list[_Statement]:
             mm = _CLIENT_COMMAND_RE.match(sql, i)
             name = mm.group(1) if mm else ""
             i = mm.end() if mm else i + 1
+            if mysql and name in ("g", "G", "gx") and not _PIPE_AFTER_RE.match(sql, i):
+                # mysql: a statement end, and the next one may follow on the same line
+                # (the line is not scanned: many \g on one line stay linear)
+                if toks or had_comment:
+                    statements.append((toks, had_comment, frozenset(flags)))
+                toks, had_comment, gap, flags = [], False, False, set()
+                continue
             line_end = _line_comment_end(sql, i, cr=True)
             rest = sql[i:line_end].strip()
             if name in ("g", "G", "gx") and not rest.startswith("|"):
@@ -550,8 +567,7 @@ def _lex(sql: str, dialect: str) -> list[_Statement]:
             i = line_end  # its arguments run to the end of the line
             gap = True
             continue
-        if ch == "." and dialect == "sqlite" and not toks and (
-                i == 0 or sql[i - 1] in "\n\r" or sql[:i].strip() == ""):
+        if ch == "." and dialect == "sqlite" and not toks and _at_line_start(sql, i):
             # a sqlite3 dot-command (.shell, .system, .import, .read …) at a line
             # start; the ones that only set the output format are left alone
             dot = _DOT_COMMAND_RE.match(sql, i)
@@ -2070,9 +2086,17 @@ def _parse_db_cli_tokens(
     # short-option bundles: psql and mysql only (sqlite3's options are words)
     short_commands = {f[1] for f in command_flags if len(f) == 2} if short_valued else set()
     short_files = {f[1] for f in file_flags if len(f) == 2} if short_valued else set()
+    # the clients accept any unique prefix of a long option (psql --comm, mysql --exec)
+    long_options = sorted({f for f in (*command_flags, *file_flags, *database_flags,
+                                       *value_flags, "--host") if f.startswith("--")})
     i, n = 0, len(tokens)
     while i < n:
         tok = tokens[i]
+        if tok.startswith("--") and len(tok) > 2:
+            name, eq, value = tok.partition("=")
+            matches = [f for f in long_options if f.startswith(name)]
+            if name not in long_options and len(matches) == 1:
+                tok = matches[0] + eq + value
         if tok in command_flags:
             i += 1
             sql_texts.append(tokens[i] if i < n else None)  # a trailing -c: unknown SQL
@@ -2146,8 +2170,9 @@ def _intent_key(intent: InfrastructureIntent) -> tuple[str, str, str]:
     return intent.resource, intent.action, repr(sorted(intent.params.items()))
 
 
-# The most of a script file (-f, -init) that is read; a larger one is opaque.
-_SQL_FILE_LIMIT = 8 * 1024 * 1024
+# The most of the script files (-f, -init) of one call that is read, in all; a
+# file past it is opaque (a 1 MiB script classifies in a few seconds).
+_SQL_FILE_LIMIT = 1024 * 1024
 
 
 def _build_cli_intents(
@@ -2187,6 +2212,7 @@ def _build_cli_intents(
                 if _intent_key(intent) not in seen:
                     seen.add(_intent_key(intent))
                     intents.append(intent)
+    budget = _SQL_FILE_LIMIT  # shared by every script file of the call
     for file_path in file_paths:
         from pathlib import Path
 
@@ -2195,8 +2221,9 @@ def _build_cli_intents(
             path = Path(file_path)
             if path.is_file():
                 with path.open("rb") as handle:
-                    data = handle.read(_SQL_FILE_LIMIT + 1)
-                if len(data) <= _SQL_FILE_LIMIT:
+                    data = handle.read(budget + 1)
+                if len(data) <= budget:
+                    budget -= len(data)
                     text = data.decode("utf-8", errors="replace")
         except OSError:
             text = None
@@ -2284,7 +2311,7 @@ def from_mysql(argv: list[str]) -> list[InfrastructureIntent]:
 # -csv, -batch, -cmd …; it has no short-option bundles).
 _SQLITE3_VALUED = frozenset({
     f"{dash}{name}" for dash in ("-", "--") for name in (
-        "nullvalue", "separator", "newline", "vfs", "lookaside", "pagecache", "heap",
+        "nullvalue", "separator", "newline", "vfs", "lookaside", "pagecache", "heap", "nonce",
         "mmap", "maxsize", "escape", "zip-file")
 })
 

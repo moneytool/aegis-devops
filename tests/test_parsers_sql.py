@@ -2501,3 +2501,48 @@ def test_many_executable_comments_stay_linear(sql, dialect):
 def test_mariadb_only_comment_is_ambiguous_under_mysql():
     intents = from_sql("/*M! SELECT 'a */ DROP TABLE x; -- ' */", dialect="mysql")
     assert any(i.params.get("unclassified") for i in intents)
+
+
+def test_many_mysql_g_commands_on_one_line_stay_linear():
+    import time
+    start = time.perf_counter()
+    from_mysql(["mysql", "-e", "\\g" * 60000])
+    assert time.perf_counter() - start < 5
+
+
+def test_script_files_past_the_shared_limit_are_opaque(tmp_path):
+    big = tmp_path / "big.sql"
+    big.write_text("SELECT 1;\n" * 70000)  # 700 KB
+    second = tmp_path / "drop.sql"
+    second.write_text("SELECT 2;\n" * 40000 + "DROP TABLE users;\n")  # 400 KB
+    intents = from_psql(["psql", "-f", str(big), "-f", str(second)])
+    assert any(i.resource == "script/drop.sql" and i.params.get("unclassified") for i in intents)
+
+
+@pytest.mark.parametrize("argv", [["psql", "--comm", "DROP TABLE users", "-c", "SELECT 1"],
+                                  ["psql", "--comm=DROP TABLE users"],
+                                  ["mysql", "--exec", "DROP TABLE users", "-e", "SELECT 1"],
+                                  ["mysql", "--init", "DROP TABLE users", "-e", "SELECT 1"]])
+def test_long_option_prefixes_are_read(argv):
+    parse = from_mysql if argv[0] == "mysql" else from_psql
+    assert ("delete", "table/users") in _actions(parse(argv))
+
+
+def test_psql_file_option_prefix_is_read(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "drop.sql").write_text("DROP TABLE users;\n")
+    assert ("delete", "table/users") in _actions(from_psql(["psql", "--fil", "drop.sql", "-c",
+                                                            "SELECT 1"]))
+
+
+def test_sqlite_dot_command_search_stays_linear():
+    import time
+    start = time.perf_counter()
+    from_sql("; ." * 200000, dialect="sqlite")
+    assert time.perf_counter() - start < 10
+
+
+def test_sqlite3_nonce_and_dump():
+    assert _actions(from_sqlite3(["sqlite3", "-nonce", "x", "db.db", "SELECT 1 FROM t"])) == [
+        ("read", "table/t")]
+    assert _actions(from_sqlite3(["sqlite3", "db.db", ".dump"])) == [("read", "table/*")]
