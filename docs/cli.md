@@ -28,7 +28,7 @@ The dialect decides how strings and comments are read, which decides where a sta
 
 | | `postgres` | `mysql` | `sqlite` | `generic` |
 |---|---|---|---|---|
-| `\'` ends a `'…'` string? | yes, except in `E'…'` | no, it escapes the quote (also in `"…"`) | yes | yes, plus an unclassified write (`ambiguous_escape`) when a backslash comes right before a quote, or ends the string |
+| `\'` ends a `'…'` string? | yes, except in `E'…'` | no, it escapes the quote (also in `"…"`) | yes, also in `E'…'` (E is a name) | yes, plus an unclassified write (`ambiguous_escape`) when a backslash comes right before a quote, ends the string, or is in an `E'…'` string |
 | block comments nest? | yes | no | no | no, plus an unclassified write (`ambiguous_comment`) when a `/*` is inside one |
 | `$$…$$` is a string? | yes | no | no | yes (not flagged) |
 | `#` starts a comment? | no | yes | no | no |
@@ -58,7 +58,9 @@ dot-commands that only set the output format (`.mode`, `.headers`, `.separator`,
 or another Unicode space is part of a name, as the servers read it. Under `sqlite`, `x IN t`
 reads table `t`.
 
-The body of a MySQL `/*! … */` comment is read as SQL in every dialect. `generic` does not flag
+The body of a MySQL `/*! … */` comment is read as SQL under `mysql` and `generic` and skipped as
+a comment under `postgres` and `sqlite`; under `generic` (and `mysql`, for a versioned
+`/*!NNNNN`), a quote, `--`, `#` or `/*` inside it is an unclassified write (`ambiguous_comment`). `generic` does not flag
 `$$` quotes, `--x` comments or `#`, because they are too common in ordinary SQL: under
 `generic`, MySQL SQL that uses `$$` as text, `--x` as arithmetic or `#` as a comment is read the
 Postgres way. Pass `--dialect mysql` for MySQL. Each statement yields one

@@ -75,8 +75,11 @@ Issue #58 -- what a statement reads, and statements that were weaker than they l
   comments; ``--`` not followed by whitespace is not, in MySQL. Postgres
   block comments nest; MySQL's and SQLite's do not. The body of a MySQL
   executable comment (``/*! ... */``, ``/*!50000 ...``, ``/*M! ...``) is read
-  as SQL in every dialect -- MySQL runs it, and over-reporting is the safe
-  side. ``generic`` can't know which reading applies, so a backslash before
+  as SQL under ``mysql`` and ``generic`` -- MySQL runs it -- and as a plain
+  comment under ``postgres`` and ``sqlite``; a quote, ``--``, ``#`` or ``/*``
+  in it (under ``generic``, or a versioned one under ``mysql``, which an older
+  server skips) adds an unclassified ``ambiguous_comment``. ``E'...'``
+  escapes are Postgres only. ``generic`` can't know which reading applies, so a backslash before
   a quote in a plain string, or a ``/*`` inside a block comment, adds an
   ``unknown/*`` ``update`` (``ambiguous_escape`` / ``ambiguous_comment``).
   The keyword regexes run on the statement with comments removed and every
@@ -175,9 +178,9 @@ from aegis_core.parser import _basename, _coerce  # noqa: F401  (re-exported con
 # * ``--`` comments (MySQL: only ``--`` followed by whitespace), MySQL ``#``
 #   comments and ``/* */`` comments are dropped; Postgres block comments
 #   nest. An executable comment ``/*! ... */`` (``/*!50000``, MariaDB
-#   ``/*M!``) is not a comment to MySQL: only its markers are dropped and its
-#   body is read as SQL, in every dialect (reporting more than a server runs
-#   is the safe side).
+#   ``/*M!``) is not a comment to MySQL: under ``mysql`` and ``generic`` only
+#   its markers are dropped and its body is read as SQL; Postgres and SQLite
+#   skip it like any comment.
 # * ``generic`` cannot know which reading the server uses, so a backslash
 #   before a quote in a plain string, or a ``/*`` inside a block comment,
 #   marks the statement ambiguous: it then also yields an unclassified write.
@@ -265,10 +268,11 @@ _LINE_END_RE = re.compile(r"[\n\r]")
 _START_TRANSACTION_RE = re.compile(r"\s*START\s+TRANSACTION\b", re.IGNORECASE)
 _CLIENT_COMMAND_RE = re.compile(r"\\([A-Za-z]+|[!.?#])")
 _DOT_COMMAND_RE = re.compile(r"\.([A-Za-z]+)")
-# sqlite3 dot-commands that only set how results are shown.
+# sqlite3 dot-commands that only set how results are shown, or show the schema.
 _FORMAT_DOT_COMMANDS = frozenset({
     "mode", "headers", "header", "separator", "nullvalue", "width", "timeout", "bail",
-    "echo", "changes", "timer", "eqp", "explain", "stats", "prompt",
+    "echo", "changes", "timer", "eqp", "explain", "stats", "prompt", "tables", "schema",
+    "indexes", "indices", "databases", "help",
 })
 
 
@@ -333,7 +337,8 @@ def _lex(sql: str, dialect: str) -> list[_Statement]:
     """Lexes ``sql`` and splits it on ``;``: a list of (tokens, had_comment,
     flags) per non-empty statement. A statement with no tokens but a comment
     is kept (it is classified as unknown, never dropped). ``flags`` holds
-    ``ambiguous_escape`` / ``ambiguous_comment`` (``generic`` only)."""
+    ``ambiguous_escape`` / ``ambiguous_comment`` (``generic``, and a MySQL
+    ``--`` followed by a control character)."""
     mysql = dialect == "mysql"
     generic = dialect == "generic"
     nested_comments = dialect == "postgres"
@@ -362,15 +367,30 @@ def _lex(sql: str, dialect: str) -> list[_Statement]:
             i += 2
             gap = True
             continue
+        control_dash = mysql and sql.startswith("--", i) and i + 2 < n and (
+            ord(sql[i + 2]) < 32 or sql[i + 2] == "\x7f") and sql[i + 2] not in _WS_CHARS
+        if control_dash:
+            # --<control>: a comment to the server, not to the mysql client, which
+            # then splits the text elsewhere
+            flags.add("ambiguous_comment")
         if (ch == "-" and sql.startswith("--", i)
-                and (not mysql or i + 2 >= n or sql[i + 2] in _WS_CHARS)) or (ch == "#" and mysql):
+                and (not mysql or i + 2 >= n or sql[i + 2] in _WS_CHARS or control_dash)) or (
+                ch == "#" and mysql):
             # Postgres ends a -- comment at a carriage return too
             i = _line_comment_end(sql, i, cr=dialect in ("postgres", "generic"))
             gap = had_comment = True
             continue
         if ch == "/" and sql.startswith("/*", i):
-            em = _EXEC_OPEN_RE.match(sql, i)
+            em = _EXEC_OPEN_RE.match(sql, i) if dialect in ("mysql", "generic") else None
             if em:
+                # MySQL runs the body of /*! … */ (unless its version is newer than the
+                # server's); other servers skip to the first */. When text in the body
+                # would move where it ends, the readings differ.
+                close = sql.find("*/", em.end())
+                inner = sql[em.end(): n if close == -1 else close]
+                if (generic or any(ch.isdigit() for ch in em.group(0))) and (
+                        any(q in inner for q in "'\"`#$") or "--" in inner or "/*" in inner):
+                    flags.add("ambiguous_comment")
                 exec_open += 1
                 i = em.end()
             elif nested_comments:
@@ -401,7 +421,8 @@ def _lex(sql: str, dialect: str) -> list[_Statement]:
         if ch in "'\"`":
             quote = ch
         elif ch in "EeNnBbXx" and sql[i + 1 : i + 2] == "'":
-            quote, e_string = "'", ch in "Ee"
+            # E'…' escapes are Postgres only (generic flags them below)
+            quote, e_string = "'", ch in "Ee" and dialect in ("postgres", "generic")
             i += 1
         elif (ch in "Uu" and not mysql and dialect != "sqlite" and sql[i + 1 : i + 2] == "&"
               and sql[i + 2 : i + 3] in ("'", '"')):  # MySQL and SQLite have no U& literals
@@ -426,9 +447,11 @@ def _lex(sql: str, dialect: str) -> list[_Statement]:
             i = end + 1 if end < n else n
             escaped = e_string or unicode or (slash and "\\" in body)
             trailing = len(body) - len(body.rstrip("\\"))
-            if generic and not e_string and not unicode and (
-                    "\\" + quote in body or trailing % 2 == 1):
-                # MySQL would end the string later: `'x\''…` or a body ending in `\`
+            if generic and not unicode and (
+                    (e_string and "\\" in body)
+                    or (not e_string and ("\\" + quote in body or trailing % 2 == 1))):
+                # MySQL would end the string later (`'x\''…`, a body ending in `\`);
+                # SQLite and MySQL read E'x\' as a name and a string ending at the `\'`
                 flags.add("ambiguous_escape")
             if unicode:
                 esc = "\\"
@@ -505,6 +528,7 @@ def _lex(sql: str, dialect: str) -> list[_Statement]:
                     i = line_end
                     if rest:
                         flags.add("client_command")  # \g FILE writes FILE
+                        had_comment = True  # also after an empty buffer (re-runs the last)
                 if toks or had_comment:
                     statements.append((toks, had_comment, frozenset(flags)))
                 toks, had_comment, gap, flags = [], False, False, set()
@@ -897,8 +921,8 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
             # ``(a JOIN b ...)``: descend; a subquery's own FROM is found by
             # the main loop.
             nxt = tok(j + 1)
-            if nxt is None or _is_word(nxt, *_SUBQUERY_START):
-                return
+            if nxt is None or _is_word(nxt, *_SUBQUERY_START, *_GROUP_STATEMENTS):
+                return  # FROM (DELETE … RETURNING *): that statement is its own op
             from_list[depth[j] + 1] = True
             ref_parens.add(j)
             j += 1
@@ -1998,15 +2022,17 @@ _MYSQL_SHORT_VALUED = frozenset("DhPupS")
 
 
 def _bundled_command(tok: str, letters: set[str],
-                     valued: frozenset[str]) -> tuple[str | None, bool] | None:
-    """For a bundle of short options (``-Atc``, ``-cSELECT 1``, ``-BNe``): the
-    SQL text attached to the command option and whether it is the next word
-    instead; ``None`` when the bundle holds no command option."""
+                     valued: frozenset[str]) -> tuple[str, str | None, bool] | None:
+    """For a bundle of short options (``-Atc``, ``-cSELECT 1``, ``-BNe``,
+    ``-qf x.sql``): the first of ``letters`` in it, the value attached to it,
+    and whether its value is the next word instead; ``None`` when the bundle
+    holds none of them."""
     for k, letter in enumerate(tok[1:], start=1):
         if letter in letters:
             rest = tok[k + 1:]
-            return (rest, False) if rest else (None, True)
-        if letter in valued or not letter.isalpha():
+            return (letter, rest, False) if rest else (letter, None, True)
+        # psql -1c / -0c, mysql -#e: those letters take no value
+        if letter in valued or not (letter.isalnum() or letter == "#"):
             return None
     return None
 
@@ -2029,7 +2055,9 @@ def _parse_db_cli_tokens(
     file_paths: list[str] = []  # psql runs every -c and -f, in order
     positional: list[str] = []
 
-    short_commands = {f[1] for f in command_flags if len(f) == 2}
+    # short-option bundles: psql and mysql only (sqlite3's options are words)
+    short_commands = {f[1] for f in command_flags if len(f) == 2} if short_valued else set()
+    short_files = {f[1] for f in file_flags if len(f) == 2} if short_valued else set()
     i, n = 0, len(tokens)
     while i < n:
         tok = tokens[i]
@@ -2037,12 +2065,16 @@ def _parse_db_cli_tokens(
             i += 1
             sql_texts.append(tokens[i] if i < n else None)  # a trailing -c: unknown SQL
         elif (len(tok) > 2 and tok[0] == "-" and tok[1] != "-"
-              and (bundled := _bundled_command(tok, short_commands, short_valued)) is not None):
-            text, takes_next = bundled  # psql -Atc 'SQL', -c'SQL', mysql -BNe 'SQL'
+              and (bundled := _bundled_command(tok, short_commands | short_files,
+                                               short_valued)) is not None):
+            letter, text, takes_next = bundled  # psql -Atc 'SQL', -c'SQL', -qf x.sql
             if takes_next:
                 i += 1
                 text = tokens[i] if i < n else None
-            sql_texts.append(text)
+            if letter in short_commands:
+                sql_texts.append(text)
+            elif text is not None:
+                file_paths.append(text)
         elif any(tok.startswith(f"{f}=") for f in command_flags if f.startswith("--")):
             sql_texts.append(tok.split("=", 1)[1])
         elif tok in file_flags:
@@ -2261,10 +2293,22 @@ def from_sqlite3(argv: list[str]) -> list[InfrastructureIntent]:
     if positional:
         database = database or positional[0]
         sql_texts = [*sql_texts, *positional[1:]]  # sqlite3 runs each SQL argument in turn
-    return _build_cli_intents(
+    intents = _build_cli_intents(
         sql_texts=sql_texts, file_paths=file_paths, database=database, host=host,
         dialect="sqlite", argv=argv,
     )
+    meta: dict[str, Any] = {"dialect": "sqlite", **({"database": database} if database else {})}
+    if len(positional) < 2:
+        # no SQL argument: after its -cmd / -init input sqlite3 reads SQL from stdin
+        intents.append(InfrastructureIntent(
+            resource="unknown/*", action="update", provider="sql",
+            params={"unclassified": True, "statement_class": "dml", "raw_action": "STDIN"},
+            metadata=meta))
+    elif not intents:  # only dot-commands that show the schema (.tables, .schema)
+        intents.append(InfrastructureIntent(
+            resource="table/*", action="read", provider="sql",
+            params={"raw_action": "DOT_COMMAND"}, metadata=meta))
+    return intents
 
 
 # --- mongosh -------------------------------------------------------------------

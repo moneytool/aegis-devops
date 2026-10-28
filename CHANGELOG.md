@@ -49,9 +49,13 @@ behaviour.
     `UESCAPE`) are decoded, and an escaped literal is never taken as a plain setting name
     (`set_config(U&'\0072ole', …)` is a role change); `U&` literals are not read in MySQL, and
     `UESCAPE` may have comments around it. SQLite `[name]` is an identifier. MySQL `#`
-    comments are comments, and `--` not followed by a space is not one in MySQL. The body of a MySQL
-    executable comment (`/*! … */`, `/*!50000 … */`) is read as SQL in every dialect, since MySQL
-    runs it. MySQL index hints (`FORCE INDEX FOR ORDER BY (i)`) no longer end a `FROM` list. `dual`
+    comments are comments, and `--` not followed by whitespace is not one in MySQL (followed by a
+    control character, which the server reads as a comment and the client does not, it is also an
+    unclassified `update`, `ambiguous_comment`). The body of a MySQL
+    executable comment (`/*! … */`, `/*!50000 … */`) is read as SQL under `mysql` and `generic`,
+    since MySQL runs it, and as a comment under `postgres` and `sqlite`; text in it that would move
+    where it ends (a quote, `--`, `#`, `/*`) is an unclassified `update` under `generic`, and under
+    `mysql` for a versioned one. `E'…'` escapes apply under `postgres` only (`generic` flags them). MySQL index hints (`FORCE INDEX FOR ORDER BY (i)`) no longer end a `FROM` list. `dual`
     is a pseudo-table only in MySQL. With the default `--dialect generic`, a statement whose
     quoting or comments MySQL and Postgres would read differently (a backslash before a quote, a
     comment inside a comment) also yields an unclassified `update` (`ambiguous_escape` /
@@ -95,7 +99,8 @@ behaviour.
   - Client commands: a bare `\g`/`\G` ends a statement (`SELECT 1\G DELETE FROM users` hid the
     delete), and other mysql/psql backslash commands (`\!`, `\.`, `\i`, `\copy`, `\gexec`, a psql
     `\g FILE`/`\g |cmd`/`\g (…)`, …) and `sqlite3` dot-commands (`.shell`, `.system`, …; not the
-    output-format ones such as `.mode` and `.headers`) are unclassified writes (`client_command`).
+    output-format ones such as `.mode` and `.headers`) are unclassified writes (`client_command`); a psql `\g FILE` on a line of
+    its own (it re-runs the last query) is one too.
   - Only ASCII whitespace separates words. A no-break space (or U+3000, U+2028, …) was taken as
     a space, while PostgreSQL, MySQL and SQLite read it as part of a name: `SELECT 1 AS x<NBSP>$a$;
     DROP TABLE users; …` hid the drop inside a fake dollar quote, and a MySQL `--<NBSP>` was taken
@@ -103,7 +108,10 @@ behaviour.
   - `sqlite3`: its single-dash options (`-csv`, `-batch`, `-echo`, `-column`, `-header`) are no
     longer read as `-c` bundles that swallowed the SQL arguments; `-cmd SQL` is read as SQL that
     runs before them, and the values of `-separator`, `-nullvalue` and similar options are not
-    taken for the database. `mysql -fe`/`-vvve` and `psql -Sc` bundles are read. A `-f`/`-init`
+    taken for the database. `mysql -fe`/`-vvve`/`-#e` and `psql -Sc`/`-1c`/`-0c` bundles are read, and so
+    is a bundled or attached psql script (`psql -qf x.sql`, `-fx.sql`), which was ignored. `sqlite3
+    x.db .tables` (and `.schema`, `.indexes`) is a read; `sqlite3` with no SQL argument reads SQL from
+    stdin and is unclassified. A `-f`/`-init`
     file that is a directory, unreadable or over 8 MiB is an opaque, unclassified script instead
     of an error. Under `sqlite`, `x IN t` (a table on the right of `IN`) reads `t`, and `WITH …
     REPLACE INTO t …` is a write like `WITH … INSERT OR REPLACE`. `aegis check sql --dialect
