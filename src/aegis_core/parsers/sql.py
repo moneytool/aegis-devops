@@ -68,8 +68,9 @@ Issue #58 -- what a statement reads, and statements that were weaker than they l
   server reads them, while a plain ``'...'`` keeps the standard reading in
   ``postgres``/``sqlite``/``generic``. ``$$``/``$tag$`` bodies are strings
   (not in MySQL or SQLite). ``E'...'`` and ``U&'...'``/``U&"..."`` (with
-  ``UESCAPE``) are decoded; an escaped literal is never compared to a
-  keyword as plain text (``set_config(U&'\\0072ole', ...)`` fails safe).
+  ``UESCAPE``, comments allowed around it; not in MySQL) are decoded; an
+  escaped literal is never compared to a keyword as plain text
+  (``set_config(U&'\\0072ole', ...)`` fails safe).
   SQLite ``[name]`` is an identifier. MySQL ``#`` and ``-- `` comments are
   comments; ``--`` not followed by whitespace is not, in MySQL. Postgres
   block comments nest; MySQL's and SQLite's do not. The body of a MySQL
@@ -95,12 +96,16 @@ Issue #58 -- what a statement reads, and statements that were weaker than they l
   each with its own target (``params["cte"]`` when the statement starts with
   ``WITH``). ``ONLY`` and MySQL's ``LOW_PRIORITY``/``QUICK``/``IGNORE``/
   ``DELAYED`` are not table names; MySQL multi-table ``DELETE t1, t2 FROM``
-  and ``UPDATE t1 JOIN t2 ... SET`` write every listed table, a target that
-  is an alias resolving to its table (one naming no table or alias deletes
-  from every table in ``FROM``). An upsert (``ON CONFLICT ... DO UPDATE``,
-  ``ON DUPLICATE KEY UPDATE``) is a ``put`` and an ``update``
-  (``params["upsert"]``). ``DROP <kind> a, b`` and ``TRUNCATE a, b`` delete
-  every name (a schema or database each with its ``table/*``). ``MERGE INTO
+  and ``UPDATE t1 JOIN t2 ... SET`` write every listed table (the UPDATE
+  walk to ``SET`` has no cutoff). A MySQL DELETE target that is an alias
+  resolves to its table, using only the aliases of the DELETE's own query
+  block (one naming no table or alias there, or an alias of two tables,
+  deletes from every table read); a plain ``DELETE FROM t`` is never
+  re-resolved. An upsert (``ON CONFLICT ... DO UPDATE``, ``ON DUPLICATE KEY
+  UPDATE``) is a ``put`` and an ``update``; ``REPLACE`` / SQLite ``INSERT OR
+  REPLACE`` a ``put`` and a ``delete`` (``params["upsert"]``). ``DROP <kind>
+  a, b`` and ``TRUNCATE a, b`` delete every name (a schema or database each
+  with its ``table/*``). ``MERGE INTO
   t`` is the strongest of its ``WHEN ... THEN`` actions (``update`` if none
   is found). A DML keyword whose target can't be read is ``unknown/*``
   ``update``, unclassified. ``unbounded`` means no ``WHERE`` in the
@@ -117,7 +122,8 @@ Issue #58 -- what a statement reads, and statements that were weaker than they l
   of ``file/<path>`` with ``params["opaque"] = params["unclassified"] = True``.
   ``SELECT ... INTO @var`` only sets a variable and stays a read. ``INTO
   OUTFILE`` is a file write wherever it appears (after ``TABLE``, ``VALUES``
-  or a parenthesised query too); ``(SELECT ... INTO t ...)`` is a create.
+  or a parenthesised query too); ``(SELECT ... INTO t ...)`` is a create,
+  also right after a ``WITH`` list. ``DROP`` lists are deduplicated.
 * A ``BEGIN ATOMIC`` function body is still split on ``;`` (merging it would
   let a later statement hide inside), but its first DML is reported.
 * ``SET [SESSION|LOCAL] ROLE``, ``SET SESSION AUTHORIZATION``, ``SET
@@ -190,7 +196,7 @@ _EXEC_OPEN_RE = re.compile(r"/\*M?!\d*")
 _COMMENT_MARK_RE = re.compile(r"/\*|\*/")
 _DOLLAR_OPEN_RE = re.compile(r"\$(?:[^\W\d][\w]*)?\$")
 _CHARSET_PREFIX_RE = re.compile(r"_[A-Za-z0-9]+(?=')")
-_UESCAPE_RE = re.compile(r"\s*UESCAPE\s*'(.)'", re.IGNORECASE | re.DOTALL)
+_UESCAPE_RE = re.compile(r"UESCAPE(?![\w$])", re.IGNORECASE)
 _WORD_RE = re.compile(r"[^\W\d][\w$]*")
 _NUM_RE = re.compile(r"\d+(?:\.\d*)?(?:[eE][+-]?\d+)?|\.\d+")
 _PARAM_RE = re.compile(r"\$\d+")
@@ -243,6 +249,46 @@ def _decode_unicode(body: str, esc: str) -> str:
         code = m.group(1) or m.group(2)
         return esc if code is None else _chr(int(code, 16))
     return pattern.sub(repl, body)
+
+
+def _skip_noise(sql: str, i: int, nested: bool) -> int:
+    """Index of the first character at or after ``i`` that is not whitespace
+    or a ``--`` / ``/* */`` comment."""
+    n = len(sql)
+    while i < n:
+        if sql[i].isspace():
+            i += 1
+        elif sql.startswith("--", i):
+            j = sql.find("\n", i)
+            i = n if j == -1 else j
+        elif sql.startswith("/*", i) and not nested:
+            j = sql.find("*/", i + 2)
+            i = n if j == -1 else j + 2
+        elif sql.startswith("/*", i):
+            level, j = 1, i + 2
+            while level and j < n:
+                cm = _COMMENT_MARK_RE.search(sql, j)
+                if cm is None:
+                    j = n
+                    break
+                level += 1 if cm.group(0) == "/*" else -1
+                j = cm.end()
+            i = j
+        else:
+            break
+    return i
+
+
+def _uescape(sql: str, i: int, nested: bool) -> tuple[str, int] | None:
+    """``UESCAPE 'c'`` after a ``U&`` literal ending at ``i``, comments
+    allowed around it: (escape char, index after it), or None."""
+    j = _skip_noise(sql, i, nested)
+    if not _UESCAPE_RE.match(sql, j):
+        return None
+    k = _skip_noise(sql, j + 7, nested)
+    if sql[k : k + 1] == "'" and sql[k + 2 : k + 3] == "'":
+        return sql[k + 1], k + 3
+    return None
 
 
 # Statements longer than this are scanned only up to it, plus an unclassified
@@ -326,7 +372,8 @@ def _lex(sql: str, dialect: str) -> list[_Statement]:
         elif ch in "EeNnBbXx" and sql[i + 1 : i + 2] == "'":
             quote, e_string = "'", ch in "Ee"
             i += 1
-        elif ch in "Uu" and sql[i + 1 : i + 2] == "&" and sql[i + 2 : i + 3] in ("'", '"'):
+        elif (ch in "Uu" and not mysql and sql[i + 1 : i + 2] == "&"
+              and sql[i + 2 : i + 3] in ("'", '"')):  # MySQL has no U& literals
             quote, unicode, backslash = sql[i + 2], True, False
             i += 2
         elif ch == "_" and mysql:
@@ -351,9 +398,9 @@ def _lex(sql: str, dialect: str) -> list[_Statement]:
                 flags.add("ambiguous_escape")  # MySQL would end the string later
             if unicode:
                 esc = "\\"
-                um = _UESCAPE_RE.match(sql, i)
-                if um:
-                    esc, i = um.group(1), um.end()
+                ue = _uescape(sql, i, nested_comments)
+                if ue:
+                    esc, i = ue
                 body = _decode_unicode(body.replace(quote + quote, quote), esc)
             elif e_string:
                 body = _decode_e_string(body)
@@ -532,11 +579,10 @@ _SET_OP_BEFORE_TABLE = frozenset({"UNION", "INTERSECT", "EXCEPT", "MINUS", "ALL"
 _DML = frozenset({"INSERT", "UPDATE", "DELETE", "MERGE"})
 _LOCK_RANK = {"key share": 0, "share": 1, "no key update": 2, "update": 3}
 _ACTION_RANK = {"delete": 3, "update": 2, "put": 1}
-_SEARCH_LIMIT = 256  # how far an UPDATE looks ahead for its SET
 
 
 class _Op:
-    __slots__ = ("action", "targets", "raw", "index", "unbounded", "upsert")
+    __slots__ = ("action", "targets", "raw", "index", "unbounded", "upsert", "using")
 
     def __init__(self, action: str | None, raw: str, index: int) -> None:
         self.action = action  # None: an unparseable DML statement
@@ -544,7 +590,10 @@ class _Op:
         self.raw = raw
         self.index = index
         self.unbounded: bool | None = None
-        self.upsert: str | None = None  # ON CONFLICT DO UPDATE / ON DUPLICATE KEY UPDATE
+        # (action, raw): ON CONFLICT DO UPDATE / ON DUPLICATE KEY UPDATE are
+        # updates, INSERT OR REPLACE / REPLACE delete the conflicting rows.
+        self.upsert: tuple[str, str] | None = None
+        self.using = False  # DELETE FROM t ... USING ... (MySQL: t may be an alias)
 
 
 class _Scan:
@@ -656,13 +705,25 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
             m += 2
         return parts, m
 
-    lead = 0  # leading '(' of a parenthesised top-level query
-    while lead < n and _is_punct(toks[lead], "("):
-        lead += 1
+    # Parentheses that hold the statement's own query (``(SELECT ...)``,
+    # ``WITH x AS (...) (SELECT ...)``), as opposed to a subquery: a SELECT
+    # ... INTO directly inside one is the statement's.
+    main_parens: set[int] = set()
+    for j, t in enumerate(toks):
+        if not _is_punct(t, "("):
+            continue
+        before = tok(j - 1)
+        if j == 0 or (_is_punct(before, "(") and j - 1 in main_parens) or (
+            first_word == "WITH" and depth[j] == 0 and _is_punct(before, ")")
+        ):
+            main_parens.add(j)
 
     seen: set[tuple[str, ...]] = set()
     alias_pos: set[int] = set()
-    alias_of: dict[str, list[str]] = {}  # alias -> table it names
+    # Per query block (the enclosing bracket, -1 for the top level): alias ->
+    # the tables it names there, and the names of the tables it reads.
+    alias_of: dict[int, dict[str, set[tuple[str, ...]]]] = {}
+    block_tables: dict[int, set[str]] = {}
     skip_dual = dialect in ("mysql", "oracle")
     from_list: dict[int, bool] = {}
 
@@ -680,7 +741,7 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
         assert t is not None
         alias_pos.add(m)
         if table is not None:
-            alias_of[t.value.lower()] = table
+            alias_of.setdefault(encl[m], {}).setdefault(t.value.lower(), set()).add(tuple(table))
 
     def parse_ref(j: int) -> None:
         while True:
@@ -718,6 +779,7 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
                 return
         table = [p.value for p in parts]
         mark_alias(m, table)
+        block_tables.setdefault(encl[j], set()).add(table[-1].lower())
         key = tuple(_norm_ident(p) for p in parts)
         if key not in seen:
             seen.add(key)
@@ -773,13 +835,19 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
             if target:
                 op.targets.append(target)
                 # MySQL multi-table UPDATE: every table before SET may be
-                # written (t1, t2 SET / t1 JOIN t2 ON ... SET).
-                k, limit = m, min(n, m + _SEARCH_LIMIT)
-                while k < limit and not _is_word(toks[k], "SET"):
+                # written (t1, t2 SET / t1 JOIN t2 ON ... SET). The walk stays
+                # at this depth (it jumps over closed groups) and stops at the
+                # next statement keyword, so the scan stays linear.
+                k = m
+                while k < n and not _is_word(toks[k], "SET"):
                     tk = toks[k]
-                    if depth[k] < d:
+                    if depth[k] != d or _is_punct(tk, ")") or (
+                        tk.kind == "word" and tk.value.upper() in _DML
+                    ):
                         break
-                    if _is_punct(tk, "(") and k in close_of:
+                    if _is_punct(tk, "(") or _is_punct(tk, "["):
+                        if k not in close_of:
+                            break
                         k = close_of[k] + 1
                         continue
                     if _is_punct(tk, ",") or _is_word(tk, "JOIN", "STRAIGHT_JOIN"):
@@ -788,14 +856,18 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
                             op.targets.append(more)
                     k += 1
             op.unbounded = last_where.get(encl[i], -1) < i
-        elif u == "INSERT":
+        elif u in ("INSERT", "REPLACE"):
             while _is_word(tok(j), "LOW_PRIORITY", "DELAYED", "HIGH_PRIORITY", "IGNORE"):
                 j += 1
+            replace = u == "REPLACE"
             if _is_word(tok(j), "OR") and tok(j + 1) is not None:  # SQLite INSERT OR ...
+                replace = _is_word(tok(j + 1), "REPLACE")
                 j += 2
             if _is_word(tok(j), "INTO"):
                 j += 1
             op = _Op("put", "INSERT INTO", i)
+            if replace:  # deletes the rows it conflicts with, then inserts
+                op.upsert = ("delete", "REPLACE" if u == "REPLACE" else "INSERT OR REPLACE")
             target, _m = target_at(j)
             if target:
                 op.targets.append(target)
@@ -816,6 +888,7 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
     using_done: dict[int, bool] = {}
     merge_at: dict[int, _Op] = {}
     insert_at: dict[int, _Op] = {}
+    delete_at: dict[int, _Op] = {}
     idents: set[int] = set()  # keyword-looking words used as identifiers
     skip_until = -1  # end of a MySQL index hint being skipped
 
@@ -832,6 +905,7 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
                 last_kw.pop(d + 1, None)
                 merge_at.pop(d + 1, None)
                 insert_at.pop(d + 1, None)
+                delete_at.pop(d + 1, None)
             elif t.value == ")" and from_list.get(d):
                 mark_alias(i + 1)  # (SELECT ...) alias / f(...) alias
             elif t.value == "," and from_list.get(d):
@@ -873,13 +947,23 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
             last_kw[d] = u
             from_list[d] = False
             continue
+        if u == "REPLACE" and prev is None and not _is_punct(tok(i + 1), "("):
+            # MySQL/SQLite REPLACE [INTO] t: an insert that first deletes
+            # the rows it conflicts with.
+            op = parse_op(i, u)
+            scan.ops.append(op)
+            query_at[d] = True
+            last_kw[d] = "INSERT"
+            insert_at[d] = op
+            continue
         if u in _DML:
             if u == "UPDATE" and d in insert_at and (
                 _is_word(prev, "DO")
                 or (_is_word(prev, "KEY") and _is_word(tok(i - 2), "DUPLICATE"))
             ):
                 insert_at[d].upsert = (
-                    "ON CONFLICT DO UPDATE" if _is_word(prev, "DO") else "ON DUPLICATE KEY UPDATE"
+                    "update",
+                    "ON CONFLICT DO UPDATE" if _is_word(prev, "DO") else "ON DUPLICATE KEY UPDATE",
                 )
             elif prev is None or _is_punct(prev, "(") or _is_punct(prev, ")") or _is_word(
                 prev, "ATOMIC"
@@ -892,6 +976,8 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
                     merge_at[d] = op
                 elif u == "INSERT":
                     insert_at[d] = op
+                elif u == "DELETE":
+                    delete_at[d] = op
                 query_at[d] = True
                 last_kw[d] = u
                 from_list[d] = False
@@ -917,6 +1003,8 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
             continue
         if u == "USING" and last_kw.get(d) in ("DELETE", "MERGE") and not using_done.get(d):
             using_done[d] = True
+            if last_kw.get(d) == "DELETE" and d in delete_at:
+                delete_at[d].using = True
             from_list[d] = True
             parse_ref(i + 1)
             continue
@@ -948,7 +1036,7 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
         if (
             u == "INTO"
             and scan.into is None
-            and encl[i] < lead  # top level, or inside the statement's leading parens
+            and (encl[i] == -1 or encl[i] in main_parens)  # the statement's own query
             and last_kw.get(d) == "SELECT"
             and first_word in ("SELECT", "WITH")
         ):
@@ -1000,18 +1088,26 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
         if u == "SET_CONFIG" and _is_punct(tok(i + 1), "("):
             _set_config(toks, i, close_of, depth, scan)
 
-    # MySQL ``DELETE s FROM secret AS s ...``: a single-part target may be an
-    # alias; one that names no table or alias here deletes from them all.
-    known = {p[-1].lower() for p in scan.tables}
+    # MySQL ``DELETE s FROM secret AS s ...`` / ``DELETE FROM s USING secret
+    # AS s``: a single-part target may be an alias -- of the operation's own
+    # query block only. A target naming no table or alias there, or an alias
+    # of two tables, deletes from every table the statement reads. A plain
+    # ``DELETE FROM t`` (no USING) names its table directly.
     for op in scan.ops:
-        if op.action != "delete":
+        if op.action != "delete" or not (op.raw == "DELETE" or op.using):
             continue
+        block = encl[op.index]
+        aliases = alias_of.get(block, {})
+        names = block_tables.get(block, set())
         resolved: list[list[str]] = []
         for target in op.targets:
             key = target[0].lower()
-            if len(target) == 1 and key in alias_of:
-                resolved.append(alias_of[key])
-            elif len(target) == 1 and op.raw == "DELETE" and key not in known:
+            if len(target) == 1 and key in aliases:
+                if len(aliases[key]) == 1:
+                    resolved.append(list(next(iter(aliases[key]))))
+                else:  # one alias, two tables in this block: any of them
+                    resolved.extend(scan.tables or [target])
+            elif len(target) == 1 and op.raw == "DELETE" and key not in names:
                 resolved.extend(scan.tables or [target])
             else:
                 resolved.append(target)
@@ -1107,7 +1203,7 @@ def _scan_results(
             results.append((resource, action, params, "dml", op.raw, meta))
             if op.upsert:
                 upsert: dict[str, Any] = {"upsert": True, **({"cte": True} if cte else {})}
-                results.append((resource, "update", upsert, "dml", op.upsert, meta))
+                results.append((resource, op.upsert[0], upsert, "dml", op.upsert[1], meta))
 
     if scan.into is not None:
         into_kind, value = scan.into
@@ -1306,6 +1402,7 @@ def _classify_drop(toks: list[_T]) -> list[_Classification]:
         params["cascade"] = True
     raw = f"DROP {mat}{kind.upper()}"
     results: list[_Classification] = []
+    seen: set[str] = set()
     while j < n and _is_name(toks[j]) and not _is_word(toks[j], "CASCADE", "RESTRICT"):
         parts = [toks[j].value]
         j += 1
@@ -1324,7 +1421,14 @@ def _classify_drop(toks: list[_T]) -> list[_Classification]:
                         break
                 j += 1
         meta: dict[str, Any] = {"schema": parts[-2]} if len(parts) >= 2 else {}
-        results.append((f"{kind}/" + ".".join(parts), "delete", dict(params), "ddl", raw, meta))
+        resource = f"{kind}/" + ".".join(parts)
+        if resource in seen:  # DROP TABLE users, users
+            if j < n and _is_punct(toks[j], ","):
+                j += 1
+                continue
+            break
+        seen.add(resource)
+        results.append((resource, "delete", dict(params), "ddl", raw, meta))
         if kind in ("schema", "database"):
             results.append(
                 ("table/*", "delete", {"unbounded": True}, "ddl", f"DROP {kind.upper()} (cascade)",
@@ -1414,7 +1518,9 @@ def _classify_tokens(toks: list[_T], dialect: str) -> list[_Classification]:
         if truncated_tables:
             return truncated_tables
 
-    if first_word in ("SELECT", "WITH", "VALUES", "TABLE", "DELETE", "UPDATE", "INSERT", "MERGE"):
+    if first_word in (
+        "SELECT", "WITH", "VALUES", "TABLE", "DELETE", "UPDATE", "INSERT", "MERGE"
+    ) or (first_word == "REPLACE" and len(toks) > 1 and not _is_punct(toks[1], "(")):
         return _scan_results(_scan(toks, first_word, dialect), first_word=first_word, primary=[])
 
     m = _ALTER_RE.match(body)

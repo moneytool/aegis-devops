@@ -30,11 +30,16 @@ The dialect decides how strings and comments are read, which decides where a sta
 |---|---|---|---|---|
 | `\'` ends a `'…'` string? | only in `E'…'` | no, it escapes the quote (also in `"…"`) | yes | yes, plus an unclassified write (`ambiguous_escape`) |
 | block comments nest? | yes | no | no | no, plus an unclassified write (`ambiguous_comment`) when a `/*` is inside one |
-| `$$…$$` is a string? | yes | no | no | yes |
+| `$$…$$` is a string? | yes | no | no | yes (not flagged) |
 | `#` starts a comment? | no | yes | no | no |
+| `--x` (no space) starts a comment? | yes | no | yes | yes (not flagged) |
+| `U&'…'` is a Unicode string? | yes | no | no | yes |
 | `[name]` is an identifier? | no | no | yes | read as one in `FROM` |
 
-The body of a MySQL `/*! … */` comment is read as SQL in every dialect. Each statement yields one
+The body of a MySQL `/*! … */` comment is read as SQL in every dialect. `generic` does not flag
+`$$` quotes, `--x` comments or `#`, because they are too common in ordinary SQL: under
+`generic`, MySQL SQL that uses `$$` as text, `--x` as arithmetic or `#` as a comment is read the
+Postgres way. Pass `--dialect mysql` for MySQL. Each statement yields one
 intent per table it reads and per write it makes (see the
 [app SQL guide](guides/app-sql.md#what-it-catches-and-what-it-does-not)); a statement Aegis
 cannot classify is an `update` of `unknown/*` with `unclassified: true`.

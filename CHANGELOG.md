@@ -31,10 +31,13 @@ behaviour.
     the strongest of its `WHEN … THEN` actions. `ONLY` and MySQL's `IGNORE`/`LOW_PRIORITY`/`QUICK`
     are no longer read as the table name (`DELETE FROM ONLY users` was `table/ONLY`), nor is
     SQLite's `UPDATE OR IGNORE`. A MySQL `DELETE s FROM secret AS s …` resolves the alias to
-    `secret` (a target naming no table or alias deletes from every table in `FROM`). An upsert
-    (`ON CONFLICT … DO UPDATE`, `ON DUPLICATE KEY UPDATE`) is a `put` and an `update`.
+    `secret`, using only the aliases of the DELETE's own query block, never a subquery's (a
+    target naming no table or alias there deletes from every table read). An upsert (`ON CONFLICT
+    … DO UPDATE`, `ON DUPLICATE KEY UPDATE`) is a `put` and an `update`; MySQL `REPLACE` and
+    SQLite `INSERT OR REPLACE` are a `put` and a `delete`. A long multi-table `UPDATE … JOIN …
+    SET` reports every table before `SET`.
     `DROP TABLE|VIEW|INDEX|… a, b` and `TRUNCATE a, b` delete every name (`DROP TABLE tmp_x, users`
-    deleted only `tmp_x`), and `DROP SCHEMA a, b` cascades for each. `unbounded` now means no
+    deleted only `tmp_x`; a repeated name counts once), and `DROP SCHEMA a, b` cascades for each. `unbounded` now means no
     `WHERE` in the operation itself, not anywhere in the text.
   - Strings, comments and dollar quotes are read by one dialect-aware lexer, used for splitting
     statements as well as classifying them, so the two agree. A backslash escapes a quote inside
@@ -43,7 +46,8 @@ behaviour.
     inside a `$$` string no longer hides the rest of the statement. Postgres block comments nest
     (`/* a /* b */ ' */; DROP TABLE secret` hid the DROP). `E'…'` and `U&'…'`/`U&"…"` (with
     `UESCAPE`) are decoded, and an escaped literal is never taken as a plain setting name
-    (`set_config(U&'\0072ole', …)` is a role change). SQLite `[name]` is an identifier. MySQL `#`
+    (`set_config(U&'\0072ole', …)` is a role change); `U&` literals are not read in MySQL, and
+    `UESCAPE` may have comments around it. SQLite `[name]` is an identifier. MySQL `#`
     comments are comments, and `--` not followed by a space is not one in MySQL. The body of a MySQL
     executable comment (`/*! … */`, `/*!50000 … */`) is read as SQL in every dialect, since MySQL
     runs it. MySQL index hints (`FORCE INDEX FOR ORDER BY (i)`) no longer end a `FROM` list. `dual`
@@ -54,7 +58,8 @@ behaviour.
   - `SELECT … INTO t` is a `create` of `table/t` (as `CREATE TABLE … AS SELECT` already was), not a
     read. MySQL `SELECT … INTO OUTFILE|DUMPFILE` is an opaque, unclassified `update` of
     `file/<path>` wherever it appears (`TABLE t INTO OUTFILE …`, `(SELECT …) INTO OUTFILE …`);
-    `SELECT … INTO @var` stays a read. `(SELECT * INTO t FROM …)` is a create too.
+    `SELECT … INTO @var` stays a read. `(SELECT * INTO t FROM …)` is a create too, also right
+    after a `WITH` list.
   - `SET ROLE`, `SET SESSION AUTHORIZATION`, `SET role = …` / `SET "role" = …`, `RESET ROLE`, MySQL
     `SET DEFAULT ROLE` and `SET PASSWORD`, and `[pg_catalog.]set_config('role', …)` are an `update`
     of `role/<name>` with `privilege: true`, like `GRANT`/`REVOKE`, instead of a `session/*` read.
@@ -84,7 +89,8 @@ behaviour.
   upgrading. Pass the right `dialect` to `from_sql` and `aegis check sql`: it now changes how
   strings and comments are read, and `generic` turns an ambiguous statement into an extra
   unclassified write. Known limits: tables read inside functions, views or procedures a query calls
-  are not seen, and MySQL `"…"` is read with string escapes even under `ANSI_QUOTES`. The example
+  are not seen; MySQL `"…"` is read with string escapes even under `ANSI_QUOTES`; and `generic`
+  reads `$$`, `--x` and `#` the Postgres way without flagging them (see the CLI reference). The example
   policies and their signatures are unchanged.
 
 ## [1.2.1] — 2026-10-24

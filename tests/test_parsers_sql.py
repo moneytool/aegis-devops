@@ -1530,7 +1530,8 @@ def test_dual_is_a_table_outside_mysql():
     ("UPDATE t1 JOIN t2 ON t1.id = t2.id SET t1.a = t2.b", "mysql",
      [("update", "table/t1"), ("update", "table/t2")]),
     ("INSERT IGNORE INTO users VALUES (1)", "mysql", [("put", "table/users")]),
-    ("INSERT OR REPLACE INTO users VALUES (1)", "sqlite", [("put", "table/users")]),
+    ("INSERT OR REPLACE INTO users VALUES (1)", "sqlite",
+     [("put", "table/users"), ("delete", "table/users")]),
     ("ALTER TABLE ONLY users ADD COLUMN x int", "postgres", [("update", "table/users")]),
 ])
 def test_dml_modifiers_are_not_table_names(sql, dialect, expected):
@@ -1917,3 +1918,111 @@ def test_begin_atomic_body_dml_is_reported():
 def test_begin_atomic_does_not_swallow_a_following_statement():
     intents = from_sql("SELECT begin atomic; DROP TABLE users", dialect="postgres")
     assert ("delete", "table/users") in [(i.action, i.resource) for i in intents]
+
+
+# --- 15. #58 review, round 3 --------------------------------------------------
+
+
+@pytest.mark.parametrize("sql,dialect,expected", [
+    # a subquery's alias never redirects the outer DELETE's target
+    ("DELETE FROM secret WHERE EXISTS (SELECT 1 FROM allowed AS secret)", "postgres",
+     [("delete", "table/secret"), ("read", "table/allowed")]),
+    ("DELETE FROM secret WHERE EXISTS (SELECT 1 FROM allowed AS secret)", "mysql",
+     [("delete", "table/secret"), ("read", "table/allowed")]),
+    ("DELETE p FROM products p WHERE p.id IN (SELECT id FROM users p)", "mysql",
+     [("delete", "table/products"), ("read", "table/users")]),
+    ("DELETE FROM p USING products AS p WHERE p.id IN (SELECT id FROM users p)", "mysql",
+     [("delete", "table/products"), ("read", "table/users")]),
+    ("DELETE x FROM products x WHERE EXISTS (SELECT 1 FROM (SELECT 1 FROM users x) y)", "mysql",
+     [("delete", "table/products"), ("read", "table/users")]),
+    # a plain DELETE FROM t ... USING keeps t when t is no alias
+    ("DELETE FROM t1 USING t2 WHERE t1.id = t2.id", "mysql",
+     [("delete", "table/t1"), ("read", "table/t2")]),
+    # one alias for two tables in the same block: any of them
+    ("DELETE s FROM secret s JOIN allowed s ON true", "mysql",
+     [("delete", "table/secret"), ("delete", "table/allowed")]),
+])
+def test_delete_aliases_are_scoped_to_the_operation(sql, dialect, expected):
+    assert _summary_in(sql, dialect) == expected
+
+
+@pytest.mark.parametrize("sql,dialect,expected", [
+    ("SELECT * FROM products WHERE a = U&'x\\''; DROP TABLE users", "mysql",
+     [("read", "table/products"), ("delete", "table/users")]),
+    ("SELECT * FROM products WHERE a = U&'x\\''; DROP TABLE users", "postgres",
+     [("read", "table/products")]),
+])
+def test_u_amp_strings_only_outside_mysql(sql, dialect, expected):
+    assert _summary_in(sql, dialect) == expected
+
+
+def test_u_amp_through_mysql_wrapper():
+    intents = from_mysql(["mysql", "-e", "SELECT * FROM products WHERE a = U&'x\\''; "
+                                         "DROP TABLE users"])
+    assert ("delete", "table/users") in [(i.action, i.resource) for i in intents]
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT * FROM U&\"!0073ecret\" /*comment*/ UESCAPE '!'",
+    "SELECT * FROM U&\"!0073ecret\" UESCAPE /* c /* nested */ */ '!'",
+    "SELECT * FROM U&\"!0073ecret\" -- c\n UESCAPE -- d\n '!'",
+])
+def test_uescape_found_across_comments(sql):
+    assert _summary_in(sql, "postgres") == [("read", "table/secret")]
+
+
+def test_long_multi_table_update_reports_every_target():
+    predicates = " AND ".join(["a.id = b.id"] * 40)
+    sql = (f"UPDATE allowed a JOIN allowed b ON {predicates} "
+           "JOIN secret s ON s.id = a.id SET s.id = 0")
+    summary = _summary_in(sql, "mysql")
+    assert ("update", "table/secret") in summary
+    assert ("read", "table/secret") not in summary
+
+
+def test_multi_table_update_walk_stays_linear():
+    import time
+
+    start = time.perf_counter()
+    from_sql("UPDATE t " + "JOIN a ON (x) " * 30_000 + "SET a = 1", dialect="mysql")
+    from_sql("UPDATE t ) " * 30_000, dialect="mysql")
+    assert time.perf_counter() - start < 2.0
+
+
+@pytest.mark.parametrize("sql,dialect,raw", [
+    ("INSERT OR REPLACE INTO products VALUES (1)", "sqlite", "INSERT OR REPLACE"),
+    ("REPLACE INTO products VALUES (1)", "mysql", "REPLACE"),
+    ("REPLACE products SET a = 1", "mysql", "REPLACE"),
+])
+def test_replace_deletes_conflicting_rows(sql, dialect, raw):
+    put, delete = from_sql(sql, dialect=dialect)
+    assert (put.action, put.resource) == ("put", "table/products")
+    assert (delete.action, delete.resource) == ("delete", "table/products")
+    assert delete.params["upsert"] is True
+    assert delete.params["raw_action"] == raw
+
+
+def test_replace_function_is_not_a_statement():
+    assert _summary_in("SELECT REPLACE(a, 'x', 'y') FROM t", "mysql") == [("read", "table/t")]
+
+
+def test_insert_or_ignore_is_only_a_put():
+    assert _summary_in("INSERT OR IGNORE INTO t VALUES (1)", "sqlite") == [("put", "table/t")]
+
+
+@pytest.mark.parametrize("sql,expected", [
+    ("WITH x AS (SELECT 1) (SELECT * INTO t FROM x)", [("create", "table/t")]),
+    ("WITH x AS (SELECT * FROM users) ((SELECT * INTO t FROM x))",
+     [("create", "table/t"), ("read", "table/users")]),
+    # a subquery after the WITH list is not the statement's own query
+    ("WITH x AS (SELECT 1) SELECT * FROM (SELECT * INTO t FROM x) s", [("read", "table/*")]),
+])
+def test_select_into_in_parens_after_with(sql, expected):
+    assert _summary(sql) == expected
+
+
+def test_drop_list_deduplicates_names():
+    assert _summary("DROP TABLE users, users, a") == [
+        ("delete", "table/users"), ("delete", "table/a")
+    ]
+    assert len(from_sql("DROP SCHEMA prod, prod")) == 2
