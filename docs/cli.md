@@ -28,13 +28,24 @@ The dialect decides how strings and comments are read, which decides where a sta
 
 | | `postgres` | `mysql` | `sqlite` | `generic` |
 |---|---|---|---|---|
-| `\'` ends a `'…'` string? | only in `E'…'` | no, it escapes the quote (also in `"…"`) | yes | yes, plus an unclassified write (`ambiguous_escape`) |
+| `\'` ends a `'…'` string? | yes, except in `E'…'` | no, it escapes the quote (also in `"…"`) | yes | yes, plus an unclassified write (`ambiguous_escape`) |
 | block comments nest? | yes | no | no | no, plus an unclassified write (`ambiguous_comment`) when a `/*` is inside one |
 | `$$…$$` is a string? | yes | no | no | yes (not flagged) |
 | `#` starts a comment? | no | yes | no | no |
 | `--x` (no space) starts a comment? | yes | no | yes | yes (not flagged) |
 | `U&'…'` is a Unicode string? | yes | no | no | yes |
 | `[name]` is an identifier? | no | no | yes | read as one in `FROM` |
+
+The dialect name is matched without case, and `postgresql`, `mariadb` and `sqlite3` name their
+dialect (`--dialect` accepts these spellings). In the library, `from_sql` reads any other name as
+`generic`, which flags what a server could read differently. A statement that changes how the
+server reads later strings (`SET sql_mode`, which can turn on `NO_BACKSLASH_ESCAPES` or
+`ANSI_QUOTES`; `SET standard_conforming_strings`; `SET backslash_quote`; `SET NAMES` or
+`client_encoding` with a charset other than UTF-8, Latin-1 or ASCII; and `set_config()` of those)
+is an unclassified write (`changes_lexing`): what follows it may split into other statements on
+the server. `PGOPTIONS` and an `options=` connection setting can do the same and are not read.
+Each `psql -c` / `mysql -e` text and each `sqlite3` SQL argument is read on its own, as the
+client runs them.
 
 The body of a MySQL `/*! … */` comment is read as SQL in every dialect. `generic` does not flag
 `$$` quotes, `--x` comments or `#`, because they are too common in ordinary SQL: under

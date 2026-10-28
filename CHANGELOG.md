@@ -81,6 +81,28 @@ behaviour.
     tokens is classified from its first part plus an unclassified `update` (`too_large`). An
     unclosed `set_config(` no longer takes seconds per thousand repeats.
   - `aegis check sql --dialect` is documented ([CLI reference](docs/cli.md#sql-and---dialect)).
+    Dialect names are matched without case (`postgresql`, `mariadb` and `sqlite3` name their
+    dialect); `--dialect` rejects any other name, and `from_sql` reads one as `generic`.
+  - Each `psql -c` / `mysql -e` text and each `sqlite3` SQL argument is classified on its own, as
+    the client runs them: a trailing `--` or `#` comment, or an open quote, in one no longer hides
+    the next (`psql -c "SELECT 1 --" -c "DROP TABLE users"` was a read).
+  - A statement that changes how the server reads later strings is an unclassified `update`
+    (`changes_lexing`): `SET sql_mode` (`NO_BACKSLASH_ESCAPES`, `ANSI_QUOTES`), `SET
+    standard_conforming_strings`, `SET backslash_quote`, `SET NAMES` / `CHARACTER SET` /
+    `client_encoding` with a charset other than UTF-8, Latin-1 or ASCII, and `set_config()` of
+    these. `PGOPTIONS` and an `options=` connection setting are not read.
+  - Outside MySQL, a quote after `@` starts an ordinary string (`@` is an operator there); only
+    MySQL reads `@'…'` as a quoted user variable.
+  - SQLite `UPDATE OR REPLACE` is an upsert like `INSERT OR REPLACE` (an extra `delete`). A
+    bracketed join group in a MySQL multi-table `UPDATE` (`JOIN (secret s) … SET s.x=1`) is
+    written, not read; a parenthesised table list (`FROM (a, users)`, `JOIN (b, (c, users))`)
+    reports every table; a clause word used as an alias before a comma (`FROM products offset,
+    users`) does not end the list; a bare column alias before `FROM` (`SELECT 1 rows FROM t`, `0
+    delete FROM t`) no longer hides the table; a DML after a CTE `SEARCH … SET col` / `CYCLE …
+    USING col` clause, and `WITH … TABLE t`, are recognised; `JOIN b USING (id)` in a MySQL
+    `DELETE` no longer reads a table `id`; `SELECT … INTO STRICT x` is a variable assignment.
+  - Multi-table `DELETE` targets and repeated `LOCK IN SHARE MODE` are resolved in linear time
+    (thousands of either took tens of seconds).
 
   **Behaviour change:** a statement can now produce more intents than before. Where a rule matches
   one of the newly visible tables or writes, or `create`/`update` on `table/*` or `role/*`, a
@@ -89,7 +111,9 @@ behaviour.
   upgrading. Pass the right `dialect` to `from_sql` and `aegis check sql`: it now changes how
   strings and comments are read, and `generic` turns an ambiguous statement into an extra
   unclassified write. Known limits: tables read inside functions, views or procedures a query calls
-  are not seen; MySQL `"…"` is read with string escapes even under `ANSI_QUOTES`; and `generic`
+  are not seen; MySQL `"…"` is read with string escapes even under `ANSI_QUOTES`, and `\'` as an
+  escaped quote even under `NO_BACKSLASH_ESCAPES`, when the mode is set outside the command (a
+  `SET` in the command itself is flagged); and `generic`
   reads `$$`, `--x` and `#` the Postgres way without flagging them (see the CLI reference). The example
   policies and their signatures are unchanged.
 

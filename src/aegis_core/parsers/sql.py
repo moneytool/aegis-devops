@@ -201,6 +201,9 @@ _WORD_RE = re.compile(r"[^\W\d][\w$]*")
 _NUM_RE = re.compile(r"\d+(?:\.\d*)?(?:[eE][+-]?\d+)?|\.\d+")
 _PARAM_RE = re.compile(r"\$\d+")
 _VAR_RE = re.compile(r"@@?(?:[\w$.]+|'(?:[^'\\]|\\.|'')*'|\"(?:[^\"\\]|\\.|\"\")*\"|`[^`]*`)")
+# Outside MySQL ``@`` is an operator (``@ 'x'``, ``@'x'``) or a named parameter
+# (``@name``): a quote after it starts an ordinary string of the dialect.
+_NAMED_VAR_RE = re.compile(r"@@?[\w$.]+")
 _BODY_RE = {
     ("'", False): re.compile(r"(?:[^']|'')*", re.DOTALL),
     ("'", True): re.compile(r"(?:[^'\\]|\\.|'')*", re.DOTALL),
@@ -372,8 +375,8 @@ def _lex(sql: str, dialect: str) -> list[_Statement]:
         elif ch in "EeNnBbXx" and sql[i + 1 : i + 2] == "'":
             quote, e_string = "'", ch in "Ee"
             i += 1
-        elif (ch in "Uu" and not mysql and sql[i + 1 : i + 2] == "&"
-              and sql[i + 2 : i + 3] in ("'", '"')):  # MySQL has no U& literals
+        elif (ch in "Uu" and not mysql and dialect != "sqlite" and sql[i + 1 : i + 2] == "&"
+              and sql[i + 2 : i + 3] in ("'", '"')):  # MySQL and SQLite have no U& literals
             quote, unicode, backslash = sql[i + 2], True, False
             i += 2
         elif ch == "_" and mysql:
@@ -426,7 +429,7 @@ def _lex(sql: str, dialect: str) -> list[_Statement]:
                 emit("param", pm.group(0), pm.group(0))
                 continue
         if ch == "@":
-            vm = _VAR_RE.match(sql, i)
+            vm = (_VAR_RE if mysql else _NAMED_VAR_RE).match(sql, i)
             if vm:
                 i = vm.end()
                 emit("var", vm.group(0), vm.group(0))
@@ -575,6 +578,8 @@ _NOT_ALIAS = frozenset({
     "SELECT", "VALUES", "AS", "TABLESAMPLE", "WITH", "LATERAL", "OUTER", "FROM",
 })
 _SUBQUERY_START = frozenset({"SELECT", "WITH", "VALUES", "TABLE"})
+# Clause words some dialects take as a bare alias.
+_CLAUSE_ALIASES = frozenset({"OFFSET", "RETURNING", "WINDOW", "FETCH", "LIMIT"})
 _SET_OP_BEFORE_TABLE = frozenset({"UNION", "INTERSECT", "EXCEPT", "MINUS", "ALL", "DISTINCT", "AS"})
 _DML = frozenset({"INSERT", "UPDATE", "DELETE", "MERGE"})
 _LOCK_RANK = {"key share": 0, "share": 1, "no key update": 2, "update": 3}
@@ -597,7 +602,8 @@ class _Op:
 
 
 class _Scan:
-    __slots__ = ("tables", "ops", "into", "lock", "nowait", "skip_locked", "roles")
+    __slots__ = ("tables", "ops", "into", "lock", "nowait", "skip_locked", "roles",
+                 "changes_lexing")
 
     def __init__(self) -> None:
         self.tables: list[list[str]] = []
@@ -611,6 +617,8 @@ class _Scan:
         # set_config('role'|'session_authorization', x): the role, or None
         # when it can't be read from literals (fail-safe: role/*).
         self.roles: list[str | None] = []
+        # set_config('standard_conforming_strings', …) and the like
+        self.changes_lexing = False
 
 
 def _is_word(tok: _T | None, *words: str) -> bool:
@@ -665,6 +673,9 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
     # name is visible after its body, a recursive one's inside it too; both
     # until the group holding the WITH closes.
     ctes: dict[str, list[tuple[int, int]]] = {}
+    # Where a WITH list ends when a SEARCH/CYCLE clause closes it (the main
+    # statement's keyword follows a word there, not a ``)``).
+    cte_list_ends: set[int] = set()
     for i in range(n):
         if not _is_word(toks[i], "WITH"):
             continue
@@ -690,8 +701,20 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
             start, end = j, close_of[j]
             ctes.setdefault(name, []).append((start if recursive else end, scope_end))
             j = end + 1
+            # SEARCH {DEPTH|BREADTH} FIRST BY c, … SET col; CYCLE c, … SET col
+            # [TO v DEFAULT v] USING col (Postgres 14+)
+            for clause, last in (("SEARCH", "SET"), ("CYCLE", "USING")):
+                if _is_word(tok(j), clause):
+                    m = j + 1
+                    while m < scope_end and depth[m] >= depth[j] and not _is_word(
+                            tok(m), last):
+                        m += 1
+                    if _is_word(tok(m), last):
+                        j = m + 2
+                        cte_list_ends.add(j)
             if not _is_punct(tok(j), ","):
                 break
+            cte_list_ends.discard(j)
             j += 1
 
     def is_cte(name: str, pos: int) -> bool:
@@ -726,6 +749,17 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
     block_tables: dict[int, set[str]] = {}
     skip_dual = dialect in ("mysql", "oracle")
     from_list: dict[int, bool] = {}
+    # ``(`` positions parse_ref descended into (``FROM (a, b)``, ``JOIN (b JOIN
+    # c)``): a table list continues inside them.
+    ref_parens: set[int] = set()
+
+    def query_block(j: int) -> int:
+        """The query block of position ``j``: its enclosing bracket, skipping
+        the brackets of a table list (``FROM (a, b)`` is the outer block's)."""
+        block = encl[j]
+        while block in ref_parens:
+            block = encl[block]
+        return block
 
     def mark_alias(m: int, table: list[str] | None = None) -> None:
         t = tok(m)
@@ -736,12 +770,17 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
                 return
         elif t is None or not (
             t.kind == "qident" or (t.kind == "word" and t.value.upper() not in _NOT_ALIAS)
+            # a clause word right before `,` is an alias (SQLite and MySQL take
+            # `FROM products offset, users`): `OFFSET ,` is not a clause
+            or (t.kind == "word" and t.value.upper() in _CLAUSE_ALIASES
+                and _is_punct(tok(m + 1), ","))
         ):
             return
         assert t is not None
         alias_pos.add(m)
         if table is not None:
-            alias_of.setdefault(encl[m], {}).setdefault(t.value.lower(), set()).add(tuple(table))
+            alias_of.setdefault(query_block(m), {}).setdefault(t.value.lower(), set()).add(
+                tuple(table))
 
     def parse_ref(j: int) -> None:
         while True:
@@ -756,6 +795,7 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
             if nxt is None or _is_word(nxt, *_SUBQUERY_START):
                 return
             from_list[depth[j] + 1] = True
+            ref_parens.add(j)
             j += 1
         if _is_punct(t, "[") and _is_name(tok(j + 1)) and _is_punct(tok(j + 2), "]"):
             # [name]: a SQLite/SQL Server identifier read in another dialect
@@ -779,7 +819,7 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
                 return
         table = [p.value for p in parts]
         mark_alias(m, table)
-        block_tables.setdefault(encl[j], set()).add(table[-1].lower())
+        block_tables.setdefault(query_block(j), set()).add(table[-1].lower())
         key = tuple(_norm_ident(p) for p in parts)
         if key not in seen:
             seen.add(key)
@@ -795,6 +835,32 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
             return None, j
         parts, m = name_parts(j)
         return [p.value for p in parts], m
+
+    def group_targets(open_at: int, targets: list[list[str]]) -> None:
+        """The tables of a bracketed join group (``(secret s JOIN other o ON
+        1)``, ``(a, b)``): its first table and each one after ``,`` or JOIN, at
+        any depth; a subquery inside it is skipped. Each token is read once."""
+        close = close_of[open_at]
+        p = open_at + 1
+        expect = True  # a table name may start here
+        while p < close:
+            tp = toks[p]
+            if _is_punct(tp, "("):
+                if p not in close_of:
+                    return
+                if _is_word(tok(p + 1), *_SUBQUERY_START):
+                    p = close_of[p] + 1
+                    expect = False
+                    continue
+                p += 1
+                expect = True
+                continue
+            if expect:
+                table, _m = target_at(p)
+                if table:
+                    targets.append(table)
+            expect = _is_punct(tp, ",") or _is_word(tp, "JOIN", "STRAIGHT_JOIN")
+            p += 1
 
     def parse_op(i: int, u: str) -> _Op:
         d = depth[i]
@@ -828,9 +894,13 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
         elif u == "UPDATE":
             while _is_word(tok(j), "LOW_PRIORITY", "IGNORE"):
                 j += 1
+            replace = False
             if _is_word(tok(j), "OR") and tok(j + 1) is not None:  # SQLite UPDATE OR ...
+                replace = _is_word(tok(j + 1), "REPLACE")
                 j += 2
             op = _Op("update", "UPDATE", i)
+            if replace:  # deletes the rows the new values conflict with
+                op.upsert = ("delete", "UPDATE OR REPLACE")
             target, m = target_at(j)
             if target:
                 op.targets.append(target)
@@ -848,6 +918,8 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
                     if _is_punct(tk, "(") or _is_punct(tk, "["):
                         if k not in close_of:
                             break
+                        if _is_punct(tk, "("):
+                            group_targets(k, op.targets)  # JOIN (secret s JOIN o ON 1)
                         k = close_of[k] + 1
                         continue
                     if _is_punct(tk, ",") or _is_word(tk, "JOIN", "STRAIGHT_JOIN"):
@@ -891,6 +963,8 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
     delete_at: dict[int, _Op] = {}
     idents: set[int] = set()  # keyword-looking words used as identifiers
     skip_until = -1  # end of a MySQL index hint being skipped
+    lock_walked = 0  # how far the lock-option walk has read
+    joined: dict[int, bool] = {}  # a JOIN seen at this depth (its USING lists columns)
 
     for i, t in enumerate(toks):
         if i <= skip_until:
@@ -900,9 +974,10 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
         if t.kind == "punct":
             if t.value in "([":
                 query_at[d + 1] = False
-                from_list[d + 1] = False
+                from_list[d + 1] = i in ref_parens
                 using_done[d + 1] = False
                 last_kw.pop(d + 1, None)
+                joined.pop(d + 1, None)
                 merge_at.pop(d + 1, None)
                 insert_at.pop(d + 1, None)
                 delete_at.pop(d + 1, None)
@@ -967,7 +1042,7 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
                 )
             elif prev is None or _is_punct(prev, "(") or _is_punct(prev, ")") or _is_word(
                 prev, "ATOMIC"
-            ):
+            ) or i in cte_list_ends:
                 # A statement keyword (top level, a CTE body, after a CTE
                 # list, the first one in a BEGIN ATOMIC function body).
                 op = parse_op(i, u)
@@ -980,6 +1055,7 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
                     delete_at[d] = op
                 query_at[d] = True
                 last_kw[d] = u
+                joined[d] = False
                 from_list[d] = False
             elif _is_word(prev, "THEN") and d in merge_at:
                 action = {"DELETE": "delete", "UPDATE": "update", "INSERT": "put"}[u] \
@@ -991,17 +1067,28 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
             continue
 
         if u == "FROM":
+            # not a table list: DELETE FROM t (the op's target), IS [NOT]
+            # DISTINCT FROM x, ROWS FROM (f(), g()); `1 rows FROM t` and `0 delete
+            # FROM t` alias a column and are one
+            delete_from = _is_word(prev, "DELETE") and any(op.index == i - 1 for op in scan.ops)
+            distinct_from = _is_word(prev, "DISTINCT") and (
+                _is_word(tok(i - 2), "IS")
+                or (_is_word(tok(i - 2), "NOT") and _is_word(tok(i - 3), "IS")))
+            rows_from = _is_word(prev, "ROWS") and _is_punct(tok(i + 1), "(") and (
+                _is_word(tok(i - 2), "FROM", "JOIN") or _is_punct(tok(i - 2), ","))
             if query_at.get(d) and (
-                i - 1 in idents or not _is_word(prev, "DELETE", "DISTINCT", "ROWS")
+                i - 1 in idents or not (delete_from or distinct_from or rows_from)
             ):
                 from_list[d] = True
                 parse_ref(i + 1)
             continue
         if u in ("JOIN", "STRAIGHT_JOIN"):
+            joined[d] = True
             from_list[d] = True
             parse_ref(i + 1)
             continue
-        if u == "USING" and last_kw.get(d) in ("DELETE", "MERGE") and not using_done.get(d):
+        if u == "USING" and last_kw.get(d) in ("DELETE", "MERGE") and not using_done.get(d) \
+                and not (joined.get(d) and _is_punct(tok(i + 1), "(")):  # JOIN b USING (id)
             using_done[d] = True
             if last_kw.get(d) == "DELETE" and d in delete_at:
                 delete_at[d].using = True
@@ -1012,13 +1099,15 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
             prev is None
             or _is_word(prev, *_SET_OP_BEFORE_TABLE)
             or _is_punct(prev, "(")
+            or i in cte_list_ends
+            or (first_word == "WITH" and d == 0 and _is_punct(prev, ")"))  # WITH … TABLE t
             or (last_kw.get(d) == "INSERT" and (_is_name(prev) or _is_punct(prev, ")"))
                 and not _is_word(prev, "INTO"))
         ):
             parse_ref(i + 1)
             continue
 
-        if u in _FROM_LIST_END and (
+        if u in _FROM_LIST_END and i not in alias_pos and (
             # MySQL index hints (FORCE INDEX FOR JOIN (i)) keep the list going
             u != "FOR" or _is_word(tok(i + 1), "UPDATE", "SHARE", "NO", "KEY")
         ):
@@ -1044,7 +1133,9 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
             while _is_word(tok(j), "TEMP", "TEMPORARY", "UNLOGGED", "TABLE"):
                 j += 1
             target = tok(j)
-            if target is not None and target.kind == "var":
+            if _is_word(target, "STRICT"):  # PL/pgSQL SELECT … INTO STRICT vars
+                scan.into = ("var", None)
+            elif target is not None and target.kind == "var":
                 scan.into = ("var", None)
             elif _is_name(target):
                 parts, _m = name_parts(j)
@@ -1076,13 +1167,16 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
         if strength is not None:
             if scan.lock is None or _LOCK_RANK[strength] > _LOCK_RANK[scan.lock]:
                 scan.lock = strength
-            j = after
+            # NOWAIT / SKIP LOCKED are global flags, so a stretch already
+            # walked for an earlier lock clause is not walked again (linear)
+            j = max(after, lock_walked)
             while j < n and depth[j] >= d and not _is_word(toks[j], "FOR"):
                 if _is_word(toks[j], "NOWAIT"):
                     scan.nowait = True
                 elif _is_word(toks[j], "SKIP") and _is_word(tok(j + 1), "LOCKED"):
                     scan.skip_locked = True
                 j += 1
+            lock_walked = j
             continue
 
         if u == "SET_CONFIG" and _is_punct(tok(i + 1), "("):
@@ -1099,19 +1193,24 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
         block = encl[op.index]
         aliases = alias_of.get(block, {})
         names = block_tables.get(block, set())
-        resolved: list[list[str]] = []
+        resolved: dict[tuple[str, ...], list[str]] = {}
+        any_table = False  # every table the statement reads, added once
         for target in op.targets:
             key = target[0].lower()
             if len(target) == 1 and key in aliases:
                 if len(aliases[key]) == 1:
-                    resolved.append(list(next(iter(aliases[key]))))
+                    table = list(next(iter(aliases[key])))
+                    resolved.setdefault(tuple(table), table)
                 else:  # one alias, two tables in this block: any of them
-                    resolved.extend(scan.tables or [target])
+                    any_table = True
             elif len(target) == 1 and op.raw == "DELETE" and key not in names:
-                resolved.extend(scan.tables or [target])
+                any_table = True
             else:
-                resolved.append(target)
-        op.targets = resolved
+                resolved.setdefault(tuple(target), target)
+        if any_table:
+            for table in scan.tables or op.targets:
+                resolved.setdefault(tuple(table), table)
+        op.targets = list(resolved.values())
     return scan
 
 
@@ -1152,6 +1251,8 @@ def _set_config(
     if len(args) < 2:
         args.append((start, min(j, close)))
     setting = _plain_string_arg(toks, close_of, *args[0])
+    if setting is None or setting.strip().lower() in _LEXING_SETTINGS | _CHARSET_SETTINGS:
+        scan.changes_lexing = True
     if setting is not None and setting.strip().lower() not in ("role", "session_authorization"):
         return
     value = None
@@ -1229,6 +1330,9 @@ def _scan_results(
          "set_config(role)", {})
         for r in scan.roles
     )
+    if scan.changes_lexing:
+        results.append(("unknown/*", "update", {"unclassified": True, "changes_lexing": True},
+                        "dml", "set_config", {}))
 
     # Dedupe writes, then add reads of the tables not already written.
     deduped: list[_Classification] = []
@@ -1566,6 +1670,13 @@ def _classify_tokens(toks: list[_T], dialect: str) -> list[_Classification]:
         identity = _identity_change(toks)
         if identity is not None:
             return identity
+        if _changes_lexing(toks):
+            # the server reads later statements' strings differently
+            # (NO_BACKSLASH_ESCAPES, ANSI_QUOTES, standard_conforming_strings, a
+            # multi-byte client charset): what this reads as one string may be
+            # two statements there
+            return [("unknown/*", "update", {"unclassified": True, "changes_lexing": True},
+                     "dml", first_word, {})]
 
     if first_word in ("BEGIN", "COMMIT", "ROLLBACK", "SET", "START"):
         return [("session/*", "read", {}, "tcl", first_word, {})]
@@ -1593,6 +1704,60 @@ def _classify_tokens(toks: list[_T], dialect: str) -> list[_Classification]:
     return [("unknown/*", "update", {"unclassified": True}, "dml", first_word or "UNKNOWN", {})]
 
 
+# Settings that change how the server splits and quotes later statements.
+_LEXING_SETTINGS = frozenset({"sql_mode", "standard_conforming_strings", "backslash_quote"})
+# Client character-set settings: a multi-byte charset whose trailing byte can be
+# a backslash (gbk, sjis, big5, …) changes where a string ends; these do not.
+_CHARSET_SETTINGS = frozenset({"names", "character_set_client", "client_encoding", "charset"})
+_SAFE_CHARSETS = frozenset({
+    "utf8", "utf8mb3", "utf8mb4", "utf-8", "unicode", "latin1", "latin2", "ascii", "binary",
+    "default", "sql_ascii", "win1252", "iso_8859_1", "iso-8859-1",
+})
+
+
+def _setting_name(t: _T) -> str:
+    return t.value.lower().lstrip("@").removeprefix("session.").removeprefix("global.")
+
+
+def _changes_lexing(toks: list[_T]) -> bool:
+    """Whether a ``SET`` changes how the server reads later statements' strings:
+    ``sql_mode`` (NO_BACKSLASH_ESCAPES, ANSI_QUOTES), ``standard_conforming_strings``,
+    ``backslash_quote``, or a client charset that is not known to be safe
+    (``SET NAMES gbk``, ``SET CHARACTER SET sjis``, ``SET client_encoding = 'SJIS'``)."""
+    for k, t in enumerate(toks):
+        if t.kind not in ("word", "qident", "var"):
+            continue
+        name = _setting_name(t)
+        if name in _LEXING_SETTINGS:
+            return True
+        if name == "character" and k + 1 < len(toks) and _is_word(toks[k + 1], "SET"):
+            name, k = "charset", k + 1
+        if name in _CHARSET_SETTINGS:
+            m = k + 1
+            while m < len(toks) and toks[m].kind == "punct" and toks[m].value in ("=",):
+                m += 1
+            if m < len(toks) and _is_word(toks[m], "TO"):
+                m += 1
+            value = toks[m] if m < len(toks) else None
+            if value is None or value.kind not in ("word", "str", "qident") or (
+                    value.value.lower() not in _SAFE_CHARSETS):
+                return True
+    return False
+
+DIALECTS = ("postgres", "mysql", "sqlite", "generic")
+_DIALECT_ALIASES = {"postgresql": "postgres", "pg": "postgres", "mariadb": "mysql",
+                    "sqlite3": "sqlite"}
+
+
+def normalize_dialect(dialect: str | None) -> str:
+    """The dialect ``from_sql`` reads ``dialect`` as: one of :data:`DIALECTS`.
+    An unknown name is read as ``generic`` rather than as one dialect's rules,
+    since a lexer for the wrong dialect can hide a statement."""
+    name = (dialect or "").strip().lower()
+    name = _DIALECT_ALIASES.get(name, name)
+    return name if name in DIALECTS else "generic"
+
+
 def from_sql(
     sql: str, *, dialect: str = "generic", database: str | None = None
 ) -> list[InfrastructureIntent]:
@@ -1600,7 +1765,10 @@ def from_sql(
     InfrastructureIntents (one or more per statement -- see module
     docstring), provider ``"sql"``. ``dialect`` (``postgres``, ``mysql``,
     ``sqlite``, ``generic``) decides how strings, comments and dollar quotes
-    are read."""
+    are read; the name is matched without case (``PostgreSQL``, ``mariadb``
+    and ``sqlite3`` name their dialect), and any other value is read as
+    ``generic``, which flags what a server could read differently."""
+    dialect = normalize_dialect(dialect)
     intents = []
     for toks, _comment, flags in _lex(sql, dialect):
         results = list(_classify_tokens(toks, dialect))
@@ -1696,7 +1864,10 @@ def _build_cli_intents(
     argv: list[str],
 ) -> list[InfrastructureIntent]:
     if sql_texts:
-        intents = from_sql("; ".join(sql_texts), dialect=dialect, database=database)
+        # psql/mysql run each -c/-e on its own: a comment or quote left open in one
+        # must not swallow the next
+        intents = [intent for text in sql_texts
+                   for intent in from_sql(text, dialect=dialect, database=database)]
     elif file_path is not None:
         from pathlib import Path
 
@@ -1792,7 +1963,7 @@ def from_sqlite3(argv: list[str]) -> list[InfrastructureIntent]:
     if not sql_texts and file_path is None:
         if len(positional) >= 2:
             database = database or positional[0]
-            sql_texts = ["; ".join(positional[1:])]
+            sql_texts = positional[1:]  # sqlite3 runs each SQL argument in turn
         elif len(positional) == 1:
             database = database or positional[0]
     return _build_cli_intents(

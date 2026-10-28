@@ -52,9 +52,12 @@ or `"sqlite"`): it decides how strings and comments are read, and so where each 
 A backslash escapes a quote inside a MySQL string or a Postgres `E'…'` string, and Postgres block
 comments nest, as each server reads them. The body of a MySQL `/*! … */` comment is checked as
 SQL, since MySQL runs it. On the command line this is `aegis check sql --dialect …`
-([CLI reference](../cli.md#sql-and---dialect)). The default, `generic`, also counts as a write any
-statement that two databases would split differently (a backslash before a quote, a comment
-inside a comment), so under this guide's rule it is rejected.
+([CLI reference](../cli.md#sql-and---dialect)). The gate in `examples/app_sql_gate.py` defaults
+to `postgres`; `from_sql` and `aegis check sql` default to `generic`, which also counts as a write
+any statement that two databases would split differently (a backslash before a quote, a comment
+inside a comment), so under this guide's rule it is rejected. An unknown dialect name is read as
+`generic`, and a statement that changes how the server reads strings (`SET sql_mode`, `SET
+standard_conforming_strings`, …) is rejected the same way.
 
 One rule allows reads only:
 

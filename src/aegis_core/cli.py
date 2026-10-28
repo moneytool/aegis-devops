@@ -482,7 +482,8 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_common_options(sql_parser)
     sql_parser.add_argument("--database", default=None)
     sql_parser.add_argument(
-        "--dialect", default="generic",
+        "--dialect", default="generic", type=str.lower,
+        choices=("postgres", "postgresql", "mysql", "mariadb", "sqlite", "sqlite3", "generic"),
         help="postgres, mysql, sqlite or generic (default): how strings and comments are read",
     )
     sql_parser.add_argument("sql", help="SQL text, or '-' to read from stdin")

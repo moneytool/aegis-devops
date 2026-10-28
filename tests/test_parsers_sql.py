@@ -1864,7 +1864,9 @@ def test_mysql_index_hints_do_not_end_the_from_list(sql):
 
 @pytest.mark.parametrize("sql,expected", [
     ("UPDATE OR IGNORE products SET a = 1", [("update", "table/products")]),
-    ("UPDATE OR REPLACE products SET a = 1 WHERE id = 1", [("update", "table/products")]),
+    # round 4: OR REPLACE deletes the rows the new values conflict with
+    ("UPDATE OR REPLACE products SET a = 1 WHERE id = 1",
+     [("update", "table/products"), ("delete", "table/products")]),
 ])
 def test_sqlite_update_or_conflict_clause(sql, expected):
     assert _summary_in(sql, "sqlite") == expected
@@ -2026,3 +2028,120 @@ def test_drop_list_deduplicates_names():
         ("delete", "table/users"), ("delete", "table/a")
     ]
     assert len(from_sql("DROP SCHEMA prod, prod")) == 2
+
+
+# --- council round 4 ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize("argv", [
+    ["psql", "-c", "SELECT 1 --", "-c", "DROP TABLE users"],
+    ["psql", "-c", "SELECT '", "-c", "DROP TABLE users"],
+    ["mysql", "-e", "SELECT 1 #", "-e", "DROP TABLE users"],
+    ["sqlite3", "db", "SELECT 1 --", "DROP TABLE users"],
+])
+def test_each_command_text_is_classified_on_its_own(argv):
+    parse = {"psql": from_psql, "mysql": from_mysql, "sqlite3": from_sqlite3}[argv[0]]
+    assert ("delete", "table/users") in [(i.action, i.resource) for i in parse(argv)]
+
+
+@pytest.mark.parametrize("dialect,expected", [
+    ("mariadb", "mysql"), ("MySQL", "mysql"), ("PostgreSQL", "postgres"),
+    ("Postgres", "postgres"), ("sqlite3", "sqlite"), ("", "generic"), ("oracle", "generic"),
+])
+def test_dialect_names_are_normalised_and_unknown_ones_read_as_generic(dialect, expected):
+    (intent, *_rest) = from_sql("SELECT 1", dialect=dialect)
+    assert intent.metadata["dialect"] == expected
+
+
+def test_an_unknown_dialect_does_not_hide_a_statement():
+    summary = _summary_in("SELECT 'a\\''; DROP TABLE users", "mariadb")
+    assert ("delete", "table/users") in summary
+
+
+@pytest.mark.parametrize("sql,dialect,tables", [
+    ("SELECT * FROM (a, users)", "mysql", ["a", "users"]),
+    ("SELECT * FROM a JOIN (b, users) ON 1", "mysql", ["a", "b", "users"]),
+    ("SELECT * FROM a CROSS JOIN (b, c, users)", "mysql", ["a", "b", "c", "users"]),
+    ("SELECT * FROM a JOIN (b, (c, users)) ON 1", "mysql", ["a", "b", "c", "users"]),
+    ("SELECT * FROM (a, users)", "sqlite", ["a", "users"]),
+    ("SELECT * FROM products offset, users", "sqlite", ["products", "users"]),
+    ("SELECT * FROM products returning, users", "mysql", ["products", "users"]),
+    ("SELECT password_hash, 1 rows FROM users", "postgres", ["users"]),
+    ("SELECT password_hash, 0 delete FROM users", "postgres", ["users"]),
+    ("SELECT query, calls, rows FROM pg_stat_statements", "postgres", ["pg_stat_statements"]),
+    ("WITH x AS (SELECT 1) TABLE users", "postgres", ["users"]),
+])
+def test_round4_reads_every_table(sql, dialect, tables):
+    assert _summary_in(sql, dialect) == [("read", f"table/{t}") for t in tables]
+
+
+@pytest.mark.parametrize("sql,dialect,expected", [
+    ("DELETE a FROM (a, users)", "mysql", [("delete", "table/a"), ("read", "table/users")]),
+    ("DELETE FROM a USING a JOIN (b, users) ON 1", "mysql",
+     [("delete", "table/a"), ("read", "table/b"), ("read", "table/users")]),
+    ("UPDATE products p INNER JOIN (secret s) ON 1 SET s.x=1", "mysql",
+     [("update", "table/products"), ("update", "table/secret")]),
+    ("UPDATE products p JOIN (secret s JOIN other o ON 1) ON 1 SET o.x=1", "mysql",
+     [("update", "table/products"), ("update", "table/secret"), ("update", "table/other")]),
+    ("DELETE a FROM a JOIN b USING (id)", "mysql", [("delete", "table/a"), ("read", "table/b")]),
+    ("SELECT * FROM a WHERE x IS DISTINCT FROM y", "postgres", [("read", "table/a")]),
+    ("SELECT a, b INTO STRICT x, y FROM t", "postgres", [("read", "table/t")]),
+])
+def test_round4_writes_and_reads(sql, dialect, expected):
+    assert _summary_in(sql, dialect) == expected
+
+
+@pytest.mark.parametrize("tail,expected", [
+    ("SEARCH DEPTH FIRST BY id SET ord DELETE FROM users", ("delete", "table/users")),
+    ("CYCLE id SET is_cycle USING path DELETE FROM users", ("delete", "table/users")),
+    ("CYCLE id SET c TO true DEFAULT false USING p UPDATE users SET x=1",
+     ("update", "table/users")),
+    ("SEARCH BREADTH FIRST BY id SET ord INSERT INTO users SELECT * FROM t",
+     ("put", "table/users")),
+])
+def test_a_dml_after_a_cte_search_or_cycle_clause(tail, expected):
+    sql = ("WITH RECURSIVE t(id) AS (SELECT 1 UNION ALL SELECT id+1 FROM t WHERE id<3) "
+           + tail)
+    assert expected in _summary_in(sql, "postgres")
+
+
+@pytest.mark.parametrize("dialect", ["postgres", "sqlite", "generic"])
+def test_a_quote_after_at_is_an_ordinary_string_outside_mysql(dialect):
+    summary = _summary_in("SELECT @'a\\'; DELETE FROM users; SELECT 'b'", dialect)
+    assert ("delete", "table/users") in summary
+
+
+@pytest.mark.parametrize("argv", [
+    ["mysql", "-e", "SET sql_mode='NO_BACKSLASH_ESCAPES'; SELECT 'a\\'; DROP TABLE users; -- '"],
+    ["mysql", "-e", "SET SESSION sql_mode='ANSI_QUOTES'; SELECT \"a\\\"; DROP TABLE users; -- \""],
+    ["mysql", "-e", "SET @@sql_mode = ''"],
+    ["mysql", "-e", "SET NAMES gbk"],
+    ["mysql", "-e", "SET CHARACTER SET sjis"],
+    ["psql", "-c", "SET standard_conforming_strings = off", "-c", "SELECT 1"],
+    ["psql", "-c", "SELECT set_config('standard_conforming_strings', 'off', false)"],
+])
+def test_a_setting_that_changes_how_strings_are_read_is_unclassified(argv):
+    parse = {"psql": from_psql, "mysql": from_mysql}[argv[0]]
+    flagged = [i for i in parse(argv) if i.params.get("changes_lexing")]
+    assert flagged and flagged[0].params["unclassified"] is True
+
+
+@pytest.mark.parametrize("sql", ["SET NAMES utf8mb4", "SET CHARACTER SET utf8",
+                                 "SET client_encoding TO 'UTF8'", "SET search_path = x"])
+def test_safe_settings_stay_session_reads(sql):
+    assert _summary_in(sql, "mysql") == [("read", "session/*")]
+
+
+@pytest.mark.parametrize("sql", [
+    "DELETE " + ", ".join(f"a{i}" for i in range(4000)) + " FROM "
+    + ", ".join(f"t{i}" for i in range(4000)) + " WHERE 1=0",
+    "DELETE " + ", ".join(f"t{i}" for i in range(4000)) + " FROM t0 "
+    + " ".join(f"JOIN t{i} ON 1" for i in range(1, 4000)),
+    "SELECT 1 " + "LOCK IN SHARE MODE " * 6000,
+])
+def test_round4_inputs_stay_linear(sql):
+    import time
+    start = time.perf_counter()
+    from_sql(sql, dialect="mysql")
+    assert time.perf_counter() - start < 3
+
