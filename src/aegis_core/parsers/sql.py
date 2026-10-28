@@ -199,6 +199,8 @@ class _T(NamedTuple):
 _WS_CHARS = " \t\n\r\f\v"
 _WS_RE = re.compile(r"[ \t\n\r\f\v]+")
 _EXEC_OPEN_RE = re.compile(r"/\*M?!\d*")
+# Text in a /*! … */ body that would move where another reader ends it.
+_BODY_MARKER_RE = re.compile(r"['\"`#$]|--|/\*")
 _COMMENT_MARK_RE = re.compile(r"/\*|\*/")
 _DOLLAR_OPEN_RE = re.compile(r"\$(?:[^\W\d][\w]*)?\$")
 _CHARSET_PREFIX_RE = re.compile(r"_[A-Za-z0-9]+(?=')")
@@ -350,6 +352,7 @@ def _lex(sql: str, dialect: str) -> list[_Statement]:
     gap = False
     exec_open = 0
     i, n = 0, len(sql)
+    close_from, close, last_marker = n + 1, -1, -1  # the last /*! … */ body searched
 
     def emit(kind: str, value: str, raw: str, escaped: bool = False) -> None:
         nonlocal gap
@@ -386,11 +389,20 @@ def _lex(sql: str, dialect: str) -> list[_Statement]:
                 # MySQL runs the body of /*! … */ (unless its version is newer than the
                 # server's); other servers skip to the first */. When text in the body
                 # would move where it ends, the readings differ.
-                close = sql.find("*/", em.end())
-                inner = sql[em.end(): n if close == -1 else close]
-                if (generic or any(ch.isdigit() for ch in em.group(0))) and (
-                        any(q in inner for q in "'\"`#$") or "--" in inner or "/*" in inner):
-                    flags.add("ambiguous_comment")
+                opener = em.group(0)
+                # versioned (skipped by an older server) or MariaDB-only /*M! (a
+                # plain comment to Oracle MySQL)
+                if generic or "M" in opener or any(c.isdigit() for c in opener):
+                    if not (close_from <= em.end() and (close == -1 or close >= em.end())):
+                        # MySQL comments do not nest: one search serves every opener
+                        # before the same */, so this stays linear
+                        close_from, close = em.end(), sql.find("*/", em.end())
+                        end_at = n if close == -1 else close
+                        last_marker = -1
+                        for mk in _BODY_MARKER_RE.finditer(sql, em.end(), end_at):
+                            last_marker = mk.start()
+                    if last_marker >= em.end():
+                        flags.add("ambiguous_comment")
                 exec_open += 1
                 i = em.end()
             elif nested_comments:
@@ -2031,8 +2043,8 @@ def _bundled_command(tok: str, letters: set[str],
         if letter in letters:
             rest = tok[k + 1:]
             return (letter, rest, False) if rest else (letter, None, True)
-        # psql -1c / -0c, mysql -#e: those letters take no value
-        if letter in valued or not (letter.isalnum() or letter == "#"):
+        # psql -1c / -0c: those letters take no value
+        if letter in valued or not letter.isalnum():
             return None
     return None
 

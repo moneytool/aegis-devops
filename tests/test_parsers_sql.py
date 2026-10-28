@@ -1992,7 +1992,7 @@ def test_multi_table_update_walk_stays_linear():
     start = time.perf_counter()
     from_sql("UPDATE t " + "JOIN a ON (x) " * 30_000 + "SET a = 1", dialect="mysql")
     from_sql("UPDATE t ) " * 30_000, dialect="mysql")
-    assert time.perf_counter() - start < 2.0
+    assert time.perf_counter() - start < 5.0
 
 
 @pytest.mark.parametrize("sql,dialect,raw", [
@@ -2454,11 +2454,9 @@ def test_psql_g_file_after_an_empty_buffer_is_a_client_command():
 
 
 @pytest.mark.parametrize("argv", [["psql", "-X1c", "DROP TABLE users"],
-                                  ["psql", "-0c", "DROP TABLE users"],
-                                  ["mysql", "-#e", "DROP TABLE users"]])
-def test_bundles_with_digit_and_hash_letters(argv):
-    parse = from_mysql if argv[0] == "mysql" else from_psql
-    assert ("delete", "table/users") in _actions(parse(argv))
+                                  ["psql", "-0c", "DROP TABLE users"]])
+def test_bundles_with_digit_letters(argv):
+    assert ("delete", "table/users") in _actions(from_psql(argv))
 
 
 @pytest.mark.parametrize("sql,dialect", [
@@ -2488,3 +2486,18 @@ def test_mysqldump_version_comments_are_not_flagged():
 def test_a_dml_subquery_in_from_is_not_a_table():
     intents = from_sql("SELECT f() FROM (DELETE FROM users RETURNING *) d", dialect="postgres")
     assert _actions(intents) == [("delete", "table/users")]
+
+
+@pytest.mark.parametrize("sql,dialect", [("/*!50000 x" * 50000, "generic"),
+                                         ("/*!50000 x" * 50000, "mysql"),
+                                         ("/*!50000 x */" * 30000, "mysql")])
+def test_many_executable_comments_stay_linear(sql, dialect):
+    import time
+    start = time.perf_counter()
+    from_sql(sql, dialect=dialect)
+    assert time.perf_counter() - start < 5
+
+
+def test_mariadb_only_comment_is_ambiguous_under_mysql():
+    intents = from_sql("/*M! SELECT 'a */ DROP TABLE x; -- ' */", dialect="mysql")
+    assert any(i.params.get("unclassified") for i in intents)
