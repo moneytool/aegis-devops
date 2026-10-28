@@ -115,7 +115,7 @@ a Python program, a Makefile, or calls a cloud SDK, gets past it. With the examp
 | a script that `nuke.sh` sources or runs in turn (also through `eval` inside it) | **runs**: only the script on the command line is read |
 | a script run from a function or alias defined in the command (`go() { bash x.sh; }; go`, `alias go='bash x.sh'; go`) | **runs** |
 | a script run by a launcher the hook does not unwrap (`npx`, `npm exec`, `yarn exec`, `direnv exec`, `dotenv`, `aws-vault exec`, `op run`, `doppler run`, `flock`, `strace`, `taskset`, `chrt`, `setpriv`, `su -c`, `runuser`, `unshare`, `chroot`, `parallel`, `screen`, `tmux`, `xargs`) | **runs** unread |
-| `source "$HOME/…"` and other paths with variables | read when the hook's own environment sets each variable and the command does not; otherwise asks |
+| `source "$HOME/…"` and other paths with variables | `$HOME` (and `~`) is filled in from the hook's environment when the command does not name HOME; any other variable (`$PWD`, `$OLDPWD`, `$_`, …) asks |
 | a script changed between the check and the run, or a symlink retargeted in between | **runs** the new content: the hook reads it once, before the command starts |
 | a script changed by an earlier step of the same command that does not name it (`git pull && ./deploy.sh`, `tar xf a.tar && bash x.sh`, `make; bash x.sh`) | **runs** the new content: the hook reads the script as it is before the command starts |
 | `python3 cleanup.py`, `make destroy`, `npm run teardown` | **runs** |

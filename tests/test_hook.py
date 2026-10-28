@@ -2067,3 +2067,75 @@ def test_final_round_hidden_readers_ask(opted_in_project, monkeypatch, command):
     monkeypatch.setenv("HOME", str(opted_in_project))
     code, out, err = run("claude", payload_for("claude", command))
     assert code == 2 or _ask_reason(out), (code, out, err)
+
+
+@pytest.mark.parametrize("stage", [
+    'while read l; do echo "$(date)"; sh; done', 'if [ -n "${X:-}" ]; then :; else sh; fi',
+    "while :; do if true; then :; fi; sh; done", "{ (true); sh; }", '{ echo "}"; sh; }',
+    "if true; then bash -s; fi", "while :; do bash -; done", "(bash -l)", "( sh -e )",
+    "if true; then python3 -u; fi", "while true; do bash -e; done",
+    "bash -c 'eval sh'", "sh -c 'eval sh'", "bash -c 'bash -c sh'", "exec bash -c 'eval sh'",
+    "bash -c '(sh)'", "eval '(sh)'", "eval '{ sh; }'", "eval 'true; sh'", "eval " * 8000 + "sh",
+])
+def test_shells_reading_a_pipe_inside_compounds_and_strings_ask(opted_in_project, stage):
+    (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
+    started = time.monotonic()
+    code, out, err = run("claude", payload_for("claude", f"cat nuke.sh | {stage}"))
+    assert code == 2 or _ask_reason(out), (code, out, err)
+    assert time.monotonic() - started < 10
+
+
+@pytest.mark.parametrize("command", [
+    "{ sh; } 2>/dev/null < nuke.sh", "exec 2>/dev/null < nuke.sh; sh",
+    "{ sh; } 2>/dev/null < <(cat nuke.sh)", "exec 2>/dev/null <<< \"$(cat nuke.sh)\"; sh",
+    "exec {fd}< nuke.sh; sh <&$fd", 'sh 0<&"$fd"', "bash -c 'eval sh' < nuke.sh",
+    "HOME=sub; bash ~/x.sh", "for HOME in sub; do bash ~/x.sh; done",
+    "(cd sub; echo 'bash x.sh' | sh)", "bash -c 'cd sub; echo \"bash x.sh\" | sh'",
+])
+def test_loop1_hidden_inputs_ask(opted_in_project, monkeypatch, command):
+    (opted_in_project / "sub").mkdir()
+    (opted_in_project / "x.sh").write_text("echo hi\n")
+    (opted_in_project / "sub" / "x.sh").write_text(BLOCK_COMMAND + "\n")
+    (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
+    monkeypatch.setenv("HOME", str(opted_in_project))
+    code, out, err = run("claude", payload_for("claude", command))
+    assert code == 2 or _ask_reason(out), (code, out, err)
+
+
+def test_many_piped_groups_stay_fast(opted_in_project):
+    started = time.monotonic()
+    run("claude", payload_for("claude", "|{" * 30000))
+    assert time.monotonic() - started < 10
+
+
+@pytest.mark.parametrize("command", ["a|{ " * 16000, "ls |{ " * 10500, "ls | { sh x.sh; " * 4000,
+                                     "eval " * 6000 + "bash nuke.sh"])
+def test_long_piped_compound_and_eval_chains_stay_fast(opted_in_project, command):
+    (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
+    started = time.monotonic()
+    run("claude", payload_for("claude", command))
+    assert time.monotonic() - started < 10
+
+
+@pytest.mark.parametrize("command", [
+    '\\cd sub && bash x.sh "$@"', '"cd" sub && echo \'bash x.sh\' | sh',
+    'env -C sub bash x.sh "$1"',
+    'sudo -D sub bash x.sh "$1"', "env -C sub echo 'bash x.sh' | sh",
+    "bash -c 'set -e; bash nuke.sh \"$@\"'", "bash -c 'x=$(date); bash nuke.sh'",
+    "eval eval eval bash nuke.sh", "exec 2>&1 < nuke.sh; sh", "{ sh; } >log < nuke.sh",
+    "cat nuke.sh | while :; do sh 2>/dev/null; done",
+])
+def test_loop1_fable_cases_ask_or_deny(opted_in_project, command):
+    (opted_in_project / "sub").mkdir()
+    (opted_in_project / "x.sh").write_text("echo hi\n")
+    (opted_in_project / "sub" / "x.sh").write_text(BLOCK_COMMAND + "\n")
+    (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
+    code, out, err = run("claude", payload_for("claude", command))
+    assert code == 2 or _ask_reason(out), (code, out, err)
+
+
+@pytest.mark.parametrize("command", ["git clone https://github.com/x/ok.sh && bash ok.sh",
+                                     "curl -o other.sh https://h/ok.sh; bash ok.sh"])
+def test_urls_only_count_for_downloads_named_after_them(opted_in_project, command):
+    (opted_in_project / "ok.sh").write_text("echo hi\n")
+    assert run("claude", payload_for("claude", command))[:2] == (0, "")

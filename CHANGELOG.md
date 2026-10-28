@@ -143,6 +143,21 @@ behaviour.
   directory after a `cd` in the command (asked), and `HOME=` anywhere in the command keeps `$HOME`
   from being filled in. `bash /dev/stdin` asks; a download named after a script (`wget …/x.sh`,
   `curl -O …/x.sh`) counts as rewriting it.
+- Agent hook: a pipe into a group, loop, `if` or subshell asks when any shell or interpreter after it
+  reads standard input: after its options (`bash -e`, `sh -l`, `bash -s`) no script, `-c` code or
+  `-m` module follows (where the compound ends is no longer worked out, which `$(…)`, `${…}`,
+  quotes and nesting got wrong, and which was quadratic). `eval`, `exec`, `builtin` and `sh -c`
+  strings are unwrapped up to four levels, and any part of such a string may be the reader (`|
+  bash -c 'eval sh'`, `| eval 'true; sh'`), also with `< FILE` (`bash -c 'eval sh' < x.sh` reads
+  x.sh). Other redirections before a group's or `exec`'s standard input (`{ sh; } 2>/dev/null <
+  x.sh`), a named descriptor (`sh <&$fd`), `~` when the command changes HOME, and a `cd` inside a
+  subshell or `-c` string before piped code are no longer missed.
+- Agent hook: a directory change is also seen spelt `\cd`, `"cd"` or as `env -C`/`sudo -D` (scripts
+  after it ask instead of being read from the hook's directory); a quoted `sh -c` string is read on
+  its own before the command is split (`bash -c 'set -e; bash x.sh "$@"'`); a chain of `eval`s is
+  joined once (it was quadratic) and followed to four levels; a redirection after a shell reading a
+  pipe (`sh 2>/dev/null`) no longer counts as its script. A URL counts as naming a script only for
+  `wget` and `curl -O`/`-J`.
 - Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
   own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
   policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a

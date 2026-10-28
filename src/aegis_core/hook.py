@@ -89,6 +89,7 @@ from aegis_core.shell import (
     script_runs_loosely,
     split_segments,
     stdin_feeders,
+    string_reader,
     strip_comment,
     strip_exec_builtin,
 )
@@ -283,7 +284,11 @@ SCRIPT_SCAN_LIMIT = 64 * 1024
 # At most this many of its lines may name an infrastructure tool; more asks.
 SCRIPT_SCAN_MAX_LINES = 64
 _SHELL_SUFFIXES = (".sh", ".bash", ".zsh", ".ksh")
-_CD_RE = re.compile(r"(?:^|[;&|(\n]\s*|\s)(?:cd|pushd|popd)(?:\s|$|;)")
+# A change of directory: cd/pushd/popd however spelt (`\cd`, `"cd"`, `'cd'`),
+# and the working-directory options of env and sudo (`env -C dir`, `sudo -D dir`).
+_CD_RE = re.compile(
+    r"(?:^|[;&|(\n\s'\"])\\?['\"]?(?:cd|pushd|popd)['\"]?(?![\w.-])"
+    r"|(?<![\w.-])env\s(?:[^;&|\n]*\s)?(?:-C|--chdir)|(?<![\w.-])sudo\s(?:[^;&|\n]*\s)?-D(?!\S)")
 
 
 def decide(command: str, config_dir: Path, extra_args: list[str] | None = None, *,
@@ -365,8 +370,10 @@ def _stdin_redirects(command: str, config_dir: Path, extra_args: list[str] | Non
         asks.append("aegis: a shell or interpreter here may read its commands from a process "
                     "substitution or here-string given to exec or to a group, loop or if, "
                     "which the hook cannot check")
-    if any(_bare_reader(command, stage.end(), _compound_end(command, stage.end()))
-           for stage in _PIPED_COMPOUND_RE.finditer(command)):
+    # a bare shell anywhere after the first piped compound (where the compound
+    # ends is not worked out: quotes, $(…) and nesting make it unreliable)
+    stage = _PIPED_COMPOUND_RE.search(command)
+    if stage is not None and _bare_reader(command, stage.start() + 1, len(command)):
         asks.append("aegis: a pipe feeds a group, loop or if that runs a shell or interpreter, "
                     "which may read its commands from the pipe; the hook cannot check them")
     if scan:
@@ -784,7 +791,7 @@ def _literal_code(argv: list[str]) -> str | None:
     return None
 
 
-_CD_WORD_RE = re.compile(r"(?:^|[;&|(\s])(?:cd|pushd|popd)(?![\w.-])")
+_CD_WORD_RE = _CD_RE
 
 
 def _piped_code(command: str, reader: list[str], feeder: list[str] | None, config_dir: Path,
@@ -823,7 +830,9 @@ def _piped_code(command: str, reader: list[str], feeder: list[str] | None, confi
     # scripts the code runs are read too, under the same per-command cap; after
     # a cd in the outer command their directory is not known here
     decide = _decide_once if _SCANNED.get() is not None else _decide
-    here = None if _CD_WORD_RE.search(command) else cwd
+    state = _SCANNED.get()
+    outer = state["command"] if state is not None else ""
+    here = None if _CD_WORD_RE.search(command) or _CD_WORD_RE.search(outer) else cwd
     verdict = decide(code, config_dir, extra_args, here, scan=True)
     if verdict.decision == "allow":
         return None
@@ -1001,9 +1010,16 @@ def _sourced_script(segment: str) -> dict[str, str] | None:
 
 # A file redirected onto a group, subshell, `if` or loop (`{ sh; } < x.sh`,
 # `for …; do bash; done < x.sh`): a bare shell inside reads its commands from it.
-_GROUP_STDIN_RE = re.compile(r"(?:[})]|\b(?:fi|done|esac))\s*0?<(?![<&(>])\s*([^\s;&|)<>]+)")
+# Other redirections that may stand before the one of standard input
+# (`{ sh; } 2>/dev/null < x.sh`, `exec 2>&1 < x.sh`); possessive, so linear.
+_OTHER_REDIRECTS = r"(?:(?:\d*>>?|&>>?|[1-9]\d*<)&?\s*[^\s;&|()<>]++\s*+)*+"
+_GROUP_STDIN_RE = re.compile(
+    rf"(?:[}})]|\b(?:fi|done|esac))\s*{_OTHER_REDIRECTS}0?<(?![<&(>])\s*([^\s;&|)<>]+)")
 _EXEC_STDIN_RE = re.compile(
-    r"(?:^|[;&|\n('\"]\s*|\s)exec\s+0?<(?![<&(>])\s*([^\s;&|)<>]+)")
+    rf"(?:^|[;&|\n('\"]\s*|\s)exec\s+{_OTHER_REDIRECTS}0?<(?![<&(>])\s*([^\s;&|)<>]+)")
+_C_STRING_STDIN_RE = re.compile(
+    r"(?<![\w.-])(?:\S*/)?(?:ba|z|da|k|a|mk|po)?sh(?:\s+-\w+)*\s+-c\s+('[^']*'|\"[^\"]*\")"
+    rf"\s*{_OTHER_REDIRECTS}0?<(?![<&(>])\s*([^\s;&|)<>]+)")
 # A pipe into a group, subshell, loop or if: every command in it shares the pipe.
 _PIPED_COMPOUND_RE = re.compile(
     r"(?<!\|)\|(?!\|)&?\s*(?:[{(]|(?:if|while|until|for|select|case)\b)")
@@ -1011,31 +1027,45 @@ _PIPED_COMPOUND_RE = re.compile(
 # group, subshell, if or loop: `exec < <(curl …); sh`, `{ sh; } <<< "$x"`.
 _GENERATED_STDIN_RE = re.compile(
     r"(?:(?P<exec>(?:^|[;&|\n('\"]\s*|\s)exec\s+)|[})]\s*|\b(?:fi|done|esac)\s*)"
-    r"0?(?:<\s*<\(|<<<)")
-_COMPOUND_CLOSE_RE = re.compile(r"\b(?:done|fi|esac)\b|[})]")
-
-
-def _compound_end(command: str, start: int) -> int:
-    """Roughly where the compound command opening at ``start`` ends: its first
-    ``done``/``fi``/``esac``/``}``/``)``."""
-    close = _COMPOUND_CLOSE_RE.search(command, start)
-    return len(command) if close is None else close.end()
+    + _OTHER_REDIRECTS + r"0?(?:<\s*<\(|<<<)")
+# A redirection word (`2>/dev/null`, `>`, `&>log`); a bare operator takes the
+# next word as its target.
+_REDIRECT_WORD_RE = re.compile(r"\d*(?:>>?|<|&>>?)&?")
 
 
 def _bare_reader(command: str, start: int, end: int) -> bool:
     """Whether ``command[start:end]`` runs a shell or interpreter that reads its
-    code from standard input: no script, module or code argument after it
-    (``sh``, ``bash -s``; not ``python3 -m mod`` or ``bash x.sh``)."""
+    code from standard input: after its options (``-e``, ``-o pipefail``) comes
+    no script, module or code argument (``sh``, ``bash -e``, ``bash -s``; not
+    ``python3 -m mod``, ``bash -c '…'`` or ``bash x.sh``)."""
     for m in _READER_WORD_RE.finditer(command, start, end):
-        following = re.match(r"\s+(\S+)", command[m.end():end])
-        word = following.group(1) if following else ""
-        if not word or word[0] in ";|&)}" or word in ("-s", "-", "-i", "-x"):
-            return True
+        shell = _basename(m.group(0)) in _SHELLS
+        words = []
+        for raw in re.findall(r"\S+", command[m.end():end][:200]):
+            word = raw.rstrip(";&|)}")
+            if word:
+                words.append(word)
+            if word != raw or not word:
+                break  # the command ends here (`-s;`, `sh)`)
+        k = 0
+        while k < len(words) and (_REDIRECT_WORD_RE.match(words[k]) or (
+                words[k].startswith("-") and words[k] not in ("-", "--"))):
+            if _REDIRECT_WORD_RE.match(words[k]):  # sh 2>/dev/null, sh > out
+                k += 2 if _REDIRECT_WORD_RE.fullmatch(words[k]) else 1
+                continue
+            option = words[k]
+            if option in ("-c", "-m") or (not shell and option[:2] in ("-e", "-E", "-r")):
+                break  # code or a module on the command line
+            k += 2 if option in ("-o", "+o", "-O", "+O") else 1
+        else:
+            word = words[k] if k < len(words) else ""
+            if not word or word in ("-", "--"):
+                return True
     return False
 
 
 # Standard input copied from another descriptor or opened read-write.
-_FD_STDIN_RE = re.compile(r"(?:^|[\s;&|])0?(?:<&\s*\d|<>)")
+_FD_STDIN_RE = re.compile(r"(?:^|[\s;&|])0?(?:<&\s*(?!-)\S|<>)")  # <&3, <&$fd, <>
 _READER_WORDS = "|".join(sorted(_SHELLS))
 _READER_WORD_RE = re.compile(
     rf"(?<![\w./-])(?:{_READER_WORDS}|python[\d.]*|perl|ruby|node|php|lua)(?![\w.-])")
@@ -1049,6 +1079,9 @@ def _group_stdin_files(command: str) -> list[str]:
         return []
     files = [match.group(1).strip("'\"")
              for match in _GROUP_STDIN_RE.finditer(command, readers[0])]
+    # bash -c 'eval sh' < FILE: a reader inside the string reads FILE
+    files += [match.group(2) for match in _C_STRING_STDIN_RE.finditer(command)
+              if string_reader(match.group(1)[1:-1])]
     # exec < FILE: the rest of the shell reads FILE as its standard input
     files += [match.group(1).strip("'\"") for match in _EXEC_STDIN_RE.finditer(command)
               if match.end() <= readers[-1]]
@@ -1225,6 +1258,11 @@ def _script_lines(text: str) -> list[tuple[int, str, str | None]]:
     return out
 
 
+# curl options that name the output file after the URL (-O, -J, --remote-name).
+_REMOTE_NAME_RE = re.compile(
+    r"(?<![\w-])(?:-[a-zA-Z]*[OJ][a-zA-Z]*|--remote-name(?:-all)?)(?![\w-])")
+
+
 def _written_by_command(file: Path, command: str, cwd: Path | None) -> bool:
     """True when ``file`` is named more than once in ``command``: besides the
     run itself, as a redirection target or an argument of another command
@@ -1268,7 +1306,8 @@ def _written_by_command(file: Path, command: str, cwd: Path | None) -> bool:
             run_position = args == 1 and (program in _SHELLS or program in ("source", "."))
         if file.name not in token:
             continue  # cannot name the file (the checks below are per word, per script)
-        if any(ch in token for ch in "$`") or "://" in token:
+        if any(ch in token for ch in "$`") or ("://" in token and program == "wget") or (
+                "://" in token and program == "curl" and _REMOTE_NAME_RE.search(command)):
             # computed, or a URL a download names the file after (curl -O, wget)
             count += token.rstrip("\"')/").rsplit("/", 1)[-1] == file.name
             continue
@@ -1357,6 +1396,15 @@ _PATH_VARIABLE_RE = re.compile(r"\$(?:\{(\w+)\}|(\w+))")
 _STABLE_VARIABLES = frozenset({"HOME"})
 
 
+def _home_changed(command: str) -> bool:
+    """Whether ``command`` (or the whole command the hook was given) names HOME
+    other than as ``$HOME``, so it may change it (``HOME=…``, ``for HOME in``,
+    ``read HOME``, ``unset HOME``) before ``~`` or ``$HOME`` is expanded."""
+    state = _SCANNED.get()
+    outer = state["command"] if state is not None else ""
+    return re.search(r"(?<![\w${])HOME\b", command + "\n" + outer) is not None
+
+
 def _known_variables(path: str, command: str) -> str:
     """``path`` with ``$HOME`` / ``${HOME}`` replaced by the hook's own value
     (``source "$HOME/.cargo/env"``) when the command names HOME nowhere else,
@@ -1365,10 +1413,7 @@ def _known_variables(path: str, command: str) -> str:
     def value(match: re.Match[str]) -> str:
         name = match.group(1) or match.group(2)
         known = os.environ.get(name)
-        state = _SCANNED.get()
-        outer = state["command"] if state is not None else ""  # the whole hook command
-        if (name not in _STABLE_VARIABLES or known is None
-                or re.search(rf"(?<![\w${{]){name}\b", command + "\n" + outer)):
+        if name not in _STABLE_VARIABLES or known is None or _home_changed(command):
             return match.group(0)
         return known
     return _PATH_VARIABLE_RE.sub(value, path) if "$" in path else path
@@ -1393,6 +1438,9 @@ def _scan_script_once(runs: dict, config_dir: Path, extra_args: list[str] | None
     if any(ch in path for ch in "$`"):
         return HookVerdict("ask", f"aegis: {path} is a script whose name is only known when "
                                   "the command runs, so its commands cannot be checked")
+    if path.startswith("~") and _home_changed(command):
+        return HookVerdict("ask", f"aegis: {path} depends on HOME, which this command changes, "
+                                  "so its commands cannot be checked")
     try:
         file = Path(path).expanduser()
     except RuntimeError:  # ~user / ~+ the hook cannot resolve

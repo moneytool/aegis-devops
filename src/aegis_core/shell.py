@@ -1484,6 +1484,11 @@ def code_run(simple: SimpleCommand) -> dict[str, str] | None:
 _LOOSE_SPLIT_RE = re.compile(r"(\|\||&&|;;|\$\(|[<>]\(|[;|&\n()`])")
 
 
+_QUOTED_C_STRING_RE = re.compile(
+    r"(?<![\w.-])(?:[^\s;&|()]*/)?(?:ba|z|da|k|a|mk|po|rba)?sh(?:\s+-[a-zA-Z]+)*\s+-c\s+"
+    r"('([^']*)'|\"((?:[^\"\\]|\\.)*)\")")
+
+
 def script_runs_loosely(command: str, _depth: int = 0) -> list[dict[str, str]]:
     """Best effort for a command the parser rejected (``bash x.sh "$TARGET"``,
     ``OUT=$(bash x.sh)``, ``for i in 1 2; do ./x.sh "$i"; done``): splits it on
@@ -1493,6 +1498,13 @@ def script_runs_loosely(command: str, _depth: int = 0) -> list[dict[str, str]]:
     returns what :func:`code_run` finds in each part. Never raises; only for
     asking, never for allowing."""
     found = []
+    if _depth < 4:
+        # a quoted sh -c string holds separators of its own: read it on its own
+        # (bash -c 'set -e; bash x.sh "$@"') before the split cuts it up
+        for match in _QUOTED_C_STRING_RE.finditer(command):
+            inner = match.group(2) if match.group(2) is not None else match.group(3)
+            found.extend(script_runs_loosely(inner, _depth + 1))
+        command = _QUOTED_C_STRING_RE.sub(" ", command)
     pieces = _LOOSE_SPLIT_RE.split(command)
     opened: list[str] = []  # brackets and backticks still open
     continuation = False  # this part follows a closing `)`/`` ` ``: the rest of a word
@@ -1531,8 +1543,11 @@ def script_runs_loosely(command: str, _depth: int = 0) -> list[dict[str, str]]:
         if not argv:
             continue
         if argv[0] == "eval":  # eval 'bash x.sh': its words are a command line
-            if _depth < 2:
-                found.extend(script_runs_loosely(" ".join(argv[1:]), _depth + 1))
+            evals = 0
+            while evals < len(argv) and argv[evals] == "eval":
+                evals += 1  # eval eval eval …: one join for the whole chain
+            if _depth < 4:
+                found.extend(script_runs_loosely(" ".join(argv[evals:]), _depth + 1))
             continue
         redirects = [t for t in argv if t.startswith(("<", "0<"))]
         argv = [t for t in argv if t not in redirects]
@@ -1572,7 +1587,54 @@ def stdin_feeders(command: str) -> list[tuple[list[str], list[str] | None]]:
 _HEREDOC_OPS = ("<<<", "<<-", "<<")
 
 
-def loose_code_reader(command: str) -> str | None:
+def _stdin_reader(argv: list[str], depth: int = 0) -> str | None:
+    """The shell or interpreter that ``argv`` runs reading its code from
+    standard input, through ``exec``/``builtin``/``eval``, launchers and a
+    ``-c`` string, any part of which may be it (``eval sh``, ``bash -c 'eval
+    sh'``, ``sh -c '(sh)'``, ``eval 'true; sh'``); at most four levels. Never
+    raises."""
+    if depth > 4:
+        return None
+    try:
+        argv = strip_exec_builtin(_strip_reserved(argv))
+        evals = 0
+        while evals < len(argv) and argv[evals] == "eval":
+            evals += 1
+        if evals:  # eval WORDS: the words, joined, are read again as a command line
+            return _string_reader(" ".join(argv[evals:]), depth + 1)
+        if not argv:
+            return None
+        argv, _env, _wrappers, string = _unwrap_inner(argv, 0)
+        if string is not None:
+            return _string_reader(string, depth + 1)
+        name = _basename(argv[0])
+        if _interpreter(name) and code_run(SimpleCommand(argv)) is None:
+            return name
+    except (ShellRejected, ValueError):
+        pass
+    return None
+
+
+def string_reader(text: str) -> str | None:
+    """The shell or interpreter a command-list string (``eval sh``, ``true;
+    sh``) runs reading standard input; ``None`` when there is none."""
+    return _string_reader(text, 0)
+
+
+def _string_reader(text: str, depth: int) -> str | None:
+    """:func:`_stdin_reader` for each part of a command list given as a string."""
+    for part in re.split(r"[;&|(){}\n]", text):
+        try:
+            words = shlex.split(part, comments=True)
+        except ValueError:
+            continue
+        reader = _stdin_reader(words, depth) if words else None
+        if reader:
+            return reader
+    return None
+
+
+def loose_code_reader(command: str, _depth: int = 0) -> str | None:
     """Best effort for a command the parser rejected: when a shell or
     interpreter with no script or inline-code argument reads its code from a
     pipe or a here-document/here-string (``base64 -d <<< … | sh``, ``sh <<<
@@ -1586,8 +1648,16 @@ def loose_code_reader(command: str) -> str | None:
     after_pipe = False
     previous = ""
     for text, sep in segments:
-        try:
-            words = shlex.split(text, comments=False)
+        inner = text.strip()
+        opened = len(inner) - len(inner.lstrip("("))
+        closed = len(inner) - len(inner.rstrip(")"))
+        if min(opened, closed) and _depth < 4:  # a subshell: (cd x; … | sh)
+            found = loose_code_reader(inner[min(opened, closed):-min(opened, closed)],
+                                      _depth + 1)
+            if found is not None:
+                return found
+        try:  # the brackets of a subshell are not part of its words
+            words = shlex.split(inner.lstrip("(").rstrip(")"), comments=False)
         except ValueError:
             words = []
         heredoc = any(w.startswith(_HEREDOC_OPS) for w in words)
@@ -1603,20 +1673,7 @@ def loose_code_reader(command: str) -> str | None:
             if w.startswith(("<", ">", "0<", "1>", "2>", "&>")):
                 continue
             argv.append(w)
-        reader = None
-        try:
-            argv = strip_exec_builtin(_strip_reserved(argv))
-            while argv and argv[0] == "eval":  # | eval sh, | eval exec bash -s
-                argv = strip_exec_builtin(shlex.split(" ".join(argv[1:])))
-            if argv:
-                argv, _env, _wrappers, string = _unwrap_inner(argv, 0)
-                if string is not None:  # | bash -c "exec sh": the string's program reads it
-                    argv = strip_exec_builtin(shlex.split(string)) or argv
-                name = _basename(argv[0])
-                if _interpreter(name) and code_run(SimpleCommand(argv)) is None:
-                    reader = name
-        except (ShellRejected, ValueError):
-            pass
+        reader = _stdin_reader(argv)
         if reader and (heredoc or after_pipe):
             return "a here-document" if heredoc else (previous or "a pipe")
         after_pipe = sep in _PIPE_SEPARATORS
