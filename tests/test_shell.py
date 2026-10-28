@@ -272,6 +272,53 @@ def test_unwrap_merges_env_from_inside_sh_c():
     assert env == {"A": "1", "B": "2"}
 
 
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        # round 6: package and environment managers that run a command
+        (["uv", "run", "kubectl", "delete", "nodes", "--all"],
+         ["kubectl", "delete", "nodes", "--all"]),
+        (["uv", "run", "--with", "x", "--frozen", "kubectl", "get", "pods"],
+         ["kubectl", "get", "pods"]),
+        (["uv", "run", "--", "kubectl", "get", "pods"], ["kubectl", "get", "pods"]),
+        (["uv", "run", "-m", "pytest"], ["python", "-m", "pytest"]),
+        (["uv", "run", "script.py", "a"], ["python", "script.py", "a"]),
+        (["uv", "tool", "run", "--from", "x", "kubectl"], ["kubectl"]),
+        (["uvx", "kubectl", "get", "pods"], ["kubectl", "get", "pods"]),
+        (["pipx", "run", "--spec", "x", "kubectl"], ["kubectl"]),
+        (["poetry", "run", "kubectl", "get", "pods"], ["kubectl", "get", "pods"]),
+        (["bundle", "exec", "kubectl", "get", "pods"], ["kubectl", "get", "pods"]),
+        (["asdf", "exec", "kubectl", "get", "pods"], ["kubectl", "get", "pods"]),
+        (["gem", "exec", "kubectl"], ["kubectl"]),
+        (["mise", "exec", "node@20", "--", "kubectl", "get", "pods"], ["kubectl", "get", "pods"]),
+        (["mise", "x", "-C", "dir", "--", "kubectl"], ["kubectl"]),
+        (["mise", "exec", "-c", "kubectl get pods"], ["kubectl", "get", "pods"]),
+        (["brew", "bundle", "exec", "--", "kubectl"], ["kubectl"]),
+        (["sudo", "uv", "run", "k", "get", "pods"], ["kubectl", "get", "pods"]),
+        # not a running subcommand: left alone
+        (["uv", "pip", "install", "kubectl"], ["uv", "pip", "install", "kubectl"]),
+        (["pipx", "install", "kubectl"], ["pipx", "install", "kubectl"]),
+        (["mise", "exec", "node@20"], ["mise", "exec", "node@20"]),
+        (["brew", "--prefix", "kubectl"], ["brew", "--prefix", "kubectl"]),
+        (["uv", "--version"], ["uv", "--version"]),
+    ],
+)
+def test_unwrap_package_manager_run_subcommands(argv, expected):
+    result, _env = unwrap(argv)
+    assert result == expected
+
+
+@pytest.mark.parametrize("argv", [
+    ["uv", "run", "--frobnicate", "kubectl", "delete", "nodes", "--all"],
+    ["uv", "--directory", "d", "run", "kubectl", "delete", "nodes", "--all"],
+    ["pipx", "run", "--bogus", "kubectl"],
+    ["poetry", "run", "--bogus", "kubectl"],
+])
+def test_unwrap_rejects_unknown_run_options(argv):
+    with pytest.raises(ShellRejected):
+        unwrap(argv)
+
+
 def test_unwrap_does_not_mutate_its_argument():
     argv = ["sudo", "k", "get", "pods"]
     unwrap(argv)

@@ -54,6 +54,18 @@ behaviour.
   options are still read (`rsync -e`/`--rsh`, `scp -o ProxyCommand=`/`-S`, `nix-shell
   --run`/`--command`), and arguments that are URLs, file names or a `-d dir` value naming an
   existing directory.
+- Shell parser: package and environment managers that run a command are unwrapped, so the
+  command meets the policy: `uv run`, `uv tool run`, `uvx`, `pipx run`, `poetry run`, `bundle
+  exec`, `asdf exec`, `gem exec`, `mise exec`/`mise x` (`… -- CMD`, `-c STRING`) and `brew bundle
+  exec -- CMD`. `uv run kubectl delete nodes --all` gave only a `uv` intent and was allowed,
+  since `uv` and `pipx` take a tool's name in their other subcommands (`uv pip install kubectl`,
+  `pipx install kubectl`, which are still allowed). An option these parsers do not know, or an
+  option before the subcommand (`uv --directory d run …`), is rejected. `uv run -m mod` and `uv
+  run script.py` are read as `python -m mod` and `python script.py`. `cargo run` and `go run`,
+  which build a program and hand it the remaining words, now ask when those words name an
+  infrastructure tool, like any unknown program. The hook also asks when a git configuration
+  value names one (`git -c alias.x='!kubectl …' x`, `git -c core.sshCommand=… fetch`, `git config
+  alias.x '!kubectl …'`): git runs such values where their argv cannot be checked.
 - Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
   own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
   policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a

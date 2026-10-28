@@ -779,6 +779,123 @@ _LAUNCHER_OPTIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
 }
 
 
+# Package and environment managers whose subcommand runs a command in the
+# project's environment: ``uv run kubectl …`` runs kubectl. Keyed by the
+# program and the words of the subcommand; the value is (options that take a
+# value, options that don't). ``--`` ends the options; any other option is
+# rejected, so an unknown one cannot hide the command.
+_UV_COMMON_VALUED = frozenset({
+    "--with", "--with-editable", "--with-requirements", "--python", "-p", "--index",
+    "--default-index", "--index-url", "-i", "--extra-index-url", "--find-links", "-f",
+    "--index-strategy", "--keyring-provider", "--resolution", "--prerelease", "--link-mode",
+    "--exclude-newer", "--config-setting", "-C", "--config-file", "--cache-dir", "--color",
+    "--directory", "--project", "--python-platform", "--refresh-package",
+    "--reinstall-package", "--upgrade-package", "-P", "--no-binary-package",
+    "--no-build-package", "--env-file", "--allow-insecure-host",
+})
+_UV_COMMON_FLAGS = frozenset({
+    "-q", "--quiet", "-v", "--verbose", "--offline", "--no-cache", "-n", "--refresh",
+    "--reinstall", "--upgrade", "-U", "--native-tls", "--no-progress", "--preview",
+    "--no-config", "--isolated", "--no-python-downloads", "--no-env-file", "--no-build",
+    "--no-binary", "--compile-bytecode", "--no-sources",
+})
+_SUBCOMMAND_LAUNCHERS: dict[tuple[str, ...], tuple[frozenset[str], frozenset[str]]] = {
+    ("uv", "run"): (
+        _UV_COMMON_VALUED | {"--extra", "--group", "--only-group", "--no-group", "--package"},
+        _UV_COMMON_FLAGS | {"--all-extras", "--no-dev", "--dev", "--only-dev", "--frozen",
+                            "--locked", "--no-sync", "--no-project", "--active",
+                            "--no-editable", "--exact", "--inexact", "--all-packages",
+                            "--all-groups", "--no-default-groups", "--script", "-s",
+                            "--gui-script"}),
+    ("uv", "tool", "run"): (_UV_COMMON_VALUED | {"--from"}, _UV_COMMON_FLAGS),
+    ("uvx",): (_UV_COMMON_VALUED | {"--from"}, _UV_COMMON_FLAGS),
+    ("pipx", "run"): (
+        frozenset({"--spec", "--python", "--pip-args", "--index-url", "-i"}),
+        frozenset({"--no-cache", "--path", "--pypackages", "--system-site-packages", "-q",
+                   "--quiet", "-v", "--verbose", "--fetch-missing-python"})),
+    ("poetry", "run"): (
+        frozenset({"-C", "--directory", "-P", "--project"}),
+        frozenset({"-q", "--quiet", "-v", "-vv", "-vvv", "--verbose", "-n",
+                   "--no-interaction", "--ansi", "--no-ansi", "--no-plugins", "--no-cache"})),
+    ("bundle", "exec"): (frozenset(), frozenset({"--keep-file-descriptors"})),
+    ("asdf", "exec"): (frozenset(), frozenset()),
+    ("gem", "exec"): (frozenset({"-v", "--version", "-g", "--gem"}),
+                      frozenset({"--conservative", "--prerelease"})),
+}
+# ``mise exec [TOOL@VERSION…] -- CMD``, ``mise exec -c STRING``, ``brew bundle
+# exec -- CMD``: the command follows ``--`` (or is a shell string).
+_DOUBLE_DASH_LAUNCHERS: dict[tuple[str, ...], tuple[frozenset[str], frozenset[str]]] = {
+    ("mise", "exec"): (frozenset({"-C", "--cd", "-j", "--jobs", "-c", "--command"}),
+                       frozenset({"--raw", "-q", "--quiet", "-v", "--verbose", "-y", "--yes",
+                                  "--no-prepare"})),
+    ("mise", "x"): (frozenset({"-C", "--cd", "-j", "--jobs", "-c", "--command"}),
+                    frozenset({"--raw", "-q", "--quiet", "-v", "--verbose", "-y", "--yes",
+                               "--no-prepare"})),
+    ("brew", "bundle", "exec"): (frozenset({"--file"}), frozenset({"--services", "-v",
+                                                                   "--verbose"})),
+}
+
+
+def _subcommand_launcher(argv: list[str]) -> tuple[tuple[str, ...], int] | None:
+    """The key of :data:`_SUBCOMMAND_LAUNCHERS` or :data:`_DOUBLE_DASH_LAUNCHERS`
+    that ``argv`` starts with, and how many words it spans; ``None`` when it is
+    not one (``uv pip install x``, ``pipx install x``). Options before the
+    subcommand are rejected when a running subcommand follows them (``uv
+    --directory d run …``): they are rare, and an option value could hide
+    which subcommand runs."""
+    head = _basename(argv[0])
+    for table in (_SUBCOMMAND_LAUNCHERS, _DOUBLE_DASH_LAUNCHERS):
+        for key in table:
+            if key[0] != head:
+                continue
+            words = argv[1:len(key)]
+            if list(words) == list(key[1:]):
+                return key, len(key)
+    if len(argv) > 1 and argv[1].startswith("-"):
+        for key in (*_SUBCOMMAND_LAUNCHERS, *_DOUBLE_DASH_LAUNCHERS):
+            if len(key) > 1 and key[0] == head and key[1] in argv[2:]:
+                raise ShellRejected(f"{head} option {argv[1]!r} before the {key[1]} subcommand")
+    return None
+
+
+def _strip_subcommand_launcher(
+    key: tuple[str, ...], rest: list[str]
+) -> tuple[list[str], str | None]:
+    """``(argv, shell_string)`` after a subcommand launcher's options. For the
+    ``--`` launchers, ``argv`` is what follows ``--`` (empty without one)."""
+    double_dash = key in _DOUBLE_DASH_LAUNCHERS
+    valued, flags = (_DOUBLE_DASH_LAUNCHERS if double_dash else _SUBCOMMAND_LAUNCHERS)[key]
+    name = " ".join(key)
+    i = 0
+    while i < len(rest):
+        tok = rest[i]
+        if tok == "--":
+            return rest[i + 1:], None
+        if not tok.startswith("-") or tok == "-":
+            if double_dash:  # mise exec node@20 -- …: tool versions until --
+                i += 1
+                continue
+            break
+        opt, eq, glued = tok.partition("=")
+        if double_dash and opt in ("-c", "--command"):
+            return [], glued if eq else (rest[i + 1] if i + 1 < len(rest) else "")
+        if opt in valued:
+            i += 1 if eq else 2
+            continue
+        if tok in flags:
+            i += 1
+            continue
+        if key == ("uv", "run") and tok in ("-m", "--module"):
+            return ["python", "-m", *rest[i + 1:]], None
+        raise ShellRejected(f"unrecognised {name} option {tok!r}")
+    if double_dash:
+        return [], None
+    rest = rest[i:]
+    if key == ("uv", "run") and rest and rest[0].endswith(".py"):
+        return ["python", *rest], None  # uv run script.py runs it with Python
+    return rest, None
+
+
 def _strip_launcher(head: str, rest: list[str]) -> tuple[list[str], str | None]:
     """``(argv, shell_string)`` after a launcher's options: ``shell_string``
     is set for ``script -c CMD`` and for ``watch`` without ``-x``, whose
@@ -914,6 +1031,20 @@ def _unwrap_inner(
             if not rest:
                 break
             wrappers.append(head)
+            argv = rest
+            continue
+        launcher = _subcommand_launcher(argv)
+        if launcher is not None:
+            key, width = launcher
+            rest, string = _strip_subcommand_launcher(key, argv[width:])
+            if string is not None:  # mise exec -c "cmd": a shell string
+                if depth >= 1:
+                    raise ShellRejected(f"nested {' '.join(key)} command string")
+                wrappers.append(" ".join(key))
+                return argv, env, wrappers, string
+            if not rest:
+                break
+            wrappers.append(" ".join(key))
             argv = rest
             continue
         if head in _LAUNCHER_OPTIONS:

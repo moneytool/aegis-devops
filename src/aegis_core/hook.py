@@ -87,6 +87,7 @@ from aegis_core.shell import (
     split_segments,
     stdin_feeders,
     strip_comment,
+    unwrap,
 )
 
 AGENTS = ("claude", "codex", "copilot", "cursor", "gemini", "opencode", "vscode")
@@ -358,6 +359,9 @@ def _precheck(command: str, config_dir: Path, extra_args: list[str] | None,
         verdict = _hidden_infra_program(intent, cwd)
         if verdict is not None:
             asks.append(verdict.reason)
+    verdict = _git_config_command(command)
+    if verdict is not None:
+        asks.append(verdict.reason)
     if scan:
         for runs, here in _scripts_with_directory(command, cwd):
             verdict = _scan_script(runs, config_dir, extra_args, here, command=command)
@@ -438,7 +442,7 @@ def _hidden_infra_program(intent, cwd: Path | None) -> HookVerdict | None:
     name = _basename(argv[0])
     if name in ARGS_ONLY_PROGRAMS or name in INFRA_BINARIES:
         return None
-    if name in _NAMES_WITHOUT_RUNNING:
+    if name in _NAMES_WITHOUT_RUNNING and not _runs_a_program(name, argv[1:]):
         # only the options that hand it a command to run are read
         for option, value in _exec_option_values(name, argv[1:]):
             if mentions_infra(value):
@@ -474,6 +478,68 @@ _EXEC_OPTIONS = {
     "scp": ("-o", "-S"),
     "nix-shell": ("--run", "--command"),
 }
+
+# Subcommands of exempt programs that build and run a program with the
+# remaining words as its arguments (``cargo run -- kubectl delete …``): there
+# the words are read like any unknown program's. The subcommands that run a
+# command directly (``uv run``, ``pipx run``, ``mise exec`` …) are unwrapped
+# by the shell parser instead, so the command itself is checked.
+_PROGRAM_RUNNING_SUBCOMMANDS = {
+    "cargo": frozenset({"run", "r"}),
+    "go": frozenset({"run"}),
+    "uv": frozenset({"run", "tool"}),
+    "pipx": frozenset({"run"}),
+    "mise": frozenset({"exec", "x"}),
+    "asdf": frozenset({"exec"}),
+    "gem": frozenset({"exec"}),
+    "brew": frozenset({"bundle"}),
+}
+
+
+def _runs_a_program(name: str, args: list[str]) -> bool:
+    """Whether ``name args…`` is a subcommand of an exempt program that runs a
+    program (:data:`_PROGRAM_RUNNING_SUBCOMMANDS`); its first non-option word
+    decides."""
+    subcommands = _PROGRAM_RUNNING_SUBCOMMANDS.get(name)
+    if not subcommands:
+        return False
+    first = next((tok for tok in args if not tok.startswith("-")), None)
+    return first in subcommands
+
+
+def _git_config_command(command: str) -> HookVerdict | None:
+    """``git -c alias.x='!kubectl …' x``, ``git -c core.sshCommand=CMD fetch``
+    and ``git config alias.x '!kubectl …'`` hand git a command it runs (now or
+    later) where its argv cannot be checked: asked when that configuration
+    value names an infrastructure tool. The git intent itself only records
+    the subcommand."""
+    for text, _sep in split_segments(command) or [(command, "")]:
+        loose = loose_argv(text)
+        if not loose:
+            continue
+        try:
+            argv, _env = unwrap(loose)
+        except ShellRejected:
+            continue
+        if not argv or _basename(argv[0]) != "git":
+            continue
+        args, values, i = argv[1:], [], 0
+        while i < len(args) and args[i].startswith("-"):  # global options
+            opt, eq, glued = args[i].partition("=")
+            if opt in ("-c", "--config-env", "-C", "--git-dir", "--work-tree", "--namespace"):
+                if opt in ("-c", "--config-env"):
+                    values.append(glued if eq else (args[i + 1] if i + 1 < len(args) else ""))
+                i += 1 if eq else 2
+                continue
+            i += 1
+        if i < len(args) and args[i] == "config":
+            values += args[i + 1:]
+        if any(mentions_infra(value) for value in values):
+            return HookVerdict(
+                "ask", "aegis: this git configuration names an infrastructure tool, which "
+                "git may run (an alias, sshCommand, pager or editor) where it cannot be "
+                "checked; run the infrastructure command on its own")
+    return None
 
 
 def _exec_option_values(name: str, args: list[str]) -> list[tuple[str, str]]:

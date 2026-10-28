@@ -1391,6 +1391,55 @@ def test_naming_an_infra_tool_without_running_it_is_allowed(opted_in_project, co
     assert (code, out) == (0, ""), (out, err)
 
 
+@pytest.mark.parametrize("command", [
+    # round 6: a package or environment manager running the blocked command
+    f"uv run {BLOCK_COMMAND}", f"uv run --with x {BLOCK_COMMAND}", f"uv run -- {BLOCK_COMMAND}",
+    f"uv tool run {BLOCK_COMMAND}", f"uvx {BLOCK_COMMAND}", f"pipx run {BLOCK_COMMAND}",
+    f"poetry run {BLOCK_COMMAND}", f"bundle exec {BLOCK_COMMAND}", f"asdf exec {BLOCK_COMMAND}",
+    f"gem exec {BLOCK_COMMAND}", f"mise exec -- {BLOCK_COMMAND}",
+    f"mise x node@20 -- {BLOCK_COMMAND}",
+    f"mise exec -c '{BLOCK_COMMAND}'", f"brew bundle exec -- {BLOCK_COMMAND}",
+    # an option the parser does not know, or one before the subcommand, fails closed
+    f"uv run --frobnicate {BLOCK_COMMAND}", f"uv --directory d run {BLOCK_COMMAND}",
+])
+def test_a_package_manager_running_a_blocked_command_is_denied(opted_in_project, command):
+    code, out, err = run("claude", payload_for("claude", command))
+    assert code == 2, (out, err)
+
+
+@pytest.mark.parametrize(("command", "program"), [
+    # round 6: these build and run a program, which gets the words as arguments
+    (f"cargo run -- {BLOCK_COMMAND}", "cargo"), (f"go run . {BLOCK_COMMAND}", "go"),
+])
+def test_a_built_program_given_an_infra_command_asks(opted_in_project, command, program):
+    code, out, err = run("claude", payload_for("claude", command))
+    assert f"{program} may run kubectl" in _ask_reason(out)
+
+
+@pytest.mark.parametrize("command", [
+    f"git -c alias.x='!{BLOCK_COMMAND}' x",
+    f"git -c core.sshCommand='{BLOCK_COMMAND}' fetch",
+    f"git config alias.x '!{BLOCK_COMMAND}'",
+])
+def test_git_configuration_that_runs_an_infra_command_asks(opted_in_project, command):
+    code, out, err = run("claude", payload_for("claude", command))
+    assert "this git configuration names an infrastructure tool" in _ask_reason(out)
+
+
+@pytest.mark.parametrize("command", [
+    # round 6: ordinary package-manager use is not affected
+    "uv run pytest", "uv run -m pytest -q", "uv pip install kubectl", "uv add kubectl",
+    "uv sync", "uv --version", "pipx install kubectl", "poetry run pytest", "poetry install",
+    "cargo run --release", "cargo build", "go run ./cmd/x", "go test ./...",
+    "bundle exec rspec", "mise install kubectl", "mise exec node@20 -- node app.js",
+    "brew --prefix kubectl", "asdf install kubectl 1.31.0", "gem install kubectl",
+    "git -c color.ui=always log", "git commit -m 'bump kubectl'", "uv run kubectl get pods",
+])
+def test_ordinary_package_manager_commands_are_allowed(opted_in_project, command):
+    code, out, err = run("claude", payload_for("claude", command))
+    assert (code, out) == (0, ""), (out, err)
+
+
 def test_a_here_doc_delimiter_with_quoted_whitespace(opted_in_project):
     # round 3: the delimiter is the whole word 'END DATA', not END
     body = f"cat <<'END DATA'\nhello\nEND\nEND DATA\n{BLOCK_COMMAND}\n"
