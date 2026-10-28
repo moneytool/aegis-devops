@@ -191,17 +191,20 @@ class _T(NamedTuple):
     escaped: bool = False  # an E'', U&'' or backslash-escaped literal
 
 
-_WS_RE = re.compile(r"\s+")
+# Only ASCII whitespace separates tokens: PostgreSQL, MySQL and SQLite read any
+# other character (a no-break space, U+3000, …) as part of an identifier.
+_WS_CHARS = " \t\n\r\f\v"
+_WS_RE = re.compile(r"[ \t\n\r\f\v]+")
 _EXEC_OPEN_RE = re.compile(r"/\*M?!\d*")
 _COMMENT_MARK_RE = re.compile(r"/\*|\*/")
 _DOLLAR_OPEN_RE = re.compile(r"\$(?:[^\W\d][\w]*)?\$")
 _CHARSET_PREFIX_RE = re.compile(r"_[A-Za-z0-9]+(?=')")
 _UESCAPE_RE = re.compile(r"UESCAPE(?![\w$])", re.IGNORECASE)
-_WORD_RE = re.compile(r"[^\W\d][\w$]*")
+_WORD_RE = re.compile(r"(?:[^\W\d]|[^\x00-\x7f])(?:[\w$]|[^\x00-\x7f])*")
 _NUM_RE = re.compile(r"\d+(?:\.\d*)?(?:[eE][+-]?\d+)?|\.\d+")
 # MySQL identifiers may start with a digit or `$` (`2fa_codes`, `$secret`); a
 # word that is all digits, or a number with an exponent, is still a number.
-_MYSQL_IDENT_RE = re.compile(r"[\d$][\w$]*")
+_MYSQL_IDENT_RE = re.compile(r"[\d$](?:[\w$]|[^\x00-\x7f])*")
 _MYSQL_NUMBER_RE = re.compile(r"\d+(?:[eE][+-]?\d+)?|0[xX][0-9a-fA-F]+|0[bB][01]+")
 _PARAM_RE = re.compile(r"\$\d+")
 _VAR_RE = re.compile(r"@@?(?:[\w$.]+|'(?:[^'\\]|\\.|'')*'|\"(?:[^\"\\]|\\.|\"\")*\"|`[^`]*`)")
@@ -261,6 +264,12 @@ def _decode_unicode(body: str, esc: str) -> str:
 _LINE_END_RE = re.compile(r"[\n\r]")
 _START_TRANSACTION_RE = re.compile(r"\s*START\s+TRANSACTION\b", re.IGNORECASE)
 _CLIENT_COMMAND_RE = re.compile(r"\\([A-Za-z]+|[!.?#])")
+_DOT_COMMAND_RE = re.compile(r"\.([A-Za-z]+)")
+# sqlite3 dot-commands that only set how results are shown.
+_FORMAT_DOT_COMMANDS = frozenset({
+    "mode", "headers", "header", "separator", "nullvalue", "width", "timeout", "bail",
+    "echo", "changes", "timer", "eqp", "explain", "stats", "prompt",
+})
 
 
 def _line_comment_end(sql: str, i: int, cr: bool) -> int:
@@ -279,7 +288,7 @@ def _skip_noise(sql: str, i: int, nested: bool, cr: bool = False) -> int:
     or a ``--`` / ``/* */`` comment."""
     n = len(sql)
     while i < n:
-        if sql[i].isspace():
+        if sql[i] in _WS_CHARS:
             i += 1
         elif sql.startswith("--", i):
             i = _line_comment_end(sql, i, cr)
@@ -344,7 +353,7 @@ def _lex(sql: str, dialect: str) -> list[_Statement]:
 
     while i < n:
         ch = sql[i]
-        if ch.isspace():
+        if ch in _WS_CHARS:
             i = _WS_RE.match(sql, i).end()  # type: ignore[union-attr]
             gap = True
             continue
@@ -354,7 +363,7 @@ def _lex(sql: str, dialect: str) -> list[_Statement]:
             gap = True
             continue
         if (ch == "-" and sql.startswith("--", i)
-                and (not mysql or i + 2 >= n or sql[i + 2].isspace())) or (ch == "#" and mysql):
+                and (not mysql or i + 2 >= n or sql[i + 2] in _WS_CHARS)) or (ch == "#" and mysql):
             # Postgres ends a -- comment at a carriage return too
             i = _line_comment_end(sql, i, cr=dialect in ("postgres", "generic"))
             gap = had_comment = True
@@ -491,9 +500,11 @@ def _lex(sql: str, dialect: str) -> list[_Statement]:
             rest = sql[i:line_end].strip()
             if name in ("g", "G", "gx") and not rest.startswith("|"):
                 # mysql: the next statement may follow on the same line; psql: the
-                # rest of the line is a file the output goes to
+                # rest of the line is a file the output is written to
                 if not mysql:
                     i = line_end
+                    if rest:
+                        flags.add("client_command")  # \g FILE writes FILE
                 if toks or had_comment:
                     statements.append((toks, had_comment, frozenset(flags)))
                 toks, had_comment, gap, flags = [], False, False, set()
@@ -505,9 +516,12 @@ def _lex(sql: str, dialect: str) -> list[_Statement]:
             continue
         if ch == "." and dialect == "sqlite" and not toks and (
                 i == 0 or sql[i - 1] in "\n\r" or sql[:i].strip() == ""):
-            # a sqlite3 dot-command (.shell, .system, .import, .read …) at a line start
-            flags.add("client_command")
-            had_comment = True
+            # a sqlite3 dot-command (.shell, .system, .import, .read …) at a line
+            # start; the ones that only set the output format are left alone
+            dot = _DOT_COMMAND_RE.match(sql, i)
+            if dot is None or dot.group(1).lower() not in _FORMAT_DOT_COMMANDS:
+                flags.add("client_command")
+                had_comment = True
             i = _line_comment_end(sql, i, cr=False)
             gap = True
             continue
@@ -711,6 +725,11 @@ def _norm_ident(tok: _T) -> str:
     return tok.value.lower() if tok.kind == "word" else tok.value
 
 
+# Statements that may open a bracket group in an UPDATE's table list; each is
+# its own op, so the group walk does not read into it.
+_GROUP_STATEMENTS = ("UPDATE", "DELETE", "INSERT", "REPLACE", "MERGE")
+
+
 def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
     n = len(toks)
     scan = _Scan()
@@ -826,13 +845,23 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
     # ``(`` positions parse_ref descended into (``FROM (a, b)``, ``JOIN (b JOIN
     # c)``): a table list continues inside them.
     ref_parens: set[int] = set()
+    block_of: dict[int, int] = {}  # query_block of a ref_parens bracket
 
     def query_block(j: int) -> int:
         """The query block of position ``j``: its enclosing bracket, skipping
-        the brackets of a table list (``FROM (a, b)`` is the outer block's)."""
+        the brackets of a table list (``FROM (a, b)`` is the outer block's).
+        A table-list bracket is marked before anything inside it is read, so
+        its answer is kept (nested ``JOIN (`` groups stay linear)."""
         block = encl[j]
+        path = []
         while block in ref_parens:
+            if block in block_of:
+                block = block_of[block]
+                break
+            path.append(block)
             block = encl[block]
+        for p in path:
+            block_of[p] = block
         return block
 
     def mark_alias(m: int, table: list[str] | None = None) -> None:
@@ -915,7 +944,11 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
     def group_targets(open_at: int, targets: list[list[str]]) -> None:
         """The tables of a bracketed join group (``(secret s JOIN other o ON
         1)``, ``(a, b)``): its first table and each one after ``,`` or JOIN, at
-        any depth; a subquery inside it is skipped. Each token is read once."""
+        any depth; a subquery inside it is skipped, and so is a statement
+        inside it (``JOIN (UPDATE …``), which reports its own targets, so each
+        token is read by one walk at most."""
+        if _is_word(tok(open_at + 1), *_GROUP_STATEMENTS):
+            return
         close = close_of[open_at]
         p = open_at + 1
         expect = True  # a table name may start here
@@ -924,7 +957,7 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
             if _is_punct(tp, "("):
                 if p not in close_of:
                     return
-                if _is_word(tok(p + 1), *_SUBQUERY_START):
+                if _is_word(tok(p + 1), *_SUBQUERY_START, *_GROUP_STATEMENTS):
                     p = close_of[p] + 1
                     expect = False
                     continue
@@ -1100,9 +1133,12 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
             last_kw[d] = u
             from_list[d] = False
             continue
-        if u == "REPLACE" and prev is None and not _is_punct(tok(i + 1), "("):
-            # MySQL/SQLite REPLACE [INTO] t: an insert that first deletes
-            # the rows it conflicts with.
+        if u == "REPLACE" and (
+            prev is None or i in cte_list_ends
+            or (first_word == "WITH" and _is_punct(prev, ")"))
+        ) and not _is_punct(tok(i + 1), "("):
+            # MySQL/SQLite REPLACE [INTO] t (also after a WITH list): an insert
+            # that first deletes the rows it conflicts with.
             op = parse_op(i, u)
             scan.ops.append(op)
             query_at[d] = True
@@ -1150,6 +1186,9 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
                     op.action = action
             continue
 
+        if u == "IN" and dialect == "sqlite" and _is_name(tok(i + 1)):
+            parse_ref(i + 1)  # sqlite: `x IN t` reads table t
+            continue
         if u == "FROM":
             # not a table list: DELETE FROM t (the op's target), IS [NOT]
             # DISTINCT FROM x, ROWS FROM (f(), g()); `1 rows FROM t` and `0 delete
@@ -1824,6 +1863,10 @@ def _classify_tokens(toks: list[_T], dialect: str) -> list[_Classification]:
     if first_word == "START" and not _START_TRANSACTION_RE.match(body):
         # START REPLICA / SLAVE / GROUP_REPLICATION change the server
         return [("unknown/*", "update", {"unclassified": True}, "dml", first_word, {})]
+    if first_word == "SET" and any(_is_word(t, "SELECT", "TABLE") for t in toks):
+        # SET @a = (SELECT secret FROM users): the tables its subqueries read
+        return _scan_results(_scan(toks, first_word, dialect), first_word=first_word,
+                             primary=[("session/*", "read", {}, "tcl", first_word, {})])
     if first_word in ("BEGIN", "COMMIT", "ROLLBACK", "SET", "START"):
         return [("session/*", "read", {}, "tcl", first_word, {})]
 
@@ -1947,12 +1990,15 @@ def from_sql(
 # --- psql / mysql / sqlite3 argv wrappers -------------------------------------
 
 
-# Short options of psql/mysql that take a value, so letters after them in a
-# bundle (`-dcars`, `-psecret`) are that value, not more options.
-_SHORT_VALUED = frozenset("dhpUfvPFRTouDS")
+# Short options of psql / mysql that take a value, so letters after them in a
+# bundle (`-dcars`, `-psecret`) are that value, not more options. mysql's -f,
+# -v, -U, -o, -T and psql's -S take none (`mysql -fe 'SQL'`, `psql -Sc 'SQL'`).
+_PSQL_SHORT_VALUED = frozenset("dhpUfvPFRToL")
+_MYSQL_SHORT_VALUED = frozenset("DhPupS")
 
 
-def _bundled_command(tok: str, letters: set[str]) -> tuple[str | None, bool] | None:
+def _bundled_command(tok: str, letters: set[str],
+                     valued: frozenset[str]) -> tuple[str | None, bool] | None:
     """For a bundle of short options (``-Atc``, ``-cSELECT 1``, ``-BNe``): the
     SQL text attached to the command option and whether it is the next word
     instead; ``None`` when the bundle holds no command option."""
@@ -1960,7 +2006,7 @@ def _bundled_command(tok: str, letters: set[str]) -> tuple[str | None, bool] | N
         if letter in letters:
             rest = tok[k + 1:]
             return (rest, False) if rest else (None, True)
-        if letter in _SHORT_VALUED or not letter.isalpha():
+        if letter in valued or not letter.isalpha():
             return None
     return None
 
@@ -1968,6 +2014,8 @@ def _bundled_command(tok: str, letters: set[str]) -> tuple[str | None, bool] | N
 def _parse_db_cli_tokens(
     tokens: list[str], *, command_flags: set[str], database_flags: set[str],
     file_flags: frozenset[str] = frozenset({"-f", "--file"}),
+    value_flags: frozenset[str] = frozenset(),
+    short_valued: frozenset[str] = frozenset(),
 ) -> tuple[str | None, str | None, list[str | None], list[str], list[str]]:
     """Shared argv walk for psql/mysql/sqlite3: returns (database, host,
     sql_texts, file_paths, positional). ``sql_texts`` and ``file_paths`` collect *every*
@@ -1989,7 +2037,7 @@ def _parse_db_cli_tokens(
             i += 1
             sql_texts.append(tokens[i] if i < n else None)  # a trailing -c: unknown SQL
         elif (len(tok) > 2 and tok[0] == "-" and tok[1] != "-"
-              and (bundled := _bundled_command(tok, short_commands)) is not None):
+              and (bundled := _bundled_command(tok, short_commands, short_valued)) is not None):
             text, takes_next = bundled  # psql -Atc 'SQL', -c'SQL', mysql -BNe 'SQL'
             if takes_next:
                 i += 1
@@ -2001,16 +2049,20 @@ def _parse_db_cli_tokens(
             i += 1
             if i < n:
                 file_paths.append(tokens[i])
+        elif tok in value_flags:
+            i += 1  # the value is not the database or SQL
         elif "--file" in file_flags and tok.startswith("--file="):
             file_paths.append(tok.split("=", 1)[1])
         elif tok in database_flags:
             i += 1
-            database = tokens[i]
+            if i < n:  # a trailing -d names no database
+                database = tokens[i]
         elif any(tok.startswith(f"{f}=") for f in database_flags if f.startswith("--")):
             database = tok.split("=", 1)[1]
         elif tok in ("-h", "--host"):
             i += 1
-            host = tokens[i]
+            if i < n:
+                host = tokens[i]
         elif tok.startswith("--host="):
             host = tok.split("=", 1)[1]
         elif tok.startswith("-") and tok != "-":
@@ -2048,6 +2100,10 @@ def _psql_variable_values(tokens: list[str]) -> list[str]:
 
 def _intent_key(intent: InfrastructureIntent) -> tuple[str, str, str]:
     return intent.resource, intent.action, repr(sorted(intent.params.items()))
+
+
+# The most of a script file (-f, -init) that is read; a larger one is opaque.
+_SQL_FILE_LIMIT = 8 * 1024 * 1024
 
 
 def _build_cli_intents(
@@ -2090,9 +2146,18 @@ def _build_cli_intents(
     for file_path in file_paths:
         from pathlib import Path
 
-        path = Path(file_path)
-        if path.exists():
-            intents.extend(from_sql(path.read_text(), dialect=dialect, database=database))
+        text = None
+        try:
+            path = Path(file_path)
+            if path.is_file():
+                with path.open("rb") as handle:
+                    data = handle.read(_SQL_FILE_LIMIT + 1)
+                if len(data) <= _SQL_FILE_LIMIT:
+                    text = data.decode("utf-8", errors="replace")
+        except OSError:
+            text = None
+        if text is not None:
+            intents.extend(from_sql(text, dialect=dialect, database=database))
         else:
             metadata: dict[str, Any] = {"dialect": dialect}
             if database is not None:
@@ -2130,7 +2195,8 @@ def from_psql(argv: list[str]) -> list[InfrastructureIntent]:
         raise ValueError(f"not a recognizable psql invocation: {argv!r}")
     tokens = argv[1:]
     database, host, sql_texts, file_paths, positional = _parse_db_cli_tokens(
-        tokens, command_flags={"-c", "--command"}, database_flags={"-d", "--dbname"}
+        tokens, command_flags={"-c", "--command"}, database_flags={"-d", "--dbname"},
+        short_valued=_PSQL_SHORT_VALUED,
     )
     if file_paths:
         # psql interpolates -v/--set/--variable values into a script (`:x`), where
@@ -2160,6 +2226,7 @@ def from_mysql(argv: list[str]) -> list[InfrastructureIntent]:
         command_flags={"-e", "--execute", "--init-command"},
         database_flags={"-D", "--database"},
         file_flags=frozenset(),
+        short_valued=_MYSQL_SHORT_VALUED,
     )
     if database is None and positional:
         database = positional[0]
@@ -2169,23 +2236,31 @@ def from_mysql(argv: list[str]) -> list[InfrastructureIntent]:
     )
 
 
+# sqlite3 options that take a value (sqlite3 options are single-dash words:
+# -csv, -batch, -cmd …; it has no short-option bundles).
+_SQLITE3_VALUED = frozenset({
+    f"{dash}{name}" for dash in ("-", "--") for name in (
+        "nullvalue", "separator", "newline", "vfs", "lookaside", "pagecache", "heap",
+        "mmap", "maxsize", "escape", "zip-file")
+})
+
+
 def from_sqlite3(argv: list[str]) -> list[InfrastructureIntent]:
     """Parses a ``sqlite3`` invocation. sqlite3 has no ``-c`` flag; SQL is
     given as a trailing positional (``sqlite3 mydb.db "DROP TABLE users;"``)
-    after the database file, or via ``-f``/``--init``."""
+    after the database file, via ``-cmd SQL`` (run first), or via
+    ``-f``/``-init``."""
     if not argv or _basename(argv[0]) != "sqlite3":
         raise ValueError(f"not a recognizable sqlite3 invocation: {argv!r}")
     tokens = argv[1:]
     database, host, sql_texts, file_paths, positional = _parse_db_cli_tokens(
-        tokens, command_flags={"-c", "--command"}, database_flags={"-d", "--dbname"},
-        file_flags=frozenset({"-f", "--init", "-init"}),
+        tokens, command_flags={"-cmd", "--cmd"}, database_flags=set(),
+        file_flags=frozenset({"-f", "--init", "-init"}), value_flags=_SQLITE3_VALUED,
     )
-    if not sql_texts:  # the SQL arguments run after any -init script
-        if len(positional) >= 2:
-            database = database or positional[0]
-            sql_texts = positional[1:]  # sqlite3 runs each SQL argument in turn
-        elif len(positional) == 1:
-            database = database or positional[0]
+    # the SQL arguments run after any -init script and -cmd command
+    if positional:
+        database = database or positional[0]
+        sql_texts = [*sql_texts, *positional[1:]]  # sqlite3 runs each SQL argument in turn
     return _build_cli_intents(
         sql_texts=sql_texts, file_paths=file_paths, database=database, host=host,
         dialect="sqlite", argv=argv,

@@ -48,10 +48,15 @@ the server. `PGOPTIONS` and an `options=` connection setting can do the same and
 Each `psql -c` text, `psql -f` script and `sqlite3` SQL argument is read on its own, as the client
 runs them; the `mysql` client joins its `-e` texts into one, so they are read both together and
 one by one. `mysql --init-command` and the values of `psql -v` (interpolated into a `-f` script)
-are read as SQL too. Client commands are not SQL: `\g` and `\G` end a statement, and any other
-backslash command (`\!`, `\.`, `\i`, `\copy`, `\o`, `\gexec`, `\g |cmd`, …) or `sqlite3`
-dot-command (`.shell`, `.system`, `.read`, …) is an unclassified write (`client_command`), since
-it may run a shell or read a file.
+are read as SQL too; so is `sqlite3 -cmd`. Client commands are not SQL: a bare `\g` / `\gx` /
+`\G` ends a statement, and any other backslash command (`\!`, `\.`, `\i`, `\copy`, `\o`,
+`\gexec`, a psql `\g` with an argument such as `\g FILE`, `\g |cmd` or `\g (format=…)`, …) or
+`sqlite3` dot-command (`.shell`, `.system`, `.read`, …) is an unclassified write
+(`client_command`), since it may run a shell, read a file or write one. The `sqlite3`
+dot-commands that only set the output format (`.mode`, `.headers`, `.separator`, `.nullvalue`,
+`.width`, `.timeout`, …) are left alone. Only ASCII whitespace separates words: a no-break space
+or another Unicode space is part of a name, as the servers read it. Under `sqlite`, `x IN t`
+reads table `t`.
 
 The body of a MySQL `/*! … */` comment is read as SQL in every dialect. `generic` does not flag
 `$$` quotes, `--x` comments or `#`, because they are too common in ordinary SQL: under

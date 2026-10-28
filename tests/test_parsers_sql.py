@@ -2316,3 +2316,98 @@ def test_round5_inputs_stay_linear(sql, dialect):
     from_sql(sql, dialect=dialect)
     assert time.perf_counter() - start < 3
 
+
+
+def _actions(intents):
+    return [(i.action, i.resource) for i in intents]
+
+
+@pytest.mark.parametrize("flags", [["-csv"], ["-batch"], ["-echo"], ["-column"],
+                                   ["-header", "-csv"], ["-separator", "|"], ["-cmd", ".mode csv"]])
+def test_sqlite3_single_dash_options_keep_the_sql_arguments(flags):
+    intents = from_sqlite3(["sqlite3", *flags, "app.db", "DELETE FROM users"])
+    assert _actions(intents) == [("delete", "table/users")]
+    assert intents[0].metadata.get("database") == "app.db"
+
+
+def test_sqlite3_cmd_is_sql_that_runs_first():
+    intents = from_sqlite3(["sqlite3", "-cmd", "DROP TABLE users", "app.db", "SELECT 1 FROM t"])
+    assert ("delete", "table/users") in _actions(intents)
+    intents = from_sqlite3(["sqlite3", "-cmd", ".shell rm -rf x", "app.db", "SELECT 1 FROM t"])
+    assert any(i.params.get("unclassified") for i in intents)
+
+
+def test_sqlite3_init_directory_is_an_opaque_script(tmp_path):
+    intents = from_sqlite3(["sqlite3", "-init", str(tmp_path), "app.db"])
+    assert [i.resource for i in intents] == [f"script/{tmp_path.name}"]
+    assert intents[0].params["unclassified"]
+
+
+@pytest.mark.parametrize("argv", [["mysql", "-fe", "DELETE FROM users"],
+                                  ["mysql", "-vvve", "DELETE FROM users"],
+                                  ["psql", "-Sc", "DELETE FROM users"]])
+def test_bundles_with_letters_that_take_no_value(argv):
+    parse = from_mysql if argv[0] == "mysql" else from_psql
+    assert _actions(parse(argv)) == [("delete", "table/users")]
+
+
+@pytest.mark.parametrize("sql", ["SELECT * FROM users WHERE x IN secrets",
+                                 "UPDATE users SET a = 1 WHERE a IN secrets",
+                                 "DELETE FROM users WHERE a NOT IN main.secrets"])
+def test_sqlite_in_table_reads_the_table(sql):
+    resources = [i.resource for i in from_sql(sql, dialect="sqlite")]
+    assert any(r in ("table/secrets", "table/main.secrets") for r in resources)
+
+
+@pytest.mark.parametrize("sql", ["SELECT * FROM users \\g /home/u/.bashrc",
+                                 "SELECT 1 \\gx /tmp/out",
+                                 "SELECT 'touch x' \\g (tuples_only=on format=unaligned) |sh"])
+def test_psql_g_with_an_argument_is_a_client_command(sql):
+    assert any(i.params.get("unclassified") for i in from_sql(sql, dialect="postgres"))
+
+
+def test_psql_bare_g_ends_the_statement():
+    intents = from_sql("SELECT * FROM users \\g\nDELETE FROM t", dialect="postgres")
+    assert _actions(intents) == [("read", "table/users"), ("delete", "table/t")]
+
+
+@pytest.mark.parametrize("sql,dialect", [
+    ("SELECT 1 AS x\u00a0$a$; DROP TABLE users; SELECT 1 AS y\u00a0$a$", "postgres"),
+    ("SELECT 1 AS x\u3000$a$; DROP TABLE users; SELECT 1 AS y\u3000$a$", "postgres"),
+    ("SELECT 1 FROM t WHERE 1 --\u00a0; DROP TABLE users", "mysql"),
+])
+def test_unicode_spaces_are_not_whitespace(sql, dialect):
+    assert ("delete", "table/users") in _actions(from_sql(sql, dialect=dialect))
+
+
+@pytest.mark.parametrize("dialect", ["sqlite", "mysql"])
+def test_replace_after_a_with_list_is_a_write(dialect):
+    sql = "WITH x AS (SELECT 1) REPLACE INTO secret SELECT * FROM x"
+    assert ("put", "table/secret") in _actions(from_sql(sql, dialect=dialect))
+
+
+def test_sqlite_format_dot_commands_are_not_client_commands():
+    intents = from_sql(".mode csv\n.headers on\nSELECT * FROM t", dialect="sqlite")
+    assert _actions(intents) == [("read", "table/t")]
+
+
+@pytest.mark.parametrize("sql", [
+    "UPDATE a JOIN (" * 20000 + "b" + ")" * 20000 + " SET x = 1",
+    "UPDATE a JOIN (" * 20000 + "b SET x = 1" + ")" * 20000,
+])
+def test_nested_update_join_groups_stay_linear(sql):
+    import time
+    start = time.perf_counter()
+    from_sql(sql, dialect="mysql")
+    assert time.perf_counter() - start < 5
+
+
+@pytest.mark.parametrize("dialect", ["mysql", "generic"])
+def test_set_with_a_subquery_reports_its_tables(dialect):
+    sql = "SET @a = (SELECT password_hash FROM users WHERE id = 1)"
+    assert ("read", "table/users") in _actions(from_sql(sql, dialect=dialect))
+
+
+def test_a_trailing_database_flag_is_ignored():
+    assert _actions(from_psql(["psql", "-c", "DELETE FROM users", "-d"])) == [
+        ("delete", "table/users")]

@@ -92,9 +92,25 @@ behaviour.
     "SELECT 1 --" -c "DROP TABLE users"` was a read). The `mysql` client joins its `-e` texts with
     a space, so they are classified both joined and one by one. `mysql --init-command` and `psql
     -v` values next to a `-f` script are classified as SQL.
-  - Client commands: `\g`/`\G` end a statement (`SELECT 1\G DELETE FROM users` hid the delete),
-    and other mysql/psql backslash commands (`\!`, `\.`, `\i`, `\copy`, `\gexec`, …) and `sqlite3`
-    dot-commands (`.shell`, `.system`, …) are unclassified writes (`client_command`). MySQL
+  - Client commands: a bare `\g`/`\G` ends a statement (`SELECT 1\G DELETE FROM users` hid the
+    delete), and other mysql/psql backslash commands (`\!`, `\.`, `\i`, `\copy`, `\gexec`, a psql
+    `\g FILE`/`\g |cmd`/`\g (…)`, …) and `sqlite3` dot-commands (`.shell`, `.system`, …; not the
+    output-format ones such as `.mode` and `.headers`) are unclassified writes (`client_command`).
+  - Only ASCII whitespace separates words. A no-break space (or U+3000, U+2028, …) was taken as
+    a space, while PostgreSQL, MySQL and SQLite read it as part of a name: `SELECT 1 AS x<NBSP>$a$;
+    DROP TABLE users; …` hid the drop inside a fake dollar quote, and a MySQL `--<NBSP>` was taken
+    for a comment.
+  - `sqlite3`: its single-dash options (`-csv`, `-batch`, `-echo`, `-column`, `-header`) are no
+    longer read as `-c` bundles that swallowed the SQL arguments; `-cmd SQL` is read as SQL that
+    runs before them, and the values of `-separator`, `-nullvalue` and similar options are not
+    taken for the database. `mysql -fe`/`-vvve` and `psql -Sc` bundles are read. A `-f`/`-init`
+    file that is a directory, unreadable or over 8 MiB is an opaque, unclassified script instead
+    of an error. Under `sqlite`, `x IN t` (a table on the right of `IN`) reads `t`, and `WITH …
+    REPLACE INTO t …` is a write like `WITH … INSERT OR REPLACE`. `aegis check sql --dialect
+    NAME` with an unknown name now records `"dialect": "generic"` in the intent metadata.
+  - `SET @a = (SELECT … FROM users)` reports the tables its subqueries read beside the `session/*`
+    read. Nested `UPDATE a JOIN (…` groups are read in linear time (they were quadratic: 20,000
+    levels took minutes). A trailing `-d`/`-h` with no value is ignored instead of an error. MySQL
     identifiers that start with a digit or `$` (`2fa_codes`, `app.2fa_codes`) are read as names,
     `FROM { OJ … }` reports its tables, and only `START TRANSACTION` is a session read (`START
     REPLICA` is unclassified).
