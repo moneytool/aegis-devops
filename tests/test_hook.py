@@ -872,3 +872,12 @@ def test_sql_past_the_decision_budget_fails_closed(opted_in_project, command):
 def test_startup_sql_files_named_in_the_environment_ask(opted_in_project, command):
     code, out, err = run("claude", payload_for("claude", command))
     assert '"ask"' in out, (code, out, err)
+
+
+@pytest.mark.parametrize("client", ["psql", '"ps"ql', "p\\sql"])
+def test_the_budget_refusal_holds_for_any_spelling(opted_in_project, client):
+    (opted_in_project / "filler.sql").write_text("SELECT 1 FROM t;\n" * (1048566 // 17))
+    command = f"{client} -f filler.sql; {client} -f filler.sql; {client} -c 'DROP TABLE users'"
+    code, out, err = run("claude", payload_for("claude", command))
+    assert code == 2, (out, err)
+    assert "cannot parse" in err

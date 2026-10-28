@@ -2600,9 +2600,22 @@ def test_each_version_threshold_is_read(sql, dialect):
     assert ("delete", "table/users") in _actions(from_sql(sql, dialect=dialect))
 
 
-def test_many_comment_versions_are_flagged():
-    sql = " ".join(f"/*!{v} x */" for v in range(10000, 10010)) + " select 1"
-    assert any(i.params.get("ambiguous_comment") for i in from_sql(sql, dialect="mysql"))
+def test_every_comment_version_is_read():
+    sql = ("select 1 /*!10000 */ /*!20000 */ /*!30000 */ /*!40000 ; */ /*!99999 select 1 from */ "
+           "drop table users")
+    assert ("delete", "table/users") in _actions(from_sql(sql, dialect="mysql"))
+
+
+def test_many_versioned_readings_fail_closed_in_time():
+    import time
+
+    from aegis_core.parsers.sql import SqlBudgetExceeded
+
+    text = "/*!1 */ /*!2 */ /*!3 */ /*!4 */ SELECT 1 FROM " + ",".join(["a"] * 30000) + ";"
+    start = time.perf_counter()
+    with pytest.raises(SqlBudgetExceeded):
+        from_mysql(["mysql", *[w for _ in range(16) for w in ("-e", text)]])
+    assert time.perf_counter() - start < 15
 
 
 def test_a_script_name_with_a_nul_is_opaque():
@@ -2624,9 +2637,56 @@ def test_mysql_option_files_are_read(tmp_path):
     cnf.write_text("[client]\ninit_command = DROP TABLE users\n")
     intents = from_mysql(["mysql", f"--defaults-extra-file={cnf}", "-e", "SELECT 1"])
     assert ("delete", "table/users") in _actions(intents)
-    missing = from_mysql(["mysql", "--defaults-file=/nonexistent.cnf", "-e", "SELECT 1"])
-    assert any(i.resource == "script/nonexistent.cnf" and i.params["unclassified"] for i in missing)
 
 
 def test_generic_reads_an_unversioned_executable_comment_both_ways():
     assert ("delete", "table/users") in _actions(from_sql("/*! select 1 from */ drop table users"))
+
+
+@pytest.mark.parametrize("sql", ["delimiter //\nselect 1 // drop table users //",
+                                 "\\d //\nselect 1 // drop table users",
+                                 "DELIMITER $$\nCREATE PROCEDURE p() BEGIN SELECT 1; END $$\n"
+                                 "DELIMITER ;\nDROP TABLE users;"])
+def test_mysql_client_delimiter_lines_are_applied(sql):
+    assert ("delete", "table/users") in _actions(from_sql(sql, dialect="mysql"))
+
+
+def test_mysql_option_file_includes_and_delimiter(tmp_path):
+    from aegis_core.parsers.sql import SqlBudgetExceeded
+
+    (tmp_path / "inner.cnf").write_text("[client]\ninit-command=DROP TABLE users\n")
+    (tmp_path / "outer.cnf").write_text(f"[client]\n!include {tmp_path / 'inner.cnf'}\n")
+    (tmp_path / "delim.cnf").write_text("[mysql]\ndelimiter=//\n")
+    outer = from_mysql(["mysql", f"--defaults-extra-file={tmp_path / 'outer.cnf'}", "-e",
+                        "SELECT 1"])
+    assert ("delete", "table/users") in _actions(outer)
+    delim = from_mysql(["mysql", f"--defaults-extra-file={tmp_path / 'delim.cnf'}", "-e",
+                        "SELECT 1 // DROP TABLE users"])
+    assert ("delete", "table/users") in _actions(delim)
+    with pytest.raises(SqlBudgetExceeded):
+        from_mysql(["mysql", "--defaults-file=/nonexistent.cnf", "-e", "SELECT 1"])
+
+
+@pytest.mark.parametrize("argv", [["mysql", "-e", "source {f}"], ["mysql", "-e", "\\. {f}"],
+                                  ["psql", "-c", "\\i {f}"]])
+def test_client_source_commands_read_the_file(tmp_path, argv):
+    script = tmp_path / "x.sql"
+    script.write_text("DROP TABLE users;\n")
+    argv = [a.format(f=script) for a in argv]
+    parse = from_mysql if argv[0] == "mysql" else from_psql
+    assert ("delete", "table/users") in _actions(parse(argv))
+
+
+def test_mysql_option_file_fifo_and_prefix(tmp_path):
+    import os
+
+    from aegis_core.parsers.sql import SqlBudgetExceeded
+
+    fifo = tmp_path / "ff"
+    os.mkfifo(fifo)
+    with pytest.raises(SqlBudgetExceeded):  # never opened: it would block
+        from_mysql(["mysql", f"--defaults-extra-file={fifo}", "-e", "SELECT 1"])
+    pre = tmp_path / "pre.cnf"
+    pre.write_text("[client]\ninit-comm=DROP TABLE users\n")
+    intents = from_mysql(["mysql", f"--defaults-extra-file={pre}", "-e", "SELECT 1"])
+    assert ("delete", "table/users") in _actions(intents)

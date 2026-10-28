@@ -207,8 +207,6 @@ _EXEC_OPEN_RE = re.compile(r"/\*M?!\d*")
 # An executable comment some servers skip: versioned, or MariaDB-only.
 _VERSIONED_OPEN_RE = re.compile(r"/\*(?:M!\d*|!\d+)")
 _VERSION_NUMBER_RE = re.compile(r"/\*M?!(\d+)")
-# Distinct comment versions read one by one; past this many the text is flagged.
-_MAX_VERSION_READINGS = 4
 # Text in a /*! … */ body that would move where another reader ends it.
 _BODY_MARKER_RE = re.compile(r"['\"`#$]|--|/\*")
 _COMMENT_MARK_RE = re.compile(r"/\*|\*/")
@@ -2048,29 +2046,67 @@ def from_sql(
     ``generic``, which flags what a server could read differently."""
     dialect = normalize_dialect(dialect)
     intents = _intents_of(sql, dialect, database)
+    seen = {_intent_key(i) for i in intents}
+
+    def add(more: list[InfrastructureIntent]) -> None:
+        for intent in more:
+            if _intent_key(intent) not in seen:
+                seen.add(_intent_key(intent))
+                intents.append(intent)
+
+    if dialect in ("mysql", "generic") and _CLIENT_DELIMITER_RE.search(sql):
+        # the mysql client's own `delimiter //` (or `\d //`) line: what follows ends
+        # its statements at // instead of ;
+        rewritten = _apply_client_delimiters(sql)
+        _charge_reading(len(rewritten))
+        add(from_sql(rewritten, dialect=dialect, database=database))
     if (dialect == "mysql" and _VERSIONED_OPEN_RE.search(sql)) or (
             dialect == "generic" and _EXEC_OPEN_RE.search(sql)):
         # a server runs the /*!N comments up to its own version and skips the rest
         # (Oracle MySQL skips /*M! too): /*!99999 select 1 */ drop table users. One
-        # reading per version threshold, with and without the MariaDB-only ones.
+        # reading per version threshold, with and without the MariaDB-only ones,
+        # each charged to the budget (too many fail closed).
         versions = sorted({int(v) for v in _VERSION_NUMBER_RE.findall(sql)})
-        if len(versions) > _MAX_VERSION_READINGS:
-            versions = [versions[0], versions[-1]]  # too many to read each: flagged
-            intents.append(InfrastructureIntent(
-                resource="unknown/*", action="update", provider="sql",
-                params={"unclassified": True, "ambiguous_comment": True,
-                        "statement_class": "dml", "raw_action": "AMBIGUOUS"},
-                metadata={"dialect": dialect, **({"database": database} if database else {})}))
-        seen = {_intent_key(i) for i in intents}
         # generic: Postgres and SQLite skip even an unversioned /*! … */ (-1 skips all)
-        for version in [*([-1] if dialect == "generic" else []), 0, *versions]:
+        thresholds = [*([-1] if dialect == "generic" else []), 0, *versions]
+        _charge_reading(len(sql) * 2 * len(thresholds))
+        for version in thresholds:
             for mariadb in (True, False):
-                for intent in _intents_of(sql, dialect, database, version=version,
-                                          mariadb=mariadb):
-                    if _intent_key(intent) not in seen:
-                        seen.add(_intent_key(intent))
-                        intents.append(intent)
+                add(_intents_of(sql, dialect, database, version=version, mariadb=mariadb))
     return intents
+
+
+def _charge_reading(size: int) -> None:
+    """Counts an extra reading of ``size`` characters against the decision's
+    budget (or, outside one, a call's); past it, fails closed."""
+    reads = _FILE_READS.get()
+    if reads is None:
+        if size > 4 * _SQL_FILE_USE_LIMIT:
+            raise SqlBudgetExceeded("more SQL readings than can be checked")
+        return
+    reads["uses"] -= size
+    if reads["uses"] < 0:
+        raise SqlBudgetExceeded("more SQL than can be checked in one command")
+
+
+_SOURCE_COMMAND_RE = re.compile(
+    r"(?im)(?:^|;)[ \t]*(?:source[ \t]+|\\\.[ \t]*|\\i(?:r|nclude(?:_relative)?)?[ \t]+)"
+    r"([^\s;]+)")
+_CLIENT_DELIMITER_RE = re.compile(r"(?im)^[ \t]*(?:delimiter|\\d)[ \t]*(\S+)[ \t]*$")
+
+
+def _apply_client_delimiters(sql: str) -> str:
+    """``sql`` as the mysql client splits it: each ``delimiter X`` / ``\\d X``
+    line is dropped and makes ``X`` end the statements after it."""
+    out, delimiter = [], ";"
+    for line in sql.split("\n"):
+        m = _CLIENT_DELIMITER_RE.fullmatch(line)
+        if m:
+            delimiter = m.group(1)
+            out.append("")
+            continue
+        out.append(line.replace(delimiter, ";") if delimiter != ";" else line)
+    return "\n".join(out)
 
 
 def _intents_of(sql: str, dialect: str, database: str | None, *,
@@ -2303,7 +2339,16 @@ def _new_reads() -> dict[str, Any]:
             "skip": False}
 
 
-def _build_cli_intents(
+def _build_cli_intents(**kwargs: Any) -> list[InfrastructureIntent]:
+    """:func:`_build_cli_intents_once` inside the decision's budget, or, called
+    on its own (``aegis check command``, the library), inside one of its own."""
+    if _FILE_READS.get() is not None:
+        return _build_cli_intents_once(**kwargs)
+    with shared_file_budget():
+        return _build_cli_intents_once(**kwargs)
+
+
+def _build_cli_intents_once(
     *,
     sql_texts: list[str | None],
     file_paths: list[str],
@@ -2314,6 +2359,9 @@ def _build_cli_intents(
 ) -> list[InfrastructureIntent]:
     if not sql_texts and not file_paths:
         raise ValueError(f"could not find SQL text or a script file in: {argv!r}")
+    # a client's own command that runs a file: mysql `source F` / `\. F`, psql `\i F`
+    file_paths = [*file_paths, *(m.group(1) for t in sql_texts if t
+                                 for m in _SOURCE_COMMAND_RE.finditer(t))]
     # psql/mysql run each -c/-e (and psql each -f) on its own: a comment or quote
     # left open in one must not swallow the next. A -c with no text is unknown SQL.
     intents: list[InfrastructureIntent] = []
@@ -2470,25 +2518,56 @@ def _mysql_side_options(tokens: list[str]) -> tuple[str | None, list[str]]:
     return delimiter, files
 
 
-def _option_file_sql(path: str) -> list[str] | None:
+def _option_file_sql(path: str, _depth: int = 0,
+                     _seen: set[str] | None = None) -> tuple[list[str], str | None] | None:
     """The SQL a mysql option file runs (its ``execute`` and ``init-command``
-    settings, however spelt); ``None`` when it cannot be read."""
+    settings, however spelt, also in files it ``!include``s or ``!includedir``s,
+    at most three levels and 16 files) and the ``delimiter`` it sets; ``None``
+    when any of it cannot be read."""
     from pathlib import Path
 
+    seen = set() if _seen is None else _seen
+    if _depth > 3 or len(seen) >= 16:
+        return None
     try:
-        with Path(path).expanduser().open("rb") as handle:
+        file = Path(path).expanduser()
+        seen.add(str(file.resolve()))
+        if not file.is_file():  # a FIFO or device would block the read
+            return None
+        with file.open("rb") as handle:
             data = handle.read(_OPTION_FILE_LIMIT + 1)
     except (OSError, ValueError, RuntimeError):
         return None
     if len(data) > _OPTION_FILE_LIMIT:
         return None
-    found = []
+    found: list[str] = []
+    delimiter: str | None = None
     for line in data.decode("utf-8", errors="replace").splitlines():
-        key, eq, value = line.strip().partition("=")
-        if eq and _mysql_option_name("--" + key.strip()) in (
-                "--execute", "--init-command", "--init-command-add"):
+        line = line.strip()
+        included: list[str] = []
+        if line.startswith("!includedir"):
+            try:
+                folder = Path(line.split(None, 1)[1]).expanduser()
+                included = sorted(str(f) for f in folder.iterdir() if f.suffix == ".cnf")
+            except (IndexError, OSError, ValueError, RuntimeError):
+                return None
+        elif line.startswith("!include"):
+            included = line.split(None, 1)[1:]
+        for inner in included:
+            nested = _option_file_sql(inner, _depth + 1, seen)
+            if nested is None:
+                return None
+            found += nested[0]
+            delimiter = nested[1] or delimiter
+        key, eq, value = line.partition("=")
+        name = _mysql_option_name("--" + key.strip())
+        runs = [o for o in ("--execute", "--init-command", "--init-command-add")
+                if o.startswith(name)] if len(name) > 3 else []
+        if eq and runs:  # init-comm= is a unique prefix of init-command
             found.append(value.strip().strip("'\""))
-    return found
+        elif eq and name == "--delimiter":
+            delimiter = value.strip().strip("'\"")
+    return found, delimiter
 
 
 _OPTION_FILE_LIMIT = 64 * 1024
@@ -2520,7 +2599,8 @@ def from_mysql(argv: list[str]) -> list[InfrastructureIntent]:
         if file_sql is None:
             unreadable.append(option_file)
         else:
-            sql_texts = [*file_sql, *sql_texts]
+            sql_texts = [*file_sql[0], *sql_texts]
+            delimiter = delimiter or file_sql[1]
     if delimiter and delimiter != ";":
         # --delimiter=// ends statements at // instead of ;: read it that way too
         sql_texts = [*sql_texts, *(t.replace(delimiter, ";") for t in sql_texts
@@ -2531,12 +2611,10 @@ def from_mysql(argv: list[str]) -> list[InfrastructureIntent]:
         sql_texts=sql_texts, file_paths=file_paths, database=database, host=host,
         dialect="mysql", argv=argv,
     )
-    for option_file in unreadable:  # an option file the hook cannot read may hold SQL
-        intents.append(InfrastructureIntent(
-            resource=f"script/{_basename(option_file)}", action="update", provider="sql",
-            params={"raw_action": "file", "unclassified": True, "unreadable": True,
-                    "opaque": True, "file": option_file},
-            metadata={"dialect": "mysql", **({"database": database} if database else {})}))
+    if unreadable:  # an option file that cannot be read may run any SQL: fail closed
+        raise SqlBudgetExceeded(
+            f"the option file {unreadable[0]} is more SQL than can be checked (it cannot be "
+            "read in full)")
     return intents
 
 

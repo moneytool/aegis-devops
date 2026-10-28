@@ -411,6 +411,11 @@ print(decision.verdict, decision.citations, decision.covered)
 `store.health` is the `StoreHealth` the CLI prints; `AegisInterceptor(store, fail_closed=True)`
 is the library form of `--fail-closed`.
 
+SQL with comment versions is read once per version (each reading counts against the budget
+below), so a statement a server of any version would run is reported. mysql's own `delimiter X`
+lines, `--delimiter`, `source FILE` / `\\. FILE` (psql `\\i FILE`) and the `execute` /
+`init-command` settings of a `--defaults-file` (with its `!include`s) are read too.
+
 In the agent hook, the SQL of one command has a budget: 1 MiB of script files read, 2 MiB of
 SQL classified (texts and each run of a file) and 50,000 statements. Past it the hook refuses the
 command (`cannot parse`), since unclassified SQL may be allowed by a policy. Outside the hook

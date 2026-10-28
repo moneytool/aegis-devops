@@ -236,7 +236,8 @@ def _is_gated(command: str) -> bool:
 # Variables that name a file of SQL or client commands a SQL client runs at
 # start-up: psql's PSQLRC, mysql's MYSQL_HOME (its my.cnf), and HOME
 # (~/.psqlrc, ~/.my.cnf, ~/.sqliterc).
-_STARTUP_SQL_RE = re.compile(r"(?<![\w$.-])(?:PSQLRC|MYSQL_HOME|HOME)=")
+_STARTUP_SQL_RE = re.compile(r"(?<![\w$.-])(?:PSQLRC|PGSYSCONFDIR|MYSQL_HOME|HOME)\+?=")
+_UNCHECKABLE_SQL = "than can be checked"
 _SQL_CLIENT_RE = re.compile(r"(?<![\w.-])(?:psql|mysql|mariadb|sqlite3)(?![\w.-])")
 
 
@@ -317,6 +318,9 @@ def _decide_command(command: str, config_dir: Path,
         return HookVerdict("ask" if reason.startswith("ESCALATE") else "deny", f"aegis: {reason}")
     message = err.getvalue().strip().splitlines()
     detail = message[-1] if message else f"exit {rc}"
+    if _UNCHECKABLE_SQL in detail:  # SqlBudgetExceeded: refused like SQL that cannot be parsed
+        return HookVerdict("deny", "aegis: cannot parse this command: "
+                           + detail.split("error: ", 1)[-1])
     if not _is_gated(command):
         return HookVerdict("allow")
     return HookVerdict(

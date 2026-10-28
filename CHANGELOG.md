@@ -144,6 +144,13 @@ behaviour.
     refused in the agent hook. Under `generic`, an unversioned `/*! … */` is also read as a plain
     comment (Postgres and SQLite skip it). The hook asks when the command sets `PSQLRC`, `MYSQL_HOME`
     or `HOME` for a SQL client: the start-up file it names is not read.
+  - Every comment version is read (one reading per version, each charged to the budget; too many
+    fail closed). The mysql client's own `delimiter X` / `\d X` lines switch the separator for what
+    follows. An option file's `!include`/`!includedir` are followed (three levels, 16 files) and its
+    `delimiter` applies; an option file that cannot be read fails closed. Outside the hook each
+    client call has the same budget, so `aegis check command`/`check sql` on more SQL than it
+    exits with an error (main read any amount); in the hook such a command is refused as `cannot
+    parse`. `PSQLRC+=` is seen too.
   - `SET @a = (SELECT … FROM users)` reports the tables its subqueries read beside the `session/*`
     read. Nested `UPDATE a JOIN (…` groups are read in linear time (they were quadratic: 20,000
     levels took minutes). A trailing `-d`/`-h` with no value is ignored instead of an error. MySQL
