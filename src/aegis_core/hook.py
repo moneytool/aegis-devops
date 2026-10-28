@@ -358,8 +358,15 @@ def _stdin_redirects(command: str, config_dir: Path, extra_args: list[str] | Non
         asks.append("aegis: a shell or interpreter here may read its commands through a "
                     "copied or read-write file descriptor (<&N, <>), which the hook cannot "
                     "follow; use `bash FILE` or `sh < FILE`")
-    if (stage := _PIPED_COMPOUND_RE.search(command)) and _READER_WORD_RE.search(
-            command, stage.end()):
+    readers = [m.start() for m in _READER_WORD_RE.finditer(command)]
+    if readers and any(  # exec: a reader after it; a group or loop: a reader inside it
+            m.end() <= readers[-1] if m.group("exec") else readers[0] < m.start()
+            for m in _GENERATED_STDIN_RE.finditer(command)):
+        asks.append("aegis: a shell or interpreter here may read its commands from a process "
+                    "substitution or here-string given to exec or to a group, loop or if, "
+                    "which the hook cannot check")
+    if any(_bare_reader(command, stage.end(), _compound_end(command, stage.end()))
+           for stage in _PIPED_COMPOUND_RE.finditer(command)):
         asks.append("aegis: a pipe feeds a group, loop or if that runs a shell or interpreter, "
                     "which may read its commands from the pipe; the hook cannot check them")
     if scan:
@@ -991,6 +998,33 @@ _EXEC_STDIN_RE = re.compile(
 # A pipe into a group, subshell, loop or if: every command in it shares the pipe.
 _PIPED_COMPOUND_RE = re.compile(
     r"(?<!\|)\|(?!\|)&?\s*(?:[{(]|(?:if|while|until|for|select|case)\b)")
+# A process substitution or here-string as the standard input of exec or of a
+# group, subshell, if or loop: `exec < <(curl …); sh`, `{ sh; } <<< "$x"`.
+_GENERATED_STDIN_RE = re.compile(
+    r"(?:(?P<exec>(?:^|[;&|\n('\"]\s*|\s)exec\s+)|[})]\s*|\b(?:fi|done|esac)\s*)"
+    r"0?(?:<\s*<\(|<<<)")
+_COMPOUND_CLOSE_RE = re.compile(r"\b(?:done|fi|esac)\b|[})]")
+
+
+def _compound_end(command: str, start: int) -> int:
+    """Roughly where the compound command opening at ``start`` ends: its first
+    ``done``/``fi``/``esac``/``}``/``)``."""
+    close = _COMPOUND_CLOSE_RE.search(command, start)
+    return len(command) if close is None else close.end()
+
+
+def _bare_reader(command: str, start: int, end: int) -> bool:
+    """Whether ``command[start:end]`` runs a shell or interpreter that reads its
+    code from standard input: no script, module or code argument after it
+    (``sh``, ``bash -s``; not ``python3 -m mod`` or ``bash x.sh``)."""
+    for m in _READER_WORD_RE.finditer(command, start, end):
+        following = re.match(r"\s+(\S+)", command[m.end():end])
+        word = following.group(1) if following else ""
+        if not word or word[0] in ";|&)}" or word in ("-s", "-", "-i", "-x"):
+            return True
+    return False
+
+
 # Standard input copied from another descriptor or opened read-write.
 _FD_STDIN_RE = re.compile(r"(?:^|[\s;&|])0?(?:<&\s*\d|<>)")
 _READER_WORDS = "|".join(sorted(_SHELLS))
@@ -1001,14 +1035,14 @@ _READER_WORD_RE = re.compile(
 def _group_stdin_files(command: str) -> list[str]:
     """The files redirected onto a group, subshell, ``if`` or loop that runs a
     shell or interpreter (``{ bash; } < c.sh``), read like ``sh < c.sh``."""
-    reader = _READER_WORD_RE.search(command)
-    if reader is None:
+    readers = [m.start() for m in _READER_WORD_RE.finditer(command)]
+    if not readers:
         return []
     files = [match.group(1).strip("'\"")
-             for match in _GROUP_STDIN_RE.finditer(command, reader.end())]
+             for match in _GROUP_STDIN_RE.finditer(command, readers[0])]
     # exec < FILE: the rest of the shell reads FILE as its standard input
     files += [match.group(1).strip("'\"") for match in _EXEC_STDIN_RE.finditer(command)
-              if _READER_WORD_RE.search(command, match.end())]
+              if match.end() <= readers[-1]]
     return files
 
 
@@ -1156,9 +1190,18 @@ def _script_lines(text: str) -> list[tuple[int, str, str | None]]:
             out.extend((n, strip_comment(b), None) for n, b in body)
             continue
         name = _heredoc_reader(line[:begin], line[end:])
-        if command.rstrip().endswith(("|", "|&")) and i < len(raw):
-            # cat <<EOF | on one line, the reader on the line after the body
-            name = _heredoc_reader(raw[i])
+        if command.rstrip().endswith(("|", "|&")):
+            # cat <<EOF | on one line, the reader after the body (blank and comment
+            # lines between are skipped, as the shell skips them)
+            k = i
+            while k < len(raw) and (not raw[k].strip() or raw[k].lstrip().startswith("#")):
+                k += 1
+            nxt = raw[k] if k < len(raw) else ""
+            name = _heredoc_reader(nxt)
+            if (name not in _SHELLS and not _interpreter(name)
+                    and re.match(r"\s*(?:[{(]|(?:if|while|until|for)\b)", nxt)
+                    and _bare_reader(nxt, 0, len(nxt))):
+                name = "sh"  # { sh; }, ( bash ), while …; do sh; done
         if name in _SHELLS or loose_code_reader(command) is not None:
             out.extend((n, strip_comment(b), None) for n, b in body)
         elif _interpreter(name) and any(mentions_infra(b) for _n, b in body):
@@ -1299,14 +1342,21 @@ def _scan_script(runs: dict, config_dir: Path, extra_args: list[str] | None,
 _PATH_VARIABLE_RE = re.compile(r"\$(?:\{(\w+)\}|(\w+))")
 
 
+# Variables a script path may use that only the user's set-up changes. Not
+# PWD, OLDPWD or _, which the shell itself changes as the command runs.
+_STABLE_VARIABLES = frozenset({"HOME"})
+
+
 def _known_variables(path: str, command: str) -> str:
-    """``path`` with ``$NAME`` / ``${NAME}`` replaced by the value the hook's own
-    environment gives (``source "$HOME/.cargo/env"``), unless the command sets
-    NAME itself; anything else (``$(pwd)``, an unset name) is left in place."""
+    """``path`` with ``$HOME`` / ``${HOME}`` replaced by the hook's own value
+    (``source "$HOME/.cargo/env"``) when the command names HOME nowhere else,
+    so nothing in it (``HOME=…``, ``for HOME in``, ``read HOME``, ``unset HOME``)
+    can change it; anything else (``$PWD``, ``$(pwd)``, an unset name) is left."""
     def value(match: re.Match[str]) -> str:
         name = match.group(1) or match.group(2)
         known = os.environ.get(name)
-        if known is None or re.search(rf"(?<![\w$]){name}=", command):
+        if (name not in _STABLE_VARIABLES or known is None
+                or re.search(rf"(?<![\w${{]){name}\b", command)):
             return match.group(0)
         return known
     return _PATH_VARIABLE_RE.sub(value, path) if "$" in path else path

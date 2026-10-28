@@ -129,6 +129,14 @@ behaviour.
   loop or `if` that runs a shell or interpreter asks (`… | while true; do sh; done`). A
   redirection target written as a separate word (`cd sub 2> /dev/null`) is no longer taken for an
   argument.
+- Agent hook: only `$HOME` in a script path is filled in from the hook's environment, and only when
+  the command names HOME nowhere else; `$PWD`, `$OLDPWD`, `$_` and a variable set by `for`, `read`
+  or `unset` ask (`cd sub && source "$PWD/x.sh"` read the wrong file). A process substitution or
+  here-string given to `exec` or to a group, loop or `if` that runs a shell asks (`exec < <(curl …);
+  sh`, `{ sh; } < <(…)`). In a script, the reader of `cat <<EOF |` may follow blank or comment lines
+  or be a group (`{ sh; }`). The pipe-into-a-loop ask only looks inside the loop and only at shells
+  and interpreters that read standard input (`… | while read f; do python3 -m mod "$f"; done` runs).
+  Many `exec < FILE` words are read in linear time.
 - Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
   own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
   policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a

@@ -1988,3 +1988,57 @@ def test_round9_ordinary_commands_are_allowed(opted_in_project, command):
     (opted_in_project / "ok.sh").write_text("echo hi\n")
     code, out, err = run("claude", payload_for("claude", command))
     assert (code, out) == (0, ""), (out, err)
+
+
+@pytest.mark.parametrize("command", [
+    'cd sub && source "$PWD/x.sh"', 'cd sub; bash "$PWD/x.sh"', 'bash "$PWD/x.sh"',
+    'echo sub/x.sh; bash "$_"', 'for HOME in sub; do bash "$HOME/x.sh"; done',
+    'read HOME <<< sub; bash "$HOME/x.sh"', 'unset HOME; bash "$HOME/x.sh"',
+])
+def test_variables_the_shell_or_command_changes_are_not_filled_in(opted_in_project, monkeypatch,
+                                                                  command):
+    (opted_in_project / "sub").mkdir()
+    (opted_in_project / "x.sh").write_text("echo hi\n")
+    (opted_in_project / "sub" / "x.sh").write_text(BLOCK_COMMAND + "\n")
+    monkeypatch.setenv("HOME", str(opted_in_project))
+    monkeypatch.setenv("PWD", str(opted_in_project))
+    code, out, err = run("claude", payload_for("claude", command))
+    assert code == 2 or _ask_reason(out), (code, out, err)
+
+
+@pytest.mark.parametrize("command", [
+    "exec < <(cat nuke.sh); sh", 'exec <<< "$(cat nuke.sh)"; sh', "{ sh; } < <(cat nuke.sh)",
+    "( sh ) < <(cat nuke.sh)", "while true; do sh; done < <(cat nuke.sh)",
+])
+def test_generated_input_to_exec_or_a_group_asks(opted_in_project, command):
+    (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
+    code, out, err = run("claude", payload_for("claude", command))
+    assert code == 2 or _ask_reason(out), (code, out, err)
+
+
+@pytest.mark.parametrize("reader", ["# run it\nsh", "\nsh", "{ sh; }"])
+def test_a_here_document_reader_after_blank_or_comment_lines(opted_in_project, reader):
+    (opted_in_project / "x.sh").write_text(f"cat <<EOF |\n{BLOCK_COMMAND}\nEOF\n{reader}\n")
+    code, out, err = run("claude", payload_for("claude", "bash x.sh"))
+    assert code == 2, (out, err)
+
+
+def test_many_exec_redirects_inside_piped_code_stay_fast(opted_in_project):
+    (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
+    body = "exec <a " * 8180
+    started = time.monotonic()
+    code, out, err = run("claude", payload_for(
+        "claude", f"echo \"echo '{body} sh' | sh\" | sh; bash nuke.sh"))
+    assert code == 2
+    assert time.monotonic() - started < 15
+
+
+@pytest.mark.parametrize("command", [
+    'git ls-files | while read f; do echo "$f"; done; python3 manage.py test',
+    "find . -name '*.py' | while read f; do python3 -m py_compile \"$f\"; done",
+    "ls | { sort; }; bash ok.sh",
+])
+def test_pipes_into_loops_without_a_stdin_reader_are_allowed(opted_in_project, command):
+    (opted_in_project / "ok.sh").write_text("echo hi\n")
+    code, out, err = run("claude", payload_for("claude", command))
+    assert (code, out) == (0, ""), (out, err)
