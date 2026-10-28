@@ -59,14 +59,14 @@ behaviour.
   exec`, `asdf exec`, `gem exec`, `mise exec`/`mise x` (`… -- CMD`, `-c STRING`) and `brew bundle
   exec -- CMD`. `uv run kubectl delete nodes --all` gave only a `uv` intent and was allowed,
   since `uv` and `pipx` take a tool's name in their other subcommands (`uv pip install kubectl`,
-  `pipx install kubectl`, which are still allowed). An option these parsers do not know, or an
-  option before the subcommand (`uv --directory d run …`), is rejected. `uv run -m mod` and `uv
+  `pipx install kubectl`, which are still allowed). An option these parsers do not know is
+  rejected. `uv run -m mod` and `uv
   run script.py` are read as `python -m mod` and `python script.py`. `cargo run` and `go run`,
   which build a program and hand it the remaining words, now ask when those words name an
   infrastructure tool, like any unknown program. The hook also asks when a git configuration
   value names one (`git -c alias.x='!kubectl …' x`, `git -c core.sshCommand=… fetch`, `git config
   alias.x '!kubectl …'`): git runs such values where their argv cannot be checked.
-- Agent hook (council round 6): a local script run inside `$(…)`, backticks, `<(…)`, a subshell,
+- Agent hook: a local script run inside `$(…)`, backticks, `<(…)`, a subshell,
   a `{ …; }` group, a loop, a `case` branch, `sh -c '…'` (also `source`/`.` there), after `exec` or
   `builtin`, or by `fish`/`csh`/`tcsh`/`mksh`/`yash`/`rbash` is read like `bash x.sh`, and one that
   inline code may rewrite (`python3 -c '…"x.sh"…'; bash x.sh`) asks. `BASH_ENV`/`ENV` before a
@@ -89,6 +89,20 @@ behaviour.
   denied at once (its expansion was exponential), a `~+` path asks instead of failing, a command
   over 64 KiB is not parsed (asks, or blocks when it names a tool), and more than 32 pieces of
   piped code ask.
+- Agent hook: script reading. A `<<` inside `$((…))`, `((…))`, `$[…]` or `${…}` is no longer taken
+  for a here-document (`SIZE=$((1<<30))` hid every later line of the script), nor is one inside a
+  string that spans lines; a quoted tag's body keeps its trailing backslashes, so `EOF` still ends
+  it; a here-document whose end is never found asks, and its lines are checked as commands. A line
+  ending in `|`, `|&`, `&&` or `||` is joined with the next (`echo … |` + newline + `sh`). Each
+  script is read once per command, and more than 32 scripts in one command ask (a long run of
+  `./x.sh;` took longer than the hook timeout). Scripts behind `builtin source`, `exec -a NAME`,
+  `exec -c`, `source --`/`. --`, `bash -r` and `posh` are read in a command that parses too.
+  More command-valued git settings and options ask when they name a tool: `git config -f FILE`/
+  `--file`/`set …`, `diff.external`, `core.gitProxy`, `core.alternateRefsCommand`,
+  `remote.*.uploadpack`/`receivepack`, `sendemail.*cmd`, an absolute `credential.helper` path,
+  `--upload-pack`, `clone -u`, `push --receive-pack`/`--exec`, `GIT_PROXY_COMMAND`, and `emacs`
+  code arguments. `git submodule foreach git pull` (and `fetch`, `status`, …) no longer asks, nor
+  does `complete -C …` in a sourced rc file.
 - Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
   own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
   policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a

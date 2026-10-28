@@ -1682,3 +1682,112 @@ def test_many_pieces_of_piped_code_ask(opted_in_project):
     code, out, err = run("claude", payload_for("claude", "echo ls | sh; " * 40))
     assert "too many to check" in _ask_reason(out)
 
+
+
+def test_many_runs_of_one_script_are_read_once(opted_in_project):
+    (opted_in_project / "x.sh").write_text("echo hi\n")
+    started = time.monotonic()
+    code, out, err = run("claude", payload_for("claude", "./x.sh;" * 2000 + BLOCK_COMMAND))
+    assert code == 2
+    assert time.monotonic() - started < 10
+
+
+def test_more_than_32_scripts_ask(opted_in_project):
+    for k in range(40):
+        (opted_in_project / f"s{k}.sh").write_text("echo hi\n")
+    command = "; ".join(f"bash s{k}.sh" for k in range(40))
+    code, out, err = run("claude", payload_for("claude", command))
+    assert "more than 32 scripts" in _ask_reason(out)
+
+
+@pytest.mark.parametrize("script", [
+    # `<<` inside arithmetic or a parameter expansion is not a here-document
+    f"#!/bin/bash\nmask=$(( 1 << 4 ))\n{BLOCK_COMMAND}\n",
+    f"echo $((1<<2))\n{BLOCK_COMMAND}\n",
+    f"(( flags <<= 1 ))\n{BLOCK_COMMAND}\n",
+    f"x=${{y#<<EOF}}\n{BLOCK_COMMAND}\n",
+    # a quoted tag's body keeps its trailing backslash: EOF still ends it
+    f"cat <<'EOF' > out.txt\nsome text \\\nEOF\n{BLOCK_COMMAND}\n",
+    # a `<<EOF` inside a string that spans lines
+    f'x="\n<<EOF\n"\n{BLOCK_COMMAND}\n',
+    f"x='\n<<EOF\n'\n{BLOCK_COMMAND}\n",
+    # a list or pipeline that goes on to the next line
+    f"true &&\n  {BLOCK_COMMAND}\n",
+])
+def test_script_lines_after_lookalike_here_documents_are_checked(opted_in_project, script):
+    (opted_in_project / "x.sh").write_text(script)
+    code, out, err = run("claude", payload_for("claude", "bash x.sh"))
+    assert code == 2, (out, err)
+    assert "x.sh line" in err
+
+
+def test_a_here_document_that_never_ends_asks_and_checks_its_body(opted_in_project):
+    (opted_in_project / "x.sh").write_text("cat <<EOF\nnever closed\necho ok\n")
+    code, out, err = run("claude", payload_for("claude", "bash x.sh"))
+    assert "is never reached" in _ask_reason(out)
+    (opted_in_project / "x.sh").write_text(f"cat <<EOF\nnever closed\n{BLOCK_COMMAND}\n")
+    code, out, err = run("claude", payload_for("claude", "bash x.sh"))
+    assert code == 2
+
+
+def test_a_pipe_into_a_shell_on_the_next_line_is_seen(opted_in_project):
+    (opted_in_project / "x.sh").write_text(f"echo '{BLOCK_COMMAND}' |\n  sh\n")
+    code, out, err = run("claude", payload_for("claude", "bash x.sh"))
+    assert code == 2 or "through a pipe" in _ask_reason(out)
+
+
+@pytest.mark.parametrize("script", [
+    "cat <<'EOF'\nkubectl delete nodes --all\nEOF\necho done\n",
+    "cat <<EOF\nline \\\nEOF\nEOF\necho hi\n",
+    'msg="hello\nit is fine"\necho "$msg"\n',
+    "echo $'it\\'s'\necho ok\n",
+    "complete -C '/usr/local/bin/aws_completer' aws\n",
+    "echo $((1 << 4))\necho ok\n",
+])
+def test_round7_ordinary_scripts_are_allowed(opted_in_project, script):
+    (opted_in_project / "x.sh").write_text(script)
+    code, out, err = run("claude", payload_for("claude", "source x.sh"))
+    assert (code, out) == (0, ""), (out, err)
+
+
+@pytest.mark.parametrize("command", [
+    "builtin source nuke.sh", "builtin . ./nuke.sh", "exec -a x ./nuke.sh", "exec -c ./nuke.sh",
+    "source -- nuke.sh", ". -- nuke.sh", 'sh -c ". -- ./nuke.sh"', "bash -r nuke.sh",
+    "posh nuke.sh",
+])
+def test_scripts_behind_builtin_exec_options_and_double_dash_are_read(opted_in_project, command):
+    (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
+    code, out, err = run("claude", payload_for("claude", command))
+    assert code == 2, (out, err)
+    assert "nuke.sh line 1" in err
+
+
+@pytest.mark.parametrize("command", [
+    f"git config -f .git/config core.pager '{BLOCK_COMMAND}'",
+    f"git config --file .gitconfig alias.x '!{BLOCK_COMMAND}'",
+    f"git config set alias.x '!{BLOCK_COMMAND}'",
+    f"git -c diff.external='{BLOCK_COMMAND}' diff",
+    f"git -c core.gitProxy='{BLOCK_COMMAND}' fetch",
+    f"git -c remote.origin.uploadpack='{BLOCK_COMMAND}' fetch",
+    f"git -c sendemail.toCmd='{BLOCK_COMMAND}' send-email x.patch",
+    f"git -c credential.helper='/usr/bin/{BLOCK_COMMAND}' fetch",
+    f"git fetch --upload-pack='{BLOCK_COMMAND}'",
+    f"git clone -u '{BLOCK_COMMAND}' repo dir",
+    f"git push --receive-pack='{BLOCK_COMMAND}' origin main",
+    f"GIT_PROXY_COMMAND='{BLOCK_COMMAND}' git fetch",
+    f"git submodule foreach '{BLOCK_COMMAND}'",
+    f"emacs --batch --eval '(shell-command \"{BLOCK_COMMAND}\")'",
+])
+def test_more_command_valued_git_settings_ask(opted_in_project, command):
+    code, out, err = run("claude", payload_for("claude", command))
+    assert _ask_reason(out), (code, out, err)
+
+
+@pytest.mark.parametrize("command", [
+    "git submodule foreach git pull", "git submodule foreach --recursive git fetch",
+    "git config -f .gitmodules submodule.x.url https://example.com/x.git",
+    "git -c credential.helper=store fetch", "builtin echo hi",
+])
+def test_round7_ordinary_commands_are_allowed(opted_in_project, command):
+    code, out, err = run("claude", payload_for("claude", command))
+    assert (code, out) == (0, ""), (out, err)

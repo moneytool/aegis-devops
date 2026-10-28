@@ -57,7 +57,9 @@ is a deny.
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import fnmatch
+import functools
 import importlib.resources
 import io
 import json
@@ -87,6 +89,7 @@ from aegis_core.shell import (
     split_segments,
     stdin_feeders,
     strip_comment,
+    strip_exec_builtin,
 )
 
 AGENTS = ("claude", "codex", "copilot", "cursor", "gemini", "opencode", "vscode")
@@ -304,8 +307,24 @@ _MAX_COMMAND_CHARS = 64 * 1024
 _MAX_PIPED_CHECKS = 32
 
 
+# At most this many distinct scripts are read for one command; a script named
+# again is not read again.
+_MAX_SCRIPTS = 32
+_SCANNED: contextvars.ContextVar[dict | None] = contextvars.ContextVar("aegis_scanned",
+                                                                         default=None)
+
+
 def _decide(command: str, config_dir: Path, extra_args: list[str] | None, cwd: Path | None,
             *, scan: bool) -> HookVerdict:
+    token = _SCANNED.set({"seen": {}, "count": 0})
+    try:
+        return _decide_once(command, config_dir, extra_args, cwd, scan=scan)
+    finally:
+        _SCANNED.reset(token)
+
+
+def _decide_once(command: str, config_dir: Path, extra_args: list[str] | None,
+                 cwd: Path | None, *, scan: bool) -> HookVerdict:
     if len(command) > _MAX_COMMAND_CHARS:
         reason = (f"aegis: this command is over {_MAX_COMMAND_CHARS // 1024} KiB, too long to "
                   "check; split it up or put it in a script")
@@ -408,7 +427,7 @@ _NAMES_WITHOUT_RUNNING = frozenset({
     "sort", "read", "install", "uninstall", "make", "pgrep", "pkill", "killall", "kill",
     "lsof", "strings", "tflint", "checkov", "tfsec", "trivy", "curl", "wget", "aria2c",
     "scp", "rsync", "git", "apt-cache", "dpkg", "rpm", "pip", "pip3", "pipx", "uv", "cargo",
-    "go", "gem",
+    "go", "gem", "complete", "compdef", "compgen",
 })
 
 
@@ -524,6 +543,7 @@ _CODE_ARG_PROGRAMS = frozenset({
     "awk", "gawk", "mawk", "nawk", "busybox", "sed", "gsed", "tmux", "screen", "expect",
     "parallel", "watchexec", "entr", "nodemon", "dtach", "abduco", "xterm", "flock",
     "unshare", "chroot", "su", "runuser", "nsenter", "firejail", "bwrap", "systemd-run",
+    "emacs",
 })
 
 # Options of exempt programs whose value is a command they run.
@@ -584,7 +604,7 @@ def _runs_a_program(name: str, args: list[str]) -> bool:
 _COMMAND_ENV_VARS = frozenset({
     "GIT_SSH_COMMAND", "GIT_SSH", "GIT_PAGER", "PAGER", "GIT_EDITOR", "EDITOR", "VISUAL",
     "GIT_SEQUENCE_EDITOR", "GIT_EXTERNAL_DIFF", "GIT_ASKPASS", "SSH_ASKPASS", "MANPAGER",
-    "LESSOPEN", "LESSCLOSE",
+    "LESSOPEN", "LESSCLOSE", "GIT_PROXY_COMMAND",
 })
 _SOURCED_ENV_VARS = frozenset({"BASH_ENV", "ENV"})
 
@@ -897,9 +917,36 @@ def _sourced_script(segment: str) -> dict[str, str] | None:
         words = shlex.split(segment, comments=True)
     except ValueError:
         return None
+    words = strip_exec_builtin(words)
     if len(words) >= 2 and words[0] in ("source", "."):
         return {"kind": "script", "interpreter": words[0], "path": words[1]}
     return None
+
+
+def _open_quote(line: str, quote: str | None) -> str | None:
+    """The quote (``'``, ``"`` or ``$'``) still open at the end of ``line`` when
+    it starts inside ``quote``; ``None`` when none is. An unquoted ``#`` at the
+    start of a word ends the line."""
+    i, n = 0, len(line)
+    while i < n:
+        ch = line[i]
+        if quote == "'":
+            quote = None if ch == "'" else quote
+        elif quote is not None:  # " and $' both take backslash escapes
+            if ch == "\\":
+                i += 1
+            elif ch == quote[-1]:
+                quote = None
+        elif ch == "\\":
+            i += 1
+        elif ch == "$" and line[i + 1:i + 2] == "'":
+            quote, i = "$'", i + 1
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "#" and (i == 0 or line[i - 1] in " \t;|&("):
+            break
+        i += 1
+    return quote
 
 
 def _script_lines(text: str) -> list[tuple[int, str, str | None]]:
@@ -911,26 +958,38 @@ def _script_lines(text: str) -> list[tuple[int, str, str | None]]:
     (``ask_reason``) when another interpreter reads one that names an
     infrastructure tool, or when an unquoted tag lets a ``$(…)`` in the body
     that names one run; otherwise as data, skipped."""
-    joined: list[tuple[int, str]] = []
-    pending, start = "", 0
-    for number, line in enumerate(text.splitlines(), 1):
-        if not pending:
-            start = number
-        candidate = pending + line
-        code = strip_comment(candidate)
-        trailing = len(code) - len(code.rstrip("\\"))
-        if code == candidate and trailing % 2 == 1:
-            pending = candidate[:-1]
-            continue
-        joined.append((start, candidate))
+    raw = text.splitlines()
+
+    def logical(at: int) -> tuple[str, int]:
+        """The line starting at raw index ``at`` with its continuations joined
+        (a backslash-newline, a quote still open, a pipeline or list operator at
+        the end), and the raw index after it."""
         pending = ""
-    if pending:
-        joined.append((start, pending))
+        quote: str | None = None
+        while at < len(raw):
+            candidate = pending + raw[at]
+            quote = _open_quote(raw[at], quote)
+            at += 1
+            if quote is not None and at < len(raw):
+                pending = candidate + "\n"  # a string that goes on to the next line
+                continue
+            code = strip_comment(candidate)
+            trailing = len(code) - len(code.rstrip("\\"))
+            if code == candidate and trailing % 2 == 1 and at < len(raw):
+                pending = candidate[:-1]
+                continue
+            if (at < len(raw) and code.rstrip().endswith(("|", "&&", "|&"))
+                    and find_heredoc(candidate) is None):
+                pending = candidate + " "  # `cmd |` / `cmd &&` goes on to the next line
+                continue
+            return (candidate[:-1] if code == candidate and trailing % 2 == 1 else candidate), at
+        return pending, at
+
     out: list[tuple[int, str, str | None]] = []
     i = 0
-    while i < len(joined):
-        number, line = joined[i]
-        i += 1
+    while i < len(raw):
+        number = i + 1
+        line, i = logical(i)
         if line.lstrip().startswith("#"):
             continue
         heredoc = find_heredoc(line)
@@ -942,15 +1001,34 @@ def _script_lines(text: str) -> list[tuple[int, str, str | None]]:
             out.append((number, line, "cannot tell where the here-document ends, so the "
                                       "lines after it were not checked as data or commands"))
             continue
+        # the body is read raw: a quoted tag's body keeps its backslashes, an
+        # unquoted one joins backslash-newline as the shell does
         body: list[tuple[int, str]] = []
-        while i < len(joined):
-            n, body_line = joined[i]
-            i += 1
+        found = False
+        while i < len(raw):
+            n = i + 1
+            if quoted:
+                body_line, i = raw[i], i + 1
+            else:
+                body_line, pending = raw[i], ""
+                i += 1
+                while (len(body_line) - len(body_line.rstrip("\\"))) % 2 == 1 and i < len(raw):
+                    pending, body_line = pending + body_line[:-1], raw[i]
+                    i += 1
+                body_line = pending + body_line
             if (body_line.lstrip("\t") if dash else body_line) == tag:
+                found = True
                 break
             body.append((n, body_line))
         command = strip_comment(line[:begin] + line[end:])
         out.append((number, command, None))
+        if not found:
+            # the shell reads to the end of the script as the body; the hook does not
+            # know that is meant, so it checks those lines as commands too and asks
+            out.append((number, line, f"the here-document's end ({tag}) is never reached, so "
+                                      "the lines after it were checked as commands"))
+            out.extend((n, strip_comment(b), None) for n, b in body)
+            continue
         reader = loose_argv(line[:begin]) or []
         name = _basename(reader[0]) if reader else ""
         if name in _SHELLS or loose_code_reader(command) is not None:
@@ -976,12 +1054,7 @@ def _written_by_command(file: Path, command: str, cwd: Path | None) -> bool:
     its last component is the file's name. Arguments of programs that only
     read files (``cat x.sh``, ``grep … x.sh``) do not count; redirection
     targets always do."""
-    lexer = shlex.shlex(command.replace("\n", " ; "), posix=True, punctuation_chars=True)
-    lexer.whitespace_split = True
-    try:
-        tokens = list(lexer)
-    except ValueError:
-        tokens = command.split()
+    tokens = _command_tokens(command)
     target = os.path.normpath(file)
     try:
         resolved = file.resolve() if file.exists() else None
@@ -1034,6 +1107,17 @@ def _written_by_command(file: Path, command: str, cwd: Path | None) -> bool:
     return count > 1
 
 
+@functools.lru_cache(maxsize=8)
+def _command_tokens(command: str) -> tuple[str, ...]:
+    """The shell words and operators of ``command`` (read once per command)."""
+    lexer = shlex.shlex(command.replace("\n", " ; "), posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        return tuple(lexer)
+    except ValueError:
+        return tuple(command.split())
+
+
 _ASSIGNMENT_WORD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 # Programs whose file arguments are only read: naming the script there is not a write.
 _FILE_READERS = frozenset({
@@ -1055,7 +1139,25 @@ def _scan_script(runs: dict, config_dir: Path, extra_args: list[str] | None,
     holding a NUL byte, larger than :data:`SCRIPT_SCAN_LIMIT`, with more than
     :data:`SCRIPT_SCAN_MAX_LINES` such lines, or whose directory is unknown (a
     ``cd`` to a computed place came first). What the script sources or runs in
-    turn is not read."""
+    turn is not read. Within one decision a script is read once (its verdict
+    is reused), and past :data:`_MAX_SCRIPTS` distinct scripts the rest ask."""
+    state = _SCANNED.get()
+    if state is None:
+        return _scan_script_once(runs, config_dir, extra_args, cwd, command=command)
+    key = (runs.get("interpreter"), runs.get("path"), str(cwd), command)
+    if key in state["seen"]:
+        return state["seen"][key]
+    if state["count"] >= _MAX_SCRIPTS:
+        return HookVerdict("ask", f"aegis: this command runs more than {_MAX_SCRIPTS} scripts, "
+                                  "too many to read; run them separately")
+    state["count"] += 1
+    verdict = _scan_script_once(runs, config_dir, extra_args, cwd, command=command)
+    state["seen"][key] = verdict
+    return verdict
+
+
+def _scan_script_once(runs: dict, config_dir: Path, extra_args: list[str] | None,
+                      cwd: Path | None, *, command: str = "") -> HookVerdict | None:
     interpreter = _basename(runs.get("interpreter", "") or "")
     path = runs.get("path", "") or ""
     if path.startswith("< "):

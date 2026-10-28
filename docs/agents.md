@@ -114,6 +114,7 @@ a Python program, a Makefile, or calls a cloud SDK, gets past it. With the examp
 | the same, where the script does not exist yet or is written by the same command (`printf '…' > x.sh; bash x.sh`, `cp a "$(pwd)/x.sh"; bash x.sh`, `chmod +x x; ./x`, `python3 -c '…Path("x.sh").write_text(…)'; bash x.sh`; reading it with `cat`, `grep`, `wc`, … does not count), cannot be read, holds a NUL byte, is over 64 KiB, names a tool on more than 64 lines, or is run after a `cd` the hook cannot follow | asks |
 | a script that `nuke.sh` sources or runs in turn | **runs**: only the script on the command line is read |
 | a script changed between the check and the run, or a symlink retargeted in between | **runs** the new content: the hook reads it once, before the command starts |
+| a script changed by an earlier step of the same command that does not name it (`git pull && ./deploy.sh`, `tar xf a.tar && bash x.sh`, `make; bash x.sh`) | **runs** the new content: the hook reads the script as it is before the command starts |
 | `python3 cleanup.py`, `make destroy`, `npm run teardown` | **runs** |
 | a file written with the agent's Write/Edit tool, then run by something other than a shell | **runs**: file edits are not commands |
 | a cloud SDK or HTTP call from code the agent wrote | **runs** |

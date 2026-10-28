@@ -207,7 +207,24 @@ def _tokens(command: str) -> list[str]:
 
 
 # Shell builtins / launchers whose effect cannot be determined statically.
-_REJECTED_BUILTINS = frozenset({"eval", "exec", "source", ".", "xargs"})
+_REJECTED_BUILTINS = frozenset({"eval", "exec", "source", ".", "xargs", "builtin"})
+
+
+def strip_exec_builtin(argv: list[str]) -> list[str]:
+    """``argv`` without a leading ``exec`` / ``builtin`` (and ``exec``'s ``-a
+    NAME`` / ``-c`` / ``-l`` options), and without the ``--`` after ``source`` /
+    ``.``: ``exec -a x ./x.sh`` -> ``./x.sh``, ``builtin . -- x.sh`` -> ``. x.sh``."""
+    while argv and argv[0] in ("exec", "builtin"):
+        head, argv = argv[0], argv[1:]
+        while head == "exec" and argv and argv[0].startswith("-"):
+            opt, argv = argv[0], argv[1:]
+            if opt == "--":
+                break
+            if "a" in opt[1:]:
+                argv = argv[1:]  # -a NAME
+    if len(argv) >= 2 and _basename(argv[0]) in ("source", ".") and argv[1] == "--":
+        argv = [argv[0], *argv[2:]]
+    return argv
 
 
 def _check_builtin(argv: list[str]) -> None:
@@ -492,6 +509,7 @@ def find_heredoc(line: str) -> tuple[int, int, bool, str, bool] | None:
     removed, ``""`` when the word cannot be read (an unclosed quote, ``$'…'``
     or ``$"…"`` quoting, nothing after ``<<``). ``None`` when there is none."""
     in_single = in_double = False
+    closers: list[str] = []  # open $((…)), ((…)), $[…], ${…}: a `<<` there is a shift
     i, n = 0, len(line)
     while i < n:
         c = line[i]
@@ -499,15 +517,27 @@ def find_heredoc(line: str) -> tuple[int, int, bool, str, bool] | None:
             in_single = c != "'"
         elif c == "\\":
             i += 1
+        elif closers and line.startswith(closers[-1], i):
+            i += len(closers.pop())
+            continue
+        elif line.startswith(("$((", "(("), i):
+            closers.append("))")
+            i += 3 if c == "$" else 2
+            continue
+        elif line.startswith(("$[", "${"), i):
+            closers.append("]" if line[i + 1] == "[" else "}")
+            i += 2
+            continue
         elif in_double:
             in_double = c != '"'
         elif c == "'":
             in_single = True
         elif c == '"':
             in_double = True
-        elif c == "#" and (i == 0 or line[i - 1].isspace() or line[i - 1] in ";&|("):
+        elif c == "#" and not closers and (
+                i == 0 or line[i - 1].isspace() or line[i - 1] in ";&|("):
             return None
-        elif line.startswith("<<", i) and not line.startswith("<<<", i) and (
+        elif not closers and line.startswith("<<", i) and not line.startswith("<<<", i) and (
                 i == 0 or line[i - 1] != "<"):
             j = i + 2
             dash = line.startswith("-", j)
@@ -632,7 +662,7 @@ def plain_binary(segment: str) -> str | None:
 
 _ALIASES = {"k": "kubectl", "tf": "terraform", "tofu": "tofu", "g": "git"}
 _SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "ash", "rbash", "mksh", "yash",
-                     "fish", "csh", "tcsh"})
+                     "fish", "csh", "tcsh", "posh"})
 _ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 _SUDO_BOOL_SHORT = frozenset("EHnkKbAlvS")
@@ -1188,10 +1218,27 @@ _GIT_COMMAND_KEYS = re.compile(
     r"(core\.(sshcommand|pager|editor|fsmonitor|askpass)|sequence\.editor|gpg\.program"
     r"|gpg\.\w+\.program|pager\..+|diff\..+\.(textconv|command)|filter\..+\.(clean|smudge|process)"
     r"|merge\..+\.driver|uploadpack\.packobjectshook|difftool\..+\.cmd|mergetool\..+\.cmd"
-    r"|interactive\.difffilter)$")
+    r"|interactive\.difffilter|diff\.external|core\.gitproxy|core\.alternaterefscommand"
+    r"|remote\..+\.(uploadpack|receivepack)|sendemail\.(.+\.)?(tocmd|cccmd))$")
 _GIT_BANG_KEYS = re.compile(r"(alias\..+|credential(\..+)?\.helper)$")
 _GIT_GLOBAL_VALUED = frozenset({"-C", "--git-dir", "--work-tree", "--namespace",
                                 "--super-prefix", "--exec-path", "--list-cmds"})
+# `git config` options whose value is not a key or a setting.
+_GIT_CONFIG_VALUED = frozenset({"-f", "--file", "--blob", "--type", "--default", "--comment",
+                                "--value", "--url"})
+# Subcommands of `git submodule foreach` that only read or sync the
+# submodules, so `git submodule foreach git pull` is not asked about.
+_GIT_FOREACH_SAFE = frozenset({"pull", "fetch", "status", "log", "diff", "show", "checkout",
+                               "switch", "rev-parse", "describe", "branch", "remote"})
+# Options of git subcommands whose value is a command run on this or the
+# remote side (`git clone -u CMD`, `git push --receive-pack=CMD`).
+_GIT_SUBCOMMAND_OPTIONS = {
+    "rebase": ("-x", "--exec"), "difftool": ("-x", "--extcmd"),
+    "mergetool": ("-x", "--extcmd"), "clone": ("-u", "--upload-pack"),
+    "fetch": ("--upload-pack",), "pull": ("--upload-pack",), "ls-remote": ("--upload-pack",),
+    "push": ("--receive-pack", "--exec"), "send-pack": ("--receive-pack", "--exec"),
+    "archive": ("--exec",),
+}
 _GIT_FILTER_OPTIONS = frozenset({"--tree-filter", "--index-filter", "--msg-filter",
                                  "--env-filter", "--commit-filter", "--parent-filter",
                                  "--tag-name-filter"})
@@ -1206,6 +1253,8 @@ def _git_config_value(key: str, value: str | None) -> list[str | None]:
         return [value]
     if _GIT_BANG_KEYS.match(key) and (value is None or value.startswith("!")):
         return [None if value is None else value[1:]]
+    if key.endswith(".helper") and _GIT_BANG_KEYS.match(key) and value.startswith("/"):
+        return [value]  # an absolute helper path runs as is
     return []
 
 
@@ -1236,17 +1285,27 @@ def git_runs(argv: list[str]) -> list[str | None]:
         return runs
     sub, sub_args = rest[0], rest[1:]
     if sub == "config":
-        words = [w for w in sub_args if not w.startswith("-")]
+        words, k = [], 0
+        while k < len(sub_args):
+            word = sub_args[k]
+            k += 2 if word in _GIT_CONFIG_VALUED else 1
+            if not word.startswith("-"):
+                words.append(word)
+        if words[:1] == ["set"]:  # git 2.46+: git config set KEY VALUE
+            words = words[1:]
         if len(words) >= 2:
             runs += _git_config_value(words[0], " ".join(words[1:]))
     elif sub == "bisect" and sub_args[:1] == ["run"]:
         runs.append(" ".join(sub_args[1:]))
     elif sub == "submodule" and "foreach" in sub_args:
-        tail = sub_args[sub_args.index("foreach") + 1:]
-        runs.append(" ".join(w for w in tail if w != "--recursive"))
+        tail = [w for w in sub_args[sub_args.index("foreach") + 1:]
+                if w not in ("--recursive", "-q", "--quiet")]
+        if len(tail) > 1 and tail[0] == "git" and tail[1] in _GIT_FOREACH_SAFE:
+            runs += git_runs(tail)  # git submodule foreach git pull
+        else:
+            runs.append(" ".join(tail))
     else:
-        options = {"rebase": ("-x", "--exec"), "difftool": ("-x", "--extcmd"),
-                   "mergetool": ("-x", "--extcmd")}.get(sub, ())
+        options = _GIT_SUBCOMMAND_OPTIONS.get(sub, ())
         if sub == "filter-branch":
             options = tuple(_GIT_FILTER_OPTIONS)
         for k, tok in enumerate(sub_args):
@@ -1384,7 +1443,7 @@ def code_run(simple: SimpleCommand) -> dict[str, str] | None:
                         "path": f"-m {following}".strip()}
             if tok == "-" or (interp in _SHELLS and tok == "-s"):
                 break  # code from stdin
-            if tok in _VALUE_FLAGS:
+            if tok in _VALUE_FLAGS and not (interp in _SHELLS and tok == "-r"):
                 skip = True
                 continue
             if tok.startswith(("-", "+")):
@@ -1457,8 +1516,7 @@ def script_runs_loosely(command: str, _depth: int = 0) -> list[dict[str, str]]:
             argv = _strip_reserved(argv)
         except ShellRejected:
             continue
-        while argv and argv[0] in ("exec", "builtin"):
-            argv = argv[1:]  # exec bash x.sh, builtin source x.sh
+        argv = strip_exec_builtin(argv)  # exec bash x.sh, builtin source x.sh
         if not argv:
             continue
         redirects = [t for t in argv if t.startswith(("<", "0<"))]
