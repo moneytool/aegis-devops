@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -1423,7 +1424,7 @@ def test_a_built_program_given_an_infra_command_asks(opted_in_project, command, 
 ])
 def test_git_configuration_that_runs_an_infra_command_asks(opted_in_project, command):
     code, out, err = run("claude", payload_for("claude", command))
-    assert "this git configuration names an infrastructure tool" in _ask_reason(out)
+    assert "runs from its configuration" in _ask_reason(out)
 
 
 @pytest.mark.parametrize("command", [
@@ -1554,3 +1555,130 @@ def test_a_brace_or_glob_in_the_program_word_is_denied(opted_in_project, command
 def test_globs_in_arguments_and_tests_are_fine(opted_in_project, command):
     code, out, err = run("claude", payload_for("claude", command))
     assert (code, out) == (0, "")
+
+
+# --- council round 6 ---------------------------------------------------------------
+
+
+def _write_scripts(project):
+    (project / "s").mkdir(exist_ok=True)
+    (project / "s" / "many.sh").write_text(f"{BLOCK_COMMAND}\n")
+    (project / "cleanup.sh").write_text(f"echo hi\n{BLOCK_COMMAND}\n")
+    (project / "benign.sh").write_text("echo hi\n")
+
+
+def test_a_word_with_many_brace_groups_is_denied_at_once(opted_in_project):
+    word = "{a,b}" * 20
+    start = time.perf_counter()
+    code, out, err = run("claude", payload_for("claude", f"{word} delete nodes --all"))
+    assert code == 2
+    assert time.perf_counter() - start < 5
+
+
+@pytest.mark.parametrize("command", [
+    "OUT=$(bash cleanup.sh)", "echo $(./cleanup.sh)", "X=`bash cleanup.sh`",
+    "cat <(bash cleanup.sh)", 'true "$(sh cleanup.sh)"',
+    'for i in 1 2; do ./s/many.sh "$i"; done', 'for i in 1 2; do bash s/many.sh "$i"; done',
+    "(bash s/many.sh)", '{ bash s/many.sh "$i"; }', "sh -c 'bash s/many.sh \"$1\"' _ x",
+    "case $x in a) bash s/many.sh;; esac", "bash -c 'source s/many.sh'", "sh -c '. s/many.sh'",
+    "exec bash s/many.sh", "fish s/many.sh",
+])
+def test_a_script_run_inside_an_expansion_or_group_is_read(opted_in_project, command):
+    _write_scripts(opted_in_project)
+    code, out, err = run("claude", payload_for("claude", command))
+    assert code == 2, (out, err)
+    assert "line" in err
+
+
+@pytest.mark.parametrize("command", [
+    "BASH_ENV=cleanup.sh bash -c true", "env BASH_ENV=cleanup.sh bash -c true",
+    "BASH_ENV=cleanup.sh bash benign.sh",
+])
+def test_bash_env_asks(opted_in_project, command):
+    _write_scripts(opted_in_project)
+    code, out, err = run("claude", payload_for("claude", command))
+    assert "makes the shell source a file first" in _ask_reason(out)
+
+
+def test_a_script_rewritten_by_inline_code_asks(opted_in_project):
+    _write_scripts(opted_in_project)
+    command = ("python3 -c 'import pathlib; pathlib.Path(\"benign.sh\").write_text(\"x\")'; "
+               "bash benign.sh")
+    code, out, err = run("claude", payload_for("claude", command))
+    assert "is written by this command" in _ask_reason(out)
+
+
+@pytest.mark.parametrize("command", [
+    f"bash -c \"git -c alias.x='!{BLOCK_COMMAND}' x\"",
+    f"git bisect run {BLOCK_COMMAND}", f"git submodule foreach '{BLOCK_COMMAND}'",
+    f"git rebase -x '{BLOCK_COMMAND}' HEAD~1", f'git difftool -x "{BLOCK_COMMAND}" HEAD~1',
+    f"git filter-branch --tree-filter '{BLOCK_COMMAND}' HEAD",
+    f"GIT_SSH_COMMAND='{BLOCK_COMMAND}' git fetch", f"EDITOR='{BLOCK_COMMAND}' git commit",
+])
+def test_a_command_git_runs_from_configuration_asks(opted_in_project, command):
+    code, out, err = run("claude", payload_for("claude", command))
+    assert "runs from its configuration" in _ask_reason(out)
+
+
+@pytest.mark.parametrize("command", [
+    f"fd -e yaml -x {BLOCK_COMMAND}", "rg --pre kubectl x", f"vim -c '!{BLOCK_COMMAND}' -c q",
+    f"awk 'BEGIN{{system(\"{BLOCK_COMMAND}\")}}'", f"sed '1e {BLOCK_COMMAND}' f",
+    f"cargo +nightly run -- {BLOCK_COMMAND}", f"cargo --color always run -- {BLOCK_COMMAND}",
+    f"go -C sub run . {BLOCK_COMMAND}", "nix run nixpkgs#kubectl -- delete nodes --all",
+    "alias kk=kubectl", "hash -p /usr/bin/kubectl kk", "bash ~+/s/many.sh",
+])
+def test_a_program_that_may_run_the_tool_asks(opted_in_project, command):
+    code, out, err = run("claude", payload_for("claude", command))
+    assert _ask_reason(out), (code, out, err)
+
+
+@pytest.mark.parametrize("command", [
+    f"uvx kubectl@latest {BLOCK_COMMAND.removeprefix('kubectl ')}",
+    f"uvx 'kubectl==1.0' {BLOCK_COMMAND.removeprefix('kubectl ')}",
+    f"gem exec kubectl:1.0 {BLOCK_COMMAND.removeprefix('kubectl ')}",
+    f"uv --directory backend run {BLOCK_COMMAND}", f"bundle --verbose exec {BLOCK_COMMAND}",
+])
+def test_round6_launcher_forms_meet_the_policy(opted_in_project, command):
+    code, out, err = run("claude", payload_for("claude", command))
+    assert code == 2, (out, err)
+
+
+@pytest.mark.parametrize("command", [
+    # round 6: development tasks of migration tools, also through a package manager
+    "rails test", "bundle exec rails test", "bundle exec rails g migration AddX",
+    "bundle exec rails routes", "bundle exec rails db:migrate:status", "uv run alembic current",
+    "uv run alembic revision --autogenerate -m x", "poetry run alembic history",
+    "uv run prisma generate", "prisma migrate status",
+    # ordinary git configuration, global options before `run`
+    "git config remote.origin.url git@github.com:org/repo.git",
+    "git config --global user.email tf@corp.com", "git -c user.email=git@example.com commit -m x",
+    "git config --global --add safe.directory /work/terraform", "git commit -m 'bump kubectl'",
+    "uv --directory backend run alembic upgrade head", "poetry -C backend run pytest",
+    "uv -q run pytest", "bundle exec --gemfile=Gemfile rspec", "uv run --no-build-isolation pytest",
+    "mise exec --env staging -- terraform plan", "alias ll='ls -la'", "uvx ruff check .",
+])
+def test_round6_ordinary_commands_are_allowed(opted_in_project, command):
+    code, out, err = run("claude", payload_for("claude", command))
+    assert (code, out) == (0, ""), (out, err)
+
+
+@pytest.mark.parametrize("command", [
+    "bundle exec rails db:schema:load", "bundle exec rails console", "rails runner 'x'",
+])
+def test_other_migration_tasks_are_still_refused(opted_in_project, command):
+    code, out, err = run("claude", payload_for("claude", command))
+    assert code == 2
+
+
+def test_a_very_long_command_is_not_parsed(opted_in_project):
+    code, out, err = run("claude", payload_for("claude", "echo x; " * 10_000 + BLOCK_COMMAND))
+    assert code == 2
+    assert "too long to check" in err
+    code, out, err = run("claude", payload_for("claude", "echo x; " * 10_000))
+    assert "too long to check" in _ask_reason(out)
+
+
+def test_many_pieces_of_piped_code_ask(opted_in_project):
+    code, out, err = run("claude", payload_for("claude", "echo ls | sh; " * 40))
+    assert "too many to check" in _ask_reason(out)
+

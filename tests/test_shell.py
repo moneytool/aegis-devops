@@ -310,7 +310,7 @@ def test_unwrap_package_manager_run_subcommands(argv, expected):
 
 @pytest.mark.parametrize("argv", [
     ["uv", "run", "--frobnicate", "kubectl", "delete", "nodes", "--all"],
-    ["uv", "--directory", "d", "run", "kubectl", "delete", "nodes", "--all"],
+    ["uv", "--frobnicate", "d", "run", "kubectl", "delete", "nodes", "--all"],
     ["pipx", "run", "--bogus", "kubectl"],
     ["poetry", "run", "--bogus", "kubectl"],
 ])

@@ -66,6 +66,29 @@ behaviour.
   infrastructure tool, like any unknown program. The hook also asks when a git configuration
   value names one (`git -c alias.x='!kubectl …' x`, `git -c core.sshCommand=… fetch`, `git config
   alias.x '!kubectl …'`): git runs such values where their argv cannot be checked.
+- Agent hook (council round 6): a local script run inside `$(…)`, backticks, `<(…)`, a subshell,
+  a `{ …; }` group, a loop, a `case` branch, `sh -c '…'` (also `source`/`.` there), after `exec` or
+  `builtin`, or by `fish`/`csh`/`tcsh`/`mksh`/`yash`/`rbash` is read like `bash x.sh`, and one that
+  inline code may rewrite (`python3 -c '…"x.sh"…'; bash x.sh`) asks. `BASH_ENV`/`ENV` before a
+  command asks. Commands git runs from its arguments or environment ask when they name an
+  infrastructure tool or cannot be read: command-valued configuration only (`alias.*` starting with
+  `!`, `core.sshCommand`, `core.pager`, `core.editor`, `*.helper` with `!`, `diff.*.textconv`,
+  `filter.*`, …; `user.email=git@…` and `safe.directory=/work/terraform` no longer ask), `bisect
+  run`, `submodule foreach`, `rebase -x`, `difftool`/`mergetool -x`, `filter-branch --*-filter`, and
+  `GIT_SSH_COMMAND`, `GIT_PAGER`, `PAGER`, `EDITOR`, `VISUAL` and similar variables; this also
+  holds inside `bash -c`. `fd -x`, `rg --pre`, `vim -c`/`+cmd`, `hash -p`, `alias NAME=…`, `nix run
+  …#tool` and code arguments of `awk`, `sed`, `tmux`, `screen`, `parallel`, `flock`, `su`, … that
+  name a tool ask. `cargo +nightly run`, `cargo --color X run` and `go -C dir run` are read as
+  `run`. Package launchers accept common options before the subcommand (`uv --directory backend run
+  …`, `poetry -C dir run`, `bundle --verbose exec`, `mise -E env exec`) and more `uv run` options,
+  and `uvx`/`uv tool run`/`pipx run`/`gem exec` drop a version from the program (`kubectl@latest`,
+  `kubectl==1.0`, `kubectl:1.0`). Development tasks of migration tools run instead of being refused
+  as unknown migrations: `rails test`/`g`/`routes`/`db:migrate:status`/…, `alembic
+  current`/`history`/`revision`/…, `prisma generate`/`migrate status`/…; other unknown tasks
+  (`rails db:schema:load`, `rails console`) are still refused. A brace word with many groups is
+  denied at once (its expansion was exponential), a `~+` path asks instead of failing, a command
+  over 64 KiB is not parsed (asks, or blocks when it names a tool), and more than 32 pieces of
+  piped code ask.
 - Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
   own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
   policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a

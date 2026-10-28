@@ -631,7 +631,8 @@ def plain_binary(segment: str) -> str | None:
 # --- unwrapping launchers ----------------------------------------------------------
 
 _ALIASES = {"k": "kubectl", "tf": "terraform", "tofu": "tofu", "g": "git"}
-_SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "ash"})
+_SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "ash", "rbash", "mksh", "yash",
+                     "fish", "csh", "tcsh"})
 _ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 _SUDO_BOOL_SHORT = frozenset("EHnkKbAlvS")
@@ -801,12 +802,14 @@ _UV_COMMON_FLAGS = frozenset({
 })
 _SUBCOMMAND_LAUNCHERS: dict[tuple[str, ...], tuple[frozenset[str], frozenset[str]]] = {
     ("uv", "run"): (
-        _UV_COMMON_VALUED | {"--extra", "--group", "--only-group", "--no-group", "--package"},
+        _UV_COMMON_VALUED | {"--extra", "--group", "--only-group", "--no-group", "--package",
+                             "--no-extra", "--torch-backend", "--python-preference"},
         _UV_COMMON_FLAGS | {"--all-extras", "--no-dev", "--dev", "--only-dev", "--frozen",
                             "--locked", "--no-sync", "--no-project", "--active",
                             "--no-editable", "--exact", "--inexact", "--all-packages",
                             "--all-groups", "--no-default-groups", "--script", "-s",
-                            "--gui-script"}),
+                            "--gui-script", "--managed-python", "--no-managed-python",
+                            "--no-build-isolation"}),
     ("uv", "tool", "run"): (_UV_COMMON_VALUED | {"--from"}, _UV_COMMON_FLAGS),
     ("uvx",): (_UV_COMMON_VALUED | {"--from"}, _UV_COMMON_FLAGS),
     ("pipx", "run"): (
@@ -817,7 +820,7 @@ _SUBCOMMAND_LAUNCHERS: dict[tuple[str, ...], tuple[frozenset[str], frozenset[str
         frozenset({"-C", "--directory", "-P", "--project"}),
         frozenset({"-q", "--quiet", "-v", "-vv", "-vvv", "--verbose", "-n",
                    "--no-interaction", "--ansi", "--no-ansi", "--no-plugins", "--no-cache"})),
-    ("bundle", "exec"): (frozenset(), frozenset({"--keep-file-descriptors"})),
+    ("bundle", "exec"): (frozenset({"--gemfile"}), frozenset({"--keep-file-descriptors"})),
     ("asdf", "exec"): (frozenset(), frozenset()),
     ("gem", "exec"): (frozenset({"-v", "--version", "-g", "--gem"}),
                       frozenset({"--conservative", "--prerelease"})),
@@ -825,15 +828,56 @@ _SUBCOMMAND_LAUNCHERS: dict[tuple[str, ...], tuple[frozenset[str], frozenset[str
 # ``mise exec [TOOL@VERSION…] -- CMD``, ``mise exec -c STRING``, ``brew bundle
 # exec -- CMD``: the command follows ``--`` (or is a shell string).
 _DOUBLE_DASH_LAUNCHERS: dict[tuple[str, ...], tuple[frozenset[str], frozenset[str]]] = {
-    ("mise", "exec"): (frozenset({"-C", "--cd", "-j", "--jobs", "-c", "--command"}),
+    ("mise", "exec"): (frozenset({"-C", "--cd", "-E", "--env", "-j", "--jobs", "-c",
+                                  "--command"}),
                        frozenset({"--raw", "-q", "--quiet", "-v", "--verbose", "-y", "--yes",
                                   "--no-prepare"})),
-    ("mise", "x"): (frozenset({"-C", "--cd", "-j", "--jobs", "-c", "--command"}),
+    ("mise", "x"): (frozenset({"-C", "--cd", "-E", "--env", "-j", "--jobs", "-c",
+                               "--command"}),
                     frozenset({"--raw", "-q", "--quiet", "-v", "--verbose", "-y", "--yes",
                                "--no-prepare"})),
     ("brew", "bundle", "exec"): (frozenset({"--file"}), frozenset({"--services", "-v",
                                                                    "--verbose"})),
 }
+
+
+# Options of these programs that may come before the subcommand (``uv
+# --directory backend run …``, ``poetry -C backend run …``): (take a value, don't).
+_GLOBAL_OPTIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
+    "uv": (frozenset({"--directory", "--project", "--config-file", "--cache-dir", "--color",
+                      "--python-preference", "--allow-insecure-host"}),
+           frozenset({"-q", "--quiet", "-v", "--verbose", "--offline", "--no-cache", "-n",
+                      "--native-tls", "--preview", "--no-config", "--no-progress",
+                      "--managed-python", "--no-managed-python", "--no-python-downloads"})),
+    "poetry": (frozenset({"-C", "--directory", "-P", "--project"}),
+               frozenset({"-q", "--quiet", "-v", "-vv", "-vvv", "--verbose", "-n",
+                          "--no-interaction", "--ansi", "--no-ansi", "--no-plugins",
+                          "--no-cache"})),
+    "bundle": (frozenset({"--gemfile"}), frozenset({"--verbose", "--no-color", "-V"})),
+    "mise": (frozenset({"-C", "--cd", "-E", "--env", "-j", "--jobs"}),
+             frozenset({"-q", "--quiet", "-v", "--verbose", "-y", "--yes"})),
+}
+
+
+def _skip_global_options(head: str, argv: list[str]) -> int:
+    """How many words of :data:`_GLOBAL_OPTIONS` follow the program name."""
+    valued, flags = _GLOBAL_OPTIONS.get(head, (frozenset(), frozenset()))
+    i = 1
+    while i < len(argv):
+        opt, eq, _glued = argv[i].partition("=")
+        if opt in valued:
+            i += 1 if eq else 2
+        elif argv[i] in flags:
+            i += 1
+        else:
+            break
+    return min(i, len(argv)) - 1
+
+
+# Launchers whose program word is a package spec with a version or extras.
+_PACKAGE_SPEC_LAUNCHERS = frozenset({("uvx",), ("uv", "tool", "run"), ("pipx", "run"),
+                                     ("gem", "exec")})
+_PACKAGE_SPEC_RE = re.compile(r"(\[[^\]]*\])?(?:[@=<>!~:].*)?$")
 
 
 def _subcommand_launcher(argv: list[str]) -> tuple[tuple[str, ...], int] | None:
@@ -844,14 +888,15 @@ def _subcommand_launcher(argv: list[str]) -> tuple[tuple[str, ...], int] | None:
     --directory d run …``): they are rare, and an option value could hide
     which subcommand runs."""
     head = _basename(argv[0])
+    skip = _skip_global_options(head, argv)
     for table in (_SUBCOMMAND_LAUNCHERS, _DOUBLE_DASH_LAUNCHERS):
         for key in table:
             if key[0] != head:
                 continue
-            words = argv[1:len(key)]
+            words = argv[1 + skip:len(key) + skip]
             if list(words) == list(key[1:]):
-                return key, len(key)
-    if len(argv) > 1 and argv[1].startswith("-"):
+                return key, len(key) + skip
+    if len(argv) > 1 + skip and argv[1 + skip].startswith("-"):
         for key in (*_SUBCOMMAND_LAUNCHERS, *_DOUBLE_DASH_LAUNCHERS):
             if len(key) > 1 and key[0] == head and key[1] in argv[2:]:
                 raise ShellRejected(f"{head} option {argv[1]!r} before the {key[1]} subcommand")
@@ -891,6 +936,9 @@ def _strip_subcommand_launcher(
     if double_dash:
         return [], None
     rest = rest[i:]
+    if rest and key in _PACKAGE_SPEC_LAUNCHERS:
+        # uvx kubectl@latest, pipx run 'kubectl==1.0', gem exec kubectl:1.0: the program
+        rest = [_PACKAGE_SPEC_RE.sub("", rest[0]) or rest[0], *rest[1:]]
     if key == ("uv", "run") and rest and rest[0].endswith(".py"):
         return ["python", *rest], None  # uv run script.py runs it with Python
     return rest, None
@@ -1118,6 +1166,112 @@ _KNOWN_BINARIES = frozenset(
     }
 )
 
+# Subcommands of migration tools that neither touch the database nor run
+# arbitrary code (tests, generators, status): they are ordinary programs, not
+# migrations. Any other subcommand the migration parser does not know is
+# refused, as before (`rails db:schema:load`, `rails runner …`, `rails console`).
+_DEV_TASKS = {
+    "rails": frozenset({"test", "t", "server", "s", "generate", "g", "routes", "about", "stats",
+                        "notes", "assets:precompile", "assets:clean", "db:migrate:status",
+                        "db:version", "zeitwerk:check", "tmp:clear", "log:clear", "-v",
+                        "--version", "--help", "-h"}),
+    "alembic": frozenset({"current", "history", "heads", "branches", "show", "check",
+                          "revision", "merge", "--version", "--help", "-h"}),
+    "prisma": frozenset({"generate", "format", "validate", "version", "-v", "--version",
+                         "--help", "-h", "migrate status"}),
+}
+
+
+# Git configuration keys whose value is a command git runs (an `alias.*` or
+# `*.helper` value only when it starts with "!").
+_GIT_COMMAND_KEYS = re.compile(
+    r"(core\.(sshcommand|pager|editor|fsmonitor|askpass)|sequence\.editor|gpg\.program"
+    r"|gpg\.\w+\.program|pager\..+|diff\..+\.(textconv|command)|filter\..+\.(clean|smudge|process)"
+    r"|merge\..+\.driver|uploadpack\.packobjectshook|difftool\..+\.cmd|mergetool\..+\.cmd"
+    r"|interactive\.difffilter)$")
+_GIT_BANG_KEYS = re.compile(r"(alias\..+|credential(\..+)?\.helper)$")
+_GIT_GLOBAL_VALUED = frozenset({"-C", "--git-dir", "--work-tree", "--namespace",
+                                "--super-prefix", "--exec-path", "--list-cmds"})
+_GIT_FILTER_OPTIONS = frozenset({"--tree-filter", "--index-filter", "--msg-filter",
+                                 "--env-filter", "--commit-filter", "--parent-filter",
+                                 "--tag-name-filter"})
+
+
+def _git_config_value(key: str, value: str | None) -> list[str | None]:
+    """The command a ``key=value`` git configuration makes git run: ``[]``
+    when it is not a command, ``[None]`` when it is one but the value is not
+    known (``--config-env``)."""
+    key = key.lower()
+    if _GIT_COMMAND_KEYS.match(key):
+        return [value]
+    if _GIT_BANG_KEYS.match(key) and (value is None or value.startswith("!")):
+        return [None if value is None else value[1:]]
+    return []
+
+
+def git_runs(argv: list[str]) -> list[str | None]:
+    """The commands ``git …`` would run from its own arguments: command-valued
+    configuration (``-c alias.x='!cmd'``, ``-c core.sshCommand=cmd``, ``git
+    config core.pager cmd``) and the subcommands that run their argument
+    (``bisect run``, ``submodule foreach``, ``rebase -x``, ``difftool`` /
+    ``mergetool -x``, ``filter-branch --*-filter``). ``None`` stands for a
+    command whose text is not on the command line."""
+    runs: list[str | None] = []
+    args = argv[1:]
+    i = 0
+    while i < len(args) and args[i].startswith("-"):  # global options
+        opt, eq, glued = args[i].partition("=")
+        value = glued if eq else (args[i + 1] if i + 1 < len(args) else "")
+        if opt == "-c":
+            key, has_value, setting = value.partition("=")
+            runs += _git_config_value(key, setting if has_value else "")
+        elif opt == "--config-env":
+            runs += _git_config_value(value.partition("=")[0], None)
+        if opt in ("-c", "--config-env") or opt in _GIT_GLOBAL_VALUED:
+            i += 1 if eq else 2
+            continue
+        i += 1
+    rest = args[i:]
+    if not rest:
+        return runs
+    sub, sub_args = rest[0], rest[1:]
+    if sub == "config":
+        words = [w for w in sub_args if not w.startswith("-")]
+        if len(words) >= 2:
+            runs += _git_config_value(words[0], " ".join(words[1:]))
+    elif sub == "bisect" and sub_args[:1] == ["run"]:
+        runs.append(" ".join(sub_args[1:]))
+    elif sub == "submodule" and "foreach" in sub_args:
+        tail = sub_args[sub_args.index("foreach") + 1:]
+        runs.append(" ".join(w for w in tail if w != "--recursive"))
+    else:
+        options = {"rebase": ("-x", "--exec"), "difftool": ("-x", "--extcmd"),
+                   "mergetool": ("-x", "--extcmd")}.get(sub, ())
+        if sub == "filter-branch":
+            options = tuple(_GIT_FILTER_OPTIONS)
+        for k, tok in enumerate(sub_args):
+            opt, eq, glued = tok.partition("=")
+            if opt in options:
+                runs.append(glued if eq else (sub_args[k + 1] if k + 1 < len(sub_args) else ""))
+            elif len(tok) > 2 and tok[:2] in options and not tok.startswith("--"):
+                runs.append(tok[2:])  # -x'cmd'
+    return runs
+
+
+def _is_dev_task(name: str, argv: list[str]) -> bool:
+    """Whether ``argv`` runs one of :data:`_DEV_TASKS` (``rails test …``,
+    ``alembic current``, ``prisma generate``, ``prisma migrate status``)."""
+    tasks = _DEV_TASKS.get("rails" if name == "bin/rails" else name)
+    if not tasks or len(argv) < 2:
+        return False
+    task = argv[1]
+    if name == "prisma" and task == "migrate" and len(argv) > 2:
+        task = f"migrate {argv[2]}"
+    if name in ("rails", "bin/rails") and task.startswith("test:"):
+        return True
+    return task in tasks
+
+
 # Interpreters and the flags that hand them code on the command line.
 _INLINE_FLAGS = {
     "python": ("-c",), "node": ("-e", "--eval", "-p", "--print"), "perl": ("-e", "-E"),
@@ -1255,17 +1409,56 @@ def code_run(simple: SimpleCommand) -> dict[str, str] | None:
     return None
 
 
-def script_runs_loosely(command: str) -> list[dict[str, str]]:
-    """Best effort for a command the parser rejected (``bash x.sh "$TARGET"``): splits
-    it on the shell's separators without expanding anything, strips launchers, and
-    returns what :func:`code_run` finds in each part. Never raises; only for asking,
-    never for allowing."""
+# Where a loose part ends: the shell's separators, and the edges of $(…), `…`,
+# <(…), >(…), (…), { …; } and case patterns.
+_LOOSE_SPLIT_RE = re.compile(r"(\|\||&&|;;|\$\(|[<>]\(|[;|&\n()`])")
+
+
+def script_runs_loosely(command: str, _depth: int = 0) -> list[dict[str, str]]:
+    """Best effort for a command the parser rejected (``bash x.sh "$TARGET"``,
+    ``OUT=$(bash x.sh)``, ``for i in 1 2; do ./x.sh "$i"; done``): splits it on
+    the shell's separators and on the edges of command substitutions, process
+    substitutions, subshells and groups, without expanding anything; strips
+    reserved words and launchers, reads one level of ``sh -c STRING``, and
+    returns what :func:`code_run` finds in each part. Never raises; only for
+    asking, never for allowing."""
     found = []
-    for part in re.split(r"\|\||&&|[;|&\n]", command):
+    pieces = _LOOSE_SPLIT_RE.split(command)
+    opened: list[str] = []  # brackets and backticks still open
+    continuation = False  # this part follows a closing `)`/`` ` ``: the rest of a word
+    for k, part in enumerate(pieces):
+        if k % 2:  # a delimiter
+            if part in ("$(", "<(", ">(", "("):
+                opened.append("(")
+                continuation = False
+            elif part == ")":
+                # closes a bracket (`$(pwd)/x.sh` goes on as one word), or ends a
+                # case pattern (`a) bash x.sh`), after which a command starts
+                continuation = bool(opened)
+                if opened:
+                    opened.pop()
+            elif part == "`":
+                if opened and opened[-1] == "`":
+                    opened.pop()
+                    continuation = True
+                else:
+                    opened.append("`")
+                    continuation = False
+            else:
+                continuation = False
+            continue
+        if continuation:
+            continue
         try:
             argv = shlex.split(part, comments=False)
         except ValueError:
             continue
+        try:
+            argv = _strip_reserved(argv)
+        except ShellRejected:
+            continue
+        while argv and argv[0] in ("exec", "builtin"):
+            argv = argv[1:]  # exec bash x.sh, builtin source x.sh
         if not argv:
             continue
         redirects = [t for t in argv if t.startswith(("<", "0<"))]
@@ -1275,8 +1468,11 @@ def script_runs_loosely(command: str) -> list[dict[str, str]]:
                           "path": argv[1] if len(argv) > 1 else ""})
             continue
         try:
-            argv, _env, _wrappers, _string = _unwrap_inner(argv, 1)
+            argv, _env, _wrappers, string = _unwrap_inner(argv, 0 if _depth == 0 else 1)
         except ShellRejected:
+            continue
+        if string is not None:
+            found.extend(script_runs_loosely(string, _depth + 1))
             continue
         runs = code_run(SimpleCommand(argv, redirects))
         if runs is not None:
@@ -1461,7 +1657,7 @@ def intents_from_command(command: str) -> list[InfrastructureIntent]:
         )
         if destroy is not None:
             produced = destroy
-        elif name in _KNOWN_BINARIES:
+        elif name in _KNOWN_BINARIES and not _is_dev_task(name, simple.argv):
             produced = from_argv(simple.argv)
         else:
             runs = code_run(simple)
@@ -1480,6 +1676,11 @@ def intents_from_command(command: str) -> list[InfrastructureIntent]:
                     params=params,
                 )
             ]
+        if name == "git":
+            commands = git_runs(simple.argv)
+            if commands:
+                for intent in produced:
+                    intent.metadata["runs_commands"] = commands
         for intent in produced:
             _annotate(intent, env, wrappers, simple)
         intents.extend(produced)

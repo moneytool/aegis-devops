@@ -87,7 +87,6 @@ from aegis_core.shell import (
     split_segments,
     stdin_feeders,
     strip_comment,
-    unwrap,
 )
 
 AGENTS = ("claude", "codex", "copilot", "cursor", "gemini", "opencode", "vscode")
@@ -299,8 +298,20 @@ def _with_asks(verdict: HookVerdict, asks: list[str]) -> HookVerdict:
     return verdict
 
 
+# Past this size a command is not parsed (the checks are not all linear in it).
+_MAX_COMMAND_CHARS = 64 * 1024
+# At most this many pieces of piped shell code get a policy run of their own.
+_MAX_PIPED_CHECKS = 32
+
+
 def _decide(command: str, config_dir: Path, extra_args: list[str] | None, cwd: Path | None,
             *, scan: bool) -> HookVerdict:
+    if len(command) > _MAX_COMMAND_CHARS:
+        reason = (f"aegis: this command is over {_MAX_COMMAND_CHARS // 1024} KiB, too long to "
+                  "check; split it up or put it in a script")
+        if mentions_infra(command):
+            return HookVerdict("deny", reason, unchecked=True)
+        return HookVerdict("ask", reason)
     pre = _precheck(command, config_dir, extra_args, cwd, scan=scan)
     if isinstance(pre, HookVerdict):
         return pre
@@ -348,7 +359,11 @@ def _precheck(command: str, config_dir: Path, extra_args: list[str] | None,
                 "its own",
                 unchecked=True,
             )
-    for reader, feeder in stdin_feeders(command):
+    for n_piped, (reader, feeder) in enumerate(stdin_feeders(command)):
+        if n_piped == _MAX_PIPED_CHECKS:
+            asks.append(f"aegis: more than {_MAX_PIPED_CHECKS} pieces of code are piped into a "
+                        "shell or interpreter, too many to check; run them as a script")
+            break
         verdict = _piped_code(command, reader, feeder, config_dir, extra_args, cwd,
                               rebuilt=rebuilt)
         if verdict is not None:
@@ -359,9 +374,10 @@ def _precheck(command: str, config_dir: Path, extra_args: list[str] | None,
         verdict = _hidden_infra_program(intent, cwd)
         if verdict is not None:
             asks.append(verdict.reason)
-    verdict = _git_config_command(command)
-    if verdict is not None:
-        asks.append(verdict.reason)
+    for intent in intents:
+        verdict = _hidden_command(intent)
+        if verdict is not None:
+            asks.append(verdict.reason)
     if scan:
         for runs, here in _scripts_with_directory(command, cwd):
             verdict = _scan_script(runs, config_dir, extra_args, here, command=command)
@@ -405,23 +421,37 @@ def _glob_denied(command: str, word: str) -> HookVerdict:
     reason = (f"aegis: cannot check this command statically ({GLOB_REASON}): the shell may "
               "expand the program word into another program's name; spell the program out")
     pattern = word.rsplit("/", 1)[-1]
-    could_be_infra = any(fnmatch.fnmatchcase(name, alternative)
-                         for alternative in _brace_alternatives(pattern)
-                         for name in INFRA_BINARIES)
+    alternatives = _brace_alternatives(pattern)
+    # too many alternatives to try (`{a,b}{a,b}…`): it may become any name
+    could_be_infra = alternatives is None or any(
+        fnmatch.fnmatchcase(name, alternative)
+        for alternative in alternatives for name in INFRA_BINARIES)
     if could_be_infra or "/" not in word or mentions_infra(command):
         return HookVerdict("deny", reason, unchecked=True)
     return HookVerdict("ask", reason)
 
 
-def _brace_alternatives(pattern: str) -> list[str]:
+_MAX_BRACE_ALTERNATIVES = 256
+
+
+def _brace_alternatives(pattern: str) -> list[str] | None:
     """``a{b,c}d`` -> ``["abd", "acd"]`` (one level per brace pair, enough to
-    tell whether a program word could become a tool's name)."""
-    match = re.search(r"\{([^{}]*)\}", pattern)
-    if match is None:
-        return [pattern]
-    head, tail = pattern[: match.start()], pattern[match.end():]
-    return [alt for part in match.group(1).split(",")
-            for alt in _brace_alternatives(head + part + tail)]
+    tell whether a program word could become a tool's name); ``None`` when
+    there would be more than :data:`_MAX_BRACE_ALTERNATIVES` (the expansion
+    grows exponentially with the number of brace pairs)."""
+    done: list[str] = []
+    todo = [pattern]
+    while todo:
+        current = todo.pop()
+        match = re.search(r"\{([^{}]*)\}", current)
+        if match is None:
+            done.append(current)
+        else:
+            head, tail = current[: match.start()], current[match.end():]
+            todo.extend(head + part + tail for part in match.group(1).split(","))
+        if len(done) + len(todo) > _MAX_BRACE_ALTERNATIVES:
+            return None
+    return done
 
 
 def _hidden_infra_program(intent, cwd: Path | None) -> HookVerdict | None:
@@ -440,6 +470,14 @@ def _hidden_infra_program(intent, cwd: Path | None) -> HookVerdict | None:
     if not argv:
         return None
     name = _basename(argv[0])
+    if name == "alias":  # alias kk=kubectl: a later `kk delete …` runs kubectl unchecked
+        for tok in argv[1:]:
+            alias, eq, value = tok.partition("=")
+            if eq and mentions_infra(value):
+                return HookVerdict(
+                    "ask", f"aegis: the alias {alias} runs an infrastructure tool under another "
+                    "name, which cannot be checked; run the tool by its own name")
+        return None
     if name in ARGS_ONLY_PROGRAMS or name in INFRA_BINARIES:
         return None
     if name in _NAMES_WITHOUT_RUNNING and not _runs_a_program(name, argv[1:]):
@@ -460,8 +498,16 @@ def _hidden_infra_program(intent, cwd: Path | None) -> HookVerdict | None:
         words = tok.split()
         if not words or "://" in tok:
             continue
-        tool = _basename(words[0])  # /usr/local/bin/kubectl, ./kubectl: still kubectl
+        # /usr/local/bin/kubectl, ./kubectl, nix run nixpkgs#kubectl: still kubectl
+        tool = _basename(words[0]).rsplit("#", 1)[-1]
         if tool not in INFRA_BINARIES:
+            if name in _CODE_ARG_PROGRAMS and len(words) > 1 and mentions_infra(tok):
+                # code or a command line in one argument (awk 'BEGIN{system("kubectl …")}',
+                # sed '1e kubectl …', tmux new 'cd x && kubectl …')
+                return HookVerdict(
+                    "ask", f"aegis: {name} is given text that names an infrastructure tool, "
+                    f"which it may run where its arguments cannot be checked; run the tool "
+                    "on its own")
             continue
         if len(words) == 1 and value and "/" not in tok and cwd is not None and (
                 cwd / tok).is_dir():
@@ -472,11 +518,24 @@ def _hidden_infra_program(intent, cwd: Path | None) -> HookVerdict | None:
     return None
 
 
+# Programs that run an argument as code or as a command line, so a tool named
+# inside that argument may run (`awk 'BEGIN{system("kubectl …")}'`, `sed '1e …'`).
+_CODE_ARG_PROGRAMS = frozenset({
+    "awk", "gawk", "mawk", "nawk", "busybox", "sed", "gsed", "tmux", "screen", "expect",
+    "parallel", "watchexec", "entr", "nodemon", "dtach", "abduco", "xterm", "flock",
+    "unshare", "chroot", "su", "runuser", "nsenter", "firejail", "bwrap", "systemd-run",
+})
+
 # Options of exempt programs whose value is a command they run.
 _EXEC_OPTIONS = {
     "rsync": ("-e", "--rsh"),
     "scp": ("-o", "-S"),
     "nix-shell": ("--run", "--command"),
+    "fd": ("-x", "-X", "--exec", "--exec-batch"),
+    "hash": ("-p",),  # hash -p /usr/bin/kubectl kk: kk now runs kubectl
+    "rg": ("--pre",),
+    "vim": ("-c", "--cmd"),
+    "vi": ("-c", "--cmd"),
 }
 
 # Subcommands of exempt programs that build and run a program with the
@@ -496,6 +555,15 @@ _PROGRAM_RUNNING_SUBCOMMANDS = {
 }
 
 
+# Options of those programs that take a value before the subcommand.
+_GLOBAL_VALUED_OPTIONS = {
+    "cargo": frozenset({"--color", "--config", "-Z", "-C", "--manifest-path"}),
+    "go": frozenset({"-C"}),
+    "uv": frozenset({"--directory", "--project", "--config-file", "--cache-dir", "--color"}),
+    "mise": frozenset({"-C", "--cd", "-E", "--env", "-j", "--jobs"}),
+}
+
+
 def _runs_a_program(name: str, args: list[str]) -> bool:
     """Whether ``name args…`` is a subcommand of an exempt program that runs a
     program (:data:`_PROGRAM_RUNNING_SUBCOMMANDS`); its first non-option word
@@ -503,42 +571,47 @@ def _runs_a_program(name: str, args: list[str]) -> bool:
     subcommands = _PROGRAM_RUNNING_SUBCOMMANDS.get(name)
     if not subcommands:
         return False
-    first = next((tok for tok in args if not tok.startswith("-")), None)
-    return first in subcommands
+    valued = _GLOBAL_VALUED_OPTIONS.get(name, frozenset())
+    i = 0
+    while i < len(args) and (args[i].startswith(("-", "+"))):  # cargo +nightly, go -C dir
+        i += 2 if args[i] in valued else 1
+    return i < len(args) and args[i] in subcommands
 
 
-def _git_config_command(command: str) -> HookVerdict | None:
-    """``git -c alias.x='!kubectl …' x``, ``git -c core.sshCommand=CMD fetch``
-    and ``git config alias.x '!kubectl …'`` hand git a command it runs (now or
-    later) where its argv cannot be checked: asked when that configuration
-    value names an infrastructure tool. The git intent itself only records
-    the subcommand."""
-    for text, _sep in split_segments(command) or [(command, "")]:
-        loose = loose_argv(text)
-        if not loose:
-            continue
-        try:
-            argv, _env = unwrap(loose)
-        except ShellRejected:
-            continue
-        if not argv or _basename(argv[0]) != "git":
-            continue
-        args, values, i = argv[1:], [], 0
-        while i < len(args) and args[i].startswith("-"):  # global options
-            opt, eq, glued = args[i].partition("=")
-            if opt in ("-c", "--config-env", "-C", "--git-dir", "--work-tree", "--namespace"):
-                if opt in ("-c", "--config-env"):
-                    values.append(glued if eq else (args[i + 1] if i + 1 < len(args) else ""))
-                i += 1 if eq else 2
-                continue
-            i += 1
-        if i < len(args) and args[i] == "config":
-            values += args[i + 1:]
-        if any(mentions_infra(value) for value in values):
+# Environment variables whose value is a command (or a script) that the program
+# run, or a shell it starts, runs: git's ssh, pager and editors, and the file
+# bash/sh source before a non-interactive command.
+_COMMAND_ENV_VARS = frozenset({
+    "GIT_SSH_COMMAND", "GIT_SSH", "GIT_PAGER", "PAGER", "GIT_EDITOR", "EDITOR", "VISUAL",
+    "GIT_SEQUENCE_EDITOR", "GIT_EXTERNAL_DIFF", "GIT_ASKPASS", "SSH_ASKPASS", "MANPAGER",
+    "LESSOPEN", "LESSCLOSE",
+})
+_SOURCED_ENV_VARS = frozenset({"BASH_ENV", "ENV"})
+
+
+def _hidden_command(intent) -> HookVerdict | None:
+    """A command a program runs from its configuration rather than its argv:
+    git's command-valued settings and subcommands (``git -c alias.x='!cmd'``,
+    ``git bisect run cmd``, see :func:`aegis_core.shell.git_runs`) and an
+    environment variable that names a command (``GIT_SSH_COMMAND=cmd``,
+    ``EDITOR=cmd``). Asked when that command names an infrastructure tool or
+    cannot be read. ``BASH_ENV``/``ENV`` (a file bash or sh sources first)
+    always asks: the hook does not read that file."""
+    env = intent.metadata.get("env_assignments") or {}
+    for var in sorted(_SOURCED_ENV_VARS & env.keys()):
+        if env[var]:
             return HookVerdict(
-                "ask", "aegis: this git configuration names an infrastructure tool, which "
-                "git may run (an alias, sshCommand, pager or editor) where it cannot be "
-                "checked; run the infrastructure command on its own")
+                "ask", f"aegis: {var}={env[var]} makes the shell source a file first, which "
+                "the hook does not read; run the command without it")
+    commands = list(intent.metadata.get("runs_commands") or [])
+    commands += [env[var] for var in sorted(_COMMAND_ENV_VARS & env.keys())]
+    for text in commands:
+        if text is None or mentions_infra(text):
+            return HookVerdict(
+                "ask", "aegis: a command this one runs from its configuration (a git "
+                "alias, hook-like setting or subcommand such as bisect run, or an "
+                "editor/pager/ssh variable) names an infrastructure tool or cannot be read, "
+                "so it cannot be checked; run the infrastructure command on its own")
     return None
 
 
@@ -548,6 +621,8 @@ def _exec_option_values(name: str, args: list[str]) -> list[tuple[str, str]]:
     ``nix-shell --run CMD`` / ``--command CMD``."""
     options = _EXEC_OPTIONS.get(name, ())
     found: list[tuple[str, str]] = []
+    if name in ("vim", "vi"):
+        found += [("+", tok[1:]) for tok in args if tok.startswith("+")]  # vim +'!cmd'
     for i, tok in enumerate(args):
         key, eq, glued = tok.partition("=")
         if key in options and key.startswith("--") and eq:
@@ -603,7 +678,10 @@ def _cd(here: Path | None, argv: list[str]) -> Path | None:
     target = args[0]
     if target.startswith("-") or any(ch in target for ch in "$`"):
         return None
-    path = Path(target).expanduser()
+    try:
+        path = Path(target).expanduser()
+    except RuntimeError:  # ~user / ~+ the hook cannot resolve
+        return None
     return path if path.is_absolute() else here / path
 
 
@@ -730,6 +808,20 @@ def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
     kept: list[tuple[str, str]] = []
     asks: list[str] = []
     opaque: tuple[str, str] | None = None
+    # a script run anywhere in the command, also inside a part that drops out
+    # (`OUT=$(bash x.sh)`) or cannot be split out (`for …; do ./x.sh "$i"; done`)
+    loose_scripts = script_runs_loosely(command)
+    if scan:
+        start = None if _CD_RE.search(command) else cwd
+        for runs in loose_scripts:
+            verdict = _scan_script(runs, config_dir, extra_args, start, command=command)
+            if verdict is not None:
+                if verdict.decision == "deny":
+                    return verdict
+                asks.append(verdict.reason)
+    if escalate_scripts and loose_scripts:
+        asks.append("aegis: this runs a local script, which the hook cannot read "
+                    "(--escalate-scripts)")
     here = cwd
     previous_sep = ""
     for text, sep in segments:
@@ -916,7 +1008,16 @@ def _written_by_command(file: Path, command: str, cwd: Path | None) -> bool:
         if any(ch in token for ch in "$`"):
             count += token.rstrip("\"')").rsplit("/", 1)[-1] == file.name
             continue
-        path = Path(token).expanduser()
+        if token.rsplit("/", 1)[-1] != file.name and re.search(
+                r"(?<![\w.-])" + re.escape(file.name) + r"(?![\w.-])", token):
+            # inside code or a command line (python3 -c '…Path("x.sh").write_text(…)'):
+            # it may write the file
+            count += 1
+            continue
+        try:
+            path = Path(token).expanduser()
+        except RuntimeError:  # ~user or ~+ the hook cannot resolve: an unknown path
+            continue
         if not path.is_absolute():
             if cwd is None:
                 continue
@@ -967,7 +1068,11 @@ def _scan_script(runs: dict, config_dir: Path, extra_args: list[str] | None,
     if any(ch in path for ch in "$`"):
         return HookVerdict("ask", f"aegis: {path} is a script whose name is only known when "
                                   "the command runs, so its commands cannot be checked")
-    file = Path(path).expanduser()
+    try:
+        file = Path(path).expanduser()
+    except RuntimeError:  # ~user / ~+ the hook cannot resolve
+        return HookVerdict("ask", f"aegis: cannot tell which file {path} is, so its commands "
+                                  "were not checked")
     if not file.is_absolute():
         if cwd is None:
             return HookVerdict("ask", f"aegis: cannot tell which directory {path} is run "
