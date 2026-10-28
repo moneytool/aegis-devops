@@ -358,6 +358,10 @@ def _stdin_redirects(command: str, config_dir: Path, extra_args: list[str] | Non
         asks.append("aegis: a shell or interpreter here may read its commands through a "
                     "copied or read-write file descriptor (<&N, <>), which the hook cannot "
                     "follow; use `bash FILE` or `sh < FILE`")
+    if (stage := _PIPED_COMPOUND_RE.search(command)) and _READER_WORD_RE.search(
+            command, stage.end()):
+        asks.append("aegis: a pipe feeds a group, loop or if that runs a shell or interpreter, "
+                    "which may read its commands from the pipe; the hook cannot check them")
     if scan:
         for path in _group_stdin_files(command):
             verdict = _scan_script({"kind": "script", "interpreter": "sh", "path": path},
@@ -802,7 +806,9 @@ def _piped_code(command: str, reader: list[str], feeder: list[str] | None, confi
         )
     if interpreter not in _SHELLS:
         return None
-    verdict = _decide(code, config_dir, extra_args, cwd, scan=False)
+    # scripts the code runs are read too, under the same per-command cap
+    decide = _decide_once if _SCANNED.get() is not None else _decide
+    verdict = decide(code, config_dir, extra_args, cwd, scan=True)
     if verdict.decision == "allow":
         return None
     reason = verdict.reason.removeprefix("aegis: ")
@@ -980,6 +986,11 @@ def _sourced_script(segment: str) -> dict[str, str] | None:
 # A file redirected onto a group, subshell, `if` or loop (`{ sh; } < x.sh`,
 # `for …; do bash; done < x.sh`): a bare shell inside reads its commands from it.
 _GROUP_STDIN_RE = re.compile(r"(?:[})]|\b(?:fi|done|esac))\s*0?<(?![<&(>])\s*([^\s;&|)<>]+)")
+_EXEC_STDIN_RE = re.compile(
+    r"(?:^|[;&|\n('\"]\s*|\s)exec\s+0?<(?![<&(>])\s*([^\s;&|)<>]+)")
+# A pipe into a group, subshell, loop or if: every command in it shares the pipe.
+_PIPED_COMPOUND_RE = re.compile(
+    r"(?<!\|)\|(?!\|)&?\s*(?:[{(]|(?:if|while|until|for|select|case)\b)")
 # Standard input copied from another descriptor or opened read-write.
 _FD_STDIN_RE = re.compile(r"(?:^|[\s;&|])0?(?:<&\s*\d|<>)")
 _READER_WORDS = "|".join(sorted(_SHELLS))
@@ -993,8 +1004,12 @@ def _group_stdin_files(command: str) -> list[str]:
     reader = _READER_WORD_RE.search(command)
     if reader is None:
         return []
-    return [match.group(1).strip("'\"")
-            for match in _GROUP_STDIN_RE.finditer(command, reader.end())]
+    files = [match.group(1).strip("'\"")
+             for match in _GROUP_STDIN_RE.finditer(command, reader.end())]
+    # exec < FILE: the rest of the shell reads FILE as its standard input
+    files += [match.group(1).strip("'\"") for match in _EXEC_STDIN_RE.finditer(command)
+              if _READER_WORD_RE.search(command, match.end())]
+    return files
 
 
 # Where the command that reads a here-document starts: after a separator or

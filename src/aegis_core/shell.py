@@ -421,7 +421,12 @@ def loose_argv(segment: str) -> list[str] | None:
         argv = shlex.split(segment, comments=True)
     except ValueError:
         return None
-    argv = [t for t in argv if not t.startswith(("<", ">", "0<", "1>", "2>", "&>"))]
+    words, argv = iter(argv), []
+    for t in words:
+        if re.fullmatch(r"\d*(?:>>?|<|&>)", t):
+            next(words, None)  # `2> /dev/null`: the target goes with the operator
+        elif not t.startswith(("<", ">", "0<", "1>", "2>", "&>")):
+            argv.append(t)
     try:
         argv = _strip_reserved(argv)
         if not argv:

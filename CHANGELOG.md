@@ -124,6 +124,11 @@ behaviour.
   `PROMPT_COMMAND` counts as a command variable. A script path with `$HOME` or another variable
   the hook's environment sets (and the command does not) is read instead of asking. Finding files
   redirected onto groups is linear (63 KB of `)<a` took 36 s).
+- Agent hook: scripts named in literal code piped into a shell are read (`echo 'bash x.sh' | sh`);
+  `exec < x.sh` before a shell or interpreter reads x.sh like `sh < x.sh`; a pipe into a group,
+  loop or `if` that runs a shell or interpreter asks (`… | while true; do sh; done`). A
+  redirection target written as a separate word (`cd sub 2> /dev/null`) is no longer taken for an
+  argument.
 - Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
   own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
   policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a

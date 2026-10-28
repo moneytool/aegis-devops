@@ -1958,3 +1958,33 @@ def test_a_script_path_with_a_known_variable_is_read(opted_in_project, monkeypat
     assert run("claude", payload_for("claude", 'bash "${HOME}/nuke.sh"'))[0] == 2
     code, out, err = run("claude", payload_for("claude", 'HOME=/tmp; source "$HOME/nuke.sh"'))
     assert _ask_reason(out)
+
+
+@pytest.mark.parametrize("command", ["echo 'bash nuke.sh' | sh", "echo 'source nuke.sh' | sh",
+                                     "exec < nuke.sh; bash", "exec 0<nuke.sh; python3",
+                                     "bash -c 'exec < nuke.sh; bash'"])
+def test_scripts_behind_piped_code_and_exec_stdin_are_read(opted_in_project, command):
+    (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
+    code, out, err = run("claude", payload_for("claude", command))
+    assert code == 2, (out, err)
+    assert "nuke.sh line 1" in err
+
+
+@pytest.mark.parametrize("command", [f"echo '{BLOCK_COMMAND}' | if true; then bash; fi",
+                                     f"echo '{BLOCK_COMMAND}' | {{ ls; sh; }}",
+                                     "cat nuke.sh | while true; do sh; done"])
+def test_a_pipe_into_a_compound_command_with_a_shell_asks(opted_in_project, command):
+    (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
+    code, out, err = run("claude", payload_for("claude", command))
+    assert code == 2 or _ask_reason(out), (code, out, err)
+
+
+@pytest.mark.parametrize("command", ["cd sub 2> /dev/null && bash ok.sh",
+                                     'kubectl get pods | while read p; do echo "$p"; done',
+                                     "false || { echo a; bash ok.sh; }"])
+def test_round9_ordinary_commands_are_allowed(opted_in_project, command):
+    (opted_in_project / "sub").mkdir()
+    (opted_in_project / "sub" / "ok.sh").write_text("echo hi\n")
+    (opted_in_project / "ok.sh").write_text("echo hi\n")
+    code, out, err = run("claude", payload_for("claude", command))
+    assert (code, out) == (0, ""), (out, err)
