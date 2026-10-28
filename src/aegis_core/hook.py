@@ -79,6 +79,7 @@ from aegis_core.shell import (
     ShellRejected,
     _basename,
     _interpreter,
+    _unwrap_inner,
     find_heredoc,
     intents_from_command,
     loose_argv,
@@ -115,12 +116,13 @@ _INFRA_WORD_RE = re.compile(
     + r")(?![\w.-])"
 )
 
-# A shell, eval or source fed code made at run time: `bash -c "$(cat x)"`,
-# `eval "$(…)"`, `source <(…)`, `sh <(curl …)`. Asked about, not denied:
+# A shell, interpreter, eval or source fed code made at run time: `bash -c
+# "$(cat x)"`, `eval "$(…)"`, `source <(…)`, `sh <(curl …)`, `bash < <(curl …)`,
+# `python3 <(curl …)`. Asked about, not denied:
 # `eval "$(pyenv init -)"` is an everyday line.
 _GENERATED_CODE_RE = re.compile(
-    r"(?:^|[;&|(]\s*|\s)((?:sudo\s+)?(?:(?:ba|z|da|k|a)?sh|eval|source|\.))"
-    r"(?:\s+-[A-Za-z]+)*\s+[\"']?(?:\$\(|`|<\()"
+    r"(?:^|[;&|(]\s*|\s)((?:sudo\s+)?(?:(?:ba|z|da|k|a)?sh|eval|source|\.|python[\d.]*|perl|ruby"
+    r"|node))(?:\s+-[A-Za-z]+)*\s+(?:\d*<\s*)?[\"']?(?:\$\(|`|<\()"
 )
 
 
@@ -331,13 +333,40 @@ def _decide_once(command: str, config_dir: Path, extra_args: list[str] | None,
         if mentions_infra(command):
             return HookVerdict("deny", reason, unchecked=True)
         return HookVerdict("ask", reason)
+    early = _stdin_redirects(command, config_dir, extra_args, cwd, scan=scan)
+    if isinstance(early, HookVerdict):
+        return early
     pre = _precheck(command, config_dir, extra_args, cwd, scan=scan)
     if isinstance(pre, HookVerdict):
-        return pre
+        return _with_asks(pre, early)
     checkable, asks = pre
+    asks = [*early, *asks]
     if not checkable.strip(" \t\n;&|"):
         return _with_asks(HookVerdict("allow"), asks)
     return _with_asks(_policy(checkable, config_dir, extra_args), asks)
+
+
+def _stdin_redirects(command: str, config_dir: Path, extra_args: list[str] | None,
+                     cwd: Path | None, *, scan: bool) -> HookVerdict | list[str]:
+    """Shells that read their commands from a redirect the parser does not tie
+    to them: a file redirected onto a group, subshell, ``if`` or loop (read
+    like ``sh < FILE``), and a copied or read-write descriptor (asked). Runs
+    before parsing, so a command the parser rejects (``( sh ) < x.sh``) is
+    covered too."""
+    asks: list[str] = []
+    if _FD_STDIN_RE.search(command) and _READER_WORD_RE.search(command):
+        asks.append("aegis: a shell or interpreter here may read its commands through a "
+                    "copied or read-write file descriptor (<&N, <>), which the hook cannot "
+                    "follow; use `bash FILE` or `sh < FILE`")
+    if scan:
+        for path in _group_stdin_files(command):
+            verdict = _scan_script({"kind": "script", "interpreter": "sh", "path": path},
+                                   config_dir, extra_args, cwd, command=command)
+            if verdict is not None:
+                if verdict.decision == "deny":
+                    return verdict
+                asks.append(verdict.reason)
+    return asks
 
 
 def _precheck(command: str, config_dir: Path, extra_args: list[str] | None,
@@ -348,7 +377,8 @@ def _precheck(command: str, config_dir: Path, extra_args: list[str] | None,
     command to check against the policy plus asks that stand if it allows."""
     escalate_scripts = "--escalate-scripts" in (extra_args or [])
     try:
-        intents = intents_from_command(command)
+        # pipeline stages too: `ssh h kubectl … | tail` asks like `ssh h kubectl …`
+        intents = intents_from_command(command, keep_pipeline_stages=True)
     except ShellRejected as exc:
         if exc.reason == GLOB_REASON:
             return _glob_denied(command, exc.command or "")
@@ -393,8 +423,13 @@ def _precheck(command: str, config_dir: Path, extra_args: list[str] | None,
         verdict = _hidden_infra_program(intent, cwd)
         if verdict is not None:
             asks.append(verdict.reason)
+    exported: dict[str, str] = {}  # export NAME=VALUE: seen by every later command
     for intent in intents:
-        verdict = _hidden_command(intent)
+        argv = (intent.params.get("argv") or []) if intent.provider == "shell" else []
+        if argv and _basename(argv[0]) in _EXPORTING_BUILTINS:
+            exported.update(tok.split("=", 1) for tok in argv[1:] if "=" in tok)
+            continue
+        verdict = _hidden_command(intent, exported)
         if verdict is not None:
             asks.append(verdict.reason)
     if scan:
@@ -510,6 +545,11 @@ def _hidden_infra_program(intent, cwd: Path | None) -> HookVerdict | None:
     after_option = False
     for tok in argv[1:]:
         if tok.startswith("-"):
+            if name in _CODE_ARG_PROGRAMS and mentions_infra(tok.partition("=")[2]):
+                return HookVerdict(  # sed --expression='…e', awk --source='…'
+                    "ask", f"aegis: {name} is given text that names an infrastructure tool, "
+                    f"which it may run where its arguments cannot be checked; run the tool "
+                    "on its own")
             # a short option or a long one without "=" may take the next word
             after_option = "=" not in tok
             continue
@@ -609,15 +649,19 @@ _COMMAND_ENV_VARS = frozenset({
 _SOURCED_ENV_VARS = frozenset({"BASH_ENV", "ENV"})
 
 
-def _hidden_command(intent) -> HookVerdict | None:
+_EXPORTING_BUILTINS = frozenset({"export", "declare", "typeset", "local", "readonly"})
+
+
+def _hidden_command(intent, exported: dict[str, str] | None = None) -> HookVerdict | None:
     """A command a program runs from its configuration rather than its argv:
     git's command-valued settings and subcommands (``git -c alias.x='!cmd'``,
     ``git bisect run cmd``, see :func:`aegis_core.shell.git_runs`) and an
     environment variable that names a command (``GIT_SSH_COMMAND=cmd``,
     ``EDITOR=cmd``). Asked when that command names an infrastructure tool or
-    cannot be read. ``BASH_ENV``/``ENV`` (a file bash or sh sources first)
+    cannot be read; ``exported`` holds the ``export NAME=VALUE`` settings made
+    earlier in the command. ``BASH_ENV``/``ENV`` (a file bash or sh sources first)
     always asks: the hook does not read that file."""
-    env = intent.metadata.get("env_assignments") or {}
+    env = {**(exported or {}), **(intent.metadata.get("env_assignments") or {})}
     for var in sorted(_SOURCED_ENV_VARS & env.keys()):
         if env[var]:
             return HookVerdict(
@@ -923,6 +967,49 @@ def _sourced_script(segment: str) -> dict[str, str] | None:
     return None
 
 
+# A file redirected onto a group, subshell, `if` or loop (`{ sh; } < x.sh`,
+# `for …; do bash; done < x.sh`): a bare shell inside reads its commands from it.
+_GROUP_STDIN_RE = re.compile(r"(?:[})]|\b(?:fi|done|esac))\s*0?<(?![<&(>])\s*([^\s;&|)<>]+)")
+# Standard input copied from another descriptor or opened read-write.
+_FD_STDIN_RE = re.compile(r"(?:^|[\s;&|])0?(?:<&\s*\d|<>)")
+_READER_WORDS = "|".join(sorted(_SHELLS))
+_READER_WORD_RE = re.compile(
+    rf"(?<![\w./-])(?:{_READER_WORDS}|python[\d.]*|perl|ruby|node|php|lua)(?![\w.-])")
+
+
+def _group_stdin_files(command: str) -> list[str]:
+    """The files redirected onto a group, subshell, ``if`` or loop that runs a
+    shell or interpreter (``{ bash; } < c.sh``), read like ``sh < c.sh``."""
+    files = []
+    for match in _GROUP_STDIN_RE.finditer(command):
+        if _READER_WORD_RE.search(command, 0, match.start()):
+            files.append(match.group(1).strip("'\""))
+    return files
+
+
+# Where the command that reads a here-document starts: after a separator or
+# the opening of a `$(…)`, subshell or group (`x=$(bash <<EOF`, `( sh <<EOF`).
+_READER_START_RE = re.compile(r"\$\(|(?<![<>])\(|[;&|`]|\{(?=\s)")
+
+
+def _heredoc_reader(prefix: str) -> str:
+    """The program that reads a here-document whose ``<<`` follows ``prefix``,
+    with ``exec``/``builtin``, launchers and ``sh -c STRING`` unwrapped
+    (``exec -a x bash <<EOF`` -> ``bash``, ``bash -c sh <<EOF`` -> ``sh``)."""
+    try:
+        words = shlex.split(_READER_START_RE.split(prefix)[-1], comments=True)
+    except ValueError:
+        return ""
+    words = [w for w in words if not w.startswith(("<", ">", "0<", "1>", "2>", "&>"))]
+    try:
+        argv, _env, _wrappers, string = _unwrap_inner(strip_exec_builtin(words), 0)
+    except ShellRejected:
+        return ""
+    if string is not None:
+        argv = loose_argv(string) or []
+    return _basename(argv[0]) if argv else ""
+
+
 def _open_quote(line: str, quote: str | None) -> str | None:
     """The quote (``'``, ``"`` or ``$'``) still open at the end of ``line`` when
     it starts inside ``quote``; ``None`` when none is. An unquoted ``#`` at the
@@ -963,27 +1050,31 @@ def _script_lines(text: str) -> list[tuple[int, str, str | None]]:
     def logical(at: int) -> tuple[str, int]:
         """The line starting at raw index ``at`` with its continuations joined
         (a backslash-newline, a quote still open, a pipeline or list operator at
-        the end), and the raw index after it."""
-        pending = ""
+        the end), and the raw index after it. Only the raw line just added is
+        examined, and the pieces are joined once, so this is linear."""
+        parts: list[str] = []
         quote: str | None = None
         while at < len(raw):
-            candidate = pending + raw[at]
-            quote = _open_quote(raw[at], quote)
+            added = raw[at]
+            quote = _open_quote(added, quote)
             at += 1
             if quote is not None and at < len(raw):
-                pending = candidate + "\n"  # a string that goes on to the next line
+                parts += (added, "\n")  # a string that goes on to the next line
                 continue
-            code = strip_comment(candidate)
+            code = strip_comment(added)
             trailing = len(code) - len(code.rstrip("\\"))
-            if code == candidate and trailing % 2 == 1 and at < len(raw):
-                pending = candidate[:-1]
-                continue
+            if code == added and trailing % 2 == 1:
+                parts.append(added[:-1])
+                if at < len(raw):
+                    continue
+                return "".join(parts), at
             if (at < len(raw) and code.rstrip().endswith(("|", "&&", "|&"))
-                    and find_heredoc(candidate) is None):
-                pending = candidate + " "  # `cmd |` / `cmd &&` goes on to the next line
+                    and find_heredoc(added) is None):
+                parts += (added, " ")  # `cmd |` / `cmd &&` goes on to the next line
                 continue
-            return (candidate[:-1] if code == candidate and trailing % 2 == 1 else candidate), at
-        return pending, at
+            parts.append(added)
+            return "".join(parts), at
+        return "".join(parts), at
 
     out: list[tuple[int, str, str | None]] = []
     i = 0
@@ -1029,8 +1120,7 @@ def _script_lines(text: str) -> list[tuple[int, str, str | None]]:
                                       "the lines after it were checked as commands"))
             out.extend((n, strip_comment(b), None) for n, b in body)
             continue
-        reader = loose_argv(line[:begin]) or []
-        name = _basename(reader[0]) if reader else ""
+        name = _heredoc_reader(line[:begin])
         if name in _SHELLS or loose_code_reader(command) is not None:
             out.extend((n, strip_comment(b), None) for n, b in body)
         elif _interpreter(name) and any(mentions_infra(b) for _n, b in body):
@@ -1062,22 +1152,32 @@ def _written_by_command(file: Path, command: str, cwd: Path | None) -> bool:
         resolved = None
     computed = any(ch in command for ch in "$`")
     count = 0
+    ran = False  # a run of the file counts once, however often it is run
     program: str | None = None  # the current simple command's program
+    args = 0  # words after the program in the current simple command
     redirect = False
+    after_bracket = False  # the word follows `(`/`)` ($(pwd)/x.sh), not a separator
     for token in tokens:
         if not token:
             continue
         if set(token) <= set("();|&"):
             program, redirect = None, False
+            after_bracket = bool(set(token) & set("()"))
             continue
         if set(token) <= set("<>&|"):
             redirect = ">" in token
             continue
         was_redirect, redirect = redirect, False
+        run_position = False
         if program is None and not _ASSIGNMENT_WORD.match(token):
-            program = _basename(token)
+            program, args, run_position = _basename(token), 0, not after_bracket
         elif not was_redirect and program in _FILE_READERS:
             continue
+        elif not was_redirect and not token.startswith("-"):
+            args += 1
+            run_position = args == 1 and (program in _SHELLS or program in ("source", "."))
+        if file.name not in token:
+            continue  # cannot name the file (the checks below are per word, per script)
         if any(ch in token for ch in "$`"):
             count += token.rstrip("\"')").rsplit("/", 1)[-1] == file.name
             continue
@@ -1103,6 +1203,8 @@ def _written_by_command(file: Path, command: str, cwd: Path | None) -> bool:
                 same = False
         if not same and computed and token.startswith("/"):
             same = token.rsplit("/", 1)[-1] == file.name  # the tail of an unquoted $(pwd)/x
+        if same and run_position:
+            same, ran = not ran, True  # bash x.sh; bash x.sh runs it twice, writes nothing
         count += same
     return count > 1
 
@@ -1123,7 +1225,7 @@ _ASSIGNMENT_WORD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _FILE_READERS = frozenset({
     "cat", "head", "tail", "grep", "egrep", "fgrep", "rg", "less", "more", "wc", "diff",
     "cmp", "file", "stat", "ls", "bat", "md5sum", "sha1sum", "sha256sum", "shasum",
-    "shellcheck",
+    "shellcheck", "test", "[", "[[",
 })
 
 

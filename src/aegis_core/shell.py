@@ -213,7 +213,8 @@ _REJECTED_BUILTINS = frozenset({"eval", "exec", "source", ".", "xargs", "builtin
 def strip_exec_builtin(argv: list[str]) -> list[str]:
     """``argv`` without a leading ``exec`` / ``builtin`` (and ``exec``'s ``-a
     NAME`` / ``-c`` / ``-l`` options), and without the ``--`` after ``source`` /
-    ``.``: ``exec -a x ./x.sh`` -> ``./x.sh``, ``builtin . -- x.sh`` -> ``. x.sh``."""
+    ``.`` (also after ``command``): ``exec -a x ./x.sh`` -> ``./x.sh``, ``builtin . --
+    x.sh`` -> ``. x.sh``, ``command source x.sh`` -> ``source x.sh``."""
     while argv and argv[0] in ("exec", "builtin"):
         head, argv = argv[0], argv[1:]
         while head == "exec" and argv and argv[0].startswith("-"):
@@ -222,6 +223,10 @@ def strip_exec_builtin(argv: list[str]) -> list[str]:
                 break
             if "a" in opt[1:]:
                 argv = argv[1:]  # -a NAME
+    if argv and argv[0] == "command":  # command [-p] source x.sh runs the builtin
+        rest = argv[2:] if argv[1:2] == ["-p"] else argv[1:]
+        if rest and _basename(rest[0]) in ("source", "."):
+            argv = rest
     if len(argv) >= 2 and _basename(argv[0]) in ("source", ".") and argv[1] == "--":
         argv = [argv[0], *argv[2:]]
     return argv
@@ -1443,8 +1448,9 @@ def code_run(simple: SimpleCommand) -> dict[str, str] | None:
                         "path": f"-m {following}".strip()}
             if tok == "-" or (interp in _SHELLS and tok == "-s"):
                 break  # code from stdin
-            if tok in _VALUE_FLAGS and not (interp in _SHELLS and tok == "-r"):
-                skip = True
+            if (tok in _VALUE_FLAGS and not (interp in _SHELLS and tok == "-r")) or (
+                    interp in ("perl", "ruby") and tok in ("-I", "-C", "-x")):
+                skip = True  # perl -I lib -e …: lib is a value, not the script
                 continue
             if tok.startswith(("-", "+")):
                 continue
@@ -1687,11 +1693,13 @@ def _annotate(
         metadata["redirects"] = list(simple.redirects)
 
 
-def intents_from_command(command: str) -> list[InfrastructureIntent]:
+def intents_from_command(command: str, *,
+                         keep_pipeline_stages: bool = False) -> list[InfrastructureIntent]:
     """Every InfrastructureIntent a shell command string would give rise
     to: :func:`split_compound` -> :func:`unwrap` -> ``from_argv`` for each
     simple command whose binary Aegis knows. Inside a pipeline, unknown
-    binaries (``| grep x``) produce nothing; on their own they produce the
+    binaries (``| grep x``) produce nothing unless ``keep_pipeline_stages``
+    (the hook's own checks of their arguments); on their own they produce the
     synthetic ``shell`` / ``binary/<name>`` / ``exec`` intent described in
     the module docstring. Environment assignments and stripped launchers
     are recorded in each intent's metadata.
@@ -1719,7 +1727,7 @@ def intents_from_command(command: str) -> list[InfrastructureIntent]:
             produced = from_argv(simple.argv)
         else:
             runs = code_run(simple)
-            if simple.in_pipeline and runs is None:
+            if simple.in_pipeline and runs is None and not keep_pipeline_stages:
                 continue
             params: dict[str, Any] = {"argv": list(simple.argv)}
             if runs is not None:

@@ -127,8 +127,11 @@ line); only a `./x` with no `#!` line and a NUL byte is taken for a binary and n
 script that the same command also writes, copies, moves, links, edits or names as an argument
 or redirection target asks, since what runs may not be what is on disk at check time. A
 relative path is read from the agent's working directory, or from the directory a literal
-`cd DIR` earlier in the command moves to; a `cd` in the background (`&`) or in a pipeline, to
-a computed place, or `env -C`/`sudo -D` make the directory unknown, which asks. Only lines that
+`cd DIR` earlier in the command moves to; a `cd` in the background (`&`), in a pipeline or in a
+`( … )` subshell (`(cd sub && ./x.sh)`), to a computed place, or `env -C`/`sudo -D` make the
+directory unknown, which asks. A file redirected onto a group, subshell, `if` or loop that runs
+a shell (`{ sh; } < x.sh`) is read like `sh < x.sh`; a shell reading a copied or read-write
+descriptor (`bash 3<x.sh <&3`, `bash <> x.sh`) asks. Only lines that
 name an infrastructure tool are checked, each as a command of its own, against the same
 policy: comments (whole-line and trailing) are skipped; a backslash at the end of a line joins
 the next line as the shell does, except at the end of a comment, which ends at the newline;

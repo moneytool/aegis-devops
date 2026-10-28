@@ -103,6 +103,20 @@ behaviour.
   `--upload-pack`, `clone -u`, `push --receive-pack`/`--exec`, `GIT_PROXY_COMMAND`, and `emacs`
   code arguments. `git submodule foreach git pull` (and `fetch`, `status`, …) no longer asks, nor
   does `complete -C …` in a sourced rc file.
+- Agent hook: a pipeline stage gets the same asks as the command on its own (`ssh h kubectl … |
+  tail -5`, `awk 'BEGIN{system("kubectl …")}' | cat` were allowed), and so does a code argument
+  given as `--expression=…`. A here-document read by a shell behind `exec`, `builtin`, `( `, `$(` or
+  `sh -c sh` is checked as commands. A file redirected onto a group, subshell, `if` or loop that
+  runs a shell (`{ bash; } < x.sh`) is read like `sh < x.sh`, and a shell reading a copied or
+  read-write descriptor (`<&3`, `<>`) asks. `export`/`declare` of a command-valued or sourced
+  variable (`export GIT_SSH_COMMAND=…; git fetch`, `export BASH_ENV=x; bash -c …`) asks like the
+  prefix form. `perl`/`ruby -I DIR -e …` reads the inline code. Joining a script's lines that end
+  in `|` or `&&` is linear in the script's size.
+- Agent hook: `command source x.sh` / `command . x.sh` read the script; `bash < <(curl …)`, `bash -s
+  < <(…)` and `python3 <(curl …)` ask like `bash <(curl …)`. Running a script twice (`bash x.sh;
+  bash x.sh`, `./run.sh build && ./run.sh test`) or testing it (`test -f .env && source .env`) no
+  longer counts as writing it. Checking which words name a script is linear in the command (32
+  scripts next to a long argument list took seconds).
 - Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
   own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
   policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a
