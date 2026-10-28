@@ -1605,13 +1605,17 @@ def loose_code_reader(command: str) -> str | None:
             argv.append(w)
         reader = None
         try:
-            argv = _strip_reserved(argv)
+            argv = strip_exec_builtin(_strip_reserved(argv))
+            while argv and argv[0] == "eval":  # | eval sh, | eval exec bash -s
+                argv = strip_exec_builtin(shlex.split(" ".join(argv[1:])))
             if argv:
-                argv, _env, _wrappers, _string = _unwrap_inner(argv, 1)
+                argv, _env, _wrappers, string = _unwrap_inner(argv, 0)
+                if string is not None:  # | bash -c "exec sh": the string's program reads it
+                    argv = strip_exec_builtin(shlex.split(string)) or argv
                 name = _basename(argv[0])
                 if _interpreter(name) and code_run(SimpleCommand(argv)) is None:
                     reader = name
-        except ShellRejected:
+        except (ShellRejected, ValueError):
             pass
         if reader and (heredoc or after_pipe):
             return "a here-document" if heredoc else (previous or "a pipe")

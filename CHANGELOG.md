@@ -137,6 +137,12 @@ behaviour.
   or be a group (`{ sh; }`). The pipe-into-a-loop ask only looks inside the loop and only at shells
   and interpreters that read standard input (`… | while read f; do python3 -m mod "$f"; done` runs).
   Many `exec < FILE` words are read in linear time.
+- Agent hook: piped code nested inside piped code shares one budget of 32 checks per command (32
+  levels of 32 took minutes). A pipe into `exec sh`, `eval sh`, `builtin exec sh` or `bash -c "exec
+  sh"` is a shell reading the pipe. Scripts named in piped code are not read from the hook's
+  directory after a `cd` in the command (asked), and `HOME=` anywhere in the command keeps `$HOME`
+  from being filled in. `bash /dev/stdin` asks; a download named after a script (`wget …/x.sh`,
+  `curl -O …/x.sh`) counts as rewriting it.
 - Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
   own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
   policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a

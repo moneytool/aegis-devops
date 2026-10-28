@@ -318,7 +318,7 @@ _SCANNED: contextvars.ContextVar[dict | None] = contextvars.ContextVar("aegis_sc
 
 def _decide(command: str, config_dir: Path, extra_args: list[str] | None, cwd: Path | None,
             *, scan: bool) -> HookVerdict:
-    token = _SCANNED.set({"seen": {}, "count": 0})
+    token = _SCANNED.set({"seen": {}, "count": 0, "piped": 0, "command": command})
     try:
         return _decide_once(command, config_dir, extra_args, cwd, scan=scan)
     finally:
@@ -419,8 +419,12 @@ def _precheck(command: str, config_dir: Path, extra_args: list[str] | None,
                 "its own",
                 unchecked=True,
             )
+    state = _SCANNED.get()
     for n_piped, (reader, feeder) in enumerate(stdin_feeders(command)):
-        if n_piped == _MAX_PIPED_CHECKS:
+        if state is not None:  # one budget per decision, nested piped code included
+            n_piped = state["piped"]
+            state["piped"] += 1
+        if n_piped >= _MAX_PIPED_CHECKS:
             asks.append(f"aegis: more than {_MAX_PIPED_CHECKS} pieces of code are piped into a "
                         "shell or interpreter, too many to check; run them as a script")
             break
@@ -780,6 +784,9 @@ def _literal_code(argv: list[str]) -> str | None:
     return None
 
 
+_CD_WORD_RE = re.compile(r"(?:^|[;&|(\s])(?:cd|pushd|popd)(?![\w.-])")
+
+
 def _piped_code(command: str, reader: list[str], feeder: list[str] | None, config_dir: Path,
                 extra_args: list[str] | None, cwd: Path | None, *,
                 rebuilt: bool) -> HookVerdict | None:
@@ -813,9 +820,11 @@ def _piped_code(command: str, reader: list[str], feeder: list[str] | None, confi
         )
     if interpreter not in _SHELLS:
         return None
-    # scripts the code runs are read too, under the same per-command cap
+    # scripts the code runs are read too, under the same per-command cap; after
+    # a cd in the outer command their directory is not known here
     decide = _decide_once if _SCANNED.get() is not None else _decide
-    verdict = decide(code, config_dir, extra_args, cwd, scan=True)
+    here = None if _CD_WORD_RE.search(command) else cwd
+    verdict = decide(code, config_dir, extra_args, here, scan=True)
     if verdict.decision == "allow":
         return None
     reason = verdict.reason.removeprefix("aegis: ")
@@ -1259,8 +1268,9 @@ def _written_by_command(file: Path, command: str, cwd: Path | None) -> bool:
             run_position = args == 1 and (program in _SHELLS or program in ("source", "."))
         if file.name not in token:
             continue  # cannot name the file (the checks below are per word, per script)
-        if any(ch in token for ch in "$`"):
-            count += token.rstrip("\"')").rsplit("/", 1)[-1] == file.name
+        if any(ch in token for ch in "$`") or "://" in token:
+            # computed, or a URL a download names the file after (curl -O, wget)
+            count += token.rstrip("\"')/").rsplit("/", 1)[-1] == file.name
             continue
         if token.rsplit("/", 1)[-1] != file.name and re.search(
                 r"(?<![\w.-])" + re.escape(file.name) + r"(?![\w.-])", token):
@@ -1355,8 +1365,10 @@ def _known_variables(path: str, command: str) -> str:
     def value(match: re.Match[str]) -> str:
         name = match.group(1) or match.group(2)
         known = os.environ.get(name)
+        state = _SCANNED.get()
+        outer = state["command"] if state is not None else ""  # the whole hook command
         if (name not in _STABLE_VARIABLES or known is None
-                or re.search(rf"(?<![\w${{]){name}\b", command)):
+                or re.search(rf"(?<![\w${{]){name}\b", command + "\n" + outer)):
             return match.group(0)
         return known
     return _PATH_VARIABLE_RE.sub(value, path) if "$" in path else path
@@ -1373,6 +1385,10 @@ def _scan_script_once(runs: dict, config_dir: Path, extra_args: list[str] | None
         return None
     if not path or path.startswith("-"):
         return None
+    if path in _STDIN_PATHS:
+        return HookVerdict("ask", f"aegis: {runs.get('interpreter') or 'this'} reads its "
+                                  f"commands from standard input ({path}), which the hook "
+                                  "cannot check; run the script by its name")
     path = _known_variables(path, command)
     if any(ch in path for ch in "$`"):
         return HookVerdict("ask", f"aegis: {path} is a script whose name is only known when "
