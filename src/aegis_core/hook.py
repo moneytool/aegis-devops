@@ -235,12 +235,23 @@ def _is_gated(command: str) -> bool:
 
 def decide(command: str, config_dir: Path, extra_args: list[str] | None = None) -> HookVerdict:
     """Runs ``aegis check command`` against ``config_dir`` and maps the
-    result to allow / deny / ask. Tool errors deny only gated commands."""
+    result to allow / deny / ask. Tool errors deny only gated commands. SQL
+    script files share one read budget for the whole decision."""
+    from aegis_core.parsers.sql import shared_file_budget
+
+    with shared_file_budget():
+        return _decide_command(command, config_dir, extra_args)
+
+
+def _decide_command(command: str, config_dir: Path,
+                    extra_args: list[str] | None = None) -> HookVerdict:
     from aegis_core import cli  # local: cli imports this module
+    from aegis_core.parsers.sql import without_script_files
 
     escalate_scripts = "--escalate-scripts" in (extra_args or [])
     try:
-        intents = intents_from_command(command)
+        with without_script_files():  # this pass only looks at shell code
+            intents = intents_from_command(command)
     except ShellRejected as exc:
         if mentions_infra(command):
             return HookVerdict(

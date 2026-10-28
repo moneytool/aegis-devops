@@ -2546,3 +2546,43 @@ def test_sqlite3_nonce_and_dump():
     assert _actions(from_sqlite3(["sqlite3", "-nonce", "x", "db.db", "SELECT 1 FROM t"])) == [
         ("read", "table/t")]
     assert _actions(from_sqlite3(["sqlite3", "db.db", ".dump"])) == [("read", "table/*")]
+
+
+@pytest.mark.parametrize("option", ["--init_command", "--loose-init-command", "--loose-execute",
+                                    "--init-command-add", "--init_comm", "--maximum-execute",
+                                    "--loose_execute"])
+def test_mysql_option_spellings_are_read(option):
+    intents = from_mysql(["mysql", f"{option}=DROP TABLE users", "-e", "SELECT 1"])
+    assert ("delete", "table/users") in _actions(intents)
+
+
+@pytest.mark.parametrize("sql,expected", [
+    ("/*!99999 select 1 */ drop table users", ("delete", "table/users")),
+    ("/*M!999999 select 1 */ drop table users", ("delete", "table/users")),
+    ("/*!99999 select * from t where */ truncate table users", ("delete", "table/users")),
+    ("/*!99999 explain */ drop table users", ("delete", "table/users")),
+])
+def test_versioned_comments_are_read_both_ways(sql, expected):
+    assert expected in _actions(from_sql(sql, dialect="mysql"))
+
+
+def test_mysqldump_header_and_select_modifier_stay_reads():
+    assert _actions(from_sql("/*!40101 SET NAMES utf8 */; SELECT 1 FROM t", dialect="mysql")) == [
+        ("read", "session/*"), ("read", "table/t")]
+    assert _actions(from_sql("SELECT STRAIGHT_JOIN a FROM t", dialect="mysql")) == [
+        ("read", "table/t")]
+
+
+def test_sqlite3_does_not_take_long_option_prefixes():
+    assert _actions(from_sqlite3(["sqlite3", "--cm", "DROP TABLE x", "db", "SELECT 1 FROM t"])) \
+        != [("delete", "table/x")]
+
+
+def test_many_same_name_cte_scopes_stay_fast():
+    import time
+    stmt = "SELECT 1 FROM " + ", ".join(
+        f"(WITH x AS (SELECT 1) SELECT 1 FROM x, x, x, x, x, x) a{i}" for i in range(4100))
+    start = time.perf_counter()
+    intents = from_sql(f"{stmt}; {stmt}; DROP TABLE users;", dialect="postgres")
+    assert time.perf_counter() - start < 10
+    assert ("delete", "table/users") in _actions(intents)

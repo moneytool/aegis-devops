@@ -823,3 +823,27 @@ def test_escalate_scripts_leaves_ordinary_commands_alone(opted_in_project, comma
 def test_escalate_scripts_on_check_command():
     rc = cli_module.main(["check", "command", "--escalate-scripts", "--", "bash nuke.sh"])
     assert rc == 2  # ESCALATE
+
+
+def test_one_sql_file_budget_per_decision(opted_in_project):
+    line = "INSERT INTO t (a, b) VALUES (1, 'abc');\n"
+    (opted_in_project / "big.sql").write_text(line * (1024 * 1024 // len(line) - 1)
+                                              + "DROP TABLE users;\n")
+    import time
+
+    started = time.monotonic()
+    code, out, err = run("claude", payload_for("claude", " && ".join(["psql -f big.sql"] * 40)))
+    assert code == 2
+    assert time.monotonic() - started < 15
+
+
+def test_one_sql_text_budget_per_decision(opted_in_project):
+    import time
+
+    stmt = "SELECT 1 FROM " + ", ".join(
+        f"(WITH x AS (SELECT 1) SELECT 1 FROM x, x, x, x, x, x) a{i}" for i in range(2000))
+    command = "mysql " + " ".join([f"-e '{stmt}'"] * 12) + " -e 'DROP TABLE users'"
+    started = time.monotonic()
+    code, out, err = run("claude", payload_for("claude", command))
+    assert code == 2
+    assert time.monotonic() - started < 20

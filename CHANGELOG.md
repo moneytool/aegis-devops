@@ -121,6 +121,16 @@ behaviour.
     `--fil x.sql`, `mysql --exec 'SQL'`, `--init 'SQL'`), as psql and mysql accept them. A line of
     many mysql `\g`, many `/*!` comments and many sqlite dot-commands are lexed in linear time.
     `sqlite3 -nonce` takes a value; `.dump` is a read.
+  - mysql's other option spellings are read too: `_` for `-` (`--init_command`), the `--loose-`
+    prefix and `--init-command-add`; sqlite3 takes no prefixes. A versioned `/*!NNNNN … */` or
+    MariaDB `/*M! … */` comment under `mysql`/`generic` is classified both with its body and without
+    it, since an older server (or Oracle MySQL, for `/*M!`) skips it: `/*!99999 select 1 */ drop table
+    users` reports the delete. `SELECT STRAIGHT_JOIN a` reads no table `a`. In the agent hook, SQL
+    script files share one budget per decision: 1 MiB read in all, and 2 MiB classified counting
+    each run of a file (`psql -f x.sql && psql -f x.sql && …`); past it a file is opaque. The `-c`/`-e`
+    texts count against the same 2 MiB, past which they are unknown SQL, and the hook's first parse
+    (which only looks for shell code) classifies no SQL. `--maximum-` is dropped like `--loose-`.
+    CTE scope lookups are logarithmic (many same-name CTEs with many references were quadratic).
   - `SET @a = (SELECT … FROM users)` reports the tables its subqueries read beside the `session/*`
     read. Nested `UPDATE a JOIN (…` groups are read in linear time (they were quadratic: 20,000
     levels took minutes). A trailing `-d`/`-h` with no value is ignored instead of an error. MySQL

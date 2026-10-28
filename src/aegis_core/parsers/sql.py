@@ -152,7 +152,12 @@ See the ``evasion`` list at the bottom of this module for the full
 enumeration (imported by the adversarial test suite).
 """
 
+import bisect
+import contextlib
+import contextvars
+import copy
 import re
+from collections.abc import Iterator
 from typing import Any, NamedTuple
 
 from aegis_core.intent import InfrastructureIntent
@@ -199,6 +204,8 @@ class _T(NamedTuple):
 _WS_CHARS = " \t\n\r\f\v"
 _WS_RE = re.compile(r"[ \t\n\r\f\v]+")
 _EXEC_OPEN_RE = re.compile(r"/\*M?!\d*")
+# An executable comment some servers skip: versioned, or MariaDB-only.
+_VERSIONED_OPEN_RE = re.compile(r"/\*(?:M!\d*|!\d+)")
 # Text in a /*! … */ body that would move where another reader ends it.
 _BODY_MARKER_RE = re.compile(r"['\"`#$]|--|/\*")
 _COMMENT_MARK_RE = re.compile(r"/\*|\*/")
@@ -345,7 +352,7 @@ _MAX_STATEMENT_TOKENS = 100_000
 _Statement = tuple[list[_T], bool, frozenset[str]]
 
 
-def _lex(sql: str, dialect: str) -> list[_Statement]:
+def _lex(sql: str, dialect: str, skip_versioned: bool = False) -> list[_Statement]:
     """Lexes ``sql`` and splits it on ``;``: a list of (tokens, had_comment,
     flags) per non-empty statement. A statement with no tokens but a comment
     is kept (it is classified as unknown, never dropped). ``flags`` holds
@@ -395,6 +402,8 @@ def _lex(sql: str, dialect: str) -> list[_Statement]:
             continue
         if ch == "/" and sql.startswith("/*", i):
             em = _EXEC_OPEN_RE.match(sql, i) if dialect in ("mysql", "generic") else None
+            if em and skip_versioned and _VERSIONED_OPEN_RE.fullmatch(em.group(0)):
+                em = None  # the reading of a server that skips it: a plain comment
             if em:
                 # MySQL runs the body of /*! … */ (unless its version is newer than the
                 # server's); other servers skip to the first */. When text in the body
@@ -777,6 +786,8 @@ def _norm_ident(tok: _T) -> str:
     return tok.value.lower() if tok.kind == "word" else tok.value
 
 
+# Words after which MySQL's STRAIGHT_JOIN is a select modifier, not a join.
+_SELECT_MODIFIERS = ("SELECT", "ALL", "DISTINCT", "DISTINCTROW", "HIGH_PRIORITY")
 # Statements that may open a bracket group in an UPDATE's table list; each is
 # its own op, so the group walk does not read into it.
 _GROUP_STATEMENTS = ("UPDATE", "DELETE", "INSERT", "REPLACE", "MERGE")
@@ -862,8 +873,27 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
             cte_list_ends.discard(j)
             j += 1
 
+    cte_index: dict[str, tuple[int, list[int], list[int]]] = {}
+
     def is_cte(name: str, pos: int) -> bool:
-        return any(lo < pos < hi for lo, hi in ctes.get(name, ()))
+        """Whether a CTE named ``name`` is in scope at ``pos``: some (lo, hi)
+        with lo < pos < hi. Bisects the starts with a running maximum of the
+        ends, so many same-name scopes and references stay fast."""
+        scopes = ctes.get(name)
+        if not scopes:
+            return False
+        cached = cte_index.get(name)
+        if cached is None or cached[0] != len(scopes):
+            ordered = sorted(scopes)
+            starts = [lo for lo, _hi in ordered]
+            reach, best = [], -1
+            for _lo, hi in ordered:
+                best = max(best, hi)
+                reach.append(best)
+            cached = cte_index[name] = (len(scopes), starts, reach)
+        _n, starts, reach = cached
+        k = bisect.bisect_left(starts, pos) - 1  # the last scope starting before pos
+        return k >= 0 and reach[k] > pos
 
     def name_parts(j: int) -> tuple[list[_T], int]:
         parts = [toks[j]]
@@ -1257,7 +1287,9 @@ def _scan(toks: list[_T], first_word: str, dialect: str) -> _Scan:
                 from_list[d] = True
                 parse_ref(i + 1)
             continue
-        if u in ("JOIN", "STRAIGHT_JOIN"):
+        # SELECT STRAIGHT_JOIN a FROM t: a select modifier, not a join
+        if u in ("JOIN", "STRAIGHT_JOIN") and not (
+                u == "STRAIGHT_JOIN" and _is_word(prev, *_SELECT_MODIFIERS)):
             joined[d] = True
             from_list[d] = True
             parse_ref(i + 1)
@@ -2010,8 +2042,24 @@ def from_sql(
     and ``sqlite3`` name their dialect), and any other value is read as
     ``generic``, which flags what a server could read differently."""
     dialect = normalize_dialect(dialect)
+    intents = _intents_of(sql, dialect, database, skip_versioned=False)
+    if dialect in ("mysql", "generic") and _VERSIONED_OPEN_RE.search(sql):
+        # /*!99999 select 1 */ drop table users: an older server (or Oracle MySQL,
+        # for /*M!) skips the comment and runs what follows; keep both readings
+        seen = {_intent_key(i) for i in intents}
+        for intent in _intents_of(sql, dialect, database, skip_versioned=True):
+            if _intent_key(intent) not in seen:
+                seen.add(_intent_key(intent))
+                intents.append(intent)
+    return intents
+
+
+def _intents_of(sql: str, dialect: str, database: str | None, *,
+                skip_versioned: bool) -> list[InfrastructureIntent]:
     intents = []
-    for toks, _comment, flags in _lex(sql, dialect):
+    for toks, _comment, flags in _lex(sql, dialect, skip_versioned):
+        if skip_versioned and not toks and not flags:
+            continue  # only the skipped comment: /*!40101 SET NAMES utf8 */;
         results = list(_classify_tokens(toks, dialect))
         for flag in sorted(flags):  # generic: the server may read it differently
             results.append(
@@ -2070,6 +2118,7 @@ def _parse_db_cli_tokens(
     file_flags: frozenset[str] = frozenset({"-f", "--file"}),
     value_flags: frozenset[str] = frozenset(),
     short_valued: frozenset[str] = frozenset(),
+    mysql_spelling: bool = False,
 ) -> tuple[str | None, str | None, list[str | None], list[str], list[str]]:
     """Shared argv walk for psql/mysql/sqlite3: returns (database, host,
     sql_texts, file_paths, positional). ``sql_texts`` and ``file_paths`` collect *every*
@@ -2087,16 +2136,24 @@ def _parse_db_cli_tokens(
     short_commands = {f[1] for f in command_flags if len(f) == 2} if short_valued else set()
     short_files = {f[1] for f in file_flags if len(f) == 2} if short_valued else set()
     # the clients accept any unique prefix of a long option (psql --comm, mysql --exec)
+    # psql and mysql (not sqlite3) accept any unique prefix of a long option
+    # (psql --comm, mysql --exec); mysql also reads `_` as `-` and drops a
+    # `--loose-` or `--maximum-` prefix (--loose-init_command)
     long_options = sorted({f for f in (*command_flags, *file_flags, *database_flags,
                                        *value_flags, "--host") if f.startswith("--")})
     i, n = 0, len(tokens)
     while i < n:
         tok = tokens[i]
-        if tok.startswith("--") and len(tok) > 2:
+        if short_valued and tok.startswith("--") and len(tok) > 2:
             name, eq, value = tok.partition("=")
+            if mysql_spelling:
+                name = "--" + name[2:].replace("_", "-").removeprefix("loose-").removeprefix(
+                    "maximum-")
             matches = [f for f in long_options if f.startswith(name)]
-            if name not in long_options and len(matches) == 1:
-                tok = matches[0] + eq + value
+            if name in long_options:
+                tok = name + eq + value
+            elif len(matches) == 1 or (matches and all(m in command_flags for m in matches)):
+                tok = matches[0] + eq + value  # --init-comm: either way it is SQL
         if tok in command_flags:
             i += 1
             sql_texts.append(tokens[i] if i < n else None)  # a trailing -c: unknown SQL
@@ -2170,9 +2227,47 @@ def _intent_key(intent: InfrastructureIntent) -> tuple[str, str, str]:
     return intent.resource, intent.action, repr(sorted(intent.params.items()))
 
 
-# The most of the script files (-f, -init) of one call that is read, in all; a
-# file past it is opaque (a 1 MiB script classifies in a few seconds).
+# The most of the script files (-f, -init) that is read, in all, for one call
+# or, inside shared_file_budget(), for one hook decision; a file past it is
+# opaque (a 1 MiB script classifies in a few seconds).
 _SQL_FILE_LIMIT = 1024 * 1024
+# The most SQL classified in all: -c/-e texts and script files, a file once per
+# run of it (psql -f x.sql && psql -f x.sql && …); past it the SQL is unknown.
+_SQL_FILE_USE_LIMIT = 2 * _SQL_FILE_LIMIT
+_FILE_READS: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "aegis_sql_file_reads", default=None)
+
+
+@contextlib.contextmanager
+def shared_file_budget() -> Iterator[None]:
+    """One script-file budget for everything parsed inside it (every client
+    call of a command line, and the hook's second parse, which reuses what
+    the first one read)."""
+    token = _FILE_READS.set(_new_reads())
+    try:
+        yield
+    finally:
+        _FILE_READS.reset(token)
+
+
+@contextlib.contextmanager
+def without_script_files() -> Iterator[None]:
+    """Inside shared_file_budget(): parse without reading script files (each
+    is an opaque script), for a pass that does not need their SQL."""
+    reads = _FILE_READS.get()
+    if reads is None:
+        yield
+        return
+    reads["skip"] = True
+    try:
+        yield
+    finally:
+        reads["skip"] = False
+
+
+def _new_reads() -> dict[str, Any]:
+    return {"left": _SQL_FILE_LIMIT, "uses": _SQL_FILE_USE_LIMIT, "files": {}, "intents": {},
+            "skip": False}
 
 
 def _build_cli_intents(
@@ -2189,7 +2284,15 @@ def _build_cli_intents(
     # psql/mysql run each -c/-e (and psql each -f) on its own: a comment or quote
     # left open in one must not swallow the next. A -c with no text is unknown SQL.
     intents: list[InfrastructureIntent] = []
-    if sql_texts:
+    reads = _FILE_READS.get() or _new_reads()
+    if sql_texts and reads["skip"]:  # this pass does not need the SQL
+        sql_texts = [None]
+    elif sql_texts:
+        for k, text in enumerate(sql_texts):
+            if text is not None and len(text) > reads["uses"]:
+                sql_texts[k] = None  # past the total for this decision: unknown SQL
+            elif text is not None:
+                reads["uses"] -= len(text)
         for text in sql_texts:
             if text is None:
                 meta: dict[str, Any] = {"dialect": dialect}
@@ -2203,7 +2306,8 @@ def _build_cli_intents(
             else:
                 intents.extend(from_sql(text, dialect=dialect, database=database))
         texts = [t for t in sql_texts if t is not None]
-        if dialect == "mysql" and len(texts) > 1:
+        if dialect == "mysql" and len(texts) > 1 and len(" ".join(texts)) <= reads["uses"]:
+            reads["uses"] -= len(" ".join(texts))
             # the mysql client joins every -e into one buffer (with a space), so a
             # quote or comment open in one -e runs on into the next; both readings
             # are kept
@@ -2212,23 +2316,42 @@ def _build_cli_intents(
                 if _intent_key(intent) not in seen:
                     seen.add(_intent_key(intent))
                     intents.append(intent)
-    budget = _SQL_FILE_LIMIT  # shared by every script file of the call
+        elif dialect == "mysql" and len(texts) > 1:  # the joined reading was not made
+            intents.append(InfrastructureIntent(
+                resource="unknown/*", action="update", provider="sql",
+                params={"unclassified": True, "statement_class": "dml",
+                        "raw_action": "TOO_LARGE", "too_large": True},
+                metadata={"dialect": dialect, **({"database": database} if database else {})}))
     for file_path in file_paths:
         from pathlib import Path
 
         text = None
         try:
             path = Path(file_path)
-            if path.is_file():
+            key = str(path.resolve())
+            if reads["skip"]:
+                pass  # this pass does not need the file's SQL
+            elif key in reads["files"]:
+                text = reads["files"][key]  # read already in this decision
+            elif path.is_file():
                 with path.open("rb") as handle:
-                    data = handle.read(budget + 1)
-                if len(data) <= budget:
-                    budget -= len(data)
+                    data = handle.read(reads["left"] + 1)
+                if len(data) <= reads["left"]:
+                    reads["left"] -= len(data)
                     text = data.decode("utf-8", errors="replace")
+                reads["files"][key] = text
         except OSError:
             text = None
+        if text is not None and len(text) > reads["uses"]:
+            text = None  # past the total for this decision: opaque
         if text is not None:
-            intents.extend(from_sql(text, dialect=dialect, database=database))
+            reads["uses"] -= len(text)
+            # a file run again in the same decision is classified once
+            done = reads.setdefault("intents", {})
+            cache_key = (key, dialect, database)
+            if cache_key not in done:
+                done[cache_key] = from_sql(text, dialect=dialect, database=database)
+            intents.extend(copy.deepcopy(done[cache_key]))
         else:
             metadata: dict[str, Any] = {"dialect": dialect}
             if database is not None:
@@ -2294,10 +2417,10 @@ def from_mysql(argv: list[str]) -> list[InfrastructureIntent]:
     database, host, sql_texts, file_paths, positional = _parse_db_cli_tokens(
         tokens,
         # --init-command runs on connect, before the -e text
-        command_flags={"-e", "--execute", "--init-command"},
+        command_flags={"-e", "--execute", "--init-command", "--init-command-add"},
         database_flags={"-D", "--database"},
         file_flags=frozenset(),
-        short_valued=_MYSQL_SHORT_VALUED,
+        short_valued=_MYSQL_SHORT_VALUED, mysql_spelling=True,
     )
     if database is None and positional:
         database = positional[0]
