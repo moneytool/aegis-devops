@@ -1525,6 +1525,10 @@ def script_runs_loosely(command: str, _depth: int = 0) -> list[dict[str, str]]:
         argv = strip_exec_builtin(argv)  # exec bash x.sh, builtin source x.sh
         if not argv:
             continue
+        if argv[0] == "eval":  # eval 'bash x.sh': its words are a command line
+            if _depth < 2:
+                found.extend(script_runs_loosely(" ".join(argv[1:]), _depth + 1))
+            continue
         redirects = [t for t in argv if t.startswith(("<", "0<"))]
         argv = [t for t in argv if t not in redirects]
         if argv and _basename(argv[0]) in ("source", "."):

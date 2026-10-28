@@ -117,6 +117,13 @@ behaviour.
   bash x.sh`, `./run.sh build && ./run.sh test`) or testing it (`test -f .env && source .env`) no
   longer counts as writing it. Checking which words name a script is linear in the command (32
   scripts next to a long argument list took seconds).
+- Agent hook: `eval ./x.sh` / `eval 'bash x.sh'` read the script. In a script, a here-document
+  piped into a shell on the line after its body (`cat <<EOF |` … `EOF` / `sh`), one with the reader
+  after the redirection (`<<EOF sh`, `0<<EOF sh`) and `source /dev/stdin <<EOF` are checked as
+  commands; `… | source /dev/stdin` is refused when the command names a tool, like `… | sh`.
+  `PROMPT_COMMAND` counts as a command variable. A script path with `$HOME` or another variable
+  the hook's environment sets (and the command does not) is read instead of asking. Finding files
+  redirected onto groups is linear (63 KB of `)<a` took 36 s).
 - Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
   own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
   policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a

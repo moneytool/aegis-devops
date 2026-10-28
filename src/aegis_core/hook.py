@@ -644,7 +644,7 @@ def _runs_a_program(name: str, args: list[str]) -> bool:
 _COMMAND_ENV_VARS = frozenset({
     "GIT_SSH_COMMAND", "GIT_SSH", "GIT_PAGER", "PAGER", "GIT_EDITOR", "EDITOR", "VISUAL",
     "GIT_SEQUENCE_EDITOR", "GIT_EXTERNAL_DIFF", "GIT_ASKPASS", "SSH_ASKPASS", "MANPAGER",
-    "LESSOPEN", "LESSCLOSE", "GIT_PROXY_COMMAND",
+    "LESSOPEN", "LESSCLOSE", "GIT_PROXY_COMMAND", "PROMPT_COMMAND",
 })
 _SOURCED_ENV_VARS = frozenset({"BASH_ENV", "ENV"})
 
@@ -915,6 +915,16 @@ def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
                 unchecked=True,
             )
         sourced = None if runs_expansion(text) else _sourced_script(text)
+        if sourced is not None and sourced["path"] in _STDIN_PATHS:
+            # source /dev/stdin: code from the pipe or here-document before it
+            if mentions_infra(command):
+                return HookVerdict(
+                    "deny", f"aegis: cannot check the code {shown!r} reads from standard "
+                    "input, and the command names an infrastructure tool; run the "
+                    "infrastructure command on its own", unchecked=True)
+            asks.append(f"aegis: {shown!r} runs code from standard input, which the hook "
+                        "cannot check")
+            continue
         if sourced is not None:
             verdict = _scan_script(sourced, config_dir, extra_args, here,
                                    command=command) if scan else None
@@ -980,11 +990,11 @@ _READER_WORD_RE = re.compile(
 def _group_stdin_files(command: str) -> list[str]:
     """The files redirected onto a group, subshell, ``if`` or loop that runs a
     shell or interpreter (``{ bash; } < c.sh``), read like ``sh < c.sh``."""
-    files = []
-    for match in _GROUP_STDIN_RE.finditer(command):
-        if _READER_WORD_RE.search(command, 0, match.start()):
-            files.append(match.group(1).strip("'\""))
-    return files
+    reader = _READER_WORD_RE.search(command)
+    if reader is None:
+        return []
+    return [match.group(1).strip("'\"")
+            for match in _GROUP_STDIN_RE.finditer(command, reader.end())]
 
 
 # Where the command that reads a here-document starts: after a separator or
@@ -992,17 +1002,27 @@ def _group_stdin_files(command: str) -> list[str]:
 _READER_START_RE = re.compile(r"\$\(|(?<![<>])\(|[;&|`]|\{(?=\s)")
 
 
-def _heredoc_reader(prefix: str) -> str:
-    """The program that reads a here-document whose ``<<`` follows ``prefix``,
-    with ``exec``/``builtin``, launchers and ``sh -c STRING`` unwrapped
-    (``exec -a x bash <<EOF`` -> ``bash``, ``bash -c sh <<EOF`` -> ``sh``)."""
+_STDIN_PATHS = frozenset({"/dev/stdin", "/dev/fd/0", "/proc/self/fd/0", "-"})
+
+
+def _heredoc_reader(prefix: str, suffix: str = "") -> str:
+    """The program that reads a here-document whose ``<<`` follows ``prefix``
+    and is followed by ``suffix`` (``<<EOF sh``), with ``exec``/``builtin``,
+    launchers and ``sh -c STRING`` unwrapped (``exec -a x bash <<EOF`` ->
+    ``bash``, ``bash -c sh <<EOF`` -> ``sh``); ``source /dev/stdin`` reads it
+    as a shell does."""
+    tail = re.split(r"[;&|)]", suffix, maxsplit=1)[0]
+    head = re.sub(r"(?:^|(?<=\s))\d+$", "", _READER_START_RE.split(prefix)[-1])  # 0<<EOF sh
     try:
-        words = shlex.split(_READER_START_RE.split(prefix)[-1], comments=True)
+        words = shlex.split(head + " " + tail, comments=True)
     except ValueError:
         return ""
-    words = [w for w in words if not w.startswith(("<", ">", "0<", "1>", "2>", "&>"))]
+    words = strip_exec_builtin(
+        [w for w in words if not w.startswith(("<", ">", "0<", "1>", "2>", "&>"))])
+    if len(words) > 1 and _basename(words[0]) in ("source", ".") and words[1] in _STDIN_PATHS:
+        return "sh"
     try:
-        argv, _env, _wrappers, string = _unwrap_inner(strip_exec_builtin(words), 0)
+        argv, _env, _wrappers, string = _unwrap_inner(words, 0)
     except ShellRejected:
         return ""
     if string is not None:
@@ -1120,7 +1140,10 @@ def _script_lines(text: str) -> list[tuple[int, str, str | None]]:
                                       "the lines after it were checked as commands"))
             out.extend((n, strip_comment(b), None) for n, b in body)
             continue
-        name = _heredoc_reader(line[:begin])
+        name = _heredoc_reader(line[:begin], line[end:])
+        if command.rstrip().endswith(("|", "|&")) and i < len(raw):
+            # cat <<EOF | on one line, the reader on the line after the body
+            name = _heredoc_reader(raw[i])
         if name in _SHELLS or loose_code_reader(command) is not None:
             out.extend((n, strip_comment(b), None) for n, b in body)
         elif _interpreter(name) and any(mentions_infra(b) for _n, b in body):
@@ -1258,6 +1281,22 @@ def _scan_script(runs: dict, config_dir: Path, extra_args: list[str] | None,
     return verdict
 
 
+_PATH_VARIABLE_RE = re.compile(r"\$(?:\{(\w+)\}|(\w+))")
+
+
+def _known_variables(path: str, command: str) -> str:
+    """``path`` with ``$NAME`` / ``${NAME}`` replaced by the value the hook's own
+    environment gives (``source "$HOME/.cargo/env"``), unless the command sets
+    NAME itself; anything else (``$(pwd)``, an unset name) is left in place."""
+    def value(match: re.Match[str]) -> str:
+        name = match.group(1) or match.group(2)
+        known = os.environ.get(name)
+        if known is None or re.search(rf"(?<![\w$]){name}=", command):
+            return match.group(0)
+        return known
+    return _PATH_VARIABLE_RE.sub(value, path) if "$" in path else path
+
+
 def _scan_script_once(runs: dict, config_dir: Path, extra_args: list[str] | None,
                       cwd: Path | None, *, command: str = "") -> HookVerdict | None:
     interpreter = _basename(runs.get("interpreter", "") or "")
@@ -1269,6 +1308,7 @@ def _scan_script_once(runs: dict, config_dir: Path, extra_args: list[str] | None
         return None
     if not path or path.startswith("-"):
         return None
+    path = _known_variables(path, command)
     if any(ch in path for ch in "$`"):
         return HookVerdict("ask", f"aegis: {path} is a script whose name is only known when "
                                   "the command runs, so its commands cannot be checked")

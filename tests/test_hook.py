@@ -1912,3 +1912,49 @@ def test_running_or_testing_a_script_twice_is_not_a_write(opted_in_project, comm
     (opted_in_project / "ok.sh").chmod(0o755)
     code, out, err = run("claude", payload_for("claude", command))
     assert (code, out) == (0, ""), (out, err)
+
+
+def test_group_redirect_search_stays_linear(opted_in_project):
+    started = time.monotonic()
+    command = f"{BLOCK_COMMAND}; echo '" + ")<a" * 21000 + "'"
+    code, out, err = run("claude", payload_for("claude", command))
+    assert code == 2
+    assert time.monotonic() - started < 10
+
+
+@pytest.mark.parametrize("script", [
+    f"cat <<EOF |\n{BLOCK_COMMAND}\nEOF\nsh\n",
+    f"<<EOF sh\n{BLOCK_COMMAND}\nEOF\n",
+    f"0<<EOF sh\n{BLOCK_COMMAND}\nEOF\n",
+    f"source /dev/stdin <<EOF\n{BLOCK_COMMAND}\nEOF\n",
+    f". /dev/fd/0 <<EOF\n{BLOCK_COMMAND}\nEOF\n",
+])
+def test_round9_here_document_readers(opted_in_project, script):
+    (opted_in_project / "x.sh").write_text(script)
+    code, out, err = run("claude", payload_for("claude", "bash x.sh"))
+    assert code == 2, (out, err)
+
+
+@pytest.mark.parametrize("command", ["eval ./nuke.sh", "eval 'bash nuke.sh'",
+                                     'eval "source nuke.sh"', "bash -c 'eval bash nuke.sh'",
+                                     f"echo '{BLOCK_COMMAND}' | source /dev/stdin"])
+def test_eval_and_source_stdin_are_checked(opted_in_project, command):
+    (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
+    code, out, err = run("claude", payload_for("claude", command))
+    assert code == 2, (out, err)
+
+
+def test_prompt_command_asks(opted_in_project):
+    command = f"PROMPT_COMMAND='{BLOCK_COMMAND}' bash -i"
+    code, out, err = run("claude", payload_for("claude", command))
+    assert _ask_reason(out)
+
+
+def test_a_script_path_with_a_known_variable_is_read(opted_in_project, monkeypatch):
+    monkeypatch.setenv("HOME", str(opted_in_project))
+    (opted_in_project / "env.sh").write_text("export X=1\n")
+    (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
+    assert run("claude", payload_for("claude", 'source "$HOME/env.sh"'))[:2] == (0, "")
+    assert run("claude", payload_for("claude", 'bash "${HOME}/nuke.sh"'))[0] == 2
+    code, out, err = run("claude", payload_for("claude", 'HOME=/tmp; source "$HOME/nuke.sh"'))
+    assert _ask_reason(out)

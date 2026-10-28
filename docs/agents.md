@@ -112,7 +112,10 @@ a Python program, a Makefile, or calls a cloud SDK, gets past it. With the examp
 | `bash nuke.sh`, `sh < nuke.sh`, `./nuke.sh`, `source nuke.sh`, `exec bash nuke.sh`, `fish nuke.sh`, also inside `$(…)`, backticks, `<(…)`, `( … )`, `{ …; }`, a loop or `case`, or `sh -c '…'`, where a line of `nuke.sh` is blocked | blocked by the policy (the message names the line) |
 | the same, where a line names `kubectl` but cannot be checked (`kubectl delete ns "$NS"`) | asks |
 | the same, where the script does not exist yet or is written by the same command (`printf '…' > x.sh; bash x.sh`, `cp a "$(pwd)/x.sh"; bash x.sh`, `chmod +x x; ./x`, `python3 -c '…Path("x.sh").write_text(…)'; bash x.sh`; reading it with `cat`, `grep`, `wc`, … does not count), cannot be read, holds a NUL byte, is over 64 KiB, names a tool on more than 64 lines, or is run after a `cd` the hook cannot follow | asks |
-| a script that `nuke.sh` sources or runs in turn | **runs**: only the script on the command line is read |
+| a script that `nuke.sh` sources or runs in turn (also through `eval` inside it) | **runs**: only the script on the command line is read |
+| a script run from a function or alias defined in the command (`go() { bash x.sh; }; go`, `alias go='bash x.sh'; go`) | **runs** |
+| a script run by a launcher the hook does not unwrap (`npx`, `npm exec`, `yarn exec`, `direnv exec`, `dotenv`, `aws-vault exec`, `op run`, `doppler run`, `flock`, `strace`, `taskset`, `chrt`, `setpriv`, `su -c`, `runuser`, `unshare`, `chroot`, `parallel`, `screen`, `tmux`, `xargs`) | **runs** unread |
+| `source "$HOME/…"` and other paths with variables | read when the hook's own environment sets each variable and the command does not; otherwise asks |
 | a script changed between the check and the run, or a symlink retargeted in between | **runs** the new content: the hook reads it once, before the command starts |
 | a script changed by an earlier step of the same command that does not name it (`git pull && ./deploy.sh`, `tar xf a.tar && bash x.sh`, `make; bash x.sh`) | **runs** the new content: the hook reads the script as it is before the command starts |
 | `python3 cleanup.py`, `make destroy`, `npm run teardown` | **runs** |
