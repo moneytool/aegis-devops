@@ -13,6 +13,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -26,6 +27,10 @@ from aegis_core import cli as cli_module
 from aegis_core import config as config_module
 from aegis_core import hook, shell
 from aegis_core.shell import ShellRejected
+
+# The linear-time tests guard against quadratic blow-ups (tens of seconds),
+# not against a slow host: shared CI runners are 2-4x slower than a laptop.
+TIMING_SLACK = 4.0 if os.environ.get("CI") else 1.0
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLE_SIGNING_KEY_PATH = REPO_ROOT / "data" / "example-signing.key"
@@ -339,7 +344,7 @@ def test_glob_program_words_stay_linear(opted_in_project, command):
     # [ (36 s at 64 KB); it is matched in one pass now
     started = time.monotonic()
     code, _out, _err = run("claude", payload_for("claude", command))
-    assert time.monotonic() - started < 1
+    assert time.monotonic() - started < 1 * TIMING_SLACK
     assert code == 2
 
 
@@ -361,7 +366,7 @@ def test_many_nested_lines_and_quoted_globs_stay_linear(opted_in_project, comman
     # a cache and have it read again for each of its program words
     started = time.monotonic()
     run("claude", payload_for("claude", command))
-    assert time.monotonic() - started < 2
+    assert time.monotonic() - started < 2 * TIMING_SLACK
 
 
 @pytest.mark.parametrize("command", [
@@ -372,15 +377,15 @@ def test_quoted_glob_program_words_stay_linear(opted_in_project, command):
     started = time.monotonic()
     with contextlib.suppress(ShellRejected):
         shell.intents_from_command(command)
-    assert time.monotonic() - started < 1
+    assert time.monotonic() - started < 1 * TIMING_SLACK
     started = time.monotonic()
     run("claude", payload_for("claude", command))
-    assert time.monotonic() - started < 1
+    assert time.monotonic() - started < 1 * TIMING_SLACK
     started = time.monotonic()
     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
         cli_module.main(["check", "command", "--config-dir", str(opted_in_project / ".aegis"),
                   "--", command])
-    assert time.monotonic() - started < 1
+    assert time.monotonic() - started < 1 * TIMING_SLACK
 
 
 def test_glob_match_agrees_with_fnmatch_without_shell_only_syntax():
@@ -433,7 +438,7 @@ def test_a_decision_past_its_time_budget_asks_or_denies(opted_in_project, monkey
     started = time.monotonic()
     reply = run(agent, payload_for(agent, command))
     release.set()  # the abandoned worker's late allow is never used
-    assert time.monotonic() - started < 2
+    assert time.monotonic() - started < 2 * TIMING_SLACK
     reason = hook.TOO_SLOW_REASON.format(seconds=0.05)
     assert reply == hook.render(agent, hook.HookVerdict(decision, reason, unchecked=True))
     assert reply != hook._allow(agent)
@@ -2335,7 +2340,7 @@ def test_long_runs_of_shell_syntax_stay_fast(opted_in_project, command):
     (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
     started = time.monotonic()
     run("claude", payload_for("claude", command))
-    assert time.monotonic() - started < 2
+    assert time.monotonic() - started < 2 * TIMING_SLACK
 
 
 @pytest.mark.parametrize("command", [
@@ -2354,7 +2359,7 @@ def test_chained_launchers_and_shell_words_stay_fast(opted_in_project, command):
     assert len(command) <= 64 * 1024
     started = time.monotonic()
     run("claude", payload_for("claude", command))
-    assert time.monotonic() - started < 2
+    assert time.monotonic() - started < 2 * TIMING_SLACK
 
 
 # Round 12 of review: here-document bodies, $'…' strings, nested -c strings and
@@ -3354,7 +3359,7 @@ def test_a_path_named_like_a_launcher_word_never_hangs(opted_in_project, program
     worker.start()
     worker.join(5)
     assert result, f"hung on {program!r}"
-    assert time.monotonic() - started < 1
+    assert time.monotonic() - started < 1 * TIMING_SLACK
     assert result[0][0] == 2
 
 
@@ -3369,7 +3374,7 @@ def test_mixed_launcher_words_stay_linear(opted_in_project, command):
     assert len(command) <= 64 * 1024
     started = time.monotonic()
     run("claude", payload_for("claude", command))
-    assert time.monotonic() - started < 1
+    assert time.monotonic() - started < 1 * TIMING_SLACK
 
 
 @pytest.mark.parametrize("command", ["bash -- -x", "zsh -- -x", "bash - -x",
@@ -3439,7 +3444,7 @@ def test_here_documents_and_substitutions_stay_fast(opted_in_project, command):
     assert len(command) <= 64 * 1024
     started = time.monotonic()
     run("claude", payload_for("claude", command))
-    assert time.monotonic() - started < 2
+    assert time.monotonic() - started < 2 * TIMING_SLACK
 
 
 @pytest.mark.parametrize("command", [
