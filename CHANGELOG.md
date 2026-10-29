@@ -331,10 +331,10 @@ behaviour.
   `<(…)`/`>(…)` and no descriptor path (not checked: a Markdown `* item`), and otherwise
   unknown (`tee >(sh)`, a function or alias in the command, `sed`, `xargs`, an `eval`
   anywhere), where a globbed word asks. Only an unquoted `case` at the start of a command,
-  with nothing before it, starts a case statement whose arm patterns are passed over; a
-  whose quoting is not known counts as a glob. Each text's quoting is read once per
-  decision. A `case` arm's pattern (`*)`, `a|b*)`) is not a program word, and `x+=1` and
-  `a[1]=2` are assignments like `x=1`. Two other regexes that
+  with nothing before it, starts a case statement, whose arm patterns (`*)`, `a|b*)`) are
+  not program words for this check. A word whose quoting is not known counts as a glob. Each
+  text's quoting is read once per decision, and `x+=1` and `a[1]=2` are assignments like
+  `x=1`. Two other regexes that
   were quadratic on `[` runs (a package spec in `uv run`/`uvx`, a Terraform address index)
   are plain string scans now. With `--log-json`, a decision ended by the time budget logs its
   ask or deny, and the abandoned worker writes no log line or ledger entry (checked when its
