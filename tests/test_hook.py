@@ -344,6 +344,20 @@ def test_glob_program_words_stay_linear(opted_in_project, command):
 
 
 @pytest.mark.parametrize("command", [
+    "".join(f"bash -c 'ls {i}'; 'k*' x; " for i in range(2400)),
+    "".join(f"eval 'ls {i}'; 'k*' x; " for i in range(2600)),
+    "".join(f"echo $(ls {i}); 'k*' x; " for i in range(2600)),
+    "find . -exec k* \\; " * 3000,
+])
+def test_many_nested_lines_and_quoted_globs_stay_linear(opted_in_project, command):
+    # many distinct nested texts must not push the outer text's quoting out of
+    # a cache and have it read again for each of its program words
+    started = time.monotonic()
+    run("claude", payload_for("claude", command))
+    assert time.monotonic() - started < 2
+
+
+@pytest.mark.parametrize("command", [
     "'*';" * 12000, "echo 'k*'; " * 5000 + "ls", "bash -c 'k*' 'k*';" * 3000, '"[["; ' * 8000,
 ])
 def test_quoted_glob_program_words_stay_linear(opted_in_project, command):
@@ -3010,6 +3024,28 @@ _ROUND28_CORPUS = [
 ]
 
 
+# Round 29: a find -exec program word is a glob as the outer shell spells it;
+# globbed program words in nested lines the parser rejects (eval, -c in -c,
+# here-documents, substitutions) are found too.
+_ROUND29_CORPUS = [
+    ('deny', 'find . -exec /usr/bin/kubec?l delete nodes --all \\;'),
+    ('deny', 'find . -exec kube{ctl,x} delete nodes --all \\;'),
+    ('deny', 'find . -exec {kubectl,helm} delete nodes --all \\;'),
+    ('deny', 'find . -exec k?bectl delete nodes --all \\;'),
+    ('deny', 'find . -exec k[u]bectl delete nodes --all \\;'),
+    ('deny', 'find . -exec kubectl* delete nodes --all \\;'),
+    ('deny', 'find . -exec k* delete nodes --all \\;'),
+    ('allow', "find . -exec 'k*' \\;"),
+    ('deny', 'bash -c "bash -c \'/usr/bin/kubec?l delete nodes --all\'"'),
+    ('deny', "eval '/usr/bin/kubec?l delete nodes --all'"),
+    ('ask|deny', 'cat <<E | sh\n/usr/bin/kubec?l delete nodes --all\nE'),
+    ('ask|deny', "bash <<'E'\n/usr/bin/kubec?l delete nodes --all\nE"),
+    ('deny', 'echo $(/usr/bin/kubec?l delete nodes --all)'),
+    ('allow', "eval 'ls *.txt'"),
+    ('allow', 'echo $(ls *.txt)'),
+]
+
+
 def _decision(code: int, out: str) -> str:
     if code == 2:
         return "deny"
@@ -3064,7 +3100,7 @@ def test_a_shell_script_named_like_an_option_is_read(opted_in_project, command):
                          + _ROUND19B_CORPUS + _ROUND20_CORPUS + _ROUND21_CORPUS
                          + _ROUND22_CORPUS + _ROUND23_CORPUS + _ROUND24_CORPUS
                          + _ROUND25_CORPUS + _ROUND26_CORPUS + _ROUND27_CORPUS
-                         + _ROUND28_CORPUS)
+                         + _ROUND28_CORPUS + _ROUND29_CORPUS)
 def test_round12_corpus(opted_in_project, expected, command):
     (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
     (opted_in_project / "ok.sh").write_text("echo hi\n")

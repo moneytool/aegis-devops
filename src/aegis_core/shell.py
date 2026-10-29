@@ -500,7 +500,8 @@ def _globbed(program: str) -> bool:
     return program not in ("[", "[[") and any(ch in program for ch in "{}*?[")
 
 
-def _program_globbed(text: str, word: str, wrappers: list[str]) -> bool:
+def _program_globbed(text: str, word: str, wrappers: list[str],
+                     spellings: tuple[frozenset[str], frozenset[str]] | None = None) -> bool:
     """Whether the program word ``word`` of a command read from ``text`` is a
     glob the shell expands: a glob character in it is unquoted where ``text``
     spells it (``"[[["`` and ``'k*'`` are names). A word that reached the
@@ -510,14 +511,40 @@ def _program_globbed(text: str, word: str, wrappers: list[str]) -> bool:
         return False
     if wrappers:
         return True
-    unquoted, spelt = _glob_spellings(text)
+    unquoted, spelt = spellings if spellings is not None else _glob_spellings(text)
     return word in unquoted or word not in spelt
 
 
-@functools.lru_cache(maxsize=32)
+def globbed_program_word(command: str) -> str | None:
+    """The first program word, in ``command`` or any command line nested in it
+    (``eval`` words, ``sh -c`` strings, here-document bodies, substitutions),
+    that is a glob the shell expands (:func:`_program_globbed`, read in the text
+    it is spelt in); ``None`` when there is none. For commands the parser
+    rejects, whose nested lines it never reads."""
+    for text in nested_commands(command):
+        spellings = None
+        for words, _redirects in _simple_commands(_shell_tokens(text)):
+            try:
+                argv = _peel_precommands(strip_exec_builtin(_strip_reserved(words)))
+                if not argv or argv[0] == "eval":
+                    continue
+                argv, _env, wrappers, _string = _unwrap_inner(argv, 0)
+            except ShellRejected:  # launchers not read: the first word that is not
+                # an assignment (x=$(( a[1] )) alone runs nothing)
+                argv = [w for w in words if not _ASSIGNMENT_RE.match(w)][:1]
+                wrappers = []
+            if argv and _globbed(argv[0]):
+                spellings = spellings or _glob_spellings(text)
+                if _program_globbed(text, argv[0], wrappers, spellings):
+                    return argv[0]
+    return None
+
+
 def _glob_spellings(text: str) -> tuple[frozenset[str], frozenset[str]]:
     """The words of ``text`` (dequoted) that some spelling writes with an
-    unquoted glob character, and all its words: one pass over the tokens."""
+    unquoted glob character, and all its words: one pass over the tokens.
+    Callers compute it once per text (not cached: many nested texts must not
+    push the outer one out of a cache and have it read again)."""
     unquoted, spelt = set(), set()
     for kind, value, start, end in _shell_tokens(text):
         if kind == "word":
@@ -2660,17 +2687,29 @@ def find_exec_commands(argv: list[str]) -> list[list[str]]:
 def _expand(
     command: str, depth: int
 ) -> Iterator[tuple[SimpleCommand, dict[str, str], list[str]]]:
+    spellings: list = []  # this text's quoting, read once when first needed
+
+    def globbed(word: str, wrappers: list[str]) -> bool:
+        if not _globbed(word):
+            return False
+        if not spellings:
+            spellings.append(_glob_spellings(command))
+        return _program_globbed(command, word, wrappers, spellings[0])
+
     for simple in split_compound(command):
         argv, env, wrappers, string = _unwrap_inner(simple.argv, depth)
         if string is None:
             yield (SimpleCommand(argv, simple.redirects, simple.in_pipeline, simple.stdin_pipe,
-                                 bool(argv) and _program_globbed(command, argv[0], wrappers)),
+                                 bool(argv) and globbed(argv[0], wrappers)),
                    env, wrappers)
             for inner_argv in find_exec_commands(argv):
-                # find runs CMD itself, without a shell: its words are never globs
+                # find runs CMD without a shell, but the outer shell has already
+                # expanded find's words: CMD's program is a glob as spelt here
                 for inner, inner_env, inner_wrappers in _expand(shlex.join(inner_argv),
                                                                 depth + 1):
-                    yield (SimpleCommand(inner.argv, inner.redirects, globbed=inner.globbed),
+                    inner_globbed = inner.globbed or bool(inner.argv) and globbed(
+                        inner.argv[0], [])
+                    yield (SimpleCommand(inner.argv, inner.redirects, globbed=inner_globbed),
                            {**env, **inner_env}, [*wrappers, "find -exec", *inner_wrappers])
             continue
         for inner, inner_env, inner_wrappers in _expand(string, depth + 1):

@@ -91,6 +91,7 @@ from aegis_core.shell import (
     _unwrap_inner,
     dequoted,
     find_heredoc,
+    globbed_program_word,
     intents_from_command,
     interactive_rcfiles,
     lex,
@@ -518,6 +519,9 @@ def _precheck(command: str, config_dir: Path, extra_args: list[str] | None,
         return inner[0], [*asks, *inner[1]]
     except ValueError as exc:  # a known binary with an argv its parser rejects
         return HookVerdict("deny", f"aegis: cannot parse this command: {exc}", unchecked=True)
+    word = globbed_program_word(command)  # in a nested line the parser did not split out
+    if word is not None:
+        return _glob_denied(command, word)
     asks: list[str] = []
     for intent in intents:
         runs = intent.params.get("runs_code") if intent.provider == "shell" else None
@@ -1031,6 +1035,9 @@ def _rejected(command: str, reason: str, config_dir: Path, extra_args: list[str]
     deny when it names an infrastructure tool, ask for code generated at run
     time or piped from a here-document or another program, check the local
     shell scripts it names, else allow."""
+    word = globbed_program_word(command)
+    if word is not None:
+        return _glob_denied(command, word)
     if mentions_infra(command):
         return HookVerdict(
             "deny",
@@ -1085,6 +1092,9 @@ def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
     expansion, ``$K …``, ``eval …``, ``find -exec``, ``ssh``, …): deny when the
     command names an infrastructure tool anywhere, else the whole-command rules
     of :func:`_rejected`."""
+    word = globbed_program_word(command)  # also in eval words, -c strings, bodies
+    if word is not None:
+        return _glob_denied(command, word)
     # a here-doc's body lines are data, not commands: judged as a whole, as before
     segments = None if "<<" in command else split_segments(command)
     if not segments:
