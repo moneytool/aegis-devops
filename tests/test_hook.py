@@ -3297,6 +3297,20 @@ _ROUND37B_CORPUS = [
 ]
 
 
+# Round 37c: git and gh are not data sinks (rebase -x, aliases, GIT_CONFIG_*),
+# and an expansion in a sink's arguments may be a program-running option.
+_ROUND37C_CORPUS = [
+    *(("ask|deny", f"{head} <<E\n{_LOCAL_GLOB}\nE") for head in (
+        "O=--compress-program=sh; sort $O", 'sort "$O"', "sort `echo --compress-program=sh`",
+        "git rebase -x sh HEAD~1",
+        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.x GIT_CONFIG_VALUE_0='!sh' git x",
+        "gh api x --input -")),
+    ("allow", "sort -u <<'EOF'\n* a\nEOF"),
+    ("allow", "sort -k2 <<'EOF'\n* a\nEOF"),
+    ("allow", "diff -u a - <<'EOF'\n* a\nEOF"),
+]
+
+
 def _decision(code: int, out: str) -> str:
     if code == 2:
         return "deny"
@@ -3355,7 +3369,7 @@ def test_a_shell_script_named_like_an_option_is_read(opted_in_project, command):
                          + _ROUND31_CORPUS + _ROUND32_CORPUS + _ROUND33_CORPUS
                          + _ROUND33B_CORPUS + _ROUND34_CORPUS + _ROUND34B_CORPUS
                          + _ROUND35_CORPUS + _ROUND36_CORPUS + _ROUND37_CORPUS
-                         + _ROUND37B_CORPUS)
+                         + _ROUND37B_CORPUS + _ROUND37C_CORPUS)
 def test_round12_corpus(opted_in_project, expected, command):
     (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
     (opted_in_project / "ok.sh").write_text("echo hi\n")

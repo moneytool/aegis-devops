@@ -327,8 +327,9 @@ behaviour.
   bodies) are checked too. For this check a here-document body is shell-run when a shell,
   `eval`, `source`, `.` or `exec` is a program of the pipeline its `<<` is in (`bash <<EOF`,
   `cat <<EOF | sh`: as for a command), data when every program there is a data sink (`cat`,
-  `tee`, `jq`, `git`, …, none with an option that runs a program on what it reads: `sort
-  --compress-program`, `diff --diff-program`, `git -c`, also abbreviated: `--compress-prog`)
+  `tee`, `jq`, `sort`, …; not `git` or `gh`, which run programs in too many ways; none with
+  an option that runs a program on what it reads, `sort --compress-program` or `diff
+  --diff-program`, also abbreviated, or with an expansion among its arguments: `sort "$O"`)
   or an interpreter of another
   language reading the body as its
   program (`python3`, `python3 -`, `node`; also `python3 -m json.tool`; not one given inline

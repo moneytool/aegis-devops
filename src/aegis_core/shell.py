@@ -1939,7 +1939,7 @@ def _body_substitutions(body: str, state: dict) -> None:
 # filter or a commit message). Not sed (its e command), awk (system()), xargs,
 # ssh, sudo, …: for the glob check, a body only these read is not run.
 _DATA_SINKS = frozenset({"cat", "tee", "head", "tail", "wc", "grep", "sort", "uniq", "cut",
-                         "tr", "jq", "yq", "base64", "diff", "git", "gh", "true", ":"})
+                         "tr", "jq", "yq", "base64", "diff", "true", ":"})
 _COMPOUND_WORDS = frozenset({"{", "}", "if", "then", "else", "elif", "fi", "do", "done",
                              "while", "until", "!", "time"})
 _DESCRIPTOR_PATHS = ("/dev/fd/", "/dev/stdin", "/dev/stdout", "/dev/stderr", "/proc/")
@@ -2040,19 +2040,21 @@ def _body_reader(line: list[_Token]) -> str:
 
 
 # Options of the data sinks that run another program on what they read.
-_SINK_PROGRAM_OPTIONS = {"sort": ("--compress-program",), "diff": ("--diff-program",),
-                         "git": ("-c", "--exec-path", "--upload-pack", "--receive-pack",
-                                 "--config-env")}
+# (git and gh are not data sinks: rebase -x, bisect run, aliases, GIT_CONFIG_*.)
+_SINK_PROGRAM_OPTIONS = {"sort": ("--compress-program",), "diff": ("--diff-program",)}
 
 
 def _sink_runs_a_program(name: str, arguments: list[str]) -> bool:
     """Whether a data sink's ``arguments`` hold an option that runs a program
-    (``sort --compress-program=sh``, ``git -c alias.x='!sh' x``)."""
+    (``sort --compress-program=sh``, abbreviated too), or one only known when
+    the command runs (``sort "$O"``)."""
     options = _SINK_PROGRAM_OPTIONS.get(name, ())
     for a in arguments:
+        if "$" in a or "`" in a:
+            return True  # sort $O: an option only known when the command runs
         long_name = a[2:].partition("=")[0] if a.startswith("--") else ""
         for o in options:
-            if a == o or a.startswith(o + "=") or (o == "-c" and a.startswith("-c")):
+            if a == o or a.startswith(o + "="):
                 return True
             # getopt takes an unambiguous abbreviation (--compress-prog, --co)
             if long_name and o.startswith("--") and o[2:].startswith(long_name):
