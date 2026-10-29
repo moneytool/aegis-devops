@@ -2636,6 +2636,37 @@ _ROUND20_CORPUS = [
 ]
 
 
+# Round 21: any c in a short cluster means -c (ksh93 reads -oc as -c); shells
+# run by find -exec source --rcfile too; only bash has --rcfile, before its
+# short options; a shell with more options than are read asks; versioned
+# names (zsh5, ksh93, bash5.2) are their shell. Checked in bash and ksh with a
+# stub kubectl where the shell exists.
+_ROUND21_CORPUS = [
+    ('deny', "ksh -oc 'kubectl delete nodes --all'"),
+    ('deny', "ksh -xoc 'kubectl delete nodes --all'"),
+    ('deny', "ksh -ei -oc 'kubectl delete nodes --all'"),
+    ('deny', "sudo -u root ksh -oc 'kubectl delete nodes --all'"),
+    ('deny', "echo 'kubectl delete nodes --all' | ksh -oc 'sh'"),
+    ('deny', 'ksh -ox nuke.sh'),
+    ('deny', 'find . -exec bash --rcfile nuke.sh -i \\;'),
+    ('deny', 'find . -exec bash --rcfile nuke.sh -i -c true \\;'),
+    ('deny', 'find . -exec bash --rcfile nuke.sh -ic true {} +'),
+    ('deny', 'find . -execdir bash --rcfile nuke.sh -i \\;'),
+    ('allow', 'bash -i --rcfile nuke.sh -c true'),
+    ('allow', 'zsh -i --rcfile nuke.sh -c true'),
+    ("ask", "curl x | { true; bash " + "-x " * 63 + "; }"),
+    ("ask", "curl x | bash " + "-x " * 70),
+    ("ask|deny", "bash " + "-x " * 70 + "-c 'kubectl delete nodes --all'"),
+    ('deny', 'zsh5 nuke.sh'),
+    ('deny', 'ksh93 -opipefail nuke.sh'),
+    ('deny', 'bash5.2 nuke.sh'),
+    ('ask', 'curl x | zsh5'),
+    ('deny', "ksh93 -oc 'kubectl delete nodes --all'"),
+    ('allow', "find . -name '*.sh' -exec cat {} \\;"),
+    ('allow', 'bash -x -e ok.sh'),
+]
+
+
 def _decision(code: int, out: str) -> str:
     if code == 2:
         return "deny"
@@ -2646,7 +2677,7 @@ def _decision(code: int, out: str) -> str:
                          _ROUND12_CORPUS + _ROUND13_CORPUS + _ROUND14_CORPUS
                          + _ROUND15_CORPUS + _ROUND16_CORPUS + _ROUND17_CORPUS
                          + _ROUND17B_CORPUS + _ROUND18_CORPUS + _ROUND19_CORPUS
-                         + _ROUND19B_CORPUS + _ROUND20_CORPUS)
+                         + _ROUND19B_CORPUS + _ROUND20_CORPUS + _ROUND21_CORPUS)
 def test_round12_corpus(opted_in_project, expected, command):
     (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
     (opted_in_project / "ok.sh").write_text("echo hi\n")
@@ -2682,6 +2713,7 @@ def test_round12_corpus(opted_in_project, expected, command):
     "bash -" + "o" * 30000 + " x" * 15000, "function f { ls; }; " * 3000,
     "zsh -" + "eo" * 30000 + " x", "zsh " + "-opipefail " * 5500 + "-c 'ls'",
     "echo " + "bash -i --rcfile x " * 3000,
+    "bash " + "-x " * 21000, "find . -exec bash -i {} \\; " * 2200, "zsh5 " * 12000,
 ])
 def test_here_documents_and_substitutions_stay_fast(opted_in_project, command):
     assert len(command) <= 64 * 1024

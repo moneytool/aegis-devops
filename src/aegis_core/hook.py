@@ -437,7 +437,8 @@ def _stdin_redirects(command: str, config_dir: Path, extra_args: list[str] | Non
                     "infrastructure tool, so it cannot be checked")
     if nested_too_deep(command):
         asks.append("aegis: this command nests commands (sh -c, eval, $(…), here-documents) "
-                    "deeper than the hook reads, so the innermost cannot be checked")
+                    "deeper than the hook reads, or gives a shell more options than it reads, "
+                    "so what runs there cannot be checked")
     for text in nested_commands(command):  # bash -c 'exec < x.sh; bash' too
         asks += [ask for ask in _stdin_asks(text) if ask not in asks]
     if scan:
@@ -1284,7 +1285,7 @@ def _bare_at(tokens: tuple[_Token, ...], r: int) -> bool:
         if shell and word.startswith("-") and "s" in letters and "c" not in letters:
             return True  # bash -s ARGS: the words after it are arguments, the code is stdin
         k += 1 + values  # an interpreter's -O/-o is a flag (python3 -OO)
-    return k >= len(tokens)
+    return True  # the end, or more words than are read: taken as reading stdin (asked)
 
 
 # Words that may stand before the program a pipe feeds (`| exec sh`, `| env X=1 sh`).

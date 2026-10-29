@@ -267,6 +267,14 @@ behaviour.
   (`bash --rcfile x.sh -io pipefail -c …`) still makes the shell interactive, so it sources the
   file. Only the shell in command position sources its `--rcfile` (`echo bash -i --rcfile x`
   runs no shell), and an interpreter's `-O`/`-o` takes no value (`python3 -OO x.py`).
+- Agent hook: any `c` in a shell's short-option cluster means `-c`, also after an attached
+  value (ksh93 reads `-oc` as `-c`), and the same holds for `i` and `s`. Shells started by
+  `find … -exec|-execdir|-ok|-okdir` are nested command lines like `watch`'s, so their
+  `--rcfile` and scripts are read. Only bash has `--rcfile`/`--init-file`, and only before its
+  short options (`bash -i --rcfile x` is an error and runs nothing). A shell with more option
+  words than the hook reads (64), before its `-c` string or script or as a reader in a piped
+  group, asks instead of being passed over. Versioned shell names (`zsh5`, `ksh93`, `bash5.2`)
+  are read as their shell.
 - Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
   own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
   policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a

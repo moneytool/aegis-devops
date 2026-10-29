@@ -682,6 +682,7 @@ def plain_binary(segment: str) -> str | None:
 _ALIASES = {"k": "kubectl", "tf": "terraform", "tofu": "tofu", "g": "git"}
 _SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "ash", "rbash", "mksh", "yash",
                      "fish", "csh", "tcsh", "posh"})
+_VERSIONED_SHELL_RE = re.compile(rf"({'|'.join(sorted(_SHELLS))})\d[\d.]*")
 _ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 _SUDO_BOOL_SHORT = frozenset("EHnkKbAlvS")
@@ -701,7 +702,9 @@ _SUDO_SHELL_OPTIONS = frozenset({"-i", "-s", "--login", "--shell", "-e", "--edit
 @functools.lru_cache(maxsize=4096)  # called for every word, often the same few
 def _basename(token: str) -> str:
     # Path(".").name is "" — keep the dot so the `.` builtin is recognised.
-    return Path(token).name or token
+    name = Path(token).name or token
+    versioned = _VERSIONED_SHELL_RE.fullmatch(name)  # zsh5, ksh93, bash5.2: the shell
+    return versioned.group(1) if versioned else name
 
 
 def _strip_sudo(rest: list[str]) -> list[str]:
@@ -1409,21 +1412,22 @@ def shell_option(word: str, shell: str) -> tuple[int, str]:
     one; in a short cluster each ``o``/``O`` takes the next word, in order
     (``-o NAME``, ``-co NAME 'cmd'``, ``-oO A B``), except in zsh, ksh, mksh
     and yash, where an ``o``/``O`` with letters after it takes them as its
-    value and ends the cluster (``zsh -eopipefail``: e, then pipefail)."""
+    value and ends the cluster (``zsh -eopipefail``: e, then pipefail). The
+    letters are all of the cluster's other letters, to be safe."""
     if word in ("--rcfile", "--init-file"):
         return 1, ""
     if word.startswith("--") or len(word) < 2 or word[0] not in "-+":
         return 0, ""
     attached = _basename(shell) in _ATTACHED_VALUE_SHELLS
-    values, letters = 0, []
+    values = 0
     for k, letter in enumerate(word[1:], start=2):
         if letter in "oO":
             if attached and k < len(word):
                 break  # the rest of the word is the option's name
             values += 1
-        else:
-            letters.append(letter)
-    return values, "".join(letters)
+    # every letter counts as set, also those after an attached value: ksh93
+    # reads -oc as -c and -oi as -i, so -c, -i and -s are not missed
+    return values, "".join(ch for ch in word[1:] if ch not in "oO")
 _PYTHON_RE = re.compile(r"^python(?:\d+(?:\.\d+)?)?$")
 # Task runners: what they run is in a Makefile / package.json the hook does not read.
 _TASK_RUNNERS = frozenset({"make", "gmake", "just", "task", "rake", "invoke"})
@@ -2004,13 +2008,27 @@ def _readers(tokens: tuple[_Token, ...]) -> list[int]:
 
 
 def _c_string_at(tokens: tuple[_Token, ...], k: int) -> int | None:
+    """For a shell word at ``k``: the index of its ``-c`` string word
+    (:func:`_shell_scan`); ``None`` when it has none."""
+    return _shell_scan(tokens, k)[0]
+
+
+# At most this many option words after a shell are read; past it the command is
+# too deep to check, and asks (see nested_too_deep).
+_MAX_SHELL_OPTIONS = 64
+
+
+def _shell_scan(tokens: tuple[_Token, ...], k: int) -> tuple[int | None, bool]:
     """For a shell word at ``k``: the index of its ``-c`` string word, after
-    its options (``-o NAME``, clusters, ``--long``; at most a few dozen words,
-    so callers stay linear); ``None`` when it has none."""
+    its options (``-o NAME``, clusters, ``--long``), or ``None``; and whether
+    it has more than :data:`_MAX_SHELL_OPTIONS` option words, which are not
+    all read (so callers stay linear)."""
     if _basename(tokens[k][1]) not in _SHELLS:
-        return None
+        return None, False
     j, saw_c = k + 1, False
-    while j < min(len(tokens), k + 64) and tokens[j][0] == "word":
+    while tokens[j:j + 1] and tokens[j][0] == "word":
+        if j >= k + _MAX_SHELL_OPTIONS:
+            return None, True  # more options than are read
         word = tokens[j][1]
         if word == "--":
             j += 1
@@ -2022,7 +2040,14 @@ def _c_string_at(tokens: tuple[_Token, ...], k: int) -> int | None:
             j += 1 + values  # -co pipefail 'cmd': the value, then the string
             continue
         break
-    return j if saw_c and j < len(tokens) and tokens[j][0] == "word" else None
+    return (j if saw_c and j < len(tokens) and tokens[j][0] == "word" else None), False
+
+
+def options_capped(text: str) -> bool:
+    """Whether a shell in ``text`` has more options than :func:`_shell_scan`
+    reads before its ``-c`` string or script."""
+    tokens = _shell_tokens(text)
+    return any(_shell_scan(tokens, k)[1] for k in _readers(tokens))
 
 
 def _eval_words_end(tokens: tuple[_Token, ...], k: int) -> int:
@@ -2058,23 +2083,25 @@ def _inner_commands(text: str) -> list[str]:
                 continue
         k += 1
     for words, _redirects in _simple_commands(tokens):
-        string = _launcher_string(words)
-        if string:
-            found.append(string)
+        found += _launched_commands(words)
     return found
 
 
-def _launcher_string(words: list[str]) -> str | None:
-    """The command string a launcher in front of ``words`` runs (``watch
-    'cmd'``, ``sudo script -qc 'cmd' /dev/null``); ``None`` when there is none
-    or the launchers cannot be unwrapped."""
+def _launched_commands(words: list[str]) -> list[str]:
+    """The command lines a launcher in front of ``words`` runs: its command
+    string (``watch 'cmd'``, ``sudo script -qc 'cmd' /dev/null``) or the
+    commands of ``find … -exec|-execdir|-ok|-okdir CMD … \\;|+``; ``[]`` when
+    there are none or the launchers cannot be unwrapped."""
     try:
         argv = strip_exec_builtin(_strip_reserved(words))
         if not argv or argv[0] == "eval":
-            return None
-        return _unwrap_inner(argv, 0)[3]
+            return []
+        argv, _env, _wrappers, string = _unwrap_inner(argv, 0)
+        if string:
+            return [string]
+        return [shlex.join(inner) for inner in find_exec_commands(argv)]
     except ShellRejected:
-        return None
+        return []
 
 
 def nested_commands(command: str) -> list[str]:
@@ -2101,6 +2128,7 @@ def _nesting(command: str) -> tuple[tuple[str, ...], bool]:
         lexed = lex(text)
         inner = _inner_commands(text)
         texts = [t for t in dict.fromkeys([*inner, *lexed.bodies, *lexed.substitutions]) if t]
+        deep[0] |= options_capped(text)
         if depth >= 4:
             deep[0] |= bool(texts)
             return
@@ -2160,13 +2188,17 @@ def _rcfile_runs(words: list[str]) -> list[dict[str, str]]:
     if not argv or _basename(argv[0]) not in _SHELLS:
         return []
     shell = _basename(argv[0])
-    files, interactive, j = [], False, 1
+    files, interactive, short, j = [], False, False, 1
     while j < len(argv):
         word = argv[j]
         if word == "--" or not word.startswith(("-", "+")) or word in ("-", "+"):
             break
-        if word in ("--rcfile", "--init-file") and j + 1 < len(argv):
+        # only bash has --rcfile, and only before its short options (bash -i
+        # --rcfile x is an error)
+        if word in ("--rcfile", "--init-file") and j + 1 < len(argv) and (
+                shell in ("bash", "rbash") and not short):
             files.append(argv[j + 1])
+        short = short or not word.startswith("--")
         values, letters = shell_option(word, shell)
         if word.startswith("-") and not word.startswith("--") and "i" in letters:
             interactive = True  # -i, -ic, -il, -io pipefail
