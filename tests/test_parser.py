@@ -2639,3 +2639,355 @@ def test_aws_numeric_looking_names_stay_strings(argv, resource):
 
     (intent,) = from_aws_multi(shlex.split(argv))
     assert intent.resource == resource
+
+
+# --- #53: kubectl boolean flags ---------------------------------------------------
+
+
+@pytest.mark.parametrize("argv, resource, params", [
+    ("kubectl get pods -n prod --no-headers", "pod/*", {"no-headers": True}),
+    ("kubectl get --no-headers pods -n prod", "pod/*", {"no-headers": True}),
+    ("kubectl get pods --show-labels -n prod", "pod/*", {"show-labels": True}),
+    ("kubectl get pods -n prod --watch", "pod/*", {"watch": True}),
+    ("kubectl get --watch pods -n prod", "pod/*", {"watch": True}),
+    ("kubectl get pods -n prod -w", "pod/*", {}),
+    ("kubectl get pods --all-namespaces --no-headers", "pod/*", {"no-headers": True}),
+    ("kubectl get pods -A --no-headers", "pod/*", {"no-headers": True}),
+    ("kubectl get pod web --ignore-not-found -n prod", "pod/web", {"ignore-not-found": True}),
+    ("kubectl delete pod web --force -n prod", "pod/web", {"force": True}),
+    ("kubectl delete pod web --wait -n prod", "pod/web", {"wait": True}),
+    ("kubectl delete pod web --wait=false -n prod", "pod/web", {"wait": False}),
+    ("kubectl delete pod web --dry-run -n prod", "pod/web", {"dry_run": True}),
+    ("kubectl get pods --no-headers=false -n prod", "pod/*", {"no-headers": False}),
+    ("kubectl logs -f api-0 -n prod", "pod/api-0", {"follow": True}),
+    ("kubectl logs api-0 --follow -n prod", "pod/api-0", {"follow": True}),
+    ("kubectl logs api-0 -f -n prod", "pod/api-0", {"follow": True}),
+    ("kubectl top pod --containers --sum -n prod", "pod/*", {"containers": True, "sum": True}),
+    ("kubectl apply -f x.yaml --openapi-patch --server-side", "manifest/x.yaml", None),
+    # not in the table: at the end of argv it is a boolean rather than a
+    # flag missing its value
+    ("kubectl get pods -n prod --ignore-validation-errors", "pod/*",
+     {"ignore-validation-errors": True}),
+])
+def test_kubectl_boolean_flags_take_no_value(argv, resource, params):
+    """#53: a boolean flag never swallows the next token, and at the end of
+    argv it is not 'missing its value'."""
+    import shlex
+
+    intents = from_kubectl_multi(shlex.split(argv))
+    assert [i.resource for i in intents] == [resource]
+    if params is not None:
+        assert intents[0].params == params
+    if "-n prod" in argv:
+        assert intents[0].metadata["namespace"] == "prod"
+
+
+@pytest.mark.parametrize("argv, resources", [
+    ("kubectl delete ns --interactive prod staging", ["namespace/prod", "namespace/staging"]),
+    ("kubectl delete ns prod staging --interactive", ["namespace/prod", "namespace/staging"]),
+])
+def test_kubectl_delete_interactive_is_a_boolean(argv, resources):
+    """Council review of #53: --interactive (kubectl 1.27+) must not swallow
+    the first name."""
+    intents = from_kubectl_multi(argv.split())
+    named = [i.resource for i in intents if "cascade_from" not in i.params]
+    assert named == resources
+
+
+@pytest.mark.parametrize("argv, resources, namespace", [
+    # --resource-version takes "--context" as its value; staging is a name
+    ("kubectl scale deploy web --resource-version --context staging --replicas=0",
+     ["deployment/web", "deployment/staging"], None),
+    # --field-manager takes "-n"; staging is a namespace being labelled
+    ("kubectl label ns prod --field-manager -n staging env=x",
+     ["namespace/prod", "namespace/staging"], None),
+    ("kubectl annotate pods --all --field-manager -n staging a=b", ["pod/staging"], None),
+    ("kubectl delete pod web --grace-period -1 -n prod", ["pod/web"], "prod"),
+])
+def test_kubectl_value_flags_take_the_next_token_even_a_dash_one(argv, resources, namespace):
+    """Council review of #53: as pflag does, a known value flag takes the
+    next token even when it starts with '-', so an option that looks like a
+    scope is not mistaken for one."""
+    intents = from_kubectl_multi(argv.split())
+    assert [i.resource for i in intents] == resources
+    assert all(i.metadata.get("namespace") == namespace for i in intents)
+    assert all("context" not in i.metadata for i in intents)
+
+
+@pytest.mark.parametrize("argv, key, value", [
+    ("kubectl delete pod web --grace-period -1", "grace-period", -1),
+    ("kubectl logs api-0 --tail -1", "tail", -1),
+    ("kubectl logs api-0 --since -5m", "since", "-5m"),
+    ("kubectl logs api-0 -c app", "container", "app"),
+    ("kubectl logs api-0 -capp", "container", "app"),
+    ("kubectl get pods -L app", "label-columns", "app"),
+    ("kubectl patch deploy x -p {}", "patch", "{}"),
+])
+def test_kubectl_value_flag_values_are_kept(argv, key, value):
+    intents = from_kubectl_multi(argv.split())
+    assert len(intents) == 1
+    assert intents[0].params[key] == value
+
+
+@pytest.mark.parametrize("argv", [
+    "kubectl get pods --some-new-switch -n prod",
+    "kubectl delete pod web --some-new-option --context staging",
+    "kubectl delete pod web --some-new-option -A",
+    "kubectl delete pod web --some-new-option --dry-run",
+    "kubectl get pods --some-new-switch --no-headers",
+])
+def test_kubectl_unknown_long_flag_before_another_option_is_refused(argv):
+    """Council review of #53: whether an unknown flag takes the next option
+    as its value decides the namespace/context/target, so it is refused."""
+    with pytest.raises(ValueError, match="cannot tell whether"):
+        from_kubectl_multi(argv.split())
+
+
+@pytest.mark.parametrize("argv", [
+    "kubectl get pods -n",
+    "kubectl get pods --namespace",
+    "kubectl get pods -l",
+    "kubectl get pods --field-selector",
+    "kubectl get pods -o",
+    "kubectl get pods --context",
+    "kubectl get pods --kubeconfig",
+])
+def test_kubectl_value_flags_still_need_their_value(argv):
+    with pytest.raises(ValueError, match="missing its value"):
+        from_kubectl_multi(argv.split())
+
+
+@pytest.mark.parametrize("argv, namespace, params", [
+    ("kubectl get pods --no-headers -n --watch", "--watch", {"no-headers": True}),
+    ("kubectl get pods -nprod --no-headers", "prod", {"no-headers": True}),
+    ("kubectl get pods --namespace=prod --no-headers", "prod", {"no-headers": True}),
+    ("kubectl get pods --no-headers -l app=web -n prod", "prod",
+     {"no-headers": True, "selector": "app=web"}),
+    ("kubectl get pods --no-headers -o name -n prod", "prod", {"no-headers": True}),
+])
+def test_kubectl_value_flags_keep_their_value_next_to_booleans(argv, namespace, params):
+    """A value flag still takes the next token, even one starting with '-';
+    glued and '=' forms are unchanged."""
+    (intent,) = from_kubectl_multi(argv.split())
+    assert intent.metadata["namespace"] == namespace
+    assert intent.params == params
+
+
+def test_kubectl_unknown_long_flag_before_a_word_still_takes_it_as_value():
+    (intent,) = from_kubectl_multi(["kubectl", "get", "pods", "--sort-by", "name", "-n", "prod"])
+    assert intent.resource == "pod/*"
+    assert intent.params == {"sort-by": "name"}
+
+
+def test_kubectl_dash_f_is_still_a_manifest_outside_logs():
+    (intent,) = from_kubectl_multi(["kubectl", "apply", "-f", "app.yaml"])
+    assert intent.resource == "manifest/app.yaml"
+
+
+# --- #54: help / version probes ---------------------------------------------------
+
+
+@pytest.mark.parametrize("argv, kind", [
+    ("helm --help", "help"),
+    ("helm -h", "help"),
+    ("helm help install", "help"),
+    ("helm version --short", "version"),
+    ("helm install --help", "help"),
+    ("argocd version --client", "version"),
+    ("argocd version --client --short", "version"),
+    ("argocd app delete --help", "help"),
+    ("argocd app delete payments --help", "help"),
+    ("kubectl version", "version"),
+    ("kubectl version --client -o json", "version"),
+    ("kubectl --version", "version"),
+    ("kubectl --help", "help"),
+    ("kubectl help delete", "help"),
+    ("kubectl delete --help", "help"),
+    ("kubectl delete -h", "help"),
+    ("kubectl rollout restart --help", "help"),
+    ("flux version --client", "version"),
+    ("flux reconcile kustomization --help", "help"),
+    ("gh --version", "version"),
+    ("gh version", "version"),
+    ("gh pr merge --help", "help"),
+    ("gh help pr", "help"),
+    ("git --version", "version"),
+    ("git version", "version"),
+    ("git help push", "help"),
+    ("git push --help", "help"),
+    ("git co --help", "help"),  # rewritten to "git help co", which shows the alias
+    ("git -h", "help"),
+    ("kubectl create deployment --help", "help"),
+    ("kubectl create deploy web --help", "help"),
+    ("kubectl create secret generic --help", "help"),
+    ("kubectl create svc nodeport --help", "help"),
+    ("kubectl top pod --help", "help"),
+    ("kubectl config use-context --help", "help"),
+    ("aws --version", "version"),
+    ("az --version", "version"),
+    ("az version", "version"),
+    ("az vm delete --help", "help"),
+    ("gcloud --version", "version"),
+    ("gcloud version", "version"),
+    ("gcloud help compute", "help"),
+    ("gcloud compute instances delete --help", "help"),
+    ("gsutil version", "version"),
+    ("gsutil --help", "help"),
+    ("psql --version", "version"),
+    ("psql -V", "version"),
+    ("psql --help", "help"),
+    ("mysql --version", "version"),
+    ("mysql --help", "help"),
+    ("sqlite3 --version", "version"),
+    ("sqlite3 -help", "help"),
+    ("mongosh --version", "version"),
+    ("mongosh --help", "help"),
+    ("pulumi version", "version"),
+    ("pulumi --version", "version"),
+    ("pulumi destroy --help", "help"),
+    ("alembic --version", "version"),
+    ("alembic --help", "help"),
+    ("alembic downgrade --help", "help"),
+    ("flyway --version", "version"),
+    ("flyway -v", "version"),
+    ("flyway version", "version"),
+    ("flyway help", "help"),
+    ("rails --version", "version"),
+    ("rails -v", "version"),
+    ("rails --help", "help"),
+    ("prisma --version", "version"),
+    ("prisma version", "version"),
+    ("prisma migrate deploy --help", "help"),
+    ("/usr/local/bin/helm --help", "help"),
+])
+def test_help_and_version_probes_are_informational(argv, kind):
+    """#54: informational probes are one read-only cli/<tool> intent, not a
+    parse error."""
+    (intent,) = from_argv(argv.split())
+    tool = argv.split()[0].rsplit("/", 1)[-1]
+    assert intent.resource == f"cli/{tool}"
+    assert intent.action == "read"
+    assert intent.params["informational"] == kind
+
+
+@pytest.mark.parametrize("argv", [
+    # --help as the value of an option: kubectl deletes namespace prod
+    "kubectl -n --help delete ns prod",
+    "kubectl delete ns prod -n --help",
+    # an option before the probe flag: left to the provider parser
+    "kubectl delete ns prod --force --help",
+    "argocd app delete payments --cascade --help",
+    # after "--" the flag belongs to the wrapped command
+    "kubectl exec api-0 -- rm -rf /data --help",
+    # plugins / extensions / aliases receive --help themselves
+    "kubectl nuke --help",
+    "helm diff --help",
+    "gh my-alias --help",
+    # gh extension exec passes --help / -h to the extension, which runs
+    "gh extension exec review-probe --help",
+    "gh extension exec review-probe -h",
+    "gh extension exec --help",
+    # flyway runs every command word it is given
+    "flyway version clean",
+    "flyway help clean",
+    # kubectl runs a kubectl-create-<x> plugin for an unknown create subcommand
+    "kubectl create nuke --help",
+    "kubectl create secret nuke --help",
+    "kubectl rollout nuke --help",
+    "kubectl alpha --help",
+    # the vcs tool: only "<cmd> --help" directly; "-h" goes to an alias as
+    # is, and is a real option of grep and ls-remote
+    "git push origin main --help",
+    "git push -h",
+    "git co -h",
+    "git grep -h",
+    "git ls-remote -h",
+    # an aws [toplevel] alias (~/.aws/cli/alias) can replace "help" and any
+    # service name, "s3 = !cmd" included, and runs its own command
+    "aws help",
+    "aws help topics",
+    "aws s3 help",
+    "aws s3 rm help",
+    "aws nuke help",
+    "aws s3 cp src help extra",
+    # -h is --host for psql / mysql
+    "psql -h db.internal",
+    "mysql -h db.internal",
+])
+def test_mutating_or_ambiguous_forms_are_not_informational(argv):
+    try:
+        intents = from_argv(argv.split())
+    except ValueError:
+        return  # a parse error fails closed
+    assert not any(i.params.get("informational") for i in intents)
+
+
+def test_aws_help_is_never_informational_an_alias_can_replace_it():
+    """Council review of #54: with "[toplevel] s3 = !cmd" in
+    ~/.aws/cli/alias, "aws s3 help" runs cmd. Such forms go to the aws
+    parser, as before; only --version is built in."""
+    for argv in ("aws s3 help", "aws s3 rm help", "aws help"):
+        try:
+            intents = from_argv(argv.split())
+        except ValueError:
+            continue  # a parse error fails closed, as on main
+        assert not any(i.params.get("informational") for i in intents)
+    (intent,) = from_argv(["aws", "--version"])
+    assert intent.params["informational"] == "version"
+
+
+@pytest.mark.parametrize("argv", [
+    "gh extension exec review-probe --help",
+    "gh extension exec review-probe -h",
+])
+def test_gh_extension_exec_help_is_still_an_extension_exec(argv):
+    """PR #59 review: "extension exec" sets DisableFlagParsing, so --help
+    reaches the extension and runs it. It stays extension/exec, which
+    extension/* constraints match, not a cli/gh read."""
+    (intent,) = from_argv(argv.split())
+    assert intent.resource == "extension/exec"
+    assert "informational" not in intent.params
+
+
+def test_gh_extension_exec_help_is_still_blocked_by_an_extension_rule():
+    """PR #59 review reproduction: BLOCK for github extension/* stays BLOCK
+    when --help or -h follows the extension name."""
+    from aegis_core.interceptor import AegisInterceptor
+    from aegis_core.shell import intents_from_command
+    from aegis_core.store import Constraint, ConstraintStore
+
+    store = ConstraintStore(authority_map={"admin": {"configuration"}})
+    store.add_constraint(Constraint.create(
+        id="block-gh-extensions", provider="github", resource_pattern="extension/*",
+        actions={"*"}, effect="BLOCK", constraint_class="configuration",
+        principal="admin", source_ref="git-abc",
+        source_timestamp="2026-01-01T00:00:00+00:00", rule_text="No gh extensions.",
+    ))
+    interceptor = AegisInterceptor(store)
+    for command in ("gh extension exec review-probe --help",
+                    "gh extension exec review-probe -h",
+                    "gh extension exec review-probe"):
+        (intent,) = intents_from_command(command)
+        decision = interceptor.intercept(intent)
+        assert decision.verdict == "BLOCK", command
+        assert "block-gh-extensions" in decision.citations
+
+
+@pytest.mark.parametrize("argv", [
+    "kubectl get --raw /api/v1/namespaces/prod/secrets",
+    "kubectl get --raw=/api/v1/namespaces/prod/secrets",
+])
+def test_kubectl_get_raw_is_still_refused(argv):
+    """A raw URI path can read any kind (secrets included), which no
+    kind-based rule would match, so it stays a parse error (fail closed)."""
+    with pytest.raises(ValueError, match="could not find a target resource"):
+        from_kubectl_multi(argv.split())
+
+
+@pytest.mark.parametrize("argv", [
+    "kubectl -n --help delete ns prod",
+    "kubectl delete ns prod --force --help",
+])
+def test_kubectl_help_next_to_a_delete_is_still_a_delete(argv):
+    intents = from_argv(argv.split())
+    assert ("namespace/prod", "delete") in [(i.resource, i.action) for i in intents]
