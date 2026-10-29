@@ -683,7 +683,7 @@ _ALIASES = {"k": "kubectl", "tf": "terraform", "tofu": "tofu", "g": "git"}
 _SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "ash", "rbash", "mksh", "yash",
                      "fish", "csh", "tcsh", "posh"})
 # Shells that ship versioned binaries (bash5.2, zsh5, ksh93, mksh-R59); not sh2.
-_VERSIONED_SHELL_RE = re.compile(r"(bash|zsh|ksh|mksh|dash|yash)\d[\d.]*")
+_VERSIONED_SHELL_RE = re.compile(r"(bash|zsh|ksh|mksh|dash|yash)(?:\d[\d.]*|-R\d+[a-z]?)")
 _ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 _SUDO_BOOL_SHORT = frozenset("EHnkKbAlvS")
@@ -1407,14 +1407,17 @@ _VALUE_FLAGS = frozenset({"-o", "+o", "-O", "+O", "-W", "-X", "-r", "--require"}
 _ATTACHED_VALUE_SHELLS = frozenset({"zsh", "ksh", "mksh", "yash"})
 
 
-def shell_option(word: str, shell: str) -> tuple[int, str]:
+def shell_option(word: str, shell: str, *, as_value: bool = False) -> tuple[int, str]:
     """For an option of ``shell``: how many of the words after it are its
     values, and the option letters it sets. ``--rcfile``/``--init-file`` take
     one; in a short cluster each ``o``/``O`` takes the next word, in order
     (``-o NAME``, ``-co NAME 'cmd'``, ``-oO A B``), except in zsh, ksh, mksh
     and yash, where an ``o``/``O`` with letters after it takes them as its
-    value and ends the cluster (``zsh -eopipefail``: e, then pipefail). The
-    letters are all of the cluster's other letters, to be safe."""
+    value and ends the cluster (``zsh -eopipefail``: e, then pipefail). By
+    default the letters are all of the cluster's other letters, to be safe
+    (ksh93 reads ``-oc`` as ``-c``); ``as_value`` gives the other reading of an
+    :func:`ambiguous_option`, where the letters after the ``o`` are only its
+    value (``zsh -onoclobber x.sh`` runs x.sh)."""
     if word in ("--rcfile", "--init-file"):
         return 1, ""
     if word.startswith("--") or len(word) < 2 or word[0] not in "-+":
@@ -1424,11 +1427,20 @@ def shell_option(word: str, shell: str) -> tuple[int, str]:
     for k, letter in enumerate(word[1:], start=2):
         if letter in "oO":
             if attached and k < len(word):
+                if as_value:
+                    return values, "".join(ch for ch in word[1:k - 1] if ch not in "oO")
                 break  # the rest of the word is the option's name
             values += 1
     # every letter counts as set, also those after an attached value: ksh93
     # reads -oc as -c and -oi as -i, so -c, -i and -s are not missed
     return values, "".join(ch for ch in word[1:] if ch not in "oO")
+
+
+def ambiguous_option(word: str, shell: str) -> bool:
+    """Whether a zsh/ksh/mksh/yash option cluster reads two ways that differ:
+    an ``o``/``O`` with letters after it that hold ``c``, ``i`` or ``s``
+    (``-onoclobber``: the value noclobber, or -c set, as ksh93 reads ``-oc``)."""
+    return shell_option(word, shell) != shell_option(word, shell, as_value=True)
 _PYTHON_RE = re.compile(r"^python(?:\d+(?:\.\d+)?)?$")
 # Task runners: what they run is in a Makefile / package.json the hook does not read.
 _TASK_RUNNERS = frozenset({"make", "gmake", "just", "task", "rake", "invoke"})
@@ -2044,35 +2056,6 @@ def _shell_scan(tokens: tuple[_Token, ...], k: int) -> tuple[int | None, bool]:
     return (j if saw_c and j < len(tokens) and tokens[j][0] == "word" else None), False
 
 
-def attached_value_reading(command: str) -> str | None:
-    """``command`` with each ambiguous option cluster of zsh, ksh, mksh or yash
-    spelt out as an option and its value (``zsh -onoclobber x.sh`` ->
-    ``zsh -o noclobber x.sh``), or ``None`` when it has none. Such a cluster
-    (an ``o``/``O`` with letters after it that hold ``c``, ``i`` or ``s``) is
-    read elsewhere with those letters set, as ksh93 reads ``-oc``; zsh and
-    ksh read ``-onoclobber`` as the value instead, so the caller checks both
-    readings."""
-    tokens = _shell_tokens(command)
-    cuts: list[tuple[int, int, str]] = []
-    for k in _readers(tokens):
-        if _basename(tokens[k][1]) not in _ATTACHED_VALUE_SHELLS:
-            continue
-        for kind, word, start, end in tokens[k + 1:k + _MAX_SHELL_OPTIONS]:
-            if kind != "word" or not re.fullmatch(r"[-+][a-zA-Z]+", word):
-                break
-            at = next((n for n, ch in enumerate(word) if n and ch in "oO"), None)
-            if at is not None and at + 1 < len(word) and set(word[at + 1:]) & set("cis") \
-                    and command[start:end] == word:
-                cuts.append((start, end, f"{word[:at + 1]} {word[at + 1:]}"))
-    if not cuts:
-        return None
-    kept, last = [], 0
-    for start, end, spelt in cuts:
-        kept.append(command[last:start] + spelt)
-        last = end
-    return "".join(kept) + command[last:]
-
-
 def options_capped(text: str) -> bool:
     """Whether a shell in ``text`` has more options than :func:`_shell_scan`
     reads before its ``-c`` string or script."""
@@ -2191,9 +2174,54 @@ def script_runs_loosely(command: str) -> list[dict[str, str]]:
                     extra = {"kind": "script", "interpreter": runs["interpreter"],
                              "path": f"< {source}"}
                     found.setdefault(tuple(sorted(extra.items())), extra)
-            for runs in _rcfile_runs(words):
+            for runs in [*_rcfile_runs(words), *_value_reading_runs(words)]:
                 found.setdefault(tuple(sorted(runs.items())), runs)
     return list(found.values())
+
+
+def value_reading_scripts(command: str) -> list[dict[str, str]]:
+    """The scripts shells in ``command`` (or in a command line nested in it)
+    run when their :func:`ambiguous_option` clusters are read as values
+    (``zsh -onoclobber x.sh`` -> x.sh; the other reading, ``-c`` set, makes
+    x.sh the command string and is checked as such), as ``runs_code`` script
+    records."""
+    return [runs for text in nested_commands(command)
+            for words, _redirects in _simple_commands(_shell_tokens(text))
+            for runs in _value_reading_runs(words)]
+
+
+def _value_reading_runs(words: list[str]) -> list[dict[str, str]]:
+    """:func:`value_reading_scripts` for one simple command's words."""
+    argv = _shell_in_command_position(words)
+    if not argv:
+        return []
+    shell, ambiguous, j = _basename(argv[0]), False, 1
+    while j < len(argv):
+        word = argv[j]
+        if word == "--":
+            j += 1
+            break
+        if not word.startswith(("-", "+")) or word in ("-", "+"):
+            break
+        ambiguous = ambiguous or ambiguous_option(word, shell)
+        values, letters = shell_option(word, shell, as_value=True)
+        if word.startswith("-") and not word.startswith("--") and "c" in letters:
+            return []  # a real -c: its string is read as a command line
+        j += 1 + values
+    if not ambiguous or j >= len(argv):
+        return []
+    return [{"kind": "script", "interpreter": shell, "path": argv[j]}]
+
+
+def _shell_in_command_position(words: list[str]) -> list[str]:
+    """The argv of the shell a simple command runs, after reserved words and
+    launchers (``sudo zsh …``); ``[]`` when it runs no shell there."""
+    try:
+        argv = strip_exec_builtin(_strip_reserved(words))
+        argv = _unwrap_inner(argv, 0)[0] if argv else argv
+    except ShellRejected:
+        argv = words
+    return argv if argv and _basename(argv[0]) in _SHELLS else []
 
 
 def interactive_rcfiles(command: str) -> list[dict[str, str]]:
@@ -2210,12 +2238,8 @@ def _rcfile_runs(words: list[str]) -> list[dict[str, str]]:
     """:func:`interactive_rcfiles` for one simple command's words: the shell in
     command position (after reserved words and launchers; ``echo bash -i
     --rcfile x`` runs no shell)."""
-    try:
-        argv = strip_exec_builtin(_strip_reserved(words))
-        argv = _unwrap_inner(argv, 0)[0] if argv else argv
-    except ShellRejected:
-        argv = words
-    if not argv or _basename(argv[0]) not in _SHELLS:
+    argv = _shell_in_command_position(words)
+    if not argv:
         return []
     shell = _basename(argv[0])
     files, interactive, short, j = [], False, False, 1

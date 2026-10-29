@@ -87,7 +87,6 @@ from aegis_core.shell import (
     _shell_tokens,
     _Token,
     _unwrap_inner,
-    attached_value_reading,
     dequoted,
     find_heredoc,
     intents_from_command,
@@ -107,6 +106,7 @@ from aegis_core.shell import (
     string_reader,
     strip_comment,
     strip_exec_builtin,
+    value_reading_scripts,
 )
 
 AGENTS = ("claude", "codex", "copilot", "cursor", "gemini", "opencode", "vscode")
@@ -409,19 +409,6 @@ def _decide_once(command: str, config_dir: Path, extra_args: list[str] | None,
         if mentions_infra(command):
             return HookVerdict("deny", reason, unchecked=True)
         return HookVerdict("ask", reason)
-    other = attached_value_reading(command)
-    if other is not None:
-        # zsh -onoclobber x.sh: an attached value, or flags with c set? Both
-        # readings are checked, and the stricter verdict stands
-        verdicts = [_decide_parts(command, config_dir, extra_args, cwd, scan=scan),
-                    _decide_once(other, config_dir, extra_args, cwd, scan=scan)]
-        return next((v for v in verdicts if v.decision == "deny"), None) or next(
-            (v for v in verdicts if v.decision == "ask"), verdicts[0])
-    return _decide_parts(command, config_dir, extra_args, cwd, scan=scan)
-
-
-def _decide_parts(command: str, config_dir: Path, extra_args: list[str] | None,
-                  cwd: Path | None, *, scan: bool) -> HookVerdict:
     early = _stdin_redirects(command, config_dir, extra_args, cwd, scan=scan)
     if isinstance(early, HookVerdict):
         return early
@@ -579,9 +566,10 @@ def _precheck(command: str, config_dir: Path, extra_args: list[str] | None,
                 if verdict.decision == "deny":
                     return verdict
                 asks.append(verdict.reason)
-        # bash --rcfile x.sh -i: an interactive shell sources its startup file
+        # bash --rcfile x.sh -i: an interactive shell sources its startup file;
+        # zsh -onoclobber x.sh: read as a value, the cluster leaves x.sh the script
         here = None if _changes_directory(command) else cwd
-        for runs in interactive_rcfiles(command):
+        for runs in [*interactive_rcfiles(command), *value_reading_scripts(command)]:
             verdict = _scan_script(runs, config_dir, extra_args, here, command=command)
             if verdict is not None:
                 if verdict.decision == "deny":
@@ -1279,7 +1267,14 @@ def _bare_at(tokens: tuple[_Token, ...], r: int) -> bool:
     script, module or code argument (``sh``, ``bash -e``, ``bash -s``; not
     ``python3 -m mod``, ``bash -c '…'`` or ``bash x.sh``). Words are dequoted
     (``'sh'``, ``\\sh``); the command ends at a separator, with or without a
-    space before it (``sh;echo``), and at a ``}``. At most 64 words are read."""
+    space before it (``sh;echo``), and at a ``}``. At most 64 words are read.
+    A zsh/ksh cluster that reads two ways (``-onoclobber``) is read both ways:
+    either one reading stdin counts."""
+    return _bare_scan(tokens, r, as_value=False) or _bare_scan(tokens, r, as_value=True)
+
+
+def _bare_scan(tokens: tuple[_Token, ...], r: int, *, as_value: bool) -> bool:
+    """:func:`_bare_at` with one reading of ambiguous option clusters."""
     shell = _basename(tokens[r][1]) in _SHELLS
     k, limit = r + 1, min(len(tokens), r + 64)
     while k < limit:
@@ -1295,7 +1290,8 @@ def _bare_at(tokens: tuple[_Token, ...], r: int) -> bool:
         if word in ("-c", "-m", "--version", "--help") or (not shell and (
                 word[:2] in ("-e", "-E", "-r") or word in ("-V", "-v", "-h"))):
             return False  # code or a module on the command line, or a version/help check
-        values, letters = shell_option(word, tokens[r][1]) if shell else (0, "")
+        values, letters = shell_option(word, tokens[r][1], as_value=as_value) if shell \
+            else (0, "")
         if shell and word.startswith("-") and "s" in letters and "c" not in letters:
             return True  # bash -s ARGS: the words after it are arguments, the code is stdin
         k += 1 + values  # an interpreter's -O/-o is a flag (python3 -OO)

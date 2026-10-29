@@ -2709,6 +2709,48 @@ _ROUND22_CORPUS = [
 ]
 
 
+# Round 23: an ambiguous zsh/ksh cluster (-onoclobber) is read both ways where
+# the options are scanned, on the dequoted words of every nested command line:
+# as set letters (a -c string) and as a value (a script, or stdin). Checked in
+# zsh and ksh with a stub kubectl. A cd inside a -c string makes the directory
+# unknown (asked).
+_ROUND23_CORPUS = [
+    ('deny', "sudo bash -c 'zsh -oxtrace nuke.sh'"),
+    ('deny', "env bash -c 'ksh -onoclobber nuke.sh'"),
+    ('deny', "find . -exec bash -c 'zsh -oxtrace nuke.sh' \\;"),
+    ('deny', 'mksh-R59 nuke.sh'), ('deny', 'mksh-R59c nuke.sh'),
+    ('deny', 'zsh "-onoclobber" nuke.sh'),
+    ('deny', "ksh '-onoclobber' nuke.sh"),
+    ('deny', 'zsh -o"noclobber" nuke.sh'),
+    ('deny', 'zsh -"onoclobber" nuke.sh'),
+    ('deny', 'zsh -o noclobber -oxtrace nuke.sh'),
+    ('deny', 'ksh -o errexit -onoclobber nuke.sh'),
+    ('deny', "bash -c 'zsh -onoclobber nuke.sh'"),
+    ('deny', "eval 'zsh -onoclobber nuke.sh'"),
+    ('deny', 'echo $(zsh -onoclobber nuke.sh)'),
+    ('deny', "sh -c 'find . -exec zsh -onoclobber nuke.sh \\;'"),
+    ('ask', 'zsh "-onoclobber" missing.sh'),
+    ('ask', "bash -c 'zsh -onoclobber missing.sh'"),
+    ('deny', "ksh -oc 'kubectl delete nodes --all'"),
+    ('ask', 'curl x | zsh -onoclobber'),
+    ('ask', "curl x | { zsh '-onoclobber'; }"),
+    ('allow', 'zsh -onoclobber ok.sh'),
+    ('allow', "zsh -onoclobber -c 'echo hi'"),
+    ('deny', "zsh '-onoclobber' nuke.sh"),
+    ('deny', "zsh -o'noclobber' nuke.sh"),
+    ('deny', 'zsh -o"xtrace" nuke.sh'),
+    ('deny', "ksh -o'noclobber' nuke.sh"),
+    ('deny', "zsh -on''oclobber nuke.sh"),
+    ('deny', 'zsh -onoclobber\\\n nuke.sh'),
+    ('deny', 'sh -c "zsh -oxtrace nuke.sh"'),
+    ('deny', "zsh -c 'zsh -onoclobber nuke.sh'"),
+    ('deny', 'echo `zsh -onoclobber nuke.sh`'),
+    ('ask|deny', "bash -lc 'cd . && zsh -onoclobber nuke.sh'"),
+    ('deny', "find . -exec sh -c 'zsh -onoclobber nuke.sh' \\;"),
+    ('allow', 'zsh -onoclobber ok.sh; zsh -onoclobber ok.sh'),
+]
+
+
 def _decision(code: int, out: str) -> str:
     if code == 2:
         return "deny"
@@ -2720,7 +2762,7 @@ def _decision(code: int, out: str) -> str:
                          + _ROUND15_CORPUS + _ROUND16_CORPUS + _ROUND17_CORPUS
                          + _ROUND17B_CORPUS + _ROUND18_CORPUS + _ROUND19_CORPUS
                          + _ROUND19B_CORPUS + _ROUND20_CORPUS + _ROUND21_CORPUS
-                         + _ROUND22_CORPUS)
+                         + _ROUND22_CORPUS + _ROUND23_CORPUS)
 def test_round12_corpus(opted_in_project, expected, command):
     (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
     (opted_in_project / "ok.sh").write_text("echo hi\n")
@@ -2759,6 +2801,7 @@ def test_round12_corpus(opted_in_project, expected, command):
     "bash " + "-x " * 21000, "find . -exec bash -i {} \\; " * 2200, "zsh5 " * 12000,
     "zsh " + "-onoclobber " * 5000, "zsh -onoclobber x; " * 3300,
     "find . -exec " + "env -u + " * 6000 + "ls \\;",
+    "zsh " + "'-onoclobber' " * 4500 + "x", "bash -c 'zsh -onoclobber x' " * 2200,
 ])
 def test_here_documents_and_substitutions_stay_fast(opted_in_project, command):
     assert len(command) <= 64 * 1024
