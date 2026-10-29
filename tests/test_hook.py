@@ -3908,3 +3908,90 @@ def test_scope_change_checks_on_long_script_lines_stay_linear(opted_in_project, 
     started = time.monotonic()
     hook.decide("bash x.sh", opted_in_project / ".aegis", [], cwd=opted_in_project)
     assert time.monotonic() - started < 1 * TIMING_SLACK
+
+
+# --- PR #60 council: `local` and `printf -vNAME` ----------------------------------
+
+_HELM_UNINSTALL = "helm --kube-context staging uninstall foo"
+_ASSIGNING_FORMS = [
+    "local HELM_NAMESPACE=staging",
+    "declare -g HELM_NAMESPACE=staging",
+    "declare -n HELM_NAMESPACE=x",
+    "typeset -l HELM_NAMESPACE=staging",
+    "printf -vHELM_NAMESPACE %s staging",
+    "printf -v HELM_NAMESPACE %s staging",
+    "read -aHELM_NAMESPACE",
+    "read -r HELM_NAMESPACE",
+    "mapfile HELM_NAMESPACE",
+    "readarray -t HELM_NAMESPACE",
+    "getopts ab HELM_NAMESPACE",
+]
+
+
+@pytest.fixture
+def helm_prod_project(opted_in_project, monkeypatch):
+    monkeypatch.setenv("HELM_NAMESPACE", "prod")
+    return opted_in_project
+
+
+def _helm_verdict(project, command):
+    return hook.decide(command, project / ".aegis", ["--resolve-current-context"], cwd=project)
+
+
+def test_helm_uninstall_in_the_invoking_prod_namespace_is_blocked(helm_prod_project):
+    assert _helm_verdict(helm_prod_project, _HELM_UNINSTALL).decision == "deny"
+
+
+@pytest.mark.parametrize("form", _ASSIGNING_FORMS)
+def test_assigning_builtins_typed_before_infra_deny(helm_prod_project, form):
+    verdict = _helm_verdict(helm_prod_project, f"{form}; {_HELM_UNINSTALL}")
+    assert verdict.decision == "deny"
+    assert "statically" in verdict.reason
+
+
+@pytest.mark.parametrize("form", _ASSIGNING_FORMS)
+def test_assigning_builtins_in_a_sourced_file_deny(helm_prod_project, form):
+    (helm_prod_project / "env.sh").write_text(form + "\n")
+    for run_it in ("source env.sh", ". env.sh"):
+        verdict = _helm_verdict(helm_prod_project, f"{run_it}; {_HELM_UNINSTALL}")
+        assert verdict.decision == "deny", run_it
+        assert "statically" in verdict.reason
+
+
+@pytest.mark.parametrize("form", _ASSIGNING_FORMS)
+@pytest.mark.parametrize("run_it", _SCRIPT_RUNS)
+def test_assigning_builtins_in_a_script_deny(helm_prod_project, form, run_it):
+    script = helm_prod_project / "x.sh"
+    script.write_text(f"#!/bin/bash\n{form}\n{_HELM_UNINSTALL}\n")
+    script.chmod(0o755)
+    verdict = _helm_verdict(helm_prod_project, run_it)
+    assert verdict.decision == "deny"
+    assert "statically" in verdict.reason
+
+
+@pytest.mark.parametrize("argv, unsure", [
+    (["local", "HELM_NAMESPACE=x"], True),
+    (["printf", "-vAWS_PROFILE", "%s", "x"], True),
+    (["printf", "-v", "AWS_PROFILE", "x"], True),
+    (["printf", "-v$N", "x"], True),
+    (["read", "-p", "$PROMPT", "x"], True),
+    (["declare", "-g", "AWS_PROFILE=x"], True),
+    (["printf", "%s", "AWS_PROFILE"], None),
+    (["printf", "--", "-vAWS_PROFILE"], None),
+    (["printf", "-v", "line", "x"], None),
+    (["read", "-r", "line"], None),
+    (["declare", "-a", "arr"], None),
+    (["local", "x=1"], None),
+])
+def test_env_change_counts_every_assigning_builtin(argv, unsure):
+    change = shell._env_change(argv, {})
+    assert (change is None) if unsure is None else change == ({}, True)
+
+
+@pytest.mark.parametrize("prefix", ["printf '%s\\n' \"$x\"", "read -r line", "local x=1",
+                                    "printf -v line %s x"])
+def test_assigning_builtins_on_other_variables_still_allow(helm_prod_project, prefix):
+    script = helm_prod_project / "x.sh"
+    script.write_text(f"#!/bin/bash\n{prefix}\nkubectl get pods\n")
+    assert _helm_verdict(helm_prod_project, "bash x.sh").decision == "allow"
+    assert _helm_verdict(helm_prod_project, f"{prefix}; kubectl get pods").decision == "allow"

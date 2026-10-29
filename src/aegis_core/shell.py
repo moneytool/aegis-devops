@@ -3093,39 +3093,71 @@ def _annotate(
 ENV_CHANGE_REASON = "an earlier part changes the environment in a way the hook cannot follow"
 
 
+# Builtins that may assign a variable named by one of their words.
+_ASSIGNING_BUILTINS = frozenset({"unset", "read", "mapfile", "readarray", "getopts", "printf"})
+
+
+_INFRA_ENV_ANYWHERE_RE = re.compile("|".join(
+    re.escape(n) for n in (*_INFRA_ENV_PREFIXES, *_INFRA_ENV_NAMES, *_ENV_METADATA_KEYS)))
+
+
+def _may_name_scope_variable(word: str) -> bool:
+    """Whether ``word`` may name a variable :func:`_infra_env` watches, also
+    behind an option letter (``-vAWS_PROFILE``, ``-aKUBECONFIG``) or through
+    an expansion (``$N``); ``False`` only when it provably does not."""
+    if any(ch in word for ch in "$`"):
+        return True
+    name = word.partition("=")[0].rstrip("+").partition("[")[0]
+    if _infra_env(name.lstrip("-+")):
+        return True
+    # an option cluster may end in the name (`-raKUBECONFIG`): any watched name in it
+    return word.startswith(("-", "+")) and _INFRA_ENV_ANYWHERE_RE.search(word) is not None
+
+
 def _env_change(argv: list[str], env: dict[str, str]) -> tuple[dict[str, str], bool] | None:
     """What a simple command does to the variables that pick a later
     infrastructure tool's account, cluster or program (:func:`_infra_env`):
     ``(values, unsure)`` -- the literal values it sets (``AWS_PROFILE=x``,
-    ``export AWS_PROFILE=x``, ``declare -x …``) and whether it changes one in a
-    way that cannot be followed (``unset``, ``export -n``, ``declare +x``,
-    ``read``); ``None`` when it changes none. A bare assignment counts: the
-    variable may already be exported."""
+    ``export AWS_PROFILE=x``, ``declare -x AWS_PROFILE=x``) and whether it may
+    change one in a way that is not followed: ``local`` (an error outside a
+    function), a declaration option other than ``-x`` (``-g``, ``-n``, ``-a``,
+    ``+x``, …), an appended or array value, and every other builtin that can
+    assign (``unset``, ``read``, ``mapfile``, ``getopts``, ``printf -v NAME`` /
+    ``-vNAME``) when a word may name such a variable; ``None`` when it
+    provably changes none. A bare assignment counts: the variable may already
+    be exported."""
     if not argv:
         values = {k: v for k, v in env.items() if _infra_env(k)}
         return (values, False) if values else None
     name = _basename(argv[0])
+    words = argv[1:]
     if name in _DECLARATION_BUILTINS:
+        if not any(_may_name_scope_variable(w) for w in words):
+            return None
+        flags = [w for w in words if w.startswith(("-", "+")) and w != "--"]
+        if name == "local" or any(w != "-x" for w in flags):
+            return {}, True
         values: dict[str, str] = {}
         unsure = False
-        for word in argv[1:]:
-            if _ASSIGNMENT_RE.match(word):
+        for word in words:
+            if _ASSIGNMENT_RE.match(word) and _may_name_scope_variable(word):
                 key, _, value = word.partition("=")
-                if _infra_env(key.rstrip("+")):
-                    if key.endswith("+") or "[" in key:
-                        unsure = True
-                    else:
-                        values[key] = value
-            elif word.startswith(("-", "+")) and word not in ("--",):
-                if set(word[1:]) - set("xgr") or word.startswith("+"):
-                    unsure = True  # export -n, declare +x / -n / -a: not followed
-            elif _infra_env(word) and name == "local":
-                unsure = True
-        if values or unsure:
-            return values, unsure
-        return None
-    if (name in ("unset", "read", "mapfile", "readarray", "getopts")
-            or name == "printf" and "-v" in argv) and any(_infra_env(w) for w in argv[1:]):
+                if key.endswith("+") or "[" in key or any(ch in key for ch in "$`"):
+                    unsure = True
+                else:
+                    values[key] = value
+        return values, unsure
+    if name in _ASSIGNING_BUILTINS and any(_may_name_scope_variable(w) for w in words):
+        if name == "printf":
+            # printf assigns only with -v (-v NAME, -vNAME) before its format
+            for k, word in enumerate(words):
+                if word == "--" or not word.startswith("-"):
+                    return None
+                if word.startswith("-v"):
+                    target = word[2:] or (words[k + 1] if k + 1 < len(words) else "")
+                    return ({}, True) if _may_name_scope_variable(target) or not target \
+                        else None
+            return None
         return {}, True
     return None
 

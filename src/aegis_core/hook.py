@@ -87,6 +87,7 @@ from aegis_core.shell import (
     _eval_words_end,
     _infra_env,
     _interpreter,
+    _may_name_scope_variable,
     _readers,
     _shell_tokens,
     _Token,
@@ -1284,7 +1285,9 @@ def _sourced_environment(runs: dict, cwd: Path | None,
                 return None
             if not words:
                 continue
-            if words[0] in _SOURCED_HARMLESS and not (words[0] == "printf" and "-v" in words):
+            if words[0] in _SOURCED_HARMLESS:
+                if words[0] == "printf" and _env_change(words, {}) is not None:
+                    return None  # printf -v NAME / -vNAME assigns
                 continue
             assigns = all(_ASSIGNMENT_RE.match(w) for w in words)
             env = dict(w.partition("=")[::2] for w in words) if assigns else {}
@@ -1875,7 +1878,7 @@ _SCOPE_CHANGE_RE = re.compile(
 # set's option words (`set -a`, `set -o allexport`): read once each, so linear
 _SET_OPTIONS_RE = re.compile(r"\bset((?:[ \t]+(?:[-+]\w+|allexport))+)")
 _SCOPE_ASSIGN_RE = re.compile(r"(?:^|[\s;&|(`'\"])([A-Za-z_]\w*)(?:\[[^\]]*\])?\+?=")
-_DECLARED_RE = re.compile(r"\b(?:export|declare|typeset|readonly|local|unset|read|mapfile|"
+_DECLARED_RE = re.compile(r"\b(export|declare|typeset|readonly|local|unset|read|mapfile|"
                           r"readarray|getopts|printf)\b([^;&|\n]*)")
 _CONTROL_FLOW_RE = re.compile(
     r"(?:^|[\s;&|(])(?:if|then|elif|else|fi|while|until|for|select|do|done|case|esac)"
@@ -1896,10 +1899,13 @@ def _changes_scope(line: str) -> bool:
     if any(_infra_env(m.group(1)) for m in _SCOPE_ASSIGN_RE.finditer(line)):
         return True
     for m in _DECLARED_RE.finditer(line):
-        for word in m.group(1).split():
-            name, eq, _value = word.partition("=")
-            if _infra_env(name.lstrip("-+\"'")) or eq and any(ch in name for ch in "$`"):
-                return True  # also a name only known at run time: export "$N"=x
+        words = [word.strip("\"'") for word in m.group(2).split()]
+        if m.group(1) == "printf":  # assigns only with -v NAME / -vNAME before its format
+            if _env_change(["printf", *words], {}) is not None:
+                return True
+        # also behind an option letter (read -aNAME) or computed ($N)
+        elif any(_may_name_scope_variable(word) for word in words):
+            return True
     return False
 
 

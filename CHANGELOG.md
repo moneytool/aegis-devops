@@ -411,6 +411,15 @@ behaviour.
   was judged with the invoking environment and directory. Scripts that change none of these
   before an infrastructure line (`set -euo pipefail` then `kubectl get pods`, `cd build &&
   make`) are still judged line by line.
+- Agent hook (PR #60 council): `local NAME=value` (an error outside a function, so it sets
+  nothing) and a declaration with an option other than `-x` (`declare -g`, `-n`, `-a`, `-l`,
+  …) are no longer followed as settings of a watched variable; with `unset`, `read` (also
+  `read -aNAME`), `mapfile` / `readarray`, `getopts` and `printf -v NAME` / `printf -vNAME`,
+  they now count as changes the hook cannot follow whenever a word may name a watched variable
+  (also a computed `$N`), typed in the command, in a sourced file or in a script the hook
+  reads: the infrastructure commands after them are refused. Before, `local
+  HELM_NAMESPACE=staging; helm … uninstall …` was judged in staging, and a sourced or scripted
+  `printf -vHELM_NAMESPACE …` was not seen.
 
 ### Changed
 - Agent hook: code piped into a shell or interpreter, or fed to one by a here-string or here-doc
