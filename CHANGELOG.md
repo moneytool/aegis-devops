@@ -261,6 +261,12 @@ behaviour.
   `bash -eo pipefail x.sh` runs x.sh), the same in the parser, the script reader and the
   checks for shells reading standard input. `function NAME { …; }` is read like `NAME() { …;
   }`, so the scripts in its body are read.
+- Agent hook: in zsh, ksh, mksh and yash an `o`/`O` with letters after it takes them as its value
+  and ends the cluster (`zsh -opipefail -c 'cmd'`, `zsh -eopipefail x.sh`); a trailing one, and
+  every `o`/`O` in bash, dash and sh, takes the next word. An `i` in a cluster with option values
+  (`bash --rcfile x.sh -io pipefail -c …`) still makes the shell interactive, so it sources the
+  file. Only the shell in command position sources its `--rcfile` (`echo bash -i --rcfile x`
+  runs no shell), and an interpreter's `-O`/`-o` takes no value (`python3 -OO x.py`).
 - Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
   own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
   policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a

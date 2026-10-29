@@ -2608,6 +2608,34 @@ _ROUND19B_CORPUS = [
 ]
 
 
+# Round 20: zsh, ksh, mksh and yash take -o/-O's value attached (-opipefail),
+# bash/dash/sh the next word; an interactive i in a cluster with option values
+# (-io pipefail); interpreter flags (python3 -OO) take no value; only the shell
+# in command position sources --rcfile. Checked in bash, zsh and ksh with a stub
+# kubectl.
+_ROUND20_CORPUS = [
+    ('deny', "zsh -opipefail -c 'kubectl delete nodes --all'"),
+    ('deny', "ksh -opipefail -c 'kubectl delete nodes --all'"),
+    ('deny', "zsh -onoglob -c 'kubectl delete nodes --all'"),
+    ('deny', "zsh -eopipefail -c 'kubectl delete nodes --all'"),
+    ('deny', "zsh -fopipefail -c 'kubectl delete nodes --all'"),
+    ('deny', "sudo zsh -onounset -c 'kubectl delete nodes --all'"),
+    ('deny', 'zsh -opipefail nuke.sh'),
+    ('deny', 'ksh -opipefail nuke.sh'),
+    ('deny', 'zsh -onoglob nuke.sh'),
+    ('deny', "zsh -onoglob -c 'bash nuke.sh'"),
+    ('deny', "zsh -co pipefail 'bash nuke.sh'"),
+    ('deny', 'ksh -o pipefail nuke.sh'),
+    ('deny', "bash --rcfile nuke.sh -io pipefail -c 'echo hi'"),
+    ('deny', "bash --rcfile nuke.sh -oi pipefail -c 'echo hi'"),
+    ('deny', "bash -co pipefail 'kubectl delete nodes --all'"),
+    ('allow', 'cat data | python3 -OO process.py'),
+    ('allow', 'echo bash -i --rcfile nuke.sh'),
+    ('allow', "zsh -opipefail -c 'echo ok'"),
+    ('allow', 'zsh -opipefail ok.sh'),
+]
+
+
 def _decision(code: int, out: str) -> str:
     if code == 2:
         return "deny"
@@ -2618,7 +2646,7 @@ def _decision(code: int, out: str) -> str:
                          _ROUND12_CORPUS + _ROUND13_CORPUS + _ROUND14_CORPUS
                          + _ROUND15_CORPUS + _ROUND16_CORPUS + _ROUND17_CORPUS
                          + _ROUND17B_CORPUS + _ROUND18_CORPUS + _ROUND19_CORPUS
-                         + _ROUND19B_CORPUS)
+                         + _ROUND19B_CORPUS + _ROUND20_CORPUS)
 def test_round12_corpus(opted_in_project, expected, command):
     (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
     (opted_in_project / "ok.sh").write_text("echo hi\n")
@@ -2652,6 +2680,8 @@ def test_round12_corpus(opted_in_project, expected, command):
     "watch 'watch ls' " * 3500, "sudo watch " * 5000 + "'ls'", "bash --rcfile ok.sh -i " * 2500,
     "bash " + "--rcfile ok.sh " * 4000 + "-i",
     "bash -" + "o" * 30000 + " x" * 15000, "function f { ls; }; " * 3000,
+    "zsh -" + "eo" * 30000 + " x", "zsh " + "-opipefail " * 5500 + "-c 'ls'",
+    "echo " + "bash -i --rcfile x " * 3000,
 ])
 def test_here_documents_and_substitutions_stay_fast(opted_in_project, command):
     assert len(command) <= 64 * 1024

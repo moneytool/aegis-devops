@@ -100,7 +100,7 @@ from aegis_core.shell import (
     plain_binary,
     runs_expansion,
     script_runs_loosely,
-    shell_option_values,
+    shell_option,
     split_segments,
     stdin_feeders,
     string_reader,
@@ -1280,9 +1280,10 @@ def _bare_at(tokens: tuple[_Token, ...], r: int) -> bool:
         if word in ("-c", "-m", "--version", "--help") or (not shell and (
                 word[:2] in ("-e", "-E", "-r") or word in ("-V", "-v", "-h"))):
             return False  # code or a module on the command line, or a version/help check
-        if shell and re.fullmatch(r"-[a-zA-Z]*s[a-zA-Z]*", word) and "c" not in word:
+        values, letters = shell_option(word, tokens[r][1]) if shell else (0, "")
+        if shell and word.startswith("-") and "s" in letters and "c" not in letters:
             return True  # bash -s ARGS: the words after it are arguments, the code is stdin
-        k += 1 + shell_option_values(word)
+        k += 1 + values  # an interpreter's -O/-o is a flag (python3 -OO)
     return k >= len(tokens)
 
 

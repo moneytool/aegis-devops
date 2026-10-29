@@ -1079,7 +1079,7 @@ def _strip_launcher(head: str, rest: list[str]) -> tuple[list[str], str | None]:
     return rest, None
 
 
-def _shell_c_string(rest: list[str]) -> str | None:
+def _shell_c_string(rest: list[str], shell: str = "sh") -> str | None:
     """For ``sh [opts] -c STRING [args…]`` returns STRING; ``None`` when the
     shell is not invoked with ``-c`` (``bash script.sh`` — an ordinary,
     unknown binary as far as the gate is concerned)."""
@@ -1092,9 +1092,10 @@ def _shell_c_string(rest: list[str]) -> str | None:
             break
         if tok.startswith(("-", "+")) and len(tok) > 1:
             # -o pipefail, -co pipefail 'cmd', --rcfile FILE, --norc, +x
-            if tok.startswith("-") and not tok.startswith("--") and "c" in tok[1:]:
+            values, letters = shell_option(tok, shell)
+            if tok.startswith("-") and not tok.startswith("--") and "c" in letters:
                 saw_c = True
-            i += 1 + shell_option_values(tok)
+            i += 1 + values
             continue
         break
     if not saw_c or i >= len(rest):
@@ -1204,7 +1205,7 @@ def _unwrap_inner(
             argv = rest
             continue
         if head in _SHELLS:
-            string = _shell_c_string(argv[1:])
+            string = _shell_c_string(argv[1:], head)
             if string is None:
                 break
             if depth >= 1:
@@ -1397,15 +1398,32 @@ _INLINE_FLAGS = {
 }
 # Options that take a value, so the value is not mistaken for a script path.
 _VALUE_FLAGS = frozenset({"-o", "+o", "-O", "+O", "-W", "-X", "-r", "--require"})
-def shell_option_values(word: str) -> int:
-    """How many of the words after a shell's option are its values: one for
-    ``--rcfile``/``--init-file``, one per ``o``/``O`` in a short cluster, in
-    order (``-o NAME``, ``-eo NAME``, ``-co NAME 'cmd'``, ``-oO A B``)."""
+# Shells whose -o/-O take an attached value (zsh -opipefail); bash, dash and sh
+# take the next word whatever follows the letter.
+_ATTACHED_VALUE_SHELLS = frozenset({"zsh", "ksh", "mksh", "yash"})
+
+
+def shell_option(word: str, shell: str) -> tuple[int, str]:
+    """For an option of ``shell``: how many of the words after it are its
+    values, and the option letters it sets. ``--rcfile``/``--init-file`` take
+    one; in a short cluster each ``o``/``O`` takes the next word, in order
+    (``-o NAME``, ``-co NAME 'cmd'``, ``-oO A B``), except in zsh, ksh, mksh
+    and yash, where an ``o``/``O`` with letters after it takes them as its
+    value and ends the cluster (``zsh -eopipefail``: e, then pipefail)."""
     if word in ("--rcfile", "--init-file"):
-        return 1
+        return 1, ""
     if word.startswith("--") or len(word) < 2 or word[0] not in "-+":
-        return 0
-    return word.count("o") + word.count("O")
+        return 0, ""
+    attached = _basename(shell) in _ATTACHED_VALUE_SHELLS
+    values, letters = 0, []
+    for k, letter in enumerate(word[1:], start=2):
+        if letter in "oO":
+            if attached and k < len(word):
+                break  # the rest of the word is the option's name
+            values += 1
+        else:
+            letters.append(letter)
+    return values, "".join(letters)
 _PYTHON_RE = re.compile(r"^python(?:\d+(?:\.\d+)?)?$")
 # Task runners: what they run is in a Makefile / package.json the hook does not read.
 _TASK_RUNNERS = frozenset({"make", "gmake", "just", "task", "rake", "invoke"})
@@ -1509,8 +1527,8 @@ def code_run(simple: SimpleCommand) -> dict[str, str] | None:
                         "path": f"-m {following}".strip()}
             if tok == "-" or (interp in _SHELLS and tok == "-s"):
                 break  # code from stdin
-            if interp in _SHELLS and shell_option_values(tok):
-                skip = shell_option_values(tok)  # bash -eo pipefail x.sh: pipefail is a value
+            if interp in _SHELLS and shell_option(tok, name)[0]:
+                skip = shell_option(tok, name)[0]  # bash -eo pipefail x.sh: pipefail is a value
                 continue
             if (tok in _VALUE_FLAGS and not (interp in _SHELLS and tok == "-r")) or (
                     interp in ("perl", "ruby") and tok in ("-I", "-C", "-x")):
@@ -1998,8 +2016,10 @@ def _c_string_at(tokens: tuple[_Token, ...], k: int) -> int | None:
             j += 1
             break
         if re.fullmatch(r"[-+][a-zA-Z]+|--[\w-]+", word):
-            saw_c = saw_c or re.fullmatch(r"-[a-zA-Z]*c[a-zA-Z]*", word) is not None
-            j += 1 + shell_option_values(word)  # -co pipefail 'cmd': the value, then the string
+            values, letters = shell_option(word, tokens[k][1])
+            saw_c = saw_c or (word.startswith("-") and not word.startswith("--")
+                              and "c" in letters)
+            j += 1 + values  # -co pipefail 'cmd': the value, then the string
             continue
         break
     return j if saw_c and j < len(tokens) and tokens[j][0] == "word" else None
@@ -2129,27 +2149,31 @@ def interactive_rcfiles(command: str) -> list[dict[str, str]]:
 
 
 def _rcfile_runs(words: list[str]) -> list[dict[str, str]]:
-    """:func:`interactive_rcfiles` for one simple command's words."""
-    shell = next((k for k, word in enumerate(words) if _basename(word) in _SHELLS), None)
-    if shell is None:
+    """:func:`interactive_rcfiles` for one simple command's words: the shell in
+    command position (after reserved words and launchers; ``echo bash -i
+    --rcfile x`` runs no shell)."""
+    try:
+        argv = strip_exec_builtin(_strip_reserved(words))
+        argv = _unwrap_inner(argv, 0)[0] if argv else argv
+    except ShellRejected:
+        argv = words
+    if not argv or _basename(argv[0]) not in _SHELLS:
         return []
-    files, interactive, j = [], False, shell + 1
-    while j < len(words):
-        word = words[j]
+    shell = _basename(argv[0])
+    files, interactive, j = [], False, 1
+    while j < len(argv):
+        word = argv[j]
         if word == "--" or not word.startswith(("-", "+")) or word in ("-", "+"):
             break
-        if word in ("--rcfile", "--init-file") and j + 1 < len(words):
-            files.append(words[j + 1])
-        if shell_option_values(word):
-            j += 1 + shell_option_values(word)
-            continue
-        if word.startswith("-") and not word.startswith("--") and "i" in word[1:]:
-            interactive = True  # -i, -ic, -il
-        j += 1
+        if word in ("--rcfile", "--init-file") and j + 1 < len(argv):
+            files.append(argv[j + 1])
+        values, letters = shell_option(word, shell)
+        if word.startswith("-") and not word.startswith("--") and "i" in letters:
+            interactive = True  # -i, -ic, -il, -io pipefail
+        j += 1 + values
     if not interactive:
         return []
-    return [{"kind": "script", "interpreter": _basename(words[shell]), "path": path}
-            for path in files]
+    return [{"kind": "script", "interpreter": shell, "path": path} for path in files]
 
 
 def _simple_commands(tokens: tuple[_Token, ...]) -> Iterator[tuple[list[str], list[str]]]:
