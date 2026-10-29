@@ -352,6 +352,7 @@ def test_glob_program_words_stay_linear(opted_in_project, command):
     "cat <<'EOF'\n" + "* item\n" * 8000 + "EOF",
     "cat " + "<<E " * 6000 + "\n" + "x\nE\n" * 6000,
     "cat <<E | tee >(sh)\n" + "k* x\n" * 7000 + "E",
+    "cat <<< 'k* x' " * 4000, "python3 -c x <<< k* | if true; then :; fi; " * 1500,
 ])
 def test_many_nested_lines_and_quoted_globs_stay_linear(opted_in_project, command):
     # many distinct nested texts must not push the outer text's quoting out of
@@ -3199,6 +3200,40 @@ _ROUND33B_CORPUS = [
 ]
 
 
+# Round 34: a here-document inside $(…), backticks, <(…) or >(…) has an unknown
+# reader (its output goes on): a globbed word in it asks, unless a shell runs it.
+_KUBE_GLOB = "/usr/bin/kubec?l delete nodes --all"
+_ROUND34_CORPUS = [
+    ("ask|deny", f"echo \"$(cat <<'E'\n{_KUBE_GLOB}\nE\n)\" | {_PY_OS}"),
+    ("ask|deny", f"echo \"`cat <<'E'\n{_KUBE_GLOB}\nE\n`\" | {_PY_OS}"),
+    ("ask|deny", f"{_PY_OS} < <(cat <<'E'\n{_KUBE_GLOB}\nE\n)"),
+    ("ask|deny", f"cat > >(cat <<'E'\n{_KUBE_GLOB}\nE\n)"),
+    ("allow", "x=$(cat <<'EOF'\n# notes\nEOF\n)"),
+    ("ask", "x=$(cat <<'EOF'\n* item\n- [ ] task\nEOF\n); echo \"$x\""),
+    ("deny", "git commit -m \"$(cat <<'EOF'\n* fix things\nEOF\n)\""),
+]
+
+
+# Round 34 (also): a here-string (<<< word) is a one-line body for the glob
+# check; a pipe into (or out of) a compound command (if, while, until, …) makes
+# the reader unknown.
+_GLOBBED_BODY = "ku*l de*e no*s --a*l"
+_ROUND34B_CORPUS = [
+    ("ask|deny", f"{_PY_OS} <<< '/usr/bin/kubec?l delete ns a'"),
+    ("ask|deny", "bash <<< '/usr/bin/kubec?l delete ns a'"),
+    ("allow", "grep x <<< '* item'"),
+    ("allow", "cat <<< '[TODO] x'"),
+    ("ask|deny", f"cat <<'E' | if true; then {_PY_OS}; fi\n{_GLOBBED_BODY}\nE"),
+    ("ask|deny", f"cat <<'E' | while true; do {_PY_OS}; break; done\n{_GLOBBED_BODY}\nE"),
+    ("ask|deny", f"cat <<'E' | while :; do {_PY_OS}; done\n{_GLOBBED_BODY}\nE"),
+    ("ask|deny", f"cat <<'E' | until true; do {_PY_OS}; done\n{_GLOBBED_BODY}\nE"),
+    ("ask|deny", f"cat <<'E' | if :; then {_PY_OS}; fi\n{_GLOBBED_BODY}\nE"),
+    ("ask|deny", f"cat <<'E' | if true\nthen {_PY_OS}\nfi\n{_GLOBBED_BODY}\nE"),
+    ("allow", "cat > notes.md <<'EOF'\n* item\nEOF"),
+    ("allow", "if true; then cat > n.md <<'EOF'\n* a\nEOF\nfi"),
+]
+
+
 def _decision(code: int, out: str) -> str:
     if code == 2:
         return "deny"
@@ -3255,7 +3290,7 @@ def test_a_shell_script_named_like_an_option_is_read(opted_in_project, command):
                          + _ROUND25_CORPUS + _ROUND26_CORPUS + _ROUND27_CORPUS
                          + _ROUND28_CORPUS + _ROUND29_CORPUS + _ROUND30_CORPUS
                          + _ROUND31_CORPUS + _ROUND32_CORPUS + _ROUND33_CORPUS
-                         + _ROUND33B_CORPUS)
+                         + _ROUND33B_CORPUS + _ROUND34_CORPUS + _ROUND34B_CORPUS)
 def test_round12_corpus(opted_in_project, expected, command):
     (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
     (opted_in_project / "ok.sh").write_text("echo hi\n")

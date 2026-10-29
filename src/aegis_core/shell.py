@@ -548,14 +548,22 @@ def globbed_program_word(command: str) -> str | None:
 
 def _glob_texts(command: str, depth: int = 0) -> list[str]:
     """:func:`nested_commands` with only the here-document bodies a shell reads."""
-    found = [command]
+    return [text for text, _substituted in _glob_texts_marked(command, depth)]
+
+
+def _glob_texts_marked(command: str, depth: int = 0,
+                       substituted: bool = False) -> list[tuple[str, bool]]:
+    """:func:`_glob_texts`, each text marked when it is (inside) a command
+    substitution, backticks or a process substitution, whose output goes on."""
+    found = [(command, substituted)]
     if depth >= 4:
         return found
     lexed = lex(command)
+    subs = set(lexed.substitutions)
     for text in dict.fromkeys([*_inner_commands(command), *lexed.glob_bodies,
                                *lexed.substitutions]):
         if text:
-            found += _glob_texts(text, depth + 1)
+            found += _glob_texts_marked(text, depth + 1, substituted or text in subs)
     return found
 
 
@@ -563,14 +571,15 @@ def globbed_word_in_unknown_bodies(command: str) -> str | None:
     """:func:`globbed_program_word` for the here-document bodies whose reader
     is not known (not a shell, not only data sinks: ``tee >(sh)``, a function):
     such a word asks rather than denies."""
-    texts = _glob_texts(command)
+    marked = _glob_texts_marked(command)
     # an eval anywhere may run a body that looked like data (x=$(cat <<E …); eval "$x")
     evals = any(kind == "word" and value == "eval"
-                for text in texts for kind, value, _s, _e in _shell_tokens(text))
-    for text in texts:
+                for text, _sub in marked for kind, value, _s, _e in _shell_tokens(text))
+    for text, substituted in marked:
         lexed = lex(text)
         shell_run = set(lexed.glob_bodies)
-        bodies = lexed.ask_bodies if not evals else [
+        # in a substitution a data body's output goes on (echo "$(cat <<E …)" | x)
+        bodies = lexed.ask_bodies if not (evals or substituted) else [
             b for b in lexed.bodies if b not in shell_run]
         for body in bodies:
             word = globbed_program_word(body)
@@ -2045,6 +2054,21 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
     parens = 0
     joined = False  # after |, |&, && or ||: a newline does not end the command
     line_start = len(tokens)  # where this line's tokens begin (for its here-documents)
+    strings: list[tuple[str, int]] = []  # this line's here-strings (<<< word): word, <<< index
+    string_next = False  # a <<< just read: the next word is a here-string
+
+    def flush_strings() -> None:
+        """Classifies this line's here-strings like one-line here-document bodies."""
+        if not strings:
+            return
+        pipelines = _pipelines(tokens, line_start)
+        readers: dict[int, str] = {}  # one reading per pipeline, however many strings
+        for value, at in strings:
+            low, high = pipelines[at - line_start]
+            if low not in readers:
+                readers[low] = _body_reader(tokens[low:high])
+            state["strings"].append((value, readers[low], depth))
+        strings.clear()
     while i < n:
         c = text[i]
         if c in " \t\r":
@@ -2058,6 +2082,7 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
             i = n if j < 0 else j
             continue
         if c == "\n" and (joined or pending):
+            flush_strings()
             if pending:
                 code = len(bodies)
                 i = _skip_bodies(text, i + 1, pending, bodies, state, depth)
@@ -2071,7 +2096,8 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
                     reader = readers[low]
                     if reader == "shell":
                         state["glob_bodies"].append(body)  # bash <<EOF, cat <<EOF | sh
-                    elif reader == "unknown":
+                    elif reader == "unknown" or depth > 0:
+                        # inside $(…), <(…), >(…) the output goes on to who knows
                         state["ask_bodies"].append(body)
                 pending, pending_ops = [], []
                 line_start = len(tokens)
@@ -2102,6 +2128,7 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
             joined = sep in _CONTINUING_SEPS
             i += len(sep)
             if sep == "\n":
+                flush_strings()
                 line_start = len(tokens)
             continue
         joined = False
@@ -2113,6 +2140,7 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
             if op is not None and not (op.startswith("&") and j > i):
                 tokens.append(("op", text[i:j] + op, start, j + len(op)))
                 want = op if op in ("<<", "<<-") else None
+                string_next = op == "<<<"
                 i = j + len(op)
                 continue
         value: list[str] = []
@@ -2178,13 +2206,17 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
         tokens.append(("word", word, start, i))
         if word in ("function", "alias"):
             state["defines"] = True
-        if word in ("{", "}") and i - start == 1:
-            state["grouped"] = True
+        if word in _COMPOUND_RESERVED and i - start == len(word):
+            state["grouped"] = True  # { }, if, while, do, …: a reader may be inside
+        if string_next:
+            strings.append((word, len(tokens) - 2))  # the <<< just before
+            string_next = False
         if want is not None:
             quoted = any(q in text[start:i] for q in "'\"\\")
             pending.append((word, want == "<<-", quoted))
             pending_ops.append(len(tokens) - 2)  # the << just before the delimiter
             want = None
+    flush_strings()
     if nested:
         state["unclosed"] = True  # a $( never closed
     if pending:
@@ -2307,8 +2339,16 @@ def lex(text: str) -> Lexed:
     tokens: list[_Token] = []
     bodies: list[str] = []
     state: dict = {"unclosed": False, "substitutions": [], "deep": False, "glob_bodies": [],
-                   "ask_bodies": [], "defines": False, "grouped": False, "piped": False}
+                   "ask_bodies": [], "defines": False, "grouped": False, "piped": False,
+                   "strings": []}
     _scan(text, 0, tokens, bodies, state, 0, False)
+    # here-strings (<<< word) are one-line bodies for the glob check
+    anywhere = state["defines"] or (state["grouped"] and state["piped"])
+    for value, reader, depth in state["strings"]:
+        if reader == "shell":
+            state["glob_bodies"].append(value)
+        elif reader == "unknown" or depth > 0 or anywhere:
+            state["ask_bodies"].append(value)
     shell_run = set(state["glob_bodies"])
     return Lexed(tuple(tokens), tuple(bodies), state["unclosed"],
                  substitutions=tuple(state["substitutions"]), deep=state["deep"],
@@ -2316,9 +2356,9 @@ def lex(text: str) -> Lexed:
                  # a function or alias anywhere may be a reader, and so may a
                  # program a group or subshell is piped into ((cat <<E …) | x):
                  # no body is data then
-                 ask_bodies=tuple(b for b in bodies if b not in shell_run)
-                 if state["defines"] or (state["grouped"] and state["piped"])
-                 else tuple(state["ask_bodies"]))
+                 ask_bodies=tuple(dict.fromkeys(
+                     [*(b for b in bodies if b not in shell_run), *state["ask_bodies"]]))
+                 if anywhere else tuple(state["ask_bodies"]))
 
 
 def _shell_tokens(text: str) -> tuple[_Token, ...]:
@@ -2591,6 +2631,11 @@ def _rcfile_runs(words: list[str]) -> list[dict[str, str]]:
     return [{"kind": "script", "interpreter": shell, "path": path} for path in files]
 
 
+# Words around which a pipe may lead into a compound command, whose reader the
+# pipeline does not show (cat <<E | if …; then python3 -c …; fi).
+_COMPOUND_RESERVED = frozenset({"{", "}", "if", "then", "else", "elif", "fi", "while", "until",
+                                "do", "done", "for", "select", "case", "esac", "function",
+                                "coproc"})
 _CASE_LEADERS = frozenset({"do", "then", "else", "elif", "if", "while", "until", "{", "!",
                            "time"})
 
