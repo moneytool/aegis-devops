@@ -3863,8 +3863,6 @@ def test_literal_export_in_a_script_reaches_its_later_lines(prod_scope_project, 
 
 @pytest.mark.parametrize("run_it", _SCRIPT_RUNS)
 @pytest.mark.parametrize("body", [
-    "cd sub\nkubectl delete pod web\n",
-    "pushd sub\naws s3 rm s3://b/k\n",
     "unset AWS_PROFILE\naws s3 rm s3://b/k\n",
     "read AWS_PROFILE\naws s3 rm s3://b/k\n",
     "printf -v AWS_PROFILE %s prod-admin\naws s3 rm s3://b/k\n",
@@ -3876,6 +3874,9 @@ def test_literal_export_in_a_script_reaches_its_later_lines(prod_scope_project, 
     "source env.sh\naws s3 rm s3://b/k\n",
     "if true; then\nexport AWS_PROFILE=staging\nfi\naws s3 rm s3://b/k\n",
     "true && export AWS_PROFILE=staging\naws s3 rm s3://b/k\n",
+    "printf -vAWS_PROFILE prod-admin\naws s3 rm s3://b/k\n",
+    "declare -n R=AWS_PROFILE\nR=prod-admin\naws s3 rm s3://b/k\n",
+    "typeset -n R=AWS_PROFILE\nR=prod-admin\naws s3 rm s3://b/k\n",
 ])
 def test_unfollowable_scope_change_in_a_script_refuses(prod_scope_project, body, run_it):
     verdict = _script_verdict(*prod_scope_project, body, run_it)
@@ -3891,6 +3892,10 @@ def test_unfollowable_scope_change_in_a_script_refuses(prod_scope_project, body,
     "kubectl get pods\ncd sub\n",
     "FOO=1\nexport BAR=2\naws s3 ls s3://b\n",
     "export AWS_PROFILE=staging\naws s3 rm s3://b/k\n",
+    "cd sub\nkubectl get pods\n",
+    "pushd sub\nkubectl get pods\npopd\n",
+    "set -euo pipefail\ncd \"$(dirname \"$0\")\"\nkubectl get pods\n",
+    "cd \"$DIR\"\nkubectl get pods\n",
 ])
 def test_scripts_without_scope_changes_before_infra_lines_allow(prod_scope_project, body,
                                                                 run_it):
@@ -3995,3 +4000,85 @@ def test_assigning_builtins_on_other_variables_still_allow(helm_prod_project, pr
     script.write_text(f"#!/bin/bash\n{prefix}\nkubectl get pods\n")
     assert _helm_verdict(helm_prod_project, "bash x.sh").decision == "allow"
     assert _helm_verdict(helm_prod_project, f"{prefix}; kubectl get pods").decision == "allow"
+
+
+@pytest.mark.parametrize("command", [
+    "printf -vAWS_PROFILE prod-admin; aws s3 rm s3://b/k",
+    "printf -vAWS_PROFILE %s prod-admin; aws s3 rm s3://b/k",
+    "declare -n R=AWS_PROFILE; R=prod-admin; aws s3 rm s3://b/k",
+    "local -n R=AWS_PROFILE; R=prod-admin; aws s3 rm s3://b/k",
+])
+def test_printf_v_attached_and_namerefs_typed_deny(prod_scope_project, command):
+    verdict = _scoped(*prod_scope_project, command)
+    assert verdict.decision == "deny"
+    assert "statically" in verdict.reason
+
+
+def test_bash_env_set_in_a_sourced_file_asks_like_a_typed_one(prod_scope_project):
+    project, config_dir = prod_scope_project
+    (project / "benv.sh").write_text("export BASH_ENV=/tmp/x.sh\n")
+    for command in ("export BASH_ENV=/tmp/x.sh; bash -c 'aws s3 ls s3://b'",
+                    "source benv.sh; bash -c 'aws s3 ls s3://b'"):
+        verdict = _scoped(project, config_dir, command)
+        assert verdict.decision == "ask", command
+        assert "BASH_ENV" in verdict.reason
+
+
+def test_cd_in_a_script_moves_its_directory_like_a_typed_cd(opted_in_project):
+    from aegis_core.hook import _script_directories
+
+    project = opted_in_project
+    lines = [(2, "cd sub", None), (3, "kubectl get pods", None), (4, 'cd "$X"', None),
+             (5, "ls", None)]
+    found = _script_directories(lines, project)
+    assert found == {3: project / "sub", 4: project / "sub", 5: None}
+    assert _script_directories([(2, "CDPATH=/x", None), (3, "cd sub", None),
+                                (4, "ls", None)], project) == {4: None}
+    assert _script_directories([(2, "if true; then cd sub; fi", None),
+                                (3, "ls", None)], project) == {3: None}
+    assert _script_directories([(2, "kubectl get pods", None)], project) == {}
+
+
+def test_cdpath_makes_a_typed_cd_target_unknown(opted_in_project, monkeypatch):
+    project = opted_in_project
+    (project / "sub").mkdir()
+    (project / "sub" / "run.sh").write_text("kubectl delete nodes --all\n")
+    config_dir = project / ".aegis"
+    assert hook.decide("cd sub; bash run.sh", config_dir, [], cwd=project).decision == "deny"
+    verdict = hook.decide("CDPATH=/tmp; cd sub; bash run.sh", config_dir, [], cwd=project)
+    assert verdict.decision == "ask"
+    assert "directory" in verdict.reason
+    monkeypatch.setenv("CDPATH", "/tmp")
+    assert hook.decide("cd sub; bash run.sh", config_dir, [], cwd=project).decision == "ask"
+    assert hook.decide("cd ./sub; bash run.sh", config_dir, [],
+                       cwd=project).decision == "deny"
+
+
+@pytest.mark.parametrize("make", [
+    lambda: "source env.sh; " * 4300 + "aws s3 rm s3://bucket/key",
+    lambda: "source big.sh; " * 4000 + "aws s3 rm s3://bucket/key",
+    lambda: "".join(f"source e{i}.sh; " for i in range(3000)) + "aws s3 rm s3://bucket/key",
+])
+def test_many_sourced_files_stay_linear(opted_in_project, make):
+    # each `source` rescanned the rest of the command and the file's spellings in it:
+    # 18.8 s for a thousand, 95 s at 64 KB
+    project = opted_in_project
+    (project / "env.sh").write_text("export AWS_PROFILE=x\n")
+    (project / "big.sh").write_text("export AWS_PROFILE=x\n" + "echo hi\n" * 7500)
+    command = make()
+    started = time.monotonic()
+    hook.decide(command, project / ".aegis", [], cwd=project)
+    assert time.monotonic() - started < 1 * TIMING_SLACK
+
+
+@pytest.mark.parametrize("run_it", _SCRIPT_RUNS)
+@pytest.mark.parametrize("body", [
+    "export BASH_ENV=/tmp/x.sh\nbash -c 'aws s3 ls s3://b'\n",
+    "ENV=/tmp/x.sh\naws s3 ls s3://b\n",
+    "GIT_SSH_COMMAND='ssh -i k'\ngit push\naws s3 ls s3://b\n",
+    "export EDITOR=vim\nkubectl edit deploy web\n",
+])
+def test_command_variables_set_in_a_script_ask_as_typed(prod_scope_project, body, run_it):
+    verdict = _script_verdict(*prod_scope_project, body, run_it)
+    assert verdict.decision == "ask"
+    assert "does not check inside a script" in verdict.reason

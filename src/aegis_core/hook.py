@@ -945,6 +945,13 @@ def _scripts_with_directory(command: str, cwd: Path | None) -> list[tuple[dict, 
     return found
 
 
+def _cdpath_changed() -> bool:
+    """Whether the whole command the hook was given names CDPATH (``CDPATH=…``,
+    ``export CDPATH``), so a ``cd`` may search other directories."""
+    state = _SCANNED.get()
+    return state is not None and re.search(r"\bCDPATH\b", state["command"]) is not None
+
+
 def _cd(here: Path | None, argv: list[str]) -> Path | None:
     """The directory after ``cd DIR``; ``None`` when it cannot be known."""
     args = [a for a in argv[1:] if a not in ("-P", "-L", "-e", "--")]
@@ -956,6 +963,9 @@ def _cd(here: Path | None, argv: list[str]) -> Path | None:
     if target.startswith("-") or any(ch in target for ch in "$`") or (
             target.startswith("~") and _home_changed("")):
         return None
+    if not target.startswith(("/", "./", "../", "~")) and target not in (".", "..") and (
+            os.environ.get("CDPATH") or _cdpath_changed()):
+        return None  # cd searches CDPATH first
     try:
         path = Path(target).expanduser()
     except RuntimeError:  # ~user / ~+ the hook cannot resolve
@@ -1139,6 +1149,12 @@ def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
         asks.append(_PIPED_READER_ASK)
     here = cwd
     previous_sep = ""
+    # whether a part after each one names an infrastructure tool: one sweep, not one
+    # scan of the rest per part (`source env.sh; ` a thousand times stays linear)
+    infra_after = [False] * len(segments)
+    for k in range(len(segments) - 2, -1, -1):
+        infra_after[k] = infra_after[k + 1] or mentions_infra(segments[k + 1][0])
+    environments: dict[tuple[str, str], dict[str, str] | None] = {}  # per file and directory
     for index, (text, sep) in enumerate(segments):
         loose = loose_argv(text)
         if loose and _basename(loose[0]) in ("cd", "pushd", "popd"):
@@ -1187,8 +1203,13 @@ def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
                 asks.append("aegis: this runs a local script, which the hook cannot read "
                             "(--escalate-scripts)")
             # the sourced file runs in this shell: what it sets reaches the parts after it
-            if mentions_infra("".join(t + s for t, s in segments[index + 1:])):
-                values = _sourced_environment(sourced, here, command) if scan else None
+            if infra_after[index]:
+                key = (sourced["path"], str(here))
+                if key not in environments:
+                    # past the script limit an unread file leaves the environment unknown
+                    environments[key] = _sourced_environment(sourced, here, command) if (
+                        scan and len(environments) < _MAX_SCRIPTS) else None
+                values = environments[key]
                 if values is None:
                     return HookVerdict(
                         "deny",
@@ -1871,7 +1892,7 @@ def _known_variables(path: str, command: str) -> str:
 # later line's infrastructure tool uses (also when spelt oddly or quoted: only
 # ever too eager, which costs a refusal when a later line names a tool).
 _SCOPE_CHANGE_RE = re.compile(
-    r"(?:^|[\s;&|(`'\"\\])(?:cd|pushd|popd|alias|eval|source|function)"
+    r"(?:^|[\s;&|(`'\"\\])(?:alias|eval|source|function)"
     r"(?=$|[\s;&|)'\"])"
     r"|(?:^|[\s;&|(])\.(?=\s)"
     r"|(?<![\w-])[\w-]+\s*\(\s*\)")  # f() { …; } (a word start only: linear)
@@ -1883,6 +1904,11 @@ _DECLARED_RE = re.compile(r"\b(export|declare|typeset|readonly|local|unset|read|
 _CONTROL_FLOW_RE = re.compile(
     r"(?:^|[\s;&|(])(?:if|then|elif|else|fi|while|until|for|select|do|done|case|esac)"
     r"(?=$|[\s;&|)])|[{}()]|&&|\|\||(?<![<>&])&(?![>&])")
+
+
+# A variable whose value the hook checks only in a typed command (:func:`_hidden_command`).
+_HIDDEN_COMMAND_VAR_RE = re.compile(
+    r"(?<![\w$])(?:" + "|".join(sorted(_COMMAND_ENV_VARS | _SOURCED_ENV_VARS)) + r")\b")
 
 
 def _changes_scope(line: str) -> bool:
@@ -1898,8 +1924,13 @@ def _changes_scope(line: str) -> bool:
             return True
     if any(_infra_env(m.group(1)) for m in _SCOPE_ASSIGN_RE.finditer(line)):
         return True
+    if _HIDDEN_COMMAND_VAR_RE.search(line):
+        return True  # BASH_ENV=…, GIT_SSH_COMMAND=…, EDITOR=…: checked only when typed
     for m in _DECLARED_RE.finditer(line):
         words = [word.strip("\"'") for word in m.group(2).split()]
+        if m.group(1) in ("declare", "typeset", "local") and any(
+                w.startswith("-") and "n" in w[1:] for w in words):
+            return True  # a nameref: a later NAME=… may set any variable
         if m.group(1) == "printf":  # assigns only with -v NAME / -vNAME before its format
             if _env_change(["printf", *words], {}) is not None:
                 return True
@@ -1926,9 +1957,45 @@ def _literal_scope_setting(line: str) -> str | None:
     if not words or not all(_ASSIGNMENT_RE.match(w) for w in words):
         return None
     change = _env_change([], dict(w.partition("=")[::2] for w in words))
-    if change is None or change[1] or any(k.endswith("+") or "[" in k for k in change[0]):
+    if change is None or change[1] or any(
+            k.endswith("+") or "[" in k or k in _COMMAND_ENV_VARS or k in _SOURCED_ENV_VARS
+            for k in change[0]):
         return None
     return "export " + " ".join(f"{k}={shlex.quote(v)}" for k, v in change[0].items())
+
+
+def _script_directories(every: list[tuple[int, str, str | None]],
+                        cwd: Path | None) -> dict[int, Path | None]:
+    """The directory each script line starts in, following its ``cd`` lines as
+    the hook follows a typed command's (:func:`_cd`): a literal ``cd DIR`` moves
+    it, a computed one (``cd "$(dirname "$0")"``), one in the background or a
+    pipeline, or any ``cd`` in a script with control flow makes it unknown
+    (``None``), as does a ``cd`` after a line naming ``CDPATH``. Only lines after a
+    ``cd`` are listed."""
+    if not _CD_RE.search("\n".join(line for _n, line, _a in every)):
+        return {}
+    control = any(ask is None and _CONTROL_FLOW_RE.search(line) for _n, line, ask in every)
+    here = cwd
+    found: dict[int, Path | None] = {}
+    moved = cdpath = False
+    for number, line, ask in every:
+        if moved:
+            found[number] = here
+        cdpath = cdpath or "CDPATH" in line  # cd may search other directories after it
+        if ask is not None or not _CD_RE.search(line):
+            continue
+        moved = True
+        if control or cdpath or _launcher_chdir(line):
+            here = None
+            continue
+        previous_sep = ""
+        for text, sep in split_segments(line) or [(line, "")]:
+            loose = loose_argv(text)
+            if loose and _basename(loose[0]) in ("cd", "pushd", "popd"):
+                subshell = sep in ("&", "|", "|&") or previous_sep in ("|", "|&")
+                here = None if subshell else _cd(here, loose)
+            previous_sep = sep
+    return found
 
 
 def _scan_script_once(runs: dict, config_dir: Path, extra_args: list[str] | None,
@@ -2018,10 +2085,16 @@ def _scan_script_once(runs: dict, config_dir: Path, extra_args: list[str] | None
         if all(_literal_scope_setting(line) for _n, line in changes) and not any(
                 ask is None and _CONTROL_FLOW_RE.search(line) for _n, line, ask in every):
             settings = {n: _literal_scope_setting(line) or "" for n, line in changes}
-            lines = [(n, line, ask) for n, line, ask in every
-                     if n in settings or (n, line, ask) in lines]
+            numbers = {n for n, _line, _ask in lines} | settings.keys()
+            lines = [(n, line, ask) for n, line, ask in every if n in numbers]
         else:
             number, line = changes[0]
+            hidden = _HIDDEN_COMMAND_VAR_RE.search(line)
+            if hidden:  # as typed: BASH_ENV=…, GIT_SSH_COMMAND=…, EDITOR=… ask
+                return HookVerdict(
+                    "ask", f"aegis: {path} line {number}: {line.strip()!r} sets "
+                    f"{hidden.group(0)}, a file or command the programs after it run, which "
+                    "the hook does not check inside a script; run the commands on their own")
             return HookVerdict(
                 "deny",
                 f"aegis: cannot check this command statically ({path} line {number}: "
@@ -2035,6 +2108,7 @@ def _scan_script_once(runs: dict, config_dir: Path, extra_args: list[str] | None
                                   f"{SCRIPT_SCAN_MAX_LINES} lines, so they were not checked")
     first_ask: str | None = None
     checkable: list[tuple[int, str, str]] = []
+    directories = _script_directories(every, cwd)
     for number, line, ask in lines:
         located = f"{path} line {number}: {line.strip()!r}"
         if ask is not None:
@@ -2043,7 +2117,7 @@ def _scan_script_once(runs: dict, config_dir: Path, extra_args: list[str] | None
         if number in settings:
             checkable.append((number, line, settings[number]))
             continue
-        pre = _precheck(line, config_dir, extra_args, cwd, scan=False)
+        pre = _precheck(line, config_dir, extra_args, directories.get(number, cwd), scan=False)
         if isinstance(pre, HookVerdict):
             if pre.decision == "allow":
                 continue

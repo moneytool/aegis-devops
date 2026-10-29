@@ -3132,6 +3132,8 @@ def _env_change(argv: list[str], env: dict[str, str]) -> tuple[dict[str, str], b
     name = _basename(argv[0])
     words = argv[1:]
     if name in _DECLARATION_BUILTINS:
+        if name != "export" and any(w.startswith("-") and "n" in w[1:] for w in words):
+            return {}, True  # a nameref: a later NAME=… may set any variable
         if not any(_may_name_scope_variable(w) for w in words):
             return None
         flags = [w for w in words if w.startswith(("-", "+")) and w != "--"]

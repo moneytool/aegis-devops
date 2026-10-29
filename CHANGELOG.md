@@ -420,6 +420,18 @@ behaviour.
   reads: the infrastructure commands after them are refused. Before, `local
   HELM_NAMESPACE=staging; helm … uninstall …` was judged in staging, and a sourced or scripted
   `printf -vHELM_NAMESPACE …` was not seen.
+- Agent hook (PR #60 council): a command that sources many files stays linear (whether an
+  infrastructure tool comes later is worked out in one sweep, and each sourced file is read
+  once per directory; past 32 distinct files the rest leave the environment unknown): a
+  thousand `source env.sh; ` before `aws …` took 18.8 s. In a script the hook reads, a
+  nameref (`declare -n` / `typeset -n` / `local -n`, also when typed) and `printf -vNAME` count
+  as changes the hook cannot follow, and a variable whose value names a file or command a
+  later program runs (`BASH_ENV`, `ENV`, `GIT_SSH_COMMAND`, `EDITOR`, …) asks as it does when
+  typed. A `cd` in a script no longer refuses it: like a typed `cd`, a literal one moves the
+  directory later lines are checked from, and a computed one (`cd "$(dirname "$0")"`), one in
+  a script with control flow or one after a line naming `CDPATH` makes it unknown, which only
+  matters to the checks that depend on it. A typed `cd DIR` to a relative name is unknown when
+  `CDPATH` is set or the command names it, since `cd` searches it first.
 
 ### Changed
 - Agent hook: code piped into a shell or interpreter, or fed to one by a here-string or here-doc
