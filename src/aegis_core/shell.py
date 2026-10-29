@@ -1953,29 +1953,55 @@ def _body_reader(line: list[_Token]) -> str:
     check: ``"shell"`` when a shell, ``eval``, ``source``, ``.`` or ``exec`` is
     a program there (``bash <<EOF``, ``cat <<EOF | sh``); ``"data"`` when every
     program is a data sink (:data:`_DATA_SINKS`) or an interpreter of another
-    language (``python3``, ``node``), with no ``<(…)``/``>(…)`` and no
-    descriptor path (``/dev/fd/3``); ``"unknown"`` otherwise. Only words in
-    command position count (``jq .``: the ``.`` is jq's)."""
-    command_start, data = True, True
-    for kind, value, _s, _e in line:
+    language reading the body as its program (``python3``, ``python3 -``,
+    ``node``; also ``python3 -m json.tool``), with no ``<(…)``/``>(…)`` and no
+    descriptor path (``/dev/fd/3``); ``"unknown"`` otherwise (an interpreter
+    with inline code or a script, ``python3 -c '…os.system(input())'``, may
+    hand the body to a shell). Only words in command position count (``jq .``:
+    the ``.`` is jq's)."""
+    data = True
+    program: str | None = None  # the interpreter whose arguments are being read
+    arguments: list[str] = []
+    command_start, after_op = True, False
+    for kind, value, _s, _e in [*line, ("sep", "", 0, 0)]:
         if kind == "sep":
-            command_start = True
+            if program is not None and not _reads_its_program(program, arguments):
+                data = False
+            program, arguments, command_start, after_op = None, [], True, False
             continue
         if kind == "op":
+            after_op = True
             continue
         if "<(" in value or ">(" in value or value.startswith(_DESCRIPTOR_PATHS):
             data = False
+        if after_op:  # a redirection's target
+            after_op = False
+            continue
         if not command_start:
+            if program is not None:
+                arguments.append(value)
             continue
         if value in _COMPOUND_WORDS or _ASSIGNMENT_RE.match(value):
             continue
         name = _basename(value)
         if name in _SHELLS or value in ("eval", "source", ".", "exec"):
             return "shell"
-        if name not in _DATA_SINKS and not _NON_SHELL_READERS.fullmatch(name):
+        if _NON_SHELL_READERS.fullmatch(name):
+            program = name
+        elif name not in _DATA_SINKS:
             data = False  # sudo, xargs, ssh, $SHELL, a function, …
         command_start = False
     return "data" if data else "unknown"
+
+
+def _reads_its_program(name: str, arguments: list[str]) -> bool:
+    """Whether an interpreter run with ``arguments`` reads its program from
+    standard input (the here-document): none, or a lone ``-``; ``python3 -m
+    json.tool`` (with options) only formats it."""
+    if arguments in ([], ["-"]):
+        return True
+    return name.startswith(("python", "pypy")) and arguments[:2] == ["-m", "json.tool"] and all(
+        a.startswith("-") for a in arguments[2:])
 
 
 def _skip_bodies(text: str, i: int, pending: list[tuple[str, bool, bool]],
@@ -2556,6 +2582,10 @@ def _rcfile_runs(words: list[str]) -> list[dict[str, str]]:
     return [{"kind": "script", "interpreter": shell, "path": path} for path in files]
 
 
+_CASE_LEADERS = frozenset({"do", "then", "else", "elif", "if", "while", "until", "{", "!",
+                           "time"})
+
+
 def _simple_commands(tokens: tuple[_Token, ...], *, case_patterns: bool = False
                      ) -> Iterator[tuple[list[str], list[str]]]:
     """The words and the standard-input redirections (``<x.sh``) of each simple
@@ -2566,6 +2596,7 @@ def _simple_commands(tokens: tuple[_Token, ...], *, case_patterns: bool = False
     cases = 0  # open case … esac (only read with case_patterns, for the glob check)
     pattern = False  # in a case arm's pattern, up to its )
     plain_case = False
+    lead = 0  # reserved words in front of this command (do, then, {, !, time)
     k = 0
     while k < len(tokens):
         kind, value, _s, _e = tokens[k]
@@ -2577,16 +2608,16 @@ def _simple_commands(tokens: tuple[_Token, ...], *, case_patterns: bool = False
                 pattern = False
             k += 1
             continue
-        if (case_patterns and kind == "word" and value == "in" and len(words) == 2
+        if (case_patterns and kind == "word" and value == "in" and len(words) - lead == 2
                 and plain_case and not redirects):
-            pattern, words = True, []  # case WORD in: an arm's pattern comes next
+            pattern, words, lead = True, [], 0  # case WORD in: an arm's pattern next
             cases += 1
             k += 1
             continue
         if kind == "sep":
             if words or redirects:
                 yield _without_function_header(words), redirects
-            words, redirects = [], []
+            words, redirects, lead = [], [], 0
             if cases and (value == ";;" or (value == ";" and tokens[k + 1:k + 2]
                                             and tokens[k + 1][:2] == ("sep", "&"))):
                 pattern = True  # ;; ;& ;;&: the next arm's pattern
@@ -2598,7 +2629,10 @@ def _simple_commands(tokens: tuple[_Token, ...], *, case_patterns: bool = False
         elif kind == "word" and value == "esac" and cases and not words:
             cases -= 1
         else:
-            if not words:  # an unquoted `case` first, nothing before it, starts one
+            if len(words) == lead and value in _CASE_LEADERS:
+                lead += 1  # do case …, then case …, { case …
+            elif len(words) == lead:  # an unquoted `case` first (after those), with no
+                # redirect or other word before it, starts a case statement
                 plain_case = value == "case" and _e - _s == 4 and not redirects
             words.append(value)
         k += 1

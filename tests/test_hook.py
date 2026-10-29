@@ -3132,6 +3132,43 @@ _ROUND31_CORPUS = [
 ]
 
 
+# Round 32: an interpreter reads a here-document as data only when the body is
+# its program (bare, -, or python -m json.tool); inline code or a script may hand
+# it to a shell (unknown: a globbed word asks). A `case` after do, then, else,
+# {, ! or time starts a case statement too.
+_ROUND32_CORPUS = [
+    ("ask|deny", "cat <<'E' | python3 -c 'import os; os.system(input())'\n"
+                 "kube* delete nodes --all\nE"),
+    ("ask|deny", "cat <<'E' | perl -e 'system <STDIN>'\nkube* delete nodes --all\nE"),
+    ("ask|deny", "cat <<'E' | perl -ne 'system $_'\nkube* delete nodes --all\nE"),
+    ("ask|deny", "cat <<'E' | node -e \"require('child_process').execSync("
+                 "require('fs').readFileSync(0,'utf8'))\"\nkube* delete nodes --all\nE"),
+    ("ask|deny", "python3 script.py <<E\nkube* delete nodes --all\nE"),
+    ("ask|deny", "python3 -m runpy <<E\nkube* delete nodes --all\nE"),
+    ("ask|deny", "ruby -e 'system(gets)' <<E\nkube* delete nodes --all\nE"),
+    ("ask|allow", "python3 - <<'EOF'\ndef f(*args): pass\nEOF"),
+    ("ask|allow", "python3 -m json.tool <<'EOF'\n[1, 2]\nEOF"),
+    ("ask|allow", "python3 -m json.tool --sort-keys <<'EOF'\n{\"b\": 1}\nEOF"),
+    ("ask|allow", "python3 - > out.txt <<'EOF'\nprint(2*3)\nEOF"),
+    ("ask|allow", "node <<'EOF'\nconsole.log([1].map(x => x*2))\nEOF"),
+    ("ask|deny", "python3 -c 'import os,sys; os.system(sys.stdin.read())' <<'E'\n"
+                 "kub*l delete ns prod\nE"),
+    ("ask|deny", "perl -e 'system(<STDIN>)' <<'E'\nkub*l delete ns prod\nE"),
+    ("ask|deny", "ruby -e 'system(gets)' <<'E'\nterra[f]orm destroy -auto-approve\nE"),
+    ("ask|deny", "node -e 'require(\"child_process\").execSync(require(\"fs\").readFileSync(0))'"
+                 " <<'E'\n/usr/local/bin/kube?tl delete nodes --all\nE"),
+    ("ask|deny", "perl -e 'print `$_` while <STDIN>' <<'E'\naw? s3 rb s3://b\nE"),
+    ("allow", 'for arg in "$@"; do case $arg in -v) v=1;; -*) echo bad;; *) files+=("$arg");;'
+              " esac; done"),
+    ("allow", 'for f in *.log; do case $f in a*) echo;; *) gzip "$f";; esac; done'),
+    ("allow", 'if [ -n "$1" ]; then case $1 in a) :;; *) echo x;; esac; else echo y; fi'),
+    ("allow", "while true; do case $f in a) echo;; *) break;; esac; done"),
+    ("allow", "{ case $f in a) :;; *) :;; esac; }"),
+    ("deny", '>/dev/null case a in; bash nuke.sh "$X"'),
+    ("deny", '"case" a in; bash nuke.sh "$X"'),
+]
+
+
 def _decision(code: int, out: str) -> str:
     if code == 2:
         return "deny"
@@ -3187,7 +3224,7 @@ def test_a_shell_script_named_like_an_option_is_read(opted_in_project, command):
                          + _ROUND22_CORPUS + _ROUND23_CORPUS + _ROUND24_CORPUS
                          + _ROUND25_CORPUS + _ROUND26_CORPUS + _ROUND27_CORPUS
                          + _ROUND28_CORPUS + _ROUND29_CORPUS + _ROUND30_CORPUS
-                         + _ROUND31_CORPUS)
+                         + _ROUND31_CORPUS + _ROUND32_CORPUS)
 def test_round12_corpus(opted_in_project, expected, command):
     (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
     (opted_in_project / "ok.sh").write_text("echo hi\n")

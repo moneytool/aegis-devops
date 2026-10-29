@@ -327,11 +327,14 @@ behaviour.
   bodies) are checked too. For this check a here-document body is shell-run when a shell,
   `eval`, `source`, `.` or `exec` is a program of the pipeline its `<<` is in (`bash <<EOF`,
   `cat <<EOF | sh`: as for a command), data when every program there is a data sink (`cat`,
-  `tee`, `jq`, `git`, …) or an interpreter of another language (`python3`, `node`), with no
-  `<(…)`/`>(…)` and no descriptor path (not checked: a Markdown `* item`), and otherwise
+  `tee`, `jq`, `git`, …) or an interpreter of another language reading the body as its
+  program (`python3`, `python3 -`, `node`; also `python3 -m json.tool`; not one given inline
+  code or a script, which may hand the body to a shell: `python3 -c '…os.system(input())'`),
+  with no `<(…)`/`>(…)` and no descriptor path (not checked: a Markdown `* item`), and otherwise
   unknown (`tee >(sh)`, a function or alias in the command, `sed`, `xargs`, an `eval`
-  anywhere), where a globbed word asks. Only an unquoted `case` at the start of a command,
-  with nothing before it, starts a case statement, whose arm patterns (`*)`, `a|b*)`) are
+  anywhere), where a globbed word asks. Only an unquoted `case` at the start of a command
+  (after `do`, `then`, `else`, `{`, `!` or `time` too), with no redirect, assignment or
+  other word before it, starts a case statement, whose arm patterns (`*)`, `a|b*)`) are
   not program words for this check. A word whose quoting is not known counts as a glob. Each
   text's quoting is read once per decision, and `x+=1` and `a[1]=2` are assignments like
   `x=1`. Two other regexes that
