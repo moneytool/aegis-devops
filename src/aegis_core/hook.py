@@ -87,6 +87,7 @@ from aegis_core.shell import (
     _shell_tokens,
     _Token,
     _unwrap_inner,
+    attached_value_reading,
     dequoted,
     find_heredoc,
     intents_from_command,
@@ -408,6 +409,19 @@ def _decide_once(command: str, config_dir: Path, extra_args: list[str] | None,
         if mentions_infra(command):
             return HookVerdict("deny", reason, unchecked=True)
         return HookVerdict("ask", reason)
+    other = attached_value_reading(command)
+    if other is not None:
+        # zsh -onoclobber x.sh: an attached value, or flags with c set? Both
+        # readings are checked, and the stricter verdict stands
+        verdicts = [_decide_parts(command, config_dir, extra_args, cwd, scan=scan),
+                    _decide_once(other, config_dir, extra_args, cwd, scan=scan)]
+        return next((v for v in verdicts if v.decision == "deny"), None) or next(
+            (v for v in verdicts if v.decision == "ask"), verdicts[0])
+    return _decide_parts(command, config_dir, extra_args, cwd, scan=scan)
+
+
+def _decide_parts(command: str, config_dir: Path, extra_args: list[str] | None,
+                  cwd: Path | None, *, scan: bool) -> HookVerdict:
     early = _stdin_redirects(command, config_dir, extra_args, cwd, scan=scan)
     if isinstance(early, HookVerdict):
         return early

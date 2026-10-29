@@ -682,7 +682,8 @@ def plain_binary(segment: str) -> str | None:
 _ALIASES = {"k": "kubectl", "tf": "terraform", "tofu": "tofu", "g": "git"}
 _SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "ash", "rbash", "mksh", "yash",
                      "fish", "csh", "tcsh", "posh"})
-_VERSIONED_SHELL_RE = re.compile(rf"({'|'.join(sorted(_SHELLS))})\d[\d.]*")
+# Shells that ship versioned binaries (bash5.2, zsh5, ksh93, mksh-R59); not sh2.
+_VERSIONED_SHELL_RE = re.compile(r"(bash|zsh|ksh|mksh|dash|yash)\d[\d.]*")
 _ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 _SUDO_BOOL_SHORT = frozenset("EHnkKbAlvS")
@@ -2043,6 +2044,35 @@ def _shell_scan(tokens: tuple[_Token, ...], k: int) -> tuple[int | None, bool]:
     return (j if saw_c and j < len(tokens) and tokens[j][0] == "word" else None), False
 
 
+def attached_value_reading(command: str) -> str | None:
+    """``command`` with each ambiguous option cluster of zsh, ksh, mksh or yash
+    spelt out as an option and its value (``zsh -onoclobber x.sh`` ->
+    ``zsh -o noclobber x.sh``), or ``None`` when it has none. Such a cluster
+    (an ``o``/``O`` with letters after it that hold ``c``, ``i`` or ``s``) is
+    read elsewhere with those letters set, as ksh93 reads ``-oc``; zsh and
+    ksh read ``-onoclobber`` as the value instead, so the caller checks both
+    readings."""
+    tokens = _shell_tokens(command)
+    cuts: list[tuple[int, int, str]] = []
+    for k in _readers(tokens):
+        if _basename(tokens[k][1]) not in _ATTACHED_VALUE_SHELLS:
+            continue
+        for kind, word, start, end in tokens[k + 1:k + _MAX_SHELL_OPTIONS]:
+            if kind != "word" or not re.fullmatch(r"[-+][a-zA-Z]+", word):
+                break
+            at = next((n for n, ch in enumerate(word) if n and ch in "oO"), None)
+            if at is not None and at + 1 < len(word) and set(word[at + 1:]) & set("cis") \
+                    and command[start:end] == word:
+                cuts.append((start, end, f"{word[:at + 1]} {word[at + 1:]}"))
+    if not cuts:
+        return None
+    kept, last = [], 0
+    for start, end, spelt in cuts:
+        kept.append(command[last:start] + spelt)
+        last = end
+    return "".join(kept) + command[last:]
+
+
 def options_capped(text: str) -> bool:
     """Whether a shell in ``text`` has more options than :func:`_shell_scan`
     reads before its ``-c`` string or script."""
@@ -2424,8 +2454,9 @@ _FIND_EXEC_FLAGS = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
 
 def find_exec_commands(argv: list[str]) -> list[list[str]]:
     """The commands ``find`` runs for each file: the words after ``-exec``,
-    ``-execdir``, ``-ok`` or ``-okdir`` up to ``;`` or ``+`` (``{}``, the file,
-    stays a literal argument). ``[]`` for anything but ``find``."""
+    ``-execdir``, ``-ok`` or ``-okdir`` up to ``;``, or up to a ``+`` right
+    after ``{}`` (any other ``+`` is an argument: ``env -u + cmd``; ``{}``, the
+    file, stays a literal argument). ``[]`` for anything but ``find``."""
     if not argv or _basename(argv[0]) != "find":
         return []
     found: list[list[str]] = []
@@ -2433,7 +2464,8 @@ def find_exec_commands(argv: list[str]) -> list[list[str]]:
     while i < len(argv):
         if argv[i] in _FIND_EXEC_FLAGS:
             j = i + 1
-            while j < len(argv) and argv[j] not in (";", "+"):
+            while j < len(argv) and argv[j] != ";" and not (
+                    argv[j] == "+" and argv[j - 1] == "{}"):
                 j += 1
             if j == len(argv):
                 raise ShellRejected(f"find {argv[i]} without ';' or '+'")

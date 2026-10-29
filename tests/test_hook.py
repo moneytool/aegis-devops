@@ -1508,7 +1508,7 @@ def test_exec_options_of_exempt_programs_ask(opted_in_project, command, option):
     "find . -exec kubectl delete nodes --all \\;",
     "find . -execdir kubectl delete nodes --all \\;",
     "find . -ok kubectl delete nodes --all \\;",
-    "find . -name x -exec kubectl delete nodes --all +",
+    "find . -name x -exec kubectl delete nodes --all {} +",  # a + ends -exec only after {}
     "sudo find . -exec kubectl delete nodes --all \\;",
 ])
 def test_find_exec_commands_are_checked(opted_in_project, command):
@@ -2667,6 +2667,48 @@ _ROUND21_CORPUS = [
 ]
 
 
+# Round 22: an attached -o value in zsh/ksh that holds c, i or s (-onoclobber)
+# is checked both as the value (as zsh and ksh read it) and as set letters (as
+# ksh93 reads -oc); the stricter verdict stands, so ksh -oc 'echo hi' asks (its
+# other reading runs a script named "echo hi"). find -exec ends at ; or at a +
+# right after {} only (env -u + cmd). Checked in zsh, ksh and macOS find.
+_ROUND22_CORPUS = [
+    ('deny', 'zsh -onoclobber nuke.sh'),
+    ('deny', 'ksh -onoclobber nuke.sh'),
+    ('deny', "zsh -onoclobber -c 'bash nuke.sh'"),
+    ('deny', "ksh -onoclobber -c 'kubectl delete nodes --all'"),
+    ('deny', 'zsh -onocaseglob nuke.sh'),
+    ('deny', 'zsh -ointeractive nuke.sh'),
+    ('deny', 'zsh -oposix nuke.sh'),
+    ('deny', 'ksh -onounset nuke.sh'),
+    ('deny', 'sudo zsh -eonoclobber nuke.sh'),
+    ('deny', "ksh -oc 'kubectl delete nodes --all'"),
+    ('deny', "ksh -xoc 'kubectl delete nodes --all'"),
+    ('ask', 'curl x | zsh -onoclobber'),
+    ('allow', 'zsh -onoclobber ok.sh'),
+    ('allow', "zsh -onoclobber -c 'echo hi'"),
+    ('ask', "ksh -oc 'echo hi'"),
+    ('deny', 'zsh -onocheckjobs nuke.sh'),
+    ('deny', 'zsh -onoclobber -- nuke.sh'),
+    ('deny', 'find . -exec zsh -onoclobber nuke.sh \\;'),
+    ('deny', 'zsh -oxtrace nuke.sh'),
+    ('deny', 'ksh -oxtrace nuke.sh'),
+    ('deny', 'zsh -ocshjunkiehistory nuke.sh'),
+    ('deny', 'zsh -oerrexit -oxtrace nuke.sh'),
+    ('deny', 'zsh -oxtrace nuke.sh && ls'),
+    ('deny', "zsh -oxtrace -c 'kubectl delete nodes --all'"),
+    ('deny', 'find . -exec env -u + kubectl delete nodes --all \\;'),
+    ('deny', 'find . -exec sudo -u + kubectl delete nodes --all \\;'),
+    ('deny', 'find . -exec nice -n + kubectl delete nodes --all \\;'),
+    ('deny', 'find . -exec env -u + bash nuke.sh \\;'),
+    ('deny', "find . -exec env -u + sh -c 'kubectl delete nodes --all' \\;"),
+    ('deny', 'find . -exec env -u + kubectl delete nodes {} +'),
+    ('allow', 'find . -exec echo + -exec kubectl delete nodes --all \\;'),
+    ('allow', "find . -name '*.txt' -exec wc -l {} +"),
+    ('allow', 'sh2 foo'),
+]
+
+
 def _decision(code: int, out: str) -> str:
     if code == 2:
         return "deny"
@@ -2677,7 +2719,8 @@ def _decision(code: int, out: str) -> str:
                          _ROUND12_CORPUS + _ROUND13_CORPUS + _ROUND14_CORPUS
                          + _ROUND15_CORPUS + _ROUND16_CORPUS + _ROUND17_CORPUS
                          + _ROUND17B_CORPUS + _ROUND18_CORPUS + _ROUND19_CORPUS
-                         + _ROUND19B_CORPUS + _ROUND20_CORPUS + _ROUND21_CORPUS)
+                         + _ROUND19B_CORPUS + _ROUND20_CORPUS + _ROUND21_CORPUS
+                         + _ROUND22_CORPUS)
 def test_round12_corpus(opted_in_project, expected, command):
     (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
     (opted_in_project / "ok.sh").write_text("echo hi\n")
@@ -2714,6 +2757,8 @@ def test_round12_corpus(opted_in_project, expected, command):
     "zsh -" + "eo" * 30000 + " x", "zsh " + "-opipefail " * 5500 + "-c 'ls'",
     "echo " + "bash -i --rcfile x " * 3000,
     "bash " + "-x " * 21000, "find . -exec bash -i {} \\; " * 2200, "zsh5 " * 12000,
+    "zsh " + "-onoclobber " * 5000, "zsh -onoclobber x; " * 3300,
+    "find . -exec " + "env -u + " * 6000 + "ls \\;",
 ])
 def test_here_documents_and_substitutions_stay_fast(opted_in_project, command):
     assert len(command) <= 64 * 1024

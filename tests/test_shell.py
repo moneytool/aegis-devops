@@ -716,7 +716,8 @@ def test_escaped_punctuation_is_a_literal_word(command, argvs):
 
 @pytest.mark.parametrize("command,inner", [
     ("find . -exec kubectl delete node/w1 \\;", [("node/w1", "delete")]),
-    ("find . -execdir kubectl delete node/w1 +", [("node/w1", "delete")]),
+    ("find . -execdir kubectl delete node/w1 {} +",  # + ends -exec only after {}
+     [("node/w1", "delete"), ("{}/*", "delete")]),
     ("find m -name '*.yaml' -ok kubectl get pods \\; -print", [("pod/*", "get")]),
 ])
 def test_find_exec_commands_become_intents(command, inner):

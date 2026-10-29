@@ -275,6 +275,13 @@ behaviour.
   words than the hook reads (64), before its `-c` string or script or as a reader in a piped
   group, asks instead of being passed over. Versioned shell names (`zsh5`, `ksh93`, `bash5.2`)
   are read as their shell.
+- Agent hook: an `o`/`O` with letters after it that hold `c`, `i` or `s` in zsh, ksh, mksh or
+  yash (`-onoclobber`, `-oxtrace`, `-ointeractive`) is read both ways, as the option's value
+  (as zsh and ksh do: `zsh -onoclobber x.sh` runs x.sh) and as set letters (as ksh93 reads
+  `-oc` as `-c`), and the stricter verdict stands; `ksh -oc 'cmd'` therefore also asks when
+  `cmd` is harmless. `find … -exec` ends at `;` or at a `+` right after `{}`; any other `+` is
+  an argument (`find . -exec env -u + cmd \;` runs cmd). Versioned names are mapped only for
+  shells that ship them (bash, zsh, ksh, mksh, dash, yash; not `sh2`).
 - Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
   own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
   policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a
