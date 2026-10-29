@@ -2049,8 +2049,15 @@ def _sink_runs_a_program(name: str, arguments: list[str]) -> bool:
     """Whether a data sink's ``arguments`` hold an option that runs a program
     (``sort --compress-program=sh``, ``git -c alias.x='!sh' x``)."""
     options = _SINK_PROGRAM_OPTIONS.get(name, ())
-    return any(a == o or a.startswith(o + "=") or (o == "-c" and a.startswith("-c") and len(a) > 2)
-               for a in arguments for o in options)
+    for a in arguments:
+        long_name = a[2:].partition("=")[0] if a.startswith("--") else ""
+        for o in options:
+            if a == o or a.startswith(o + "=") or (o == "-c" and a.startswith("-c")):
+                return True
+            # getopt takes an unambiguous abbreviation (--compress-prog, --co)
+            if long_name and o.startswith("--") and o[2:].startswith(long_name):
+                return True
+    return False
 
 
 def _reads_its_program(name: str, arguments: list[str]) -> bool:

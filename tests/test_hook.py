@@ -3287,6 +3287,16 @@ _ROUND37_CORPUS = [
 ]
 
 
+# Round 37b: getopt takes abbreviations of long options (--compress-prog, --co).
+_ROUND37B_CORPUS = [
+    *(("ask|deny", f"{head} <<E\n{_LOCAL_GLOB}\nE") for head in (
+        "sort --compress-prog=sh -S1b", "sort --compress-p sh", "sort --co=sh", "sort --c sh",
+        "diff --diff-prog=sh - x", "git --exec-pa=/tmp x")),
+    ("allow", "sort -u <<'EOF'\n* a\nEOF"),
+    ("allow", "sort --check <<'EOF'\n* a\nEOF"),
+]
+
+
 def _decision(code: int, out: str) -> str:
     if code == 2:
         return "deny"
@@ -3344,7 +3354,8 @@ def test_a_shell_script_named_like_an_option_is_read(opted_in_project, command):
                          + _ROUND28_CORPUS + _ROUND29_CORPUS + _ROUND30_CORPUS
                          + _ROUND31_CORPUS + _ROUND32_CORPUS + _ROUND33_CORPUS
                          + _ROUND33B_CORPUS + _ROUND34_CORPUS + _ROUND34B_CORPUS
-                         + _ROUND35_CORPUS + _ROUND36_CORPUS + _ROUND37_CORPUS)
+                         + _ROUND35_CORPUS + _ROUND36_CORPUS + _ROUND37_CORPUS
+                         + _ROUND37B_CORPUS)
 def test_round12_corpus(opted_in_project, expected, command):
     (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
     (opted_in_project / "ok.sh").write_text("echo hi\n")
