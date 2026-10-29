@@ -3311,6 +3311,28 @@ _ROUND37C_CORPUS = [
 ]
 
 
+# Round 37d: a here-document attached to a group, subshell, loop or if is read by
+# what runs inside it, which the reader logic does not see: unknown.
+_SORT_SH = "sort --compress-program=sh"
+_ROUND37D_CORPUS = [
+    ("ask|deny", "{ sort -S 1k --compress-program=sh; } <<EOF\n*.a\nEOF"),
+    ("ask|deny", f"( {_SORT_SH} ) <<EOF\n*.a\nEOF"),
+    ("ask|deny", f"{{ {_SORT_SH}\n}} <<EOF\n*.a\nEOF"),
+    ("ask|deny", f"while read x; do {_SORT_SH}; done <<EOF\n*.a\nEOF"),
+    ("ask|deny", f"if true; then {_SORT_SH}; fi <<EOF\n*.a\nEOF"),
+    ("ask|deny", f"{{ {_SORT_SH}; }} <<< '*.a'"),
+    ("allow", "cat <<'EOF' > f.md\n* item\nEOF"),
+    ("allow", 'while read l; do echo "$l"; done < f'),
+    ("allow", "tee \"$F\" <<'EOF'\n* a\nEOF"),
+    ("allow", "tee -a \"$LOG\" <<'EOF'\n* a\nEOF"),
+    ("allow", "tee \"${OUT}/notes.md\" > /dev/null <<'EOF'\n* a\nEOF"),
+    ("allow", "cat \"$F\" - <<'EOF'\n* a\nEOF"),
+    ("allow", "cat <<'EOF' | tee \"$F\"\n* a\nEOF"),
+    ("ask|deny", "sort $O <<E\n* a\nE"),
+    ("ask|deny", 'sort "$O" <<E\n* a\nE'),
+]
+
+
 def _decision(code: int, out: str) -> str:
     if code == 2:
         return "deny"
@@ -3369,7 +3391,7 @@ def test_a_shell_script_named_like_an_option_is_read(opted_in_project, command):
                          + _ROUND31_CORPUS + _ROUND32_CORPUS + _ROUND33_CORPUS
                          + _ROUND33B_CORPUS + _ROUND34_CORPUS + _ROUND34B_CORPUS
                          + _ROUND35_CORPUS + _ROUND36_CORPUS + _ROUND37_CORPUS
-                         + _ROUND37B_CORPUS + _ROUND37C_CORPUS)
+                         + _ROUND37B_CORPUS + _ROUND37C_CORPUS + _ROUND37D_CORPUS)
 def test_round12_corpus(opted_in_project, expected, command):
     (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
     (opted_in_project / "ok.sh").write_text("echo hi\n")

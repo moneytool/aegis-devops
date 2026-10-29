@@ -327,18 +327,18 @@ behaviour.
   bodies) are checked too. For this check a here-document body is shell-run when a shell,
   `eval`, `source`, `.` or `exec` is a program of the pipeline its `<<` is in (`bash <<EOF`,
   `cat <<EOF | sh`: as for a command), data when every program there is a data sink (`cat`,
-  `tee`, `jq`, `sort`, …; not `git` or `gh`, which run programs in too many ways; none with
-  an option that runs a program on what it reads, `sort --compress-program` or `diff
-  --diff-program`, also abbreviated, or with an expansion among its arguments: `sort "$O"`)
-  or an interpreter of another
-  language reading the body as its
-  program (`python3`, `python3 -`, `node`; also `python3 -m json.tool`; not one given inline
-  code or a script, which may hand the body to a shell: `python3 -c '…os.system(input())'`),
+  `tee`, `jq`, `sort`, …; not `git` or `gh`, which run programs in too many ways; for `sort`
+  and `diff`, none of `--compress-program` or `--diff-program`, also abbreviated, nor an
+  expansion among the arguments: `sort "$O"`) or an interpreter of another language reading
+  the body as its program (`python3`, `python3 -`, `node`; also `python3 -m json.tool`; not
+  one given inline code or a script, which may hand the body to a shell: `python3 -c
+  '…os.system(input())'`),
   with no `<(…)`/`>(…)` and no descriptor path (not checked: a Markdown `* item`), and otherwise
   unknown (`tee >(sh)`, a function or alias in the command, `sed`, `xargs`, an `eval`
   anywhere, a group or subshell in a command with a pipe: `(cat <<E …) | x`, a
   here-document inside `$(…)`, backticks, `<(…)` or `>(…)`, whose output goes on, and a
-  pipe into or out of a compound command: `cat <<E | if …; then …; fi`), where a globbed
+  pipe into or out of a compound command: `cat <<E | if …; then …; fi`, a here-document
+  attached to a group, subshell, loop or if: `{ …; } <<E`, `done <<E`), where a globbed
   word asks (an `eval` anywhere adds every body to these). A here-string (`<<< word`) is
   read like a one-line body, also inside a substitution. A body whose pipeline goes on past
   its line (`cat <<E |`, the next stage after the body) has an unknown reader too (accepted

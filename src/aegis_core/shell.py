@@ -2050,7 +2050,7 @@ def _sink_runs_a_program(name: str, arguments: list[str]) -> bool:
     the command runs (``sort "$O"``)."""
     options = _SINK_PROGRAM_OPTIONS.get(name, ())
     for a in arguments:
-        if "$" in a or "`" in a:
+        if options and ("$" in a or "`" in a):
             return True  # sort $O: an option only known when the command runs
         long_name = a[2:].partition("=")[0] if a.startswith("--") else ""
         for o in options:
@@ -2127,7 +2127,7 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
         for value, at in strings:
             low, high = pipelines[at - base]
             reader = _tail_reader(tokens, low, high, readers)
-            if reader != "shell" and piped_on():
+            if reader != "shell" and (piped_on() or attached_to_compound(low)):
                 reader = "unknown"  # the pipeline goes on past this line: unread readers
             state["strings"].append((value, reader, depth))
         strings.clear()
@@ -2137,6 +2137,15 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
         while at > line_start and tokens[at - 1][0] != "sep":
             at -= 1
         return at
+
+    def attached_to_compound(low: int) -> bool:
+        """Whether the command at ``low`` is the end of a group, subshell, loop or
+        if (``{ …; } <<E``, ``( … ) <<E``, ``done <<E``): what reads the body
+        runs inside it."""
+        if low > 0 and tokens[low - 1][:2] == ("sep", ")"):
+            return True
+        return low < len(tokens) and tokens[low][0] == "word" and tokens[low][1] in (
+            "}", "done", "fi", "esac") and tokens[low][3] - tokens[low][2] == len(tokens[low][1])
 
     def piped_on() -> bool:
         """Whether this line ends with a | whose next stage is on a later line."""
@@ -2165,7 +2174,7 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
                     # the reader is the pipeline the << is in, not the whole line
                     low, high = pipelines[at - base]
                     reader = _tail_reader(tokens, low, high, readers)
-                    if reader != "shell" and piped_on():
+                    if reader != "shell" and (piped_on() or attached_to_compound(low)):
                         reader = "unknown"  # cat <<E |, then the reader after the body
                     if reader == "shell":
                         state["glob_bodies"].append(body)  # bash <<EOF, cat <<EOF | sh
