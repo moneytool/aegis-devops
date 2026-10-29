@@ -2883,6 +2883,10 @@ def test_help_and_version_probes_are_informational(argv, kind):
     "kubectl nuke --help",
     "helm diff --help",
     "gh my-alias --help",
+    # gh extension exec passes --help / -h to the extension, which runs
+    "gh extension exec review-probe --help",
+    "gh extension exec review-probe -h",
+    "gh extension exec --help",
     # flyway runs every command word it is given
     "flyway version clean",
     "flyway help clean",
@@ -2930,6 +2934,43 @@ def test_aws_help_is_never_informational_an_alias_can_replace_it():
         assert not any(i.params.get("informational") for i in intents)
     (intent,) = from_argv(["aws", "--version"])
     assert intent.params["informational"] == "version"
+
+
+@pytest.mark.parametrize("argv", [
+    "gh extension exec review-probe --help",
+    "gh extension exec review-probe -h",
+])
+def test_gh_extension_exec_help_is_still_an_extension_exec(argv):
+    """PR #59 review: "extension exec" sets DisableFlagParsing, so --help
+    reaches the extension and runs it. It stays extension/exec, which
+    extension/* constraints match, not a cli/gh read."""
+    (intent,) = from_argv(argv.split())
+    assert intent.resource == "extension/exec"
+    assert "informational" not in intent.params
+
+
+def test_gh_extension_exec_help_is_still_blocked_by_an_extension_rule():
+    """PR #59 review reproduction: BLOCK for github extension/* stays BLOCK
+    when --help or -h follows the extension name."""
+    from aegis_core.interceptor import AegisInterceptor
+    from aegis_core.shell import intents_from_command
+    from aegis_core.store import Constraint, ConstraintStore
+
+    store = ConstraintStore(authority_map={"admin": {"configuration"}})
+    store.add_constraint(Constraint.create(
+        id="block-gh-extensions", provider="github", resource_pattern="extension/*",
+        actions={"*"}, effect="BLOCK", constraint_class="configuration",
+        principal="admin", source_ref="git-abc",
+        source_timestamp="2026-01-01T00:00:00+00:00", rule_text="No gh extensions.",
+    ))
+    interceptor = AegisInterceptor(store)
+    for command in ("gh extension exec review-probe --help",
+                    "gh extension exec review-probe -h",
+                    "gh extension exec review-probe"):
+        (intent,) = intents_from_command(command)
+        decision = interceptor.intercept(intent)
+        assert decision.verdict == "BLOCK", command
+        assert "block-gh-extensions" in decision.citations
 
 
 @pytest.mark.parametrize("argv", [

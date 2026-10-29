@@ -3134,6 +3134,13 @@ _KUBECTL_SUBCOMMANDS: dict[tuple[str, ...], frozenset[str]] = {
 # (argparse) exits on -h before running its command.
 _INFO_ONE_VERB_HELP_TOOLS = {"git", "alembic"}
 
+# Built-in command paths that pass every later argument, --help and -h
+# included, to code outside the tool: "gh extension exec NAME --help" runs
+# the extension (the command sets DisableFlagParsing).
+_INFO_FORWARDING_PATHS: dict[str, tuple[tuple[str, ...], ...]] = {
+    "gh": (("extension", "exec"),),
+}
+
 # The flags that make "<tool> <words...> <flag>" help, where narrower than
 # the tool's own help flags: "git <cmd> -h" is handed to an alias as is
 # (and is a real option of grep and ls-remote).
@@ -3184,6 +3191,9 @@ def _informational_kind(name: str, args: list[str]) -> str | None:
     if args[-1] in ("--help", "-h") and args[-1] in verb_help_flags:
         words = args[:-1]
         if not words or not all(_is_word(t) for t in words):
+            return None
+        if any(tuple(words[:len(path)]) == path
+               for path in _INFO_FORWARDING_PATHS.get(name, ())):
             return None
         if name in _INFO_ONE_VERB_HELP_TOOLS:
             return "help" if len(words) == 1 else None

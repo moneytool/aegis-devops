@@ -38,7 +38,7 @@ behaviour.
   `alembic <cmd> --help`; for aws only `aws --version` (an alias in `~/.aws/cli/alias` can
   replace `help` and any service name, so `aws s3 help` is parsed as an aws command). Anything
   else (an option before `--help`, `--` before it, `git <cmd> -h`, a plugin or unknown
-  subcommand) is parsed as the command it is, so `kubectl -n --help delete ns prod` is still a
+  subcommand, `gh extension exec NAME --help`, which runs the extension) is parsed as the command it is, so `kubectl -n --help delete ns prod` is still a
   namespace delete. In a chain each command is still checked: `argocd version --client && argocd
   app delete payments` escalates.
 

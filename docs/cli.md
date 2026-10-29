@@ -325,7 +325,8 @@ For aws only `aws --version` counts: a `[toplevel]` alias in `~/.aws/cli/alias` 
 
 Anything else is parsed as the command it is: an option before the help flag
 (`kubectl -n --help delete ns prod` deletes namespace `prod`), `--` before it, a plugin,
-extension or unknown subcommand. Some real probes are therefore still refused, for example
+extension or unknown subcommand, and `gh extension exec NAME --help`, which passes the flag to
+the extension and runs it. Some real probes are therefore still refused, for example
 `gcloud version --format json` and `alembic -c x.ini upgrade --help`. The git and aws parsers
 do not resolve aliases at all: `git co` is read as a git command, and an unknown aws service
 as that service.
