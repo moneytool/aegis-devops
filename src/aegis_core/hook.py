@@ -474,8 +474,8 @@ def _stdin_asks(command: str) -> list[str]:
                     "which the hook cannot check")
     # a bare shell anywhere after the first piped compound (where the compound
     # ends is not worked out: quotes, $(…) and nesting make it unreliable)
-    stage = _PIPED_COMPOUND_RE.search(command)
-    if stage is not None and _bare_reader(command, stage.start() + 1, len(command)):
+    stage = _piped_compound(command)
+    if stage is not None and _bare_reader(command, stage, len(command)):
         asks.append("aegis: a pipe feeds a group, loop or if that runs a shell or interpreter, "
                     "which may read its commands from the pipe; the hook cannot check them")
     return asks
@@ -956,21 +956,23 @@ def _rejected(command: str, reason: str, config_dir: Path, extra_args: list[str]
             "run the infrastructure command on its own, without shell expansion",
             unchecked=True,
         )
-    generated = _GENERATED_CODE_RE.search(command)
+    # a quoted here-document only data sinks read (cat > README.md <<'EOF') is
+    # data: the loose checks below do not read it as commands
+    code = without_data_bodies(command)
+    generated = _GENERATED_CODE_RE.search(code)
     if generated:
         return HookVerdict(
             "ask",
             f"aegis: {generated.group(1)} runs code that is only produced when the command "
             "runs, so it cannot be checked; run the commands directly instead",
         )
-    producer = loose_code_reader(command)
+    producer = loose_code_reader(code)
     if producer is not None:
         return HookVerdict(
             "ask", f"aegis: a shell or interpreter runs code from {producer}, which the hook "
             "cannot read; save it to a file and run that, so its commands are checked")
-    if _piped_into_reader(command):
+    if _piped_into_reader(code):
         return HookVerdict("ask", _PIPED_READER_ASK)
-    code = without_data_bodies(command)  # a quoted here-document cat writes is data
     scripts = script_runs_loosely(code)
     if scan:
         here = None if _changes_directory(code) else cwd
@@ -1219,9 +1221,25 @@ def _c_strings_with_stdin(command: str) -> list[tuple[str, str, str]]:
     return found
 
 
-# A pipe into a group, subshell, loop or if: every command in it shares the pipe.
-_PIPED_COMPOUND_RE = re.compile(
-    r"(?<!\|)\|(?!\|)&?\s*(?:time\s+(?:-p\s+)?|!\s*)?(?:[{(]|(?:if|while|until|for|select|case)\b)")
+_COMPOUND_OPENERS = frozenset({"{", "if", "while", "until", "for", "select", "case"})
+
+
+def _piped_compound(command: str) -> int | None:
+    """Where the first pipe into a group, subshell, loop or if ends (every
+    command in it shares the pipe), read from the tokens, so a newline,
+    comment or blank line after the ``|`` is passed over as the shell does;
+    ``None`` when there is none."""
+    tokens = _shell_tokens(command)
+    for k, (kind, value, _start, end) in enumerate(tokens):
+        if kind != "sep" or value not in ("|", "|&"):
+            continue
+        j = k + 1
+        while j < len(tokens) and tokens[j][0] == "word" and tokens[j][1] in ("time", "-p", "!"):
+            j += 1
+        if j < len(tokens) and (tokens[j][:2] == ("sep", "(") or (
+                tokens[j][0] == "word" and tokens[j][1] in _COMPOUND_OPENERS)):
+            return end
+    return None
 
 
 def _bare_reader(command: str, start: int, end: int) -> bool:
