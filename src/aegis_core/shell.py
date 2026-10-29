@@ -1640,6 +1640,26 @@ def _ansi_c(text: str, i: int, n: int) -> tuple[str, int, bool]:
     return "".join(value), i + 1, i < n
 
 
+_BACKTICK_ESCAPE_RE = re.compile(r"\\([`\\$])")
+
+
+def _backtick(text: str, i: int, state: dict, depth: int) -> int:
+    """The index after the ``` `…` ``` that opens at ``text[i]``: it ends at
+    the first backtick no backslash escapes. Its command line, with bash's
+    unescaping (``\\` `` -> `` ` ``, ``\\\\`` -> ``\\``, ``\\$`` -> ``$``, so an
+    escaped backtick inside is a nested substitution), is recorded at the top
+    level and read as a command line in turn (:func:`nested_commands`)."""
+    n = len(text)
+    j = i + 1
+    while j < n and text[j] != "`":
+        j += 2 if text[j] == "\\" else 1
+    if j >= n:
+        state["unclosed"] = True
+    if depth == 0:
+        state["substitutions"].append(_BACKTICK_ESCAPE_RE.sub(r"\1", text[i + 1:min(j, n)]))
+    return min(j + 1, n)
+
+
 def _body_substitutions(body: str, state: dict) -> None:
     """Records the command substitutions an unquoted here-document body runs
     (``$(…)``, backticks, also inside ``${…}``, ``$((…))`` and ``$[…]``); its
@@ -1652,10 +1672,7 @@ def _body_substitutions(body: str, state: dict) -> None:
         elif c == "$" and body[i + 1:i + 2] in ("(", "{", "["):
             i = _expansion(body, i, [], state, 0, in_double=True)
         elif c == "`":
-            j = body.find("`", i + 1)
-            if j > 0:
-                state["substitutions"].append(body[i + 1:j])
-            i = n if j < 0 else j + 1
+            i = _backtick(body, i, state, 0)
         else:
             i += 1
 
@@ -1774,6 +1791,11 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
                         value.append(text[i:j])
                         i = j
                         continue
+                    if text[i] == "`":  # "`…`" runs too
+                        j = _backtick(text, i, state, depth)
+                        value.append(text[i:j])
+                        i = j
+                        continue
                     if text[i] == "\\" and text[i + 1:i + 2] in ('"', "\\", "$", "`", "\n"):
                         i += 1
                         if text[i] == "\n":
@@ -1789,11 +1811,7 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
                 value.append(text[i:j])
                 i = j
             elif c == "`":
-                j = text.find("`", i + 1)
-                state["unclosed"] |= j < 0
-                if depth == 0 and j > 0:
-                    state["substitutions"].append(text[i + 1:j])
-                j = n if j < 0 else j + 1
+                j = _backtick(text, i, state, depth)
                 value.append(text[i:j])
                 i = j
             else:
@@ -1865,10 +1883,7 @@ def _skip_expansion(text: str, i: int, opening: str, closing: str, bodies: list[
             in_double = not in_double
             i += 1
         elif c == "`":
-            j = text.find("`", i + 1)
-            if depth == 0 and j > 0:
-                state["substitutions"].append(text[i + 1:j])
-            i = n if j < 0 else j + 1
+            i = _backtick(text, i, state, depth)
         elif c == "$" and text[i + 1:i + 2] in ("{", "[") and _nest(state):
             pair = ("{", "}") if text[i + 1] == "{" else ("[", "]")
             i = _skip_expansion(text, i + 1, *pair, bodies, state, depth,

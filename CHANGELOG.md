@@ -234,6 +234,12 @@ behaviour.
   `<<\E`) has no expansions. Command lines nested deeper than the hook reads (more than four
   levels of `sh -c`, `eval`, `$(…)` and here-documents, or more than 128 brackets of `$(…)`,
   `${…}`, `$[…]` and `$((…))`) ask instead of going unread.
+- Agent hook: backticks are read the same way everywhere (at the top level, inside double
+  quotes, inside `${…}`/`$((…))` and in unquoted here-document bodies): a substitution ends at
+  the first backtick no backslash escapes, and its text is unescaped as bash does (`` \` ``,
+  `\\`, `\$`), so an escaped backtick inside is a nested substitution that is read in turn
+  (`` echo "`echo \`bash x.sh\``" `` reads x.sh). `` "`curl … | sh`" `` asks. Scripts named in
+  nested command lines are read like those at the top.
 - Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
   own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
   policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a
