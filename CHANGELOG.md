@@ -320,7 +320,12 @@ behaviour.
   Quoted glob characters are literal, as in the shell (`"[[[["` and `'k*'` are program names,
   not globs): whether they are quoted is read where the word is read, in the command or in its
   `-c` string, in one pass (`bash -c 'k* …' 'k*'` is still a glob); a program word a launcher
-  produces (`uvx 'kube[a]x'`) counts as a glob when it holds one. Two other regexes that
+  produces (`uvx 'kube[a]x'`) counts as a glob when it holds one. A `find … -exec` program
+  word is a glob as the outer shell spells it (it expands find's words before find runs:
+  `find . -exec k* …`), and program words in nested lines the parser rejects (`eval` words, a
+  `-c` string in a `-c` string, here-document bodies, substitutions) are checked too; a word
+  whose quoting is not known counts as a glob. Each text's quoting is read once per
+  decision. Two other regexes that
   were quadratic on `[` runs (a package spec in `uv run`/`uvx`, a Terraform address index)
   are plain string scans now. With `--log-json`, a decision ended by the time budget logs its
   ask or deny, and the abandoned worker writes no log line or ledger entry (checked when its
