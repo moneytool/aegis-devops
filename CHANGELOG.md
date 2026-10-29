@@ -400,6 +400,17 @@ behaviour.
   `kube{ctl,x} delete …`) is now kept when a script is read (`bash x.sh`, `./x.sh`, `source
   x.sh`, `sh < x.sh`) and asks like the same command typed directly; a glob in an argument
   (`rm -f *.tmp`) still allows.
+- Agent hook: inside a script the hook reads (`bash x.sh`, `./x.sh`, `sh < x.sh`, `source
+  x.sh`), a line that may change the account, cluster, program or directory of a later line
+  that names an infrastructure tool now refuses the script as a computed scope does ("cannot
+  check this command statically"): an assignment, `export`, `declare`, `unset`, `read` or
+  `printf -v` of the variables the hook watches, `cd` / `pushd` / `popd`, `set -a`, `alias`, a
+  function, `eval`, or a nested `source` / `.`. Literal settings (`export AWS_PROFILE=prod`,
+  `AWS_PROFILE=prod`, `declare -x …`) in a script without control flow are followed instead,
+  so `export AWS_PROFILE=prod-admin` then `aws s3 rm …` is judged in prod. Before, each line
+  was judged with the invoking environment and directory. Scripts that change none of these
+  before an infrastructure line (`set -euo pipefail` then `kubectl get pods`, `cd build &&
+  make`) are still judged line by line.
 
 ### Changed
 - Agent hook: code piped into a shell or interpreter, or fed to one by a here-string or here-doc

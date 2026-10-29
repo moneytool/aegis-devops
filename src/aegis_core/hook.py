@@ -85,6 +85,7 @@ from aegis_core.shell import (
     _c_string_at,
     _env_change,
     _eval_words_end,
+    _infra_env,
     _interpreter,
     _readers,
     _shell_tokens,
@@ -1863,6 +1864,67 @@ def _known_variables(path: str, command: str) -> str:
     return _PATH_VARIABLE_RE.sub(value, path) if "$" in path else path
 
 
+# A script line that may change which account, cluster, program or directory a
+# later line's infrastructure tool uses (also when spelt oddly or quoted: only
+# ever too eager, which costs a refusal when a later line names a tool).
+_SCOPE_CHANGE_RE = re.compile(
+    r"(?:^|[\s;&|(`'\"\\])(?:cd|pushd|popd|alias|eval|source|function)"
+    r"(?=$|[\s;&|)'\"])"
+    r"|(?:^|[\s;&|(])\.(?=\s)"
+    r"|(?<![\w-])[\w-]+\s*\(\s*\)")  # f() { …; } (a word start only: linear)
+# set's option words (`set -a`, `set -o allexport`): read once each, so linear
+_SET_OPTIONS_RE = re.compile(r"\bset((?:[ \t]+(?:[-+]\w+|allexport))+)")
+_SCOPE_ASSIGN_RE = re.compile(r"(?:^|[\s;&|(`'\"])([A-Za-z_]\w*)(?:\[[^\]]*\])?\+?=")
+_DECLARED_RE = re.compile(r"\b(?:export|declare|typeset|readonly|local|unset|read|mapfile|"
+                          r"readarray|getopts|printf)\b([^;&|\n]*)")
+_CONTROL_FLOW_RE = re.compile(
+    r"(?:^|[\s;&|(])(?:if|then|elif|else|fi|while|until|for|select|do|done|case|esac)"
+    r"(?=$|[\s;&|)])|[{}()]|&&|\|\||(?<![<>&])&(?![>&])")
+
+
+def _changes_scope(line: str) -> bool:
+    """Whether a script line may change the environment or directory a later
+    line's infrastructure tool sees: an assignment, ``export`` / ``declare`` /
+    ``unset`` / ``read`` / ``printf -v`` of a variable in the hook's list (see
+    :func:`aegis_core.shell.plain_binary`), ``cd`` / ``pushd`` / ``popd``,
+    ``set -a``, ``alias``, a function, ``eval``, or a nested ``source`` / ``.``."""
+    if _SCOPE_CHANGE_RE.search(line):
+        return True
+    for m in _SET_OPTIONS_RE.finditer(line):
+        if any(w == "allexport" or w[0] in "-+" and "a" in w[1:] for w in m.group(1).split()):
+            return True
+    if any(_infra_env(m.group(1)) for m in _SCOPE_ASSIGN_RE.finditer(line)):
+        return True
+    for m in _DECLARED_RE.finditer(line):
+        for word in m.group(1).split():
+            name, eq, _value = word.partition("=")
+            if _infra_env(name.lstrip("-+\"'")) or eq and any(ch in name for ch in "$`"):
+                return True  # also a name only known at run time: export "$N"=x
+    return False
+
+
+def _literal_scope_setting(line: str) -> str | None:
+    """``export AWS_PROFILE=x`` / ``AWS_PROFILE=x`` / ``declare -x …`` with
+    nothing else on the line: its literal settings of the hook's variables as
+    one ``export`` command; ``None`` for any other line."""
+    if any(ch in line for ch in "$`\\;&|<>(){}*?[]~") or _SCOPE_CHANGE_RE.search(line):
+        return None
+    try:
+        words = shlex.split(line)
+    except ValueError:
+        return None
+    if words and words[0] in ("export", "declare", "typeset", "readonly"):
+        words = [w for w in words[1:] if w != "-x"]
+        if not words or words[0] == "--":
+            return None
+    if not words or not all(_ASSIGNMENT_RE.match(w) for w in words):
+        return None
+    change = _env_change([], dict(w.partition("=")[::2] for w in words))
+    if change is None or change[1] or any(k.endswith("+") or "[" in k for k in change[0]):
+        return None
+    return "export " + " ".join(f"{k}={shlex.quote(v)}" for k, v in change[0].items())
+
+
 def _scan_script_once(runs: dict, config_dir: Path, extra_args: list[str] | None,
                       cwd: Path | None, *, command: str = "") -> HookVerdict | None:
     interpreter = _basename(runs.get("interpreter", "") or "")
@@ -1935,11 +1997,33 @@ def _scan_script_once(runs: dict, config_dir: Path, extra_args: list[str] | None
         return None  # ./x without #!: a binary, not a shell script
     # a line whose program word is a glob or brace (`kube{ctl,x} …`, `/usr/bin/kubec?l …`)
     # may run an infrastructure tool it does not name: kept, so the glob check sees it
-    lines = [(n, line, ask) for n, line, ask in _script_lines(text)
+    every = _script_lines(text)
+    lines = [(n, line, ask) for n, line, ask in every
              if ask is not None or mentions_infra(line)
              or globbed_program_word(line) is not None]
     if not lines:
         return None
+    settings: dict[int, str] = {}  # line number -> the literal settings, as an export
+    changes = [(n, line) for n, line, ask in every if ask is None and _changes_scope(line)]
+    if changes and any(n > changes[0][0] for n, _l, _a in lines):
+        # a line that may change the account, cluster or directory of the infrastructure
+        # lines after it: only literal settings in a script without control flow are
+        # followed (kept, so the lines run through the policy together carry them)
+        if all(_literal_scope_setting(line) for _n, line in changes) and not any(
+                ask is None and _CONTROL_FLOW_RE.search(line) for _n, line, ask in every):
+            settings = {n: _literal_scope_setting(line) or "" for n, line in changes}
+            lines = [(n, line, ask) for n, line, ask in every
+                     if n in settings or (n, line, ask) in lines]
+        else:
+            number, line = changes[0]
+            return HookVerdict(
+                "deny",
+                f"aegis: cannot check this command statically ({path} line {number}: "
+                f"{line.strip()!r} may change the environment, such as the account, cluster "
+                "or directory, of the infrastructure commands after it); run the "
+                "infrastructure command on its own",
+                unchecked=True,
+            )
     if len(lines) > SCRIPT_SCAN_MAX_LINES:
         return HookVerdict("ask", f"aegis: {path} names an infrastructure tool on more than "
                                   f"{SCRIPT_SCAN_MAX_LINES} lines, so they were not checked")
@@ -1949,6 +2033,9 @@ def _scan_script_once(runs: dict, config_dir: Path, extra_args: list[str] | None
         located = f"{path} line {number}: {line.strip()!r}"
         if ask is not None:
             first_ask = first_ask or f"aegis: {located}: {ask}"
+            continue
+        if number in settings:
+            checkable.append((number, line, settings[number]))
             continue
         pre = _precheck(line, config_dir, extra_args, cwd, scan=False)
         if isinstance(pre, HookVerdict):

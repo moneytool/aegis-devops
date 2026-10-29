@@ -3835,3 +3835,76 @@ def test_script_lines_with_plain_globs_in_arguments_allow(opted_in_project, run_
     script.chmod(0o755)
     verdict = hook.decide(run_it, opted_in_project / ".aegis", [], cwd=opted_in_project)
     assert verdict.decision == "allow", verdict.reason
+
+
+# --- scope changes inside scripts the hook reads ---------------------------------
+
+_SCRIPT_RUNS = ["bash x.sh", "./x.sh", "sh < x.sh", "source x.sh", ". x.sh"]
+
+
+def _script_verdict(project, config_dir, body, run_it):
+    script = project / "x.sh"
+    script.write_text("#!/bin/bash\n" + body)
+    script.chmod(0o755)
+    return _scoped(project, config_dir, run_it)
+
+
+@pytest.mark.parametrize("run_it", _SCRIPT_RUNS)
+@pytest.mark.parametrize("body", [
+    "export AWS_PROFILE=prod-admin\naws s3 rm s3://b/k\n",
+    "AWS_PROFILE=prod-admin\naws s3 rm s3://b/k\n",
+    "declare -x AWS_PROFILE='prod-admin'\necho go\naws s3 rm s3://b/k\n",
+])
+def test_literal_export_in_a_script_reaches_its_later_lines(prod_scope_project, body, run_it):
+    verdict = _script_verdict(*prod_scope_project, body, run_it)
+    assert verdict.decision == "deny"
+    assert "no-aws-delete-in-prod" in verdict.reason
+
+
+@pytest.mark.parametrize("run_it", _SCRIPT_RUNS)
+@pytest.mark.parametrize("body", [
+    "cd sub\nkubectl delete pod web\n",
+    "pushd sub\naws s3 rm s3://b/k\n",
+    "unset AWS_PROFILE\naws s3 rm s3://b/k\n",
+    "read AWS_PROFILE\naws s3 rm s3://b/k\n",
+    "printf -v AWS_PROFILE %s prod-admin\naws s3 rm s3://b/k\n",
+    "export AWS_PROFILE=\"$(cat p)\"\naws s3 rm s3://b/k\n",
+    "set -a\n. ./vars\naws s3 rm s3://b/k\n",
+    "alias aws='aws --profile prod-admin'\naws s3 rm s3://b/k\n",
+    "setup() { export AWS_PROFILE=prod-admin; }\nsetup\naws s3 rm s3://b/k\n",
+    "eval \"$SETUP\"\naws s3 rm s3://b/k\n",
+    "source env.sh\naws s3 rm s3://b/k\n",
+    "if true; then\nexport AWS_PROFILE=staging\nfi\naws s3 rm s3://b/k\n",
+    "true && export AWS_PROFILE=staging\naws s3 rm s3://b/k\n",
+])
+def test_unfollowable_scope_change_in_a_script_refuses(prod_scope_project, body, run_it):
+    verdict = _script_verdict(*prod_scope_project, body, run_it)
+    assert verdict.decision == "deny"
+    assert "statically" in verdict.reason
+
+
+@pytest.mark.parametrize("run_it", _SCRIPT_RUNS)
+@pytest.mark.parametrize("body", [
+    "set -euo pipefail\nkubectl get pods\n",
+    "cd build && make\n",
+    "echo start\nread -r line\nkubectl get pods\n",
+    "kubectl get pods\ncd sub\n",
+    "FOO=1\nexport BAR=2\naws s3 ls s3://b\n",
+    "export AWS_PROFILE=staging\naws s3 rm s3://b/k\n",
+])
+def test_scripts_without_scope_changes_before_infra_lines_allow(prod_scope_project, body,
+                                                                run_it):
+    verdict = _script_verdict(*prod_scope_project, body, run_it)
+    assert verdict.decision == "allow", verdict.reason
+
+
+@pytest.mark.parametrize("line", ["a" * 60000, "set " * 15000, "a-" * 30000, "export " * 8000,
+                                  "cd" * 30000, "read " * 12000])
+def test_scope_change_checks_on_long_script_lines_stay_linear(opted_in_project, line):
+    # `[\w-]+\s*\(` from every position of a long word, and `set …` rescanning to the end
+    # of the line from each `set`, were quadratic (12 s on a 60 KB word)
+    script = opted_in_project / "x.sh"
+    script.write_text(f"#!/bin/bash\n{line}\nkubectl get pods\n")
+    started = time.monotonic()
+    hook.decide("bash x.sh", opted_in_project / ".aegis", [], cwd=opted_in_project)
+    assert time.monotonic() - started < 1 * TIMING_SLACK
