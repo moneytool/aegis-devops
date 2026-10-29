@@ -950,7 +950,11 @@ def _cdpath_changed() -> bool:
     """Whether the whole command the hook was given names CDPATH (``CDPATH=…``,
     ``export CDPATH``), so a ``cd`` may search other directories."""
     state = _SCANNED.get()
-    return state is not None and re.search(r"\bCDPATH\b", state["command"]) is not None
+    if state is None:
+        return False
+    if "cdpath" not in state:  # once per command: a cd per part would rescan it each time
+        state["cdpath"] = re.search(r"\bCDPATH\b", state["command"]) is not None
+    return state["cdpath"]
 
 
 def _cd(here: Path | None, argv: list[str]) -> Path | None:
@@ -1932,9 +1936,29 @@ _SET_OPTIONS_RE = re.compile(r"\bset((?:[ \t]+(?:[-+]\w+|allexport))+)")
 _SCOPE_ASSIGN_RE = re.compile(r"(?:^|[\s;&|(`'\"])([A-Za-z_]\w*)(?:\[[^\]]*\])?\+?=")
 _DECLARED_RE = re.compile(r"\b(export|declare|typeset|readonly|local|unset|read|mapfile|"
                           r"readarray|getopts|printf)\b([^;&|\n]*)")
-_CONTROL_FLOW_RE = re.compile(
-    r"(?:^|[\s;&|(])(?:if|then|elif|else|fi|while|until|for|select|do|done|case|esac)"
-    r"(?=$|[\s;&|)])|[{}()]|&&|\|\||(?<![<>&])&(?![>&])")
+_CONTROL_WORDS = frozenset({"if", "then", "elif", "else", "fi", "while", "until", "for",
+                            "select", "do", "done", "case", "esac", "{", "}", "function"})
+_CONTROL_SEPS = frozenset({"&&", "||", "&", "(", ")", ";;", ";&", ";;&"})
+_LOOP_NAME_RE = re.compile(r"(?:^|[\s;&|(])(?:for|select)\s+(\S+)")
+
+
+def _control_flow(line: str) -> bool:
+    """Whether a script line holds control flow the line-by-line reading loses:
+    a reserved word or brace in command position, a subshell, a function, a
+    case arm, ``&&`` / ``||`` or a background ``&`` -- read with the lexer, so
+    ``$(…)``, ``${…}`` and quoted text do not count."""
+    command_position = True
+    for kind, value, _start, _end in _shell_tokens(line):
+        if kind == "sep":
+            if value in _CONTROL_SEPS:
+                return True
+            command_position = True
+            continue
+        if kind == "word":
+            if command_position and value in _CONTROL_WORDS:
+                return True
+            command_position = command_position and _ASSIGNMENT_RE.match(value) is not None
+    return False
 
 
 # A variable whose value the hook checks only in a typed command (:func:`_hidden_command`).
@@ -1980,6 +2004,8 @@ def _changes_scope(line: str) -> bool:
 def _changes_scope_spelt(line: str) -> bool:
     if _SCOPE_CHANGE_RE.search(line):
         return True
+    if any(_may_name_scope_variable(m.group(1)) for m in _LOOP_NAME_RE.finditer(line)):
+        return True  # for AWS_PROFILE in …: the loop sets it
     for m in _SET_OPTIONS_RE.finditer(line):
         if any(w == "allexport" or w[0] in "-+" and "a" in w[1:] for w in m.group(1).split()):
             return True
@@ -2036,7 +2062,7 @@ def _script_directories(every: list[tuple[int, str, str | None]],
     ``cd`` are listed."""
     if not _changes_directory("\n".join(line for _n, line, _a in every)):
         return {}
-    control = any(ask is None and _CONTROL_FLOW_RE.search(line) for _n, line, ask in every)
+    control = any(ask is None and _control_flow(line) for _n, line, ask in every)
     here = cwd
     found: dict[int, Path | None] = {}
     moved = cdpath = False
@@ -2144,7 +2170,7 @@ def _scan_script_once(runs: dict, config_dir: Path, extra_args: list[str] | None
         # lines after it: only literal settings in a script without control flow are
         # followed (kept, so the lines run through the policy together carry them)
         if all(_literal_scope_setting(line) for _n, line in changes) and not any(
-                ask is None and _CONTROL_FLOW_RE.search(line) for _n, line, ask in every):
+                ask is None and _control_flow(line) for _n, line, ask in every):
             settings = {n: _literal_scope_setting(line) or "" for n, line in changes}
             numbers = {n for n, _line, _ask in lines} | settings.keys()
             lines = [(n, line, ask) for n, line, ask in every if n in numbers]
@@ -2164,7 +2190,7 @@ def _scan_script_once(runs: dict, config_dir: Path, extra_args: list[str] | None
                 "infrastructure command on its own",
                 unchecked=True,
             )
-    if len(lines) > SCRIPT_SCAN_MAX_LINES:
+    if len(lines) - len(settings) > SCRIPT_SCAN_MAX_LINES:  # the settings kept do not count
         return HookVerdict("ask", f"aegis: {path} names an infrastructure tool on more than "
                                   f"{SCRIPT_SCAN_MAX_LINES} lines, so they were not checked")
     first_ask: str | None = None

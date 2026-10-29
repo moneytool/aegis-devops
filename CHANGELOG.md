@@ -440,7 +440,14 @@ behaviour.
   `source /dev/fd/3; kubectl …` asks at once instead of waiting on the pipe. In scripts and
   sourced files, names and command words are matched after quote removal, and a quoted name or
   command word (`export H"ELM_NAMESPACE"=prod`, `sour""ce x.sh`) is never followed as a
-  setting.
+  setting. Whether the command names `CDPATH` is worked out once, not once per `cd`
+  (`"cd a;"` 12800 times took 5.25 s), and the literal settings kept from a script do not
+  count toward its 64-line limit. A `for` / `select` loop whose variable is one the hook
+  watches (`for AWS_PROFILE in prod; do …; done`), and a watched variable assigned in front
+  of a POSIX special builtin (`AWS_PROFILE=prod :`, which sh and dash keep), are changes the
+  hook cannot follow, typed, in a `sh -c` string or in a script: the infrastructure commands in
+  the loop and after it are refused. A script's control flow is now read with the shell lexer,
+  so `$(…)`, `${…}` and quoted text no longer stop its literal settings from being followed.
 
 ### Changed
 - Agent hook: code piped into a shell or interpreter, or fed to one by a here-string or here-doc

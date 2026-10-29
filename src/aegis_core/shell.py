@@ -85,6 +85,8 @@ class SimpleCommand:
     # for/select body or a `{ …; }` group, which an `&&` / `||` or a pipe or `&`
     # after it may skip or run apart (see :func:`intents_from_command`)
     unsettled: bool = False
+    # the for/select loop variables set just before this command (the loop's body)
+    loop_names: tuple[str, ...] = ()
 
 
 # --- tokenising --------------------------------------------------------------
@@ -286,6 +288,7 @@ def split_compound(command: str) -> list[SimpleCommand]:
     in_pipeline = False
     conditional = False  # after `&&` / `||`
     depth = 0  # open if/while/until/for/select bodies and { … } groups
+    loop_names: list[str] = []  # for/select names set before the next command
 
     def flush(pipeline: bool, background: bool = False) -> None:
         nonlocal argv, redirects, depth
@@ -301,11 +304,15 @@ def split_compound(command: str) -> list[SimpleCommand]:
         opening = k < len(argv) and argv[k] in _HEADER_RESERVED
         closing = k < len(argv) and argv[k] in _CLOSING_RESERVED and len(argv) == k + 1
         nested = depth > 0 or opening
+        if opening and k + 1 < len(argv):
+            loop_names.append(argv[k + 1])  # for/select NAME sets NAME (exported if it was)
         argv = _strip_reserved(argv)
         if argv:
             _check_builtin(argv)
             commands.append(SimpleCommand(argv, redirects, pipeline, in_pipeline,
-                                          unsettled=background or conditional or nested))
+                                          unsettled=background or conditional or nested,
+                                          loop_names=tuple(loop_names)))
+            loop_names.clear()
         depth = max(depth + opening - closing, 0)
         argv, redirects = [], []
 
@@ -3049,7 +3056,8 @@ def _expand(
         argv, env, wrappers, string = _unwrap_inner(simple.argv, depth)
         if string is None:
             yield (SimpleCommand(argv, simple.redirects, simple.in_pipeline, simple.stdin_pipe,
-                                 bool(argv) and globbed(argv[0], wrappers), simple.unsettled),
+                                 bool(argv) and globbed(argv[0], wrappers), simple.unsettled,
+                                 simple.loop_names),
                    env, wrappers)
             for inner_argv in find_exec_commands(argv):
                 # find runs CMD without a shell, but the outer shell has already
@@ -3069,6 +3077,8 @@ def _expand(
                     simple.in_pipeline or inner.in_pipeline,
                     simple.stdin_pipe or inner.stdin_pipe,
                     inner.globbed,
+                    simple.unsettled or inner.unsettled,
+                    inner.loop_names,
                 ),
                 {**env, **inner_env},
                 [*wrappers, *inner_wrappers],
@@ -3094,6 +3104,10 @@ def _annotate(
         metadata["redirects"] = list(simple.redirects)
 
 
+# POSIX special builtins: an assignment in front of one stays set in sh and dash.
+_SPECIAL_BUILTINS = frozenset({":", ".", "export", "readonly", "set", "eval", "exec", "shift",
+                               "trap", "unset", "return", "break", "continue", "times",
+                               "source", "typeset", "declare", "local"})
 ENV_CHANGE_REASON = "an earlier part changes the environment in a way the hook cannot follow"
 
 
@@ -3195,6 +3209,8 @@ def intents_from_command(command: str, *,
     exported: dict[str, str] = {}  # literal settings that reach every later command
     lost: str | None = None  # a change that cannot be followed came first
     for simple, env, wrappers in _expand(command, 0):
+        if any(_may_name_scope_variable(name) for name in simple.loop_names):
+            lost = lost or "for " + simple.loop_names[0]  # a loop sets it: not followed
         change = _env_change(simple.argv, env)
         if change is not None:
             values, unsure = change
@@ -3202,6 +3218,10 @@ def intents_from_command(command: str, *,
                 lost = lost or shlex.join(simple.argv) or " ".join(f"{k}=" for k in values)
             else:
                 exported.update(values)
+        if simple.argv and env and _basename(simple.argv[0]) in _SPECIAL_BUILTINS and any(
+                _infra_env(k) for k in env):
+            # POSIX sh keeps an assignment in front of a special builtin (`AWS_PROFILE=x :`)
+            lost = lost or shlex.join(simple.argv)
         if not simple.argv:
             continue
         feeder, previous = (previous if simple.stdin_pipe else None), simple

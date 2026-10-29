@@ -4180,3 +4180,66 @@ def test_a_missing_sourced_file_asks_as_the_script_scan_does(prod_scope_project)
     verdict = _scoped(*prod_scope_project, f"source missing.sh; {_RM}")
     assert verdict.decision == "ask"
     assert "does not exist yet" in verdict.reason
+
+
+@pytest.mark.parametrize("command", [
+    "cd a;" * 12800 + "kubectl get pods", "cd a\n" * 12800 + "kubectl get pods",
+    "cd a&&" * 9000 + "kubectl get pods", 'cd "a";' * 9000 + "kubectl get pods",
+])
+def test_many_cds_stay_linear(opted_in_project, command):
+    # each bare cd searched the whole command for CDPATH (5.25 s at 64 KB)
+    started = time.monotonic()
+    run("claude", payload_for("claude", command))
+    assert time.monotonic() - started < 2 * TIMING_SLACK
+
+
+@pytest.mark.parametrize("command", [
+    f"for AWS_PROFILE in prod-admin; do :; done; {_RM}",
+    f"for AWS_PROFILE in prod-admin; do {_RM}; done",
+    f"select AWS_PROFILE in prod-admin; do break; done; {_RM}",
+    f"AWS_PROFILE=prod-admin :; {_RM}",
+    f"AWS_PROFILE=prod-admin export X=1; {_RM}",
+    f"AWS_PROFILE=staging readonly X=1; {_RM}",
+])
+def test_loop_variables_and_special_builtin_prefixes_are_unsettled(prod_scope_project,
+                                                                   command):
+    verdict = _scoped(*prod_scope_project, command)
+    assert verdict.decision == "deny"
+    assert "statically" in verdict.reason
+
+
+def test_loops_and_prefixes_on_other_names_still_allow(prod_scope_project):
+    project, config_dir = prod_scope_project
+    for command in ("for x in a b; do echo $x; done; aws s3 ls s3://b",
+                    "AWS_PROFILE=x true; aws s3 ls s3://b", "FOO=1 :; aws s3 ls s3://b"):
+        assert _scoped(project, config_dir, command).decision == "allow", command
+
+
+@pytest.mark.parametrize("body, decision", [
+    (f"for AWS_PROFILE in prod-admin; do :; done\n{_RM}\n", "deny"),
+    (f"for AWS_PROFILE in prod-admin; do {_RM}; done\n", "ask"),
+    (f"AWS_PROFILE=prod-admin :\n{_RM}\n", "deny"),
+])
+def test_loop_variables_in_scripts_refuse(prod_scope_project, body, decision):
+    verdict = _script_verdict(*prod_scope_project, body, "bash x.sh")
+    assert verdict.decision == decision
+    assert "statically" in verdict.reason
+
+
+def test_expansions_are_not_control_flow_for_literal_settings(prod_scope_project):
+    body = ('cd "$(dirname "$0")"\necho "${HOME}"\nexport AWS_PROFILE=prod-admin\n'
+            f'echo "$(date)"\n{_RM}\n')
+    verdict = _script_verdict(*prod_scope_project, body, "bash x.sh")
+    assert verdict.decision == "deny"
+    assert "no-aws-delete-in-prod" in verdict.reason
+    from aegis_core.hook import _control_flow
+    assert not _control_flow('cd "$(dirname "$0")"')
+    assert not _control_flow('echo "${HOME}" "a && b" if')
+    assert all(_control_flow(t) for t in ("if x; then", "{ a; }", "a && b", "(a)", "a &",
+                                          "f() {", "a) b;;", "done"))
+
+
+def test_loop_variable_inside_a_shell_string_is_unsettled(prod_scope_project):
+    verdict = _scoped(*prod_scope_project,
+                      f"bash -c 'for AWS_PROFILE in prod-admin; do {_RM}; done'")
+    assert verdict.decision == "deny"
