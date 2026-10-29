@@ -10,6 +10,7 @@ project directory before touching ``aegis_core.hook``.
 
 from __future__ import annotations
 
+import io
 import json
 import shlex
 import subprocess
@@ -323,6 +324,53 @@ def test_escalate_codex_denies(opted_in_project):
     body = json.loads(out)
     assert body["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert err
+
+
+@pytest.mark.parametrize("agent", hook.AGENTS)
+@pytest.mark.parametrize("command, decision", [(BLOCK_COMMAND, "deny"), ("ls -la", "ask")])
+def test_a_decision_past_its_time_budget_asks_or_denies(opted_in_project, monkeypatch,
+                                                         agent, command, decision):
+    # a decision that hangs must not run into the agent's own hook timeout,
+    # past which the command runs: the hook answers on its own after the budget
+    monkeypatch.setattr(hook, "DECISION_BUDGET_SECONDS", 0.05)
+    release = threading.Event()
+    monkeypatch.setattr(hook, "decide", lambda *_a, **_k: release.wait(5) or hook.HookVerdict(
+        "allow"))
+    started = time.monotonic()
+    reply = run(agent, payload_for(agent, command))
+    release.set()  # the abandoned worker's late allow is never used
+    assert time.monotonic() - started < 2
+    reason = hook.TOO_SLOW_REASON.format(seconds=0.05)
+    assert reply == hook.render(agent, hook.HookVerdict(decision, reason, unchecked=True))
+    assert reply != hook._allow(agent)
+
+
+@pytest.mark.parametrize("agent", hook.AGENTS)
+def test_a_decision_within_its_time_budget_is_unchanged(opted_in_project, agent):
+    assert run(agent, payload_for(agent, "ls -la")) == hook._allow(agent)
+    code, _out, _err = run(agent, payload_for(agent, BLOCK_COMMAND))
+    assert code == 2 or agent == "cursor"
+
+
+def test_main_hook_writes_to_the_streams_it_started_with(opted_in_project, monkeypatch,
+                                                         capsys):
+    # a worker left running may swap sys.stdout (policy output is captured that
+    # way); the reply still goes to the real stream
+    monkeypatch.setattr(hook, "DECISION_BUDGET_SECONDS", 0.05)
+
+    def slow(*_a, **_k):
+        sys.stdout = io.StringIO()  # what a still-running policy check does
+        time.sleep(1)
+        return hook.HookVerdict("allow")
+
+    monkeypatch.setattr(hook, "decide", slow)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload_for("claude", "ls"))))
+    real = sys.stdout
+    try:
+        assert hook.main_hook("claude", escalate_as="ask", extra_args=[]) == 0
+    finally:
+        sys.stdout = real
+    assert "took too long to check" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("agent", hook.AGENTS)

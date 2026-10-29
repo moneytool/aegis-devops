@@ -67,6 +67,7 @@ import os
 import re
 import shlex
 import sys
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -1956,6 +1957,41 @@ def _budget_outcome(agent: str, payload: dict, request: HookRequest, config_dir:
     return check(agent, payload, request.cwd, policy, key=key, insecure=insecure)
 
 
+# The hook decides within this many seconds, well inside the agents' own hook
+# timeouts (30 s), past which an agent runs the command anyway. A decision that
+# takes longer is abandoned: the command asks, or is denied when it names an
+# infrastructure tool.
+DECISION_BUDGET_SECONDS = 10.0
+TOO_SLOW_REASON = ("aegis: the command took too long to check (over {seconds:g} s), so it "
+                   "cannot be checked; split it up or put it in a script")
+
+
+def _decide_in_time(command: str, config_dir: Path, extra_args: list[str] | None,
+                    cwd: str | None) -> HookVerdict:
+    """:func:`decide` in a worker thread, within :data:`DECISION_BUDGET_SECONDS`
+    (portable: no signals). The worker of a decision that runs out of time is
+    left behind (a daemon, so it ends with the hook's process) and its result
+    is never used."""
+    result: list = []
+
+    def work() -> None:
+        try:
+            result.append(decide(command, config_dir, extra_args, cwd=cwd))
+        except BaseException as exc:  # noqa: BLE001 - re-raised in the caller
+            result.append(exc)
+
+    worker = threading.Thread(target=work, name="aegis-decide", daemon=True)
+    worker.start()
+    worker.join(DECISION_BUDGET_SECONDS)
+    if not result:
+        reason = TOO_SLOW_REASON.format(seconds=DECISION_BUDGET_SECONDS)
+        return HookVerdict("deny" if mentions_infra(command) else "ask", reason,
+                           unchecked=True)
+    if isinstance(result[0], BaseException):
+        raise result[0]
+    return result[0]
+
+
 def run_hook(agent: str, stdin_text: str, *, escalate_as: str = "ask",
              extra_args: list[str] | None = None) -> tuple[int, str, str]:
     """The whole hook: payload text in, ``(exit, stdout, stderr)`` out.
@@ -1990,7 +2026,7 @@ def run_hook(agent: str, stdin_text: str, *, escalate_as: str = "ask",
         if not has_command and not has_budget:
             return _allow(agent)
 
-        verdict = decide(request.command, config_dir, extra_args, cwd=request.cwd) \
+        verdict = _decide_in_time(request.command, config_dir, extra_args, request.cwd) \
             if has_command \
             else HookVerdict("allow")
         if verdict.decision == "deny":
@@ -2021,13 +2057,16 @@ def run_hook(agent: str, stdin_text: str, *, escalate_as: str = "ask",
 
 
 def main_hook(agent: str, *, escalate_as: str, extra_args: list[str]) -> int:
+    # the streams as they are now: a decision still running past its time
+    # budget (in its own thread) may swap sys.stdout while it checks a policy
+    stdout, stderr = sys.stdout, sys.stderr
     code, out, err = run_hook(
         agent, sys.stdin.read(), escalate_as=escalate_as, extra_args=extra_args
     )
     if out:
-        print(out)
+        print(out, file=stdout, flush=True)
     if err:
-        print(err, file=sys.stderr)
+        print(err, file=stderr, flush=True)
     return code
 
 

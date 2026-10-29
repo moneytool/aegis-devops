@@ -14,6 +14,12 @@ behaviour.
   enforces "reads only" on generated SQL; the guide is explicit that a read's tables, columns and
   cost are the database role's job (the SQL classifier sees only a SELECT's first table, and
   treats `SELECT … INTO` and `SET ROLE` as reads). Every Aegis result in its table is a test.
+- Agent hook: a time budget for each decision (`DECISION_BUDGET_SECONDS`, 10 s). The decision
+  runs in a worker thread; when it takes longer, the hook answers on its own (asks, or denies
+  when the command names an infrastructure tool, in each agent's usual format) instead of
+  running into the agent's 30 s hook timeout, past which the agent would run the command. The
+  abandoned worker's result is never used, and the reply is written to the streams the hook
+  started with. A safety net: the checks are meant to be linear.
 
 ### Fixed
 - Agent hook: a shell expansion in one part of a compound command no longer refuses the whole
