@@ -174,6 +174,17 @@ behaviour.
   a bare `cd` or `cd ~` after the command changes HOME makes the directory unknown; `python3
   /dev/stdin` reads the pipe; `env -iC` counts as a directory change; many `env`/`sudo` words stay
   linear.
+- Agent hook: the regexes that find a shell's `-c` string and a shell or interpreter word are
+  linear: runs of backticks, `{` inside quotes and `-o ` (with or without a `-c`) took 6-60 s, past
+  the hook's timeout. A shell reading a piped group's input is found before a separator with no
+  space (`sh;echo`, `sh&&x`, `sh -s;x`). Any interpreter given `/dev/stdin` or `/dev/fd/0` as its
+  script asks, as `bash /dev/stdin` does (`| python3 /dev/stdin`, `| node /dev/stdin`). `env`
+  and `sudo` read clusters of short options (`env -iv`, `env -iC DIR`, `env -iCDIR`, `env -u X
+  -iC DIR`, `sudo -Eu USER`), and `env -S STRING` / `--split-string` is split into words unless
+  it holds `$`, a backslash or options of its own; a cluster with `C` or `D` makes the directory
+  unknown. A shell, interpreter or script run under `env`/`sudo` options the hook does not know
+  (`env -P DIR bash x.sh`, `sudo -iu USER bash x.sh`, `cat x.sh | env -Q sh`) asks instead of
+  being allowed.
 - Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
   own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
   policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a

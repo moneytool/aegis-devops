@@ -319,6 +319,21 @@ def test_unwrap_rejects_unknown_run_options(argv):
         unwrap(argv)
 
 
+@pytest.mark.parametrize("argv", [
+    ["env", "-iC", ".", "kubectl", "delete", "node/x"],
+    ["env", "-iCsub", "kubectl", "delete", "node/x"],
+    ["env", "-iv", "-u", "X", "kubectl", "delete", "node/x"],
+    ["env", "-iuX", "kubectl", "delete", "node/x"],
+    ["env", "-S", "kubectl delete node/x"],
+    ["env", "-iS", "kubectl delete", "node/x"],
+    ["env", "--split-string=kubectl delete node/x"],
+    ["sudo", "-Eu", "bob", "kubectl", "delete", "node/x"],
+    ["sudo", "-Euadmin", "kubectl", "delete", "node/x"],
+])
+def test_unwrap_reads_combined_short_options(argv):
+    assert unwrap(argv)[0] == ["kubectl", "delete", "node/x"]
+
+
 def test_unwrap_does_not_mutate_its_argument():
     argv = ["sudo", "k", "get", "pods"]
     unwrap(argv)
@@ -333,7 +348,10 @@ def test_unwrap_does_not_mutate_its_argument():
         ["sudo", "--login"],
         ["sudo", "--typo", "kubectl", "get", "pods"],
         ["sudo", "-Z", "kubectl", "get", "pods"],
-        ["env", "-S", "kubectl delete node/x"],
+        ["env", "-S", "kubectl delete $NODE"],  # env expands ${NODE} itself
+        ["env", "-S", "-C sub kubectl get pods"],  # options inside the string
+        ["env", "-iQ", "kubectl", "get", "pods"],
+        ["sudo", "-iu", "bob", "kubectl", "get", "pods"],
         ["env", "--typo", "kubectl", "get", "pods"],
         ["timeout", "--typo", "5", "kubectl", "get", "pods"],
         ["nice", "--typo", "kubectl", "get", "pods"],

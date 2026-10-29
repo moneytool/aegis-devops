@@ -84,6 +84,7 @@ from aegis_core.shell import (
     intents_from_command,
     loose_argv,
     loose_code_reader,
+    opaque_launcher_code,
     plain_binary,
     runs_expansion,
     script_runs_loosely,
@@ -286,10 +287,17 @@ SCRIPT_SCAN_MAX_LINES = 64
 _SHELL_SUFFIXES = (".sh", ".bash", ".zsh", ".ksh")
 # A change of directory: cd/pushd/popd however spelt (`\cd`, `"cd"`, `'cd'`),
 # and the working-directory options of env and sudo (`env -C dir`, `sudo -D dir`).
+# env's own -C (also in a cluster, `-iC`, `-iCdir`, after `-u NAME`) and sudo's
+# -D, not make -C; possessive, so linear.
+_LAUNCHER_CD_RE = re.compile(
+    r"(?<![\w.-])env\s++(?:(?:-[iv0]*+[uS](?:\s++)?+\S++|-[iv0]++(?!\S)"
+    r"|--(?:unset|split-string)\s++\S++|--(?!chdir)[\w-]++(?:=\S*+)?|\w++=\S*+)\s++)*+"
+    r"(?:-[iv0]*+C|--chdir)"
+    r"|(?<![\w.-])sudo\s++(?:(?:-[EHnkKbAlvS]*+[ugpCrtTUh](?:\s++)?+\S++|-[EHnkKbAlvS]++(?!\S)"
+    r"|--(?:user|group|prompt|host|role|type|command-timeout|other-user)\s++\S++"
+    r"|--(?!chdir)[\w-]++(?:=\S*+)?)\s++)*+(?:-[EHnkKbAlvS]*+D|--chdir)")
 _CD_RE = re.compile(
-    r"(?:^|[;&|(\n\s'\"])\\?['\"]?(?:cd|pushd|popd)['\"]?(?![\w.-])"
-    r"|(?<![\w.-])env\s++(?:(?:-(?!\w*C)\w+|\w+=\S*)\s++)*+(?:-\w*C|--chdir)"
-    r"|(?<![\w.-])sudo\s++(?:-(?!D(?!\S))\w+\s++)*+-D(?!\S)")  # env's own -C, not make -C
+    r"(?:^|[;&|(\n\s'\"])\\?['\"]?(?:cd|pushd|popd)['\"]?(?![\w.-])|" + _LAUNCHER_CD_RE.pattern)
 
 
 def decide(command: str, config_dir: Path, extra_args: list[str] | None = None, *,
@@ -365,8 +373,8 @@ def _stdin_redirects(command: str, config_dir: Path, extra_args: list[str] | Non
                     "copied or read-write file descriptor (<&N, <>), which the hook cannot "
                     "follow; use `bash FILE` or `sh < FILE`")
     readers = [m.start() for m in _READER_WORD_RE.finditer(command)]
-    if any(m.group("generated") and string_reader(m.group(1)[1:-1])
-           for m in _C_STRING_STDIN_RE.finditer(command)):
+    if any(generated and string_reader(string[1:-1])
+           for string, _file, generated in _c_strings_with_stdin(command)):
         asks.append("aegis: a shell's -c string reads code from a process substitution or "
                     "here-string, which the hook cannot check")
     if readers and any(  # exec: a reader after it; a group or loop: a reader inside it
@@ -746,7 +754,8 @@ def _scripts_with_directory(command: str, cwd: Path | None) -> list[tuple[dict, 
         except ValueError:
             continue
         words = set(text.split())
-        chdir = bool(words & {"-C", "--chdir", "-D"}) or "--chdir=" in text
+        chdir = bool(words & {"-C", "--chdir", "-D"}) or "--chdir=" in text or bool(
+            _LAUNCHER_CD_RE.search(text))
         for intent in intents:
             if intent.provider != "shell":
                 continue
@@ -880,6 +889,11 @@ def _rejected(command: str, reason: str, config_dir: Path, extra_args: list[str]
             verdict = _scan_script(runs, config_dir, extra_args, here, command=command)
             if verdict is not None:
                 return verdict
+    hidden = opaque_launcher_code(command)
+    if hidden is not None:
+        return HookVerdict(
+            "ask", f"aegis: {hidden} runs under a launcher whose options the hook cannot read "
+            "(env, sudo, …), so what it runs cannot be checked; drop the unknown options")
     if escalate_scripts and scripts:
         return HookVerdict(
             "ask", "aegis: this runs a local script, which the hook cannot read "
@@ -1023,11 +1037,43 @@ _GROUP_STDIN_RE = re.compile(
     rf"(?:[}})]|\b(?:fi|done|esac))\s*{_OTHER_REDIRECTS}0?<(?![<&(>])\s*([^\s;&|)<>]+)")
 _EXEC_STDIN_RE = re.compile(
     rf"(?:^|[;&|\n('\"]\s*|\s)exec\s+{_OTHER_REDIRECTS}0?<(?![<&(>])\s*([^\s;&|)<>]+)")
-_C_STRING_STDIN_RE = re.compile(
-    r"(?<![^\s;&|()`])(?:[^\s;&|()<>]*/)?(?:ba|z|da|k|a|mk|po)?sh"
-    r"(?:\s+(?:-[a-zA-Z]+|--[\w-]+|[-+]o\s+[\w-]+))*?\s+-[a-zA-Z]*c[a-zA-Z]*\s+\$?"
-    r"('[^']*'|\"[^\"]*\")(?:\s+[^\s;&|<>()]++)*+"
+# A shell with a quoted -c string (`bash -o pipefail -c 'eval sh'`). Linear:
+# the shell word starts after a separator and its directory part (possessive,
+# one segment per slash) holds none of them, so no character is scanned from
+# two starts; its options are disjoint and possessive (`-o NAME`, a cluster
+# without `c`, `--long`; NAME is never a shell's name, which no shell takes as
+# an option), so no later shell word lies inside them; then the cluster with
+# `c`, then the string (closed at the latest by the next start's own quote).
+_C_STRING_RE = re.compile(
+    r"(?<![^\s;&|()`])(?:[^\s;&|()<>`/]*+/)*+(?:ba|z|da|k|a|mk|po)?sh"
+    r"(?:\s++(?:[-+]o\s++(?!(?:ba|z|da|k|a|mk|po|rba)?sh(?![\w-]))[\w-]++"
+    r"|-(?![a-zA-Z]*c)[a-zA-Z]++|--[\w-]++))*+"
+    r"\s++-[a-zA-Z]*c[a-zA-Z]*\s+\$?('[^']*'|\"[^\"]*\")")
+# What may follow the string's arguments: other redirections, then standard
+# input from a file, a process substitution or a here-document/string.
+_C_STRING_TAIL_RE = re.compile(
     rf"\s*{_OTHER_REDIRECTS}0?<(?:(?![<&(>])\s*([^\s;&|)<>]+)|\s*(?P<generated><\(|<<))")
+_ARGS_END_RE = re.compile(r"[;&|<>()]")  # the string's arguments end at a separator
+
+
+def _c_strings_with_stdin(command: str) -> list[tuple[str, str | None, bool]]:
+    """``(string, file, generated)`` for each ``sh -c 'STRING' [ARGS…]`` whose
+    standard input is redirected: from ``file``, or from a process substitution
+    or here-document/string (``generated``). The arguments run to the next
+    separator; strings that share it share one look-up, so this stays linear
+    however many strings there are."""
+    found: list[tuple[str, str | None, bool]] = []
+    scanned_to, tail = -1, None
+    for match in _C_STRING_RE.finditer(command):
+        if match.end() > scanned_to:  # past the last look-up: a new separator
+            sep = _ARGS_END_RE.search(command, match.end())
+            scanned_to = sep.start() if sep else len(command)
+            tail = _C_STRING_TAIL_RE.match(command, scanned_to) if sep else None
+        if tail is not None:
+            found.append((match.group(1), tail.group(1), bool(tail.group("generated"))))
+    return found
+
+
 # A pipe into a group, subshell, loop or if: every command in it shares the pipe.
 _PIPED_COMPOUND_RE = re.compile(
     r"(?<!\|)\|(?!\|)&?\s*(?:time\s+(?:-p\s+)?|!\s*)?(?:[{(]|(?:if|while|until|for|select|case)\b)")
@@ -1050,6 +1096,9 @@ def _bare_reader(command: str, start: int, end: int) -> bool:
         shell = _basename(m.group(0)) in _SHELLS
         words = []
         line = command[m.end():end][:200].split("\n", 1)[0]  # a reader ends its line
+        # ... or its command, at a separator even with no space (`sh;echo`, `sh&&x`),
+        # but not at the `&` of a redirection (`sh 2>&1`, `sh &>log`)
+        line = _COMMAND_END_RE.split(line, maxsplit=1)[0]
         for raw in re.findall(r"\S+", line):
             if raw.startswith("#"):
                 break
@@ -1076,11 +1125,15 @@ def _bare_reader(command: str, start: int, end: int) -> bool:
     return False
 
 
+_COMMAND_END_RE = re.compile(r"[;|]|(?<![<>])&(?!>)")
+
+
 # Standard input copied from another descriptor or opened read-write.
 _FD_STDIN_RE = re.compile(r"(?:^|[\s;&|])0?(?:<&\s*(?!-)\S|<>)")  # <&3, <&$fd, <>
 _READER_WORDS = "|".join(sorted(_SHELLS))
 _READER_WORD_RE = re.compile(
-    rf"(?<![^\s;&|()<>'\"`{{}}])(?:[^\s;&|()<>'\"`]*/)?(?:{_READER_WORDS}|python[\d.]*|perl|ruby|node|php|lua)"
+    rf"(?<![^\s;&|()<>'\"`{{}}])(?:[^\s;&|()<>'\"`{{}}/]*+/)*+"  # starts and path: disjoint
+    rf"(?:{_READER_WORDS}|python[\d.]*|perl|ruby|node|php|lua)"
     r"(?![\w.-])")  # sh, /bin/sh, /usr/bin/python3
 
 
@@ -1093,8 +1146,8 @@ def _group_stdin_files(command: str) -> list[str]:
     files = [match.group(1).strip("'\"")
              for match in _GROUP_STDIN_RE.finditer(command, readers[0])]
     # bash -c 'eval sh' < FILE: a reader inside the string reads FILE
-    files += [match.group(2) for match in _C_STRING_STDIN_RE.finditer(command)
-              if match.group(2) and string_reader(match.group(1)[1:-1])]
+    files += [file for string, file, _generated in _c_strings_with_stdin(command)
+              if file and string_reader(string[1:-1])]
     # exec < FILE: the rest of the shell reads FILE as its standard input
     files += [match.group(1).strip("'\"") for match in _EXEC_STDIN_RE.finditer(command)
               if match.end() <= readers[-1]]
@@ -1440,14 +1493,14 @@ def _scan_script_once(runs: dict, config_dir: Path, extra_args: list[str] | None
     if path.startswith("< "):
         path = path[2:]
     shell_run = interpreter in _SHELLS or interpreter in ("source", ".")
+    if path in _STDIN_PATHS and path != "-":  # python3 /dev/stdin reads a pipe like bash's
+        return HookVerdict("ask", f"aegis: {runs.get('interpreter') or 'this'} reads its "
+                                  f"commands from standard input ({path}), which the hook "
+                                  "cannot check; run the script by its name")
     if interpreter and not shell_run:
         return None
     if not path or path.startswith("-"):
         return None
-    if path in _STDIN_PATHS:
-        return HookVerdict("ask", f"aegis: {runs.get('interpreter') or 'this'} reads its "
-                                  f"commands from standard input ({path}), which the hook "
-                                  "cannot check; run the script by its name")
     path = _known_variables(path, command)
     if any(ch in path for ch in "$`"):
         return HookVerdict("ask", f"aegis: {path} is a script whose name is only known when "

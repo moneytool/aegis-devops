@@ -712,14 +712,18 @@ def _strip_sudo(rest: list[str]) -> list[str]:
                 continue
             raise ShellRejected(f"unrecognised sudo option {tok!r}")
         if tok.startswith("-") and len(tok) > 1:
-            body = tok[1:]
-            if body[0] in _SUDO_VALUE_SHORT:
-                i += 1 if len(body) > 1 else 2  # -uadmin or -u admin
-                continue
-            if set(body) <= _SUDO_BOOL_SHORT:
-                i += 1
-                continue
-            raise ShellRejected(f"unrecognised sudo option {tok!r}")
+            # a cluster of short options (-En, -Eu admin, -Euadmin): flags, then at
+            # most one option that takes the rest of the word or the next word
+            i += 1
+            for k, letter in enumerate(tok[1:], start=1):
+                if f"-{letter}" in _SUDO_SHELL_OPTIONS:
+                    raise ShellRejected(f"sudo -{letter} opens a shell/editor")
+                if letter in _SUDO_VALUE_SHORT:
+                    i += 0 if tok[k + 1:] else 1  # -uadmin or -u admin
+                    break
+                if letter not in _SUDO_BOOL_SHORT:
+                    raise ShellRejected(f"unrecognised sudo option {tok!r}")
+            continue
         break
     return rest[i:]
 
@@ -732,18 +736,18 @@ def _strip_env(rest: list[str]) -> tuple[list[str], dict[str, str]]:
         if tok == "--":
             i += 1
             break
-        if tok in ("-S", "--split-string") or tok.startswith("--split-string="):
-            raise ShellRejected("env -S re-splits its argument")
-        if tok in ("-i", "--ignore-environment", "-0", "--null", "-v", "--debug"):
+        if tok in ("--split-string", "-S") or tok.startswith("--split-string="):
+            string = tok.partition("=")[2] if tok.startswith("--split-string=") else (
+                rest[i + 1] if i + 1 < len(rest) else "")
+            rest, i = _split_env_string(string) + rest[i + (1 if "=" in tok else 2):], 0
+            continue
+        if tok in ("--ignore-environment", "--null", "--debug"):
             i += 1
             continue
-        if tok in ("-u", "--unset", "-C", "--chdir"):
+        if tok in ("--unset", "--chdir"):
             i += 2
             continue
         if tok.startswith(("--unset=", "--chdir=")):
-            i += 1
-            continue
-        if tok.startswith("-u") and len(tok) > 2:
             i += 1
             continue
         if _ASSIGNMENT_RE.match(tok):
@@ -751,10 +755,40 @@ def _strip_env(rest: list[str]) -> tuple[list[str], dict[str, str]]:
             assignments[key] = value
             i += 1
             continue
+        if tok.startswith("-") and not tok.startswith("--") and len(tok) > 1:
+            # a cluster of short options (-iv, -iC dir, -iCdir, -u NAME, -S STRING):
+            # flags, then at most one option that takes the rest of the word or the next
+            i += 1
+            for k, letter in enumerate(tok[1:], start=1):
+                if letter in "i0v":
+                    continue
+                if letter not in "uCS":
+                    raise ShellRejected(f"unrecognised env option {tok!r}")
+                value = tok[k + 1:]
+                if not value:
+                    value = rest[i] if i < len(rest) else ""
+                    i += 1
+                if letter == "S":
+                    rest, i = _split_env_string(value) + rest[i:], 0
+                break
+            continue
         if tok.startswith("-"):
             raise ShellRejected(f"unrecognised env option {tok!r}")
         break
     return rest[i:], assignments
+
+
+def _split_env_string(string: str) -> list[str]:
+    """The words of ``env -S STRING``, when env splits it as the shell would:
+    no escapes or ``${VAR}`` of its own, and no options of env inside it
+    (``-C dir`` there would move the command where the hook does not look)."""
+    try:
+        words = shlex.split(string, comments=True)
+    except ValueError:
+        words = []
+    if not words or "\\" in string or "$" in string or words[0].startswith("-"):
+        raise ShellRejected("env -S re-splits its argument")
+    return words
 
 
 def _strip_timeout(rest: list[str]) -> list[str]:
@@ -1484,9 +1518,17 @@ def code_run(simple: SimpleCommand) -> dict[str, str] | None:
 _LOOSE_SPLIT_RE = re.compile(r"(\|\||&&|;;|\$\(|[<>]\(|[;|&\n()`])")
 
 
+# Linear in the command: the shell word starts after a separator and its
+# directory part holds none of them (possessive), so no character is scanned
+# from two starts; its options are disjoint and possessive (`-o NAME`, a
+# cluster without `c`, `--long`; NAME is never a shell's name, which no shell
+# takes as an option), so no later shell word lies inside them; then comes the
+# cluster with `c`.
 _QUOTED_C_STRING_RE = re.compile(
-    r"(?<![^\s;&|()`])(?:[^\s;&|()]*/)?(?:ba|z|da|k|a|mk|po|rba)?sh"
-    r"(?:\s+(?:-[a-zA-Z]+|--[\w-]+|[-+]o\s+[\w-]+))*?\s+-[a-zA-Z]*c[a-zA-Z]*\s+\$?"
+    r"(?<![^\s;&|()`])(?:[^\s;&|()`/]*+/)*+(?:ba|z|da|k|a|mk|po|rba)?sh"
+    r"(?:\s++(?:[-+]o\s++(?!(?:ba|z|da|k|a|mk|po|rba)?sh(?![\w-]))[\w-]++"
+    r"|-(?![a-zA-Z]*c)[a-zA-Z]++|--[\w-]++))*+"
+    r"\s++-[a-zA-Z]*c[a-zA-Z]*\s+\$?"
     r"('([^']*)'|\"((?:[^\"\\]|\\.)*)\")")
 
 
@@ -1567,6 +1609,33 @@ def script_runs_loosely(command: str, _depth: int = 0) -> list[dict[str, str]]:
         if runs is not None:
             found.append(runs)
     return found
+
+
+# Words that name a script to run, rather than a file to read.
+_SCRIPT_WORD_RE = re.compile(r"^(?:\.{1,2}/|~/)|\.(?:sh|bash|zsh|ksh|py|rb|pl|js|mjs|php|lua)$")
+
+
+def opaque_launcher_code(command: str) -> str | None:
+    """Best effort for a command the parser rejected: a shell, interpreter or
+    script named after a launcher the parser could not unwrap (an option of
+    ``env``/``sudo``/… it does not know, ``sudo -i``, an ``env -S`` string it
+    does not split), so what the launcher runs is unknown: ``env -P x bash
+    x.sh``, ``sudo -iu bob bash x.sh``, ``cat x.sh | env -Q sh``. Returns that
+    word, else ``None``. Never raises; only for asking."""
+    for part in _LOOSE_SPLIT_RE.split(command)[::2]:
+        try:
+            argv = strip_exec_builtin(_strip_reserved(shlex.split(part, comments=False)))
+        except (ShellRejected, ValueError):
+            continue
+        if not argv or _basename(argv[0]) in _REJECTED_BUILTINS:
+            continue  # eval/source/xargs …: their own checks
+        try:
+            _unwrap_inner(list(argv), 0)
+        except ShellRejected:
+            for word in " ".join(argv[1:]).split():  # env -S 'bash x.sh': two words
+                if _interpreter(_basename(word)) or _SCRIPT_WORD_RE.search(word):
+                    return word
+    return None
 
 
 def stdin_feeders(command: str) -> list[tuple[list[str], list[str] | None]]:
