@@ -82,7 +82,8 @@ class SimpleCommand:
     globbed: bool = False
     # an assignment here may not reach the commands after it: the command runs
     # in the background (`&`), after `&&` / `||`, or inside an if/while/until/
-    # for/select body (see :func:`intents_from_command`)
+    # for/select body or a `{ …; }` group, which an `&&` / `||` or a pipe or `&`
+    # after it may skip or run apart (see :func:`intents_from_command`)
     unsettled: bool = False
 
 
@@ -284,7 +285,7 @@ def split_compound(command: str) -> list[SimpleCommand]:
     pending_op: str | None = None
     in_pipeline = False
     conditional = False  # after `&&` / `||`
-    depth = 0  # open if/while/until/for/select bodies
+    depth = 0  # open if/while/until/for/select bodies and { … } groups
 
     def flush(pipeline: bool, background: bool = False) -> None:
         nonlocal argv, redirects, depth
@@ -292,7 +293,10 @@ def split_compound(command: str) -> list[SimpleCommand]:
             raise ShellRejected(f"redirection {pending_op!r} without a target", command)
         k = 0
         while k < len(argv) and (argv[k] in _GROUPING_WORDS or argv[k] in _LEADING_RESERVED):
-            depth += argv[k] in ("if", "while", "until")
+            if argv[k] == "}":
+                depth = max(depth - 1, 0)
+            else:
+                depth += argv[k] in ("if", "while", "until", "{")
             k += 1
         opening = k < len(argv) and argv[k] in _HEADER_RESERVED
         closing = k < len(argv) and argv[k] in _CLOSING_RESERVED and len(argv) == k + 1

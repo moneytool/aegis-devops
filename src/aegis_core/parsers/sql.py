@@ -639,7 +639,8 @@ def _build_cli_intents(
         from pathlib import Path
 
         path = Path(file_path)
-        if path.exists():
+        # only a regular file is read: a pipe (/dev/fd/N, a FIFO) could block forever
+        if path.is_file():
             intents = from_sql(path.read_text(), dialect=dialect, database=database)
         else:
             metadata: dict[str, Any] = {"dialect": dialect}

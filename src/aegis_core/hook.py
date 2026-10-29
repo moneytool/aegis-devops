@@ -65,6 +65,7 @@ import json
 import os
 import re
 import shlex
+import stat
 import sys
 import threading
 from dataclasses import dataclass
@@ -1154,7 +1155,7 @@ def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
     infra_after = [False] * len(segments)
     for k in range(len(segments) - 2, -1, -1):
         infra_after[k] = infra_after[k + 1] or mentions_infra(segments[k + 1][0])
-    environments: dict[tuple[str, str], dict[str, str] | None] = {}  # per file and directory
+    environments: dict[tuple[str, str], dict[str, str] | None | bool] = {}  # per file, dir
     for index, (text, sep) in enumerate(segments):
         loose = loose_argv(text)
         if loose and _basename(loose[0]) in ("cd", "pushd", "popd"):
@@ -1210,7 +1211,10 @@ def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
                     environments[key] = _sourced_environment(sourced, here, command) if (
                         scan and len(environments) < _MAX_SCRIPTS) else None
                 values = environments[key]
-                if values is None:
+                if values is False and verdict is not None:
+                    # not read at all (not a regular file, missing, too big): as the scan says
+                    return HookVerdict("ask", verdict.reason)
+                if not isinstance(values, dict):
                     return HookVerdict(
                         "deny",
                         f"aegis: cannot check this command statically ({shown!r} may change "
@@ -1256,37 +1260,64 @@ def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
 _SOURCED_HARMLESS = frozenset({"echo", ":", "true", "printf"})
 
 
+def _read_regular(file: Path, limit: int) -> bytes | None:
+    """Up to ``limit`` bytes of ``file`` when it is a regular file; ``None``
+    for anything else (a pipe, ``/dev/fd/N``, ``/dev/stdin``, a device, a
+    socket or a directory), which is never opened in a way that can block:
+    checked before it is opened, opened without blocking, and checked again on
+    the open descriptor in case it was swapped in between. Raises
+    :class:`OSError` when it cannot be read."""
+    if not stat.S_ISREG(os.stat(file).st_mode):
+        return None
+    fd = os.open(file, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0))
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        chunks: list[bytes] = []
+        size = 0
+        while size < limit:
+            chunk = os.read(fd, limit - size)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
 def _sourced_environment(runs: dict, cwd: Path | None,
-                         command: str) -> dict[str, str] | None:
+                         command: str) -> dict[str, str] | None | bool:
     """The literal settings a sourced file (``source env.sh``) makes to the
     variables that pick an infrastructure tool's account, cluster or program
     (``export AWS_PROFILE=prod``, ``KUBECONFIG=…``), in order; ``None`` when
     it may change the environment in any other way (``cd``, ``unset``, a
     function or alias, ``set -a``, a computed value, another program or
-    sourced file, control flow, a line the hook cannot read) or cannot be
-    read. Only comments, blank lines, ``echo``/``printf``/``:``/``true`` and
-    such assignments are understood."""
+    sourced file, control flow, a line the hook cannot read); ``False`` when
+    it was not read at all (its name is computed, it is missing, not a regular
+    file, unreadable, too big or written by the command). Only comments, blank
+    lines, ``echo``/``printf``/``:``/``true`` and such assignments are
+    understood."""
     path = _known_variables(runs.get("path", "") or "", command)
     if not path or any(ch in path for ch in "$`") or (path.startswith("~")
                                                      and _home_changed(command)):
-        return None
+        return False
     try:
         file = Path(path).expanduser()
     except RuntimeError:
-        return None
+        return False
     if not file.is_absolute():
         if cwd is None:
-            return None
+            return False
         file = cwd / file
     if _written_by_command(file, command, cwd):
-        return None
+        return False
     try:
-        with file.open("rb") as handle:
-            data = handle.read(SCRIPT_SCAN_LIMIT + 1)
+        data = _read_regular(file, SCRIPT_SCAN_LIMIT + 1)
     except OSError:
-        return None
-    if len(data) > SCRIPT_SCAN_LIMIT or b"\0" in data:
-        return None
+        return False
+    if data is None or len(data) > SCRIPT_SCAN_LIMIT or b"\0" in data:
+        return False
     values: dict[str, str] = {}
     for line in data.decode("utf-8", errors="replace").splitlines():
         line = line.strip()
@@ -1298,7 +1329,7 @@ def _sourced_environment(runs: dict, cwd: Path | None,
         if not segments:
             return None
         for text, sep in segments:
-            if sep not in ("", ";"):
+            if sep not in ("", ";") or _quoted_name(text):
                 return None
             try:
                 words = shlex.split(text, comments=True)
@@ -1911,12 +1942,42 @@ _HIDDEN_COMMAND_VAR_RE = re.compile(
     r"(?<![\w$])(?:" + "|".join(sorted(_COMMAND_ENV_VARS | _SOURCED_ENV_VARS)) + r")\b")
 
 
+def _quoted_name(text: str) -> bool:
+    """Whether a command word, or the name a declaration or assignment sets, is
+    spelt with quotes or a backslash (``sour""ce``, ``export H"ELM_NAMESPACE"=x``,
+    ``H"ELM_NAMESPACE"=x``, which is a command, not an assignment): a spelling
+    the literal readers do not resolve, so they treat it as unknown."""
+    if not any(ch in text for ch in "'\"\\"):
+        return False
+    words = [(value, text[start:end]) for kind, value, start, end in _shell_tokens(text)
+             if kind == "word"]
+    if not words:
+        return False
+    first_value, first_raw = words[0]
+    if any(ch in first_raw.partition("=")[0] for ch in "'\"\\"):
+        return True
+    if first_value in _EXPORTING_BUILTINS or "=" in first_raw:
+        return any(any(ch in raw.partition("=")[0] for ch in "'\"\\") for _v, raw in words)
+    return False
+
+
 def _changes_scope(line: str) -> bool:
     """Whether a script line may change the environment or directory a later
     line's infrastructure tool sees: an assignment, ``export`` / ``declare`` /
     ``unset`` / ``read`` / ``printf -v`` of a variable in the hook's list (see
-    :func:`aegis_core.shell.plain_binary`), ``cd`` / ``pushd`` / ``popd``,
-    ``set -a``, ``alias``, a function, ``eval``, or a nested ``source`` / ``.``."""
+    :func:`aegis_core.shell.plain_binary`), a nameref, a variable naming a
+    command, ``set -a``, ``alias``, a function, ``eval``, or a nested ``source`` /
+    ``.`` -- as written or after quote removal (``export H"ELM_NAMESPACE"=x``,
+    ``sour""ce x``)."""
+    if _changes_scope_spelt(line):
+        return True
+    if not any(ch in line for ch in "'\"\\"):
+        return False
+    plain = dequoted(line)
+    return plain != line and _changes_scope_spelt(plain)
+
+
+def _changes_scope_spelt(line: str) -> bool:
     if _SCOPE_CHANGE_RE.search(line):
         return True
     for m in _SET_OPTIONS_RE.finditer(line):
@@ -1944,7 +2005,8 @@ def _literal_scope_setting(line: str) -> str | None:
     """``export AWS_PROFILE=x`` / ``AWS_PROFILE=x`` / ``declare -x …`` with
     nothing else on the line: its literal settings of the hook's variables as
     one ``export`` command; ``None`` for any other line."""
-    if any(ch in line for ch in "$`\\;&|<>(){}*?[]~") or _SCOPE_CHANGE_RE.search(line):
+    if any(ch in line for ch in "$`\\;&|<>(){}*?[]~") or _SCOPE_CHANGE_RE.search(line) or \
+            _quoted_name(line):
         return None
     try:
         words = shlex.split(line)
@@ -1972,7 +2034,7 @@ def _script_directories(every: list[tuple[int, str, str | None]],
     pipeline, or any ``cd`` in a script with control flow makes it unknown
     (``None``), as does a ``cd`` after a line naming ``CDPATH``. Only lines after a
     ``cd`` are listed."""
-    if not _CD_RE.search("\n".join(line for _n, line, _a in every)):
+    if not _changes_directory("\n".join(line for _n, line, _a in every)):
         return {}
     control = any(ask is None and _CONTROL_FLOW_RE.search(line) for _n, line, ask in every)
     here = cwd
@@ -1982,7 +2044,7 @@ def _script_directories(every: list[tuple[int, str, str | None]],
         if moved:
             found[number] = here
         cdpath = cdpath or "CDPATH" in line  # cd may search other directories after it
-        if ask is not None or not _CD_RE.search(line):
+        if ask is not None or not _changes_directory(line):
             continue
         moved = True
         if control or cdpath or _launcher_chdir(line):
@@ -2040,11 +2102,10 @@ def _scan_script_once(runs: dict, config_dir: Path, extra_args: list[str] | None
                 return HookVerdict("ask", f"aegis: {path} does not exist yet, so the commands "
                                           "in it cannot be checked; write it first, then run it")
             return None
-        if not file.is_file():
+        data = _read_regular(file, SCRIPT_SCAN_LIMIT + 1)
+        if data is None:
             return HookVerdict("ask", f"aegis: {path} is not a regular file, so the commands "
                                       "in it cannot be checked")
-        with file.open("rb") as handle:
-            data = handle.read(SCRIPT_SCAN_LIMIT + 1)
     except OSError as exc:
         return HookVerdict("ask", f"aegis: cannot read {path} to check the commands in it "
                                   f"({exc.strerror or exc})")

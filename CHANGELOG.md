@@ -432,6 +432,15 @@ behaviour.
   a script with control flow or one after a line naming `CDPATH` makes it unknown, which only
   matters to the checks that depend on it. A typed `cd DIR` to a relative name is unknown when
   `CDPATH` is set or the command names it, since `cd` searches it first.
+- Agent hook (PR #60 council): a setting inside a `{ …; }` group (also one an `&&` / `||`
+  may skip, `false && { …; export HELM_NAMESPACE=staging; }`) no longer reaches the commands
+  after the group: like one in an if or loop body it is a change the hook cannot follow. A
+  sourced file, a script, a `KUBECONFIG` file and a `psql -f` file are only read when they are
+  regular files: a pipe (`/dev/fd/N`, a FIFO), a device or a directory is never opened, so
+  `source /dev/fd/3; kubectl …` asks at once instead of waiting on the pipe. In scripts and
+  sourced files, names and command words are matched after quote removal, and a quoted name or
+  command word (`export H"ELM_NAMESPACE"=prod`, `sour""ce x.sh`) is never followed as a
+  setting.
 
 ### Changed
 - Agent hook: code piped into a shell or interpreter, or fed to one by a here-string or here-doc

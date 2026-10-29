@@ -3767,7 +3767,6 @@ def test_exported_prod_profile_reaches_the_policy(prod_scope_project, command):
     f"source seta.sh; {_RM}",
     f"source nested.sh; {_RM}",
     f"source cond.sh; {_RM}",
-    f"source missing.sh; {_RM}",
     f"source env.sh & {_RM}",
     f"true && export AWS_PROFILE=staging; {_RM}",
     f"if true; then export AWS_PROFILE=staging; fi; {_RM}",
@@ -4082,3 +4081,102 @@ def test_command_variables_set_in_a_script_ask_as_typed(prod_scope_project, body
     verdict = _script_verdict(*prod_scope_project, body, run_it)
     assert verdict.decision == "ask"
     assert "does not check inside a script" in verdict.reason
+
+
+# --- PR #60 council: grouped settings, non-regular sourced files, quote removal ---
+
+
+@pytest.mark.parametrize("command", [
+    f"false && {{ echo hi; export HELM_NAMESPACE=staging; }}; {_HELM_UNINSTALL}",
+    f"true || {{ export HELM_NAMESPACE=staging; }}; {_HELM_UNINSTALL}",
+    f"{{ export HELM_NAMESPACE=staging; }}; {_HELM_UNINSTALL}",
+    f"{{ echo a; {{ export HELM_NAMESPACE=staging; }}; }}; {_HELM_UNINSTALL}",
+    f"if false; then echo a; export HELM_NAMESPACE=staging; fi; {_HELM_UNINSTALL}",
+])
+def test_settings_inside_groups_are_unsettled(helm_prod_project, command):
+    verdict = _helm_verdict(helm_prod_project, command)
+    assert verdict.decision == "deny"
+    assert "statically" in verdict.reason
+
+
+def test_settings_after_a_closed_group_still_propagate(helm_prod_project):
+    command = f"{{ echo a; }}; export HELM_NAMESPACE=staging; {_HELM_UNINSTALL}"
+    assert _helm_verdict(helm_prod_project, command).decision == "allow"
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs FIFOs")
+def test_non_regular_sourced_files_are_never_opened(opted_in_project):
+    project = opted_in_project
+    config_dir = project / ".aegis"
+    read_end, write_end = os.pipe()
+    os.mkfifo(project / "ff")
+    holder = os.open(project / "ff", os.O_RDWR)  # an open writer: a blocking read hangs
+    try:
+        for command in (f"source /dev/fd/{read_end}; kubectl get pods",
+                        f". /dev/fd/{read_end}; kubectl get pods",
+                        "source ff; kubectl get pods", "bash ff; kubectl get pods",
+                        f"bash /dev/fd/{read_end}", "source /dev/null; kubectl get pods",
+                        "source .; kubectl get pods"):
+            started = time.monotonic()
+            verdict = hook.decide(command, config_dir, [], cwd=project)
+            assert time.monotonic() - started < 1 * TIMING_SLACK, command
+            assert verdict.decision == "ask", command
+            assert "not a regular file" in verdict.reason, command
+    finally:
+        for fd in (read_end, write_end, holder):
+            os.close(fd)
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs FIFOs")
+def test_pipes_named_as_kubeconfig_or_sql_file_are_not_read(opted_in_project, monkeypatch):
+    from aegis_core.environments import kubeconfig_current_context
+
+    project = opted_in_project
+    os.mkfifo(project / "ff")
+    holder = os.open(project / "ff", os.O_RDWR)
+    try:
+        started = time.monotonic()
+        assert kubeconfig_current_context({"KUBECONFIG": str(project / "ff")}, project)[1] \
+            is None
+        hook.decide("psql -f ff", project / ".aegis", [], cwd=project)
+        assert time.monotonic() - started < 1 * TIMING_SLACK
+    finally:
+        os.close(holder)
+
+
+@pytest.mark.parametrize("line", [
+    'export H"ELM_NAMESPACE"=staging',
+    "export HELM_NAMES'PACE'=staging",
+    'H"ELM_NAMESPACE"=staging',
+    "export HELM\\_NAMESPACE=staging",
+    'sour""ce env.sh',
+    "'.' env.sh",
+    'decl"are" -n R=HELM_NAMESPACE',
+    'printf -v"HELM_NAMESPACE" %s staging',
+])
+def test_quoted_names_in_scripts_and_sourced_files_are_unknown(helm_prod_project, line):
+    project = helm_prod_project
+    (project / "env.sh").write_text("echo hi\n")
+    script = project / "x.sh"
+    script.write_text(f"#!/bin/bash\n{line}\n{_HELM_UNINSTALL}\n")
+    verdict = _helm_verdict(project, "bash x.sh")
+    assert verdict.decision == "deny", verdict.reason
+    assert "statically" in verdict.reason
+    (project / "q.sh").write_text(line + "\n")
+    verdict = _helm_verdict(project, f"source q.sh; {_HELM_UNINSTALL}")
+    assert verdict.decision == "deny", verdict.reason
+
+
+def test_quoted_values_still_propagate(prod_scope_project):
+    project, config_dir = prod_scope_project
+    (project / "x.sh").write_text("#!/bin/bash\nexport AWS_PROFILE='prod-admin'\n"
+                                  "aws s3 rm s3://b/k\n")
+    verdict = _scoped(project, config_dir, "bash x.sh")
+    assert verdict.decision == "deny"
+    assert "no-aws-delete-in-prod" in verdict.reason
+
+
+def test_a_missing_sourced_file_asks_as_the_script_scan_does(prod_scope_project):
+    verdict = _scoped(*prod_scope_project, f"source missing.sh; {_RM}")
+    assert verdict.decision == "ask"
+    assert "does not exist yet" in verdict.reason

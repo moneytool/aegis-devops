@@ -233,6 +233,8 @@ def _load_kubeconfig(
     for path in files:
         if not strict and not path.exists():
             continue
+        if not path.is_file():  # a pipe (/dev/fd/N, a FIFO) could block forever: unknown
+            return None
         try:
             doc = yaml.safe_load(path.read_text()) or {}
         except (OSError, yaml.YAMLError):
