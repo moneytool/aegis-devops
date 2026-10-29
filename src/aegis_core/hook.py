@@ -103,7 +103,6 @@ from aegis_core.shell import (
     string_reader,
     strip_comment,
     strip_exec_builtin,
-    without_data_bodies,
 )
 
 AGENTS = ("claude", "codex", "copilot", "cursor", "gemini", "opencode", "vscode")
@@ -956,26 +955,23 @@ def _rejected(command: str, reason: str, config_dir: Path, extra_args: list[str]
             "run the infrastructure command on its own, without shell expansion",
             unchecked=True,
         )
-    # a quoted here-document only data sinks read (cat > README.md <<'EOF') is
-    # data: the loose checks below do not read it as commands
-    code = without_data_bodies(command)
-    generated = _GENERATED_CODE_RE.search(code)
+    generated = _GENERATED_CODE_RE.search(command)
     if generated:
         return HookVerdict(
             "ask",
             f"aegis: {generated.group(1)} runs code that is only produced when the command "
             "runs, so it cannot be checked; run the commands directly instead",
         )
-    producer = loose_code_reader(code)
+    producer = loose_code_reader(command)
     if producer is not None:
         return HookVerdict(
             "ask", f"aegis: a shell or interpreter runs code from {producer}, which the hook "
             "cannot read; save it to a file and run that, so its commands are checked")
-    if _piped_into_reader(code):
+    if _piped_into_reader(command):
         return HookVerdict("ask", _PIPED_READER_ASK)
-    scripts = script_runs_loosely(code)
+    scripts = script_runs_loosely(command)
     if scan:
-        here = None if _changes_directory(code) else cwd
+        here = None if _changes_directory(command) else cwd
         for runs in scripts:
             verdict = _scan_script(runs, config_dir, extra_args, here, command=command)
             if verdict is not None:
@@ -1016,10 +1012,9 @@ def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
     opaque: tuple[str, str] | None = None
     # a script run anywhere in the command, also inside a part that drops out
     # (`OUT=$(bash x.sh)`) or cannot be split out (`for …; do ./x.sh "$i"; done`)
-    code = without_data_bodies(command)  # a quoted here-document cat writes is data
-    loose_scripts = script_runs_loosely(code)
+    loose_scripts = script_runs_loosely(command)
     if scan:
-        start = None if _changes_directory(code) else cwd
+        start = None if _changes_directory(command) else cwd
         for runs in loose_scripts:
             verdict = _scan_script(runs, config_dir, extra_args, start, command=command)
             if verdict is not None:

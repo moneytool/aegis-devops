@@ -135,7 +135,8 @@ def _prescan(command: str) -> str:
     while i < n:
         c = command[i]
         if not (in_single or in_double or c in " \t\r\n" or (c == "#" and (
-                i == 0 or command[i - 1].isspace() or command[i - 1] in ";&|()"))):
+                i == 0 or command[i - 1].isspace() or command[i - 1] in ";&|()"))
+                or (c == "\\" and command.startswith("\n", i + 1))):  # a continuation
             tail = (tail + c)[-2:]
         if in_single:
             if c == "'":
@@ -1561,13 +1562,10 @@ class Lexed:
     end."""
 
     tokens: tuple[_Token, ...]
-    bodies: tuple[str, ...]  # bodies a shell or interpreter on their line may read as code
+    bodies: tuple[str, ...]  # here-document bodies, all checked as commands
     unclosed: bool
-    # the command lines of the outermost $(…), <(…), >(…) and `…` (also those
-    # an unquoted here-document body expands)
+    # the command lines of the outermost $(…), <(…), >(…) and `…`
     substitutions: tuple[str, ...] = ()
-    # where the top-level quoted bodies that nothing reads as code are: data
-    data_spans: tuple[tuple[int, int], ...] = ()
 
 
 def _skip_brackets(text: str, i: int, n: int, opening: str = "(",
@@ -1641,78 +1639,15 @@ def _ansi_c(text: str, i: int, n: int) -> tuple[str, int, bool]:
     return "".join(value), i + 1, i < n
 
 
-def _body_substitutions(body: str) -> list[str]:
-    """The ``$(…)`` and ``` `…` ``` an unquoted here-document body expands."""
-    state: dict = {"unclosed": False, "substitutions": []}
-    i, n = 0, len(body)
-    while i < n:
-        c = body[i]
-        if c == "\\":
-            i += 2
-        elif body.startswith("$(", i):
-            i = _expansion(body, i, [], state, 0)
-        elif c == "`":
-            j = body.find("`", i + 1)
-            if j > 0:
-                state["substitutions"].append(body[i + 1:j])
-            i = n if j < 0 else j + 1
-        else:
-            i += 1
-    return state["substitutions"]
-
-
-# Programs that only read a here-document as data (it goes to a file, the
-# terminal, a filter or a commit message), never as commands to run. Not sed
-# (its e command runs one), awk (system()), xargs, ssh, sudo, su, at, …
-_DATA_SINKS = frozenset({"cat", "tee", "head", "tail", "wc", "grep", "egrep", "fgrep", "sort",
-                         "uniq", "cut", "tr", "nl", "fold", "fmt", "column", "jq", "yq",
-                         "base64", "diff", "git", "gh", "true", ":"})
-# Words that open or close a compound command around the programs on a line.
-_COMPOUND_WORDS = frozenset({"{", "}", "if", "then", "else", "elif", "fi", "do", "done",
-                             "while", "until", "!", "time"})
-
-
-def _only_data_sinks(line: tuple[_Token, ...] | list[_Token], state: dict) -> bool:
-    """Whether every program on a here-document's opening line is a data sink
-    (:data:`_DATA_SINKS`: ``cat > f <<'EOF'``, ``cat <<'EOF' | tee f``), so the
-    body is data: no ``<(…)``/``>(…)``, no ``exec``/``eval``/``source``, no
-    program that is an expansion, and no function or alias defined earlier
-    in the command. Anything else may read the body as code."""
-    if state.get("defines"):
-        return False
-    command_start, after_op = True, False
-    for kind, value, _s, _e in line:
-        if kind == "sep":
-            command_start, after_op = True, False
-            continue
-        if kind == "op":
-            after_op = True
-            continue
-        if "<(" in value or ">(" in value:
-            return False
-        if after_op:  # a redirection's target
-            after_op = False
-            continue
-        if not command_start:
-            continue
-        if value in _COMPOUND_WORDS or _ASSIGNMENT_RE.match(value):
-            continue
-        if value not in _DATA_SINKS:
-            return False  # also exec, eval, source, sudo, xargs, ssh, $SHELL, `which sh`
-        command_start = False
-    return True
-
-
-def _skip_bodies(text: str, i: int, pending: list[tuple[str, bool, bool]], bodies: list[str],
-                 state: dict, depth: int, code: bool) -> int:
+def _skip_bodies(text: str, i: int, pending: list[tuple[str, bool]], bodies: list[str],
+                 state: dict) -> int:
     """Past the here-document bodies that start at ``i`` (one per ``<<`` on the
-    line before, in order), each up to its delimiter line. A body is kept as
-    code (``code``) unless only data sinks are on its line
-    (:func:`_only_data_sinks`); a data body is set aside, and only an unquoted
-    one's ``$(…)``/backticks run. A body whose
-    delimiter never comes leaves the command unclosed."""
+    line before, in order), each up to its delimiter line; collects them. Each
+    is checked as commands, quoted or not, whatever reads it: which program
+    reads a body as code cannot be told reliably (functions, aliases, PATH,
+    ``>(…)``). A body whose delimiter never comes leaves the command unclosed."""
     n = len(text)
-    for delimiter, strip_tabs, quoted in pending:
+    for delimiter, strip_tabs in pending:
         start = i
         while i < n:
             j = text.find("\n", i)
@@ -1722,13 +1657,7 @@ def _skip_bodies(text: str, i: int, pending: list[tuple[str, bool, bool]], bodie
             i = n if j < 0 else j + 1
         else:
             state["unclosed"] = True  # never ended: the body runs to the end
-        body = text[start:i]
-        if code:
-            bodies.append(body)
-        elif not quoted and depth == 0:
-            state["substitutions"].extend(_body_substitutions(body))
-        elif depth == 0:
-            state["data_spans"].append((start, i))
+        bodies.append(text[start:i])
         if i < n:  # past the delimiter line
             j = text.find("\n", i)
             i = n if j < 0 else j + 1
@@ -1740,16 +1669,18 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
     """Tokens of ``text`` from ``i`` into ``tokens``; inside a ``$(…)``
     (``nested``) up to its closing ``)``, whose index + 1 is returned."""
     n = len(text)
-    # here-documents whose bodies start at the next line: (delimiter, <<-, quoted)
-    pending: list[tuple[str, bool, bool]] = []
+    # here-documents whose bodies start at the next line: (delimiter, <<-)
+    pending: list[tuple[str, bool]] = []
     want: str | None = None  # a << just read: the next word is its delimiter
     parens = 0
     joined = False  # after |, |&, && or ||: a newline does not end the command
-    line_start = len(tokens)
     while i < n:
         c = text[i]
         if c in " \t\r":
             i += 1
+            continue
+        if c == "\\" and text.startswith("\n", i + 1):  # a line continuation: a space
+            i += 2
             continue
         if c == "#":  # a comment, where a word would start
             j = text.find("\n", i)
@@ -1757,10 +1688,8 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
             continue
         if c == "\n" and (joined or pending):
             if pending:
-                code = not _only_data_sinks(tokens[line_start:], state)
-                i = _skip_bodies(text, i + 1, pending, bodies, state, depth, code)
+                i = _skip_bodies(text, i + 1, pending, bodies, state)
                 pending = []
-                line_start = len(tokens)
                 if not joined:
                     tokens.append(("sep", "\n", i - 1, i))
                 continue
@@ -1775,16 +1704,12 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
             i = j
             continue
         if c in "\n;()" or (c in "|&" and not text.startswith("&>", i)):
-            if c == ")" and tokens and tokens[-1][:2] == ("sep", "("):
-                state["defines"] = True  # name() …: a function the hook does not follow
             two = text[i:i + 2]
             sep = two if two in ("&&", "||", "|&", ";;") else c
             parens += 1 if c == "(" else -1 if c == ")" and parens else 0
             tokens.append(("sep", sep, i, i + len(sep)))
             joined = sep in _CONTINUING_SEPS
             i += len(sep)
-            if c == "\n":
-                line_start = len(tokens)
             continue
         joined = False
         start = j = i
@@ -1820,7 +1745,7 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
                 i += 1
                 while i < n and text[i] != '"':
                     if text[i] == "$" and text[i + 1:i + 2] in ("(", "{", "["):
-                        j = _expansion(text, i, bodies, state, depth)
+                        j = _expansion(text, i, bodies, state, depth, in_double=True)
                         value.append(text[i:j])
                         i = j
                         continue
@@ -1854,11 +1779,8 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
             continue  # only line continuations
         word = "".join(value)
         tokens.append(("word", word, start, i))
-        if word in ("function", "alias"):
-            state["defines"] = True
         if want is not None:
-            quoted = any(q in text[start:i] for q in "'\"\\")
-            pending.append((word, want == "<<-", quoted))
+            pending.append((word, want == "<<-"))
             want = None
     if nested:
         state["unclosed"] = True  # a $( never closed
@@ -1868,25 +1790,30 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
 
 
 # `((…))` is arithmetic only when it closes with an adjacent `))`; `((cmd) )`
-# is a subshell in a subshell and `$((cmd) )` a command substitution. Two
-# levels of inner brackets, no quotes; possessive, so linear.
-_ARITHMETIC_RE = re.compile(
-    r"\(\((?:[^()'\"\\]++|\((?:[^()'\"\\]++|\([^()'\"\\]*+\))*+\))*+\)\)")
+# is a subshell in a subshell and `$((cmd) )` a command substitution. Quotes
+# are ordinary characters in arithmetic; up to four levels of inner brackets;
+# possessive, so linear.
+_BRACKETED = r"[^()]++"
+for _ in range(4):
+    _BRACKETED = rf"[^()]++|\((?:{_BRACKETED})*+\)"
+_ARITHMETIC_RE = re.compile(rf"\(\((?:{_BRACKETED})*+\)\)")
 
 
 def _skip_expansion(text: str, i: int, opening: str, closing: str, bodies: list[str],
-                    state: dict, depth: int) -> int:
+                    state: dict, depth: int, quotes: bool = False) -> int:
     """The index after the ``closing`` that matches the ``opening`` at
-    ``text[i]`` (an arithmetic ``((…))``, ``${…}`` or ``$[…]``), quotes heeded.
-    A ``<<`` in it is a shift or a pattern, not a here-document; the
-    ``$(…)``, ``<(…)``, ``>(…)`` and backticks in it are read as commands."""
+    ``text[i]`` (an arithmetic ``((…))``, ``${…}`` or ``$[…]``). A ``<<`` in
+    it is a shift or a pattern, not a here-document; the ``$(…)``, ``<(…)``,
+    ``>(…)`` and backticks in it are read as commands. Single quotes hide
+    them only where they quote (``quotes``: an unquoted ``${…}``); in
+    arithmetic and in a double-quoted ``"${…}"`` they are literal."""
     n = len(text)
     level = 0
     while i < n:
         c = text[i]
         if c == "\\":
             i += 2
-        elif c == "'":
+        elif c == "'" and quotes:
             j = text.find("'", i + 1)
             i = n if j < 0 else j + 1
         elif c == "$" and text.startswith("(", i + 1) and not _ARITHMETIC_RE.match(text, i + 1) \
@@ -1909,13 +1836,17 @@ def _skip_expansion(text: str, i: int, opening: str, closing: str, bodies: list[
     return n
 
 
-def _expansion(text: str, i: int, bodies: list[str], state: dict, depth: int) -> int:
+def _expansion(text: str, i: int, bodies: list[str], state: dict, depth: int,
+               in_double: bool = False) -> int:
     """The index after the ``$(…)``/``<(…)``/``>(…)`` at ``i``, read as a
     command line of its own (its here-documents included), or after the
-    ``$((…))``, ``${…}`` or ``$[…]`` there (:func:`_skip_expansion`)."""
-    pair = {"{": ("{", "}"), "[": ("[", "]")}.get(text[i + 1:i + 2])
-    if pair is not None:
-        return _skip_expansion(text, i + 1, *pair, bodies, state, depth)
+    ``$((…))``, ``${…}`` or ``$[…]`` there (:func:`_skip_expansion`;
+    ``in_double``: inside double quotes)."""
+    if text.startswith("${", i):
+        return _skip_expansion(text, i + 1, "{", "}", bodies, state, depth,
+                               quotes=not in_double)
+    if text.startswith("$[", i):
+        return _skip_expansion(text, i + 1, "[", "]", bodies, state, depth)
     if text[i] == "$" and _ARITHMETIC_RE.match(text, i + 1):
         return _skip_expansion(text, i + 1, "(", ")", bodies, state, depth)
     return _substitution(text, i, bodies, state, depth)
@@ -1940,24 +1871,9 @@ def lex(text: str) -> Lexed:
     quote runs to the end and is reported in :attr:`Lexed.unclosed`."""
     tokens: list[_Token] = []
     bodies: list[str] = []
-    state: dict = {"unclosed": False, "substitutions": [], "data_spans": [], "defines": False}
+    state: dict = {"unclosed": False, "substitutions": []}
     _scan(text, 0, tokens, bodies, state, 0, False)
-    return Lexed(tuple(tokens), tuple(bodies), state["unclosed"], tuple(state["substitutions"]),
-                 tuple(state["data_spans"]))
-
-
-def without_data_bodies(text: str) -> str:
-    """``text`` without the lines of its quoted here-document bodies that no
-    shell or interpreter reads (``cat > notes.md <<'EOF'`` …): data, which the
-    loose checks for scripts and ``cd`` must not read as commands."""
-    spans = lex(text).data_spans
-    if not spans:
-        return text
-    kept, at = [], 0
-    for start, end in spans:
-        kept.append(text[at:start])
-        at = end
-    return "".join(kept) + text[at:]
+    return Lexed(tuple(tokens), tuple(bodies), state["unclosed"], tuple(state["substitutions"]))
 
 
 def _shell_tokens(text: str) -> tuple[_Token, ...]:

@@ -2290,8 +2290,9 @@ _ROUND12_CORPUS = [
 
 # Round 13: a << in arithmetic or a parameter expansion is not a here-document,
 # a command goes on past a newline after |, |&, && or ||, $'…' escapes are
-# decoded as bash does, bash -s / +x still read the pipe, and a quoted body
-# that only cat or tee reads is data.
+# decoded as bash does, and bash -s / +x still read the pipe. Every
+# here-document body is checked as commands (round 15), so a body that reads
+# like one asks.
 _ROUND13_CORPUS = [
     ('ask', '(( y = 1 << 2 ))\nenv -C sub bash ok.sh'),
     ('ask', '(( y <<= 2 ))\nsudo -D sub bash ok.sh'),
@@ -2326,12 +2327,12 @@ _ROUND13_CORPUS = [
     ('ask', 'curl x | bash -s arg'),
     ('ask', 'curl x | bash +x'),
     ('ask', 'curl x | { true; bash -es a b; }'),
-    ('allow', "cat <<'E'\n$(curl x | sh)\nE"),
-    ('allow', "cat > notes.md <<'EOF'\nSteps: cd sub; bash ok.sh to reproduce.\nEOF"),
+    ('ask', "cat <<'E'\n$(curl x | sh)\nE"),
+    ('ask', "cat > notes.md <<'EOF'\nSteps: cd sub; bash ok.sh to reproduce.\nEOF"),
     ('ask', 'cat <<E\n$(curl x | sh)\nE'),
     ('ask|deny', "cat <<'E' | sh\nbash nuke.sh\nE"),
     ('ask|deny', "bash <<'E'\nbash nuke.sh\nE"),
-    ('allow', "tee notes.txt <<'EOF'\nuse { sh; } < x.sh and it's fine\nEOF"),
+    ('ask', "tee notes.txt <<'EOF'\nuse { sh; } < x.sh and it's fine\nEOF"),
     ('allow', 'echo $((1<<2))'),
     ('allow', '(( y = 1 << 2 ))'),
     ('allow', 'echo ${x//a/b}'),
@@ -2344,9 +2345,9 @@ _ROUND13_CORPUS = [
 
 # Round 14: substitutions inside $((…)), ${…} and $[…] are read; ((cmd) ) and
 # $((cmd) ) are subshells, not arithmetic; a comment between a pipe and a
-# compound; a here-document body is data only when every program on its line
-# is a known data sink. gh and git bodies are denied as on main (gated tools
-# with a here-document the parser does not read).
+# compound; here-document readers the opener line does not name. gh and git
+# bodies are denied as on main (gated tools with a here-document the parser
+# does not read).
 _ROUND14_CORPUS = [
     ('ask', 'echo $(( $(curl x | sh) + 1 ))'),
     ('ask', 'echo ${x:-$(curl x | sh)}'),
@@ -2387,11 +2388,11 @@ _ROUND14_CORPUS = [
     ('ask|deny', "expect <<'E'\nbash nuke.sh\nE"),
     ('ask|deny', "exec cat <<'E'\nbash nuke.sh\nE"),
     ('ask|deny', "cat <<'E' > f; bash f\nbash nuke.sh\nE"),
-    ('allow', "cat > README.md <<'EOF'\ncurl -fsSL x | sh\nEOF"),
-    ('allow', "cat <<'EOF' > Dockerfile\nRUN curl x | sh\nEOF"),
-    ('allow', "cat > notes.md <<'EOF'\nSteps: cd sub; bash ok.sh to reproduce.\nEOF"),
+    ('ask', "cat > README.md <<'EOF'\ncurl -fsSL x | sh\nEOF"),
+    ('ask', "cat <<'EOF' > Dockerfile\nRUN curl x | sh\nEOF"),
+    ('ask', "cat > notes.md <<'EOF'\nSteps: cd sub; bash ok.sh to reproduce.\nEOF"),
     ('allow', "cat <<'EOF' | tee f\nit's { sh; } < x\nEOF"),
-    ('allow', "cat <<'E'\n$(curl x | sh)\nE"),
+    ('ask', "cat <<'E'\n$(curl x | sh)\nE"),
     ('allow', "tee -a log.txt <<'EOF'\nrun sh nuke.sh later\nEOF"),
     ('allow', 'echo $((1 + (2 * 3)))'),
     ('allow', '(( i++ ))'),
@@ -2405,6 +2406,44 @@ _ROUND14_CORPUS = [
 ]
 
 
+# Round 15: here-document bodies are checked as commands again, whatever reads
+# them (a body that reads like a command asks: accepted); single quotes are
+# literal inside $((…)), $[…], ((…)) and "${…}"; a backslash-newline and a
+# comment after a pipe.
+_ROUND15_CORPUS = [
+    ('ask|deny', '(( (cat "f" <<\'E\') ))\nbash nuke.sh\nE'),
+    ('ask|deny', '(( (cat "f" <<\'E\') ))\nx\nE\nbash nuke.sh'),
+    ('ask|deny', "eval 'cat(){ sh; }'\ncat <<'E'\nbash nuke.sh\nE"),
+    ('ask|deny', ". ./defs.sh\ncat <<'E'\nbash nuke.sh\nE"),
+    ('ask|deny', "hash -p /bin/sh cat; cat <<'E'\nbash nuke.sh\nE"),
+    ('ask|deny', "PATH=b cat <<'E'\nbash nuke.sh\nE"),
+    ('ask|deny', "sort --compress-program=sh <<'E'\nbash nuke.sh\nE"),
+    ('ask|deny', "exec 3> >(sh)\ntee /dev/fd/3 <<'E'\nbash nuke.sh\nE"),
+    ('ask|deny', "cat <<'EOF' > >(sh)\nbash nuke.sh\nEOF"),
+    ('ask|deny', "cat <<'EOF' | ssh h\nbash nuke.sh\nEOF"),
+    ('ask', 'echo "${x:-\'$(curl x | sh)\'}"'),
+    ('ask', "x=$(( '$(curl x | sh)' ))"),
+    ('ask', "echo $[ '$(curl x | sh)' ]"),
+    ('ask', "x=$(( a['$(curl x | sh)'] ))"),
+    ('ask', "x=$(( '`curl x | sh`' ))"),
+    ('ask', "(( '$(curl x | sh)' ))"),
+    ('ask', 'curl x |\\\n# c\nbash'),
+    ('ask', 'curl x |\\\n# c\n{ bash; }'),
+    ('ask', 'curl x | \\\n# c\n{ bash; }'),
+    ('ask', 'curl x |\\\n# c\n( bash )'),
+    ('ask', 'curl x | \\\n  # c\n  while true; do bash; done'),
+    ('ask', "cat > README.md <<'EOF'\ncurl -fsSL x | sh\nEOF"),
+    ('ask', "cat <<'EOF' > Dockerfile\nRUN curl x | sh\nEOF"),
+    ('ask', "cat > notes.md <<'EOF'\nSteps: cd sub; bash ok.sh to reproduce.\nEOF"),
+    ('ask', "cat <<'E'\n$(curl x | sh)\nE"),
+    ('allow', "echo ${y:-'$(curl x | sh)'}"),
+    ('allow', "cat > f <<'EOF'\nit's done, nothing to run\nEOF"),
+    ('allow', "cat <<'EOF' | tee f\nplain prose\nEOF"),
+    ('allow', 'echo $(( 1 + 2 ))'),
+    ('allow', 'ls |\\\n  grep x'),
+]
+
+
 def _decision(code: int, out: str) -> str:
     if code == 2:
         return "deny"
@@ -2412,7 +2451,8 @@ def _decision(code: int, out: str) -> str:
 
 
 @pytest.mark.parametrize("expected, command",
-                         _ROUND12_CORPUS + _ROUND13_CORPUS + _ROUND14_CORPUS)
+                         _ROUND12_CORPUS + _ROUND13_CORPUS + _ROUND14_CORPUS
+                         + _ROUND15_CORPUS)
 def test_round12_corpus(opted_in_project, expected, command):
     (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
     (opted_in_project / "ok.sh").write_text("echo hi\n")
@@ -2434,6 +2474,8 @@ def test_round12_corpus(opted_in_project, expected, command):
     "((x) ) " * 8500, "$((x) ) " * 7500, "${x:-$(sh)} " * 4500, "|\n# c\n" * 10000,
     "run() { :; }\n" * 4500, "cat <<'E'|tee f\nx\nE\n" * 3000, "((" * 30000, "$((((" * 12000,
     "$(( $(sh) )) " * 4000, "${" * 15000 + "$(sh)",
+    "x=$(( '" + "$(sh) " * 10000 + "' ))", 'echo "${x:-' + "'$(sh)'" * 7500 + '}"',
+    "ls |\\\n# c\n" * 6000, "((((" * 15000 + "))))" * 1000, "$[ '" * 15000,
 ])
 def test_here_documents_and_substitutions_stay_fast(opted_in_project, command):
     assert len(command) <= 64 * 1024
