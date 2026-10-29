@@ -74,17 +74,26 @@ from aegis_core import config as config_module
 from aegis_core.shell import (
     _ASSIGNMENT_RE,
     _KNOWN_BINARIES,
+    _READER_NAME_RE,
     _SHELLS,
     ARGS_ONLY_PROGRAMS,
     GLOB_REASON,
     ShellRejected,
     _basename,
+    _c_string_at,
+    _eval_words_end,
     _interpreter,
+    _readers,
+    _shell_tokens,
+    _Token,
     _unwrap_inner,
+    dequoted,
     find_heredoc,
     intents_from_command,
+    lex,
     loose_argv,
     loose_code_reader,
+    nested_commands,
     opaque_launcher_code,
     plain_binary,
     runs_expansion,
@@ -417,18 +426,30 @@ def _stdin_redirects(command: str, config_dir: Path, extra_args: list[str] | Non
     before parsing, so a command the parser rejects (``( sh ) < x.sh``) is
     covered too."""
     asks: list[str] = []
-    for text in _nested_commands(command):  # bash -c 'exec < x.sh; bash' too
+    if lex(command).unclosed and (_NAMES_READER_RE.search(command) or mentions_infra(command)):
+        # the shell would refuse it, or it ends inside a $(…) the lexer reads
+        # differently: the checks below cannot be trusted with it
+        asks.append("aegis: a quote, $(…) or backtick in this command is never closed, so "
+                    "where its words end cannot be told; it names a shell, interpreter or "
+                    "infrastructure tool, so it cannot be checked")
+    for text in nested_commands(command):  # bash -c 'exec < x.sh; bash' too
         asks += [ask for ask in _stdin_asks(text) if ask not in asks]
     if scan:
-        for path in dict.fromkeys(p for text in _nested_commands(command)
+        # after a cd the files are not where the hook would read them (asked)
+        here = None if _changes_directory(command) else cwd
+        for path in dict.fromkeys(p for text in nested_commands(command)
                                   for p in _group_stdin_files(text)):
             verdict = _scan_script({"kind": "script", "interpreter": "sh", "path": path},
-                                   config_dir, extra_args, cwd, command=command)
+                                   config_dir, extra_args, here, command=command)
             if verdict is not None:
                 if verdict.decision == "deny":
                     return verdict
                 asks.append(verdict.reason)
     return asks
+
+
+# A shell or interpreter named anywhere in the raw text (for the unclosed-quote net).
+_NAMES_READER_RE = re.compile(rf"(?<![\w.-]){_READER_NAME_RE.pattern}(?![\w.-])")
 
 
 def _stdin_asks(command: str) -> list[str]:
@@ -912,6 +933,11 @@ def _piped_code(command: str, reader: list[str], feeder: list[str] | None, confi
     return HookVerdict("ask", f"aegis: code piped into {interpreter}: {reason}")
 
 
+_PIPED_READER_ASK = ("aegis: a shell or interpreter reads code from a pipe in a command the "
+                     "hook cannot parse, so the code cannot be checked; save it to a file and "
+                     "run that")
+
+
 def _rejected(command: str, reason: str, config_dir: Path, extra_args: list[str] | None,
               cwd: Path | None, *, scan: bool, escalate_scripts: bool) -> HookVerdict:
     """A command (or a part of it) that cannot be parsed, judged as a whole:
@@ -937,6 +963,8 @@ def _rejected(command: str, reason: str, config_dir: Path, extra_args: list[str]
         return HookVerdict(
             "ask", f"aegis: a shell or interpreter runs code from {producer}, which the hook "
             "cannot read; save it to a file and run that, so its commands are checked")
+    if _piped_into_reader(command):
+        return HookVerdict("ask", _PIPED_READER_ASK)
     scripts = script_runs_loosely(command)
     if scan:
         here = None if _changes_directory(command) else cwd
@@ -992,6 +1020,8 @@ def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
     if escalate_scripts and loose_scripts:
         asks.append("aegis: this runs a local script, which the hook cannot read "
                     "(--escalate-scripts)")
+    if _piped_into_reader(command):  # the split below may not see it (`$'a\\'b'`)
+        asks.append(_PIPED_READER_ASK)
     here = cwd
     previous_sep = ""
     for text, sep in segments:
@@ -1083,137 +1113,6 @@ def _sourced_script(segment: str) -> dict[str, str] | None:
     return None
 
 
-# --- shell words, dequoted ------------------------------------------------------------
-#
-# The checks below match on the words the shell will see (`'sh'`, `"sh"` and
-# `\sh` are all `sh`), not on the raw text, and model redirections in order
-# (the last `<` is standard input). One linear pass over the command.
-
-# A token: (kind, value, start, end). kind is "word" (value dequoted; a
-# `$(…)`, `` `…` `` or `<(…)` stays raw inside it), "op" (a redirection
-# operator, its descriptor number in front: `<`, `2>`, `<<<`, `&>`, `<&`) or
-# "sep" (`;`, `&`, `&&`, `|`, `||`, `|&`, newline, `(`, `)`).
-_Token = tuple[str, str, int, int]
-_REDIRECT_OPS = ("&>>", "<<<", "<<-", "&>", "<<", "<>", "<&", ">>", ">&", ">|", "<", ">")
-
-
-def _skip_balanced(text: str, i: int, n: int) -> int:
-    """The index after the `)` that closes the `(` at ``text[i]``, quotes and
-    backslashes heeded; ``n`` when it is never closed."""
-    depth = 0
-    while i < n:
-        c = text[i]
-        if c == "\\":
-            i += 2
-            continue
-        if c == "'":
-            j = text.find("'", i + 1, n)
-            i = n if j < 0 else j + 1
-            continue
-        if c == '"':
-            i += 1
-            while i < n and text[i] != '"':
-                i += 2 if text[i] == "\\" else 1
-            i += 1
-            continue
-        if c == "(":
-            depth += 1
-        elif c == ")":
-            depth -= 1
-            if depth == 0:
-                return i + 1
-        i += 1
-    return n
-
-
-@functools.lru_cache(maxsize=32)
-def _shell_tokens(text: str) -> tuple[_Token, ...]:
-    """The tokens of ``text``. Never raises; an unclosed quote runs to the end."""
-    tokens: list[_Token] = []
-    i, n = 0, len(text)
-    while i < n:
-        c = text[i]
-        if c in " \t\r":
-            i += 1
-            continue
-        if c == "#":  # a comment, where a word would start
-            j = text.find("\n", i, n)
-            i = n if j < 0 else j
-            continue
-        if c in "\n;()" or (c in "|&" and not text.startswith(("&>",), i)):
-            two = text[i:i + 2]
-            sep = two if two in ("&&", "||", "|&", ";;") else c
-            tokens.append(("sep", sep, i, i + len(sep)))
-            i += len(sep)
-            continue
-        start = i
-        j = i
-        while j < n and text[j].isdigit():
-            j += 1
-        if j < n and text[j] in "<>&" and not text.startswith(("<(", ">("), j):
-            op = next((o for o in _REDIRECT_OPS if text.startswith(o, j)), None)
-            if op is not None and not (op.startswith("&") and j > i):
-                tokens.append(("op", text[i:j] + op, start, j + len(op)))
-                i = j + len(op)
-                continue
-        value: list[str] = []
-        while i < n:
-            c = text[i]
-            if c in " \t\r\n;|&()<>" and not (c in "<>" and text.startswith("(", i + 1)):
-                break
-            if c == "\\":
-                if text.startswith("\n", i + 1):
-                    i += 2  # a line continuation
-                    continue
-                value.append(text[i + 1:i + 2])
-                i += 2
-            elif c == "'" or (c == "$" and text.startswith("'", i + 1)):
-                i += 1 if c == "'" else 2
-                j = text.find("'", i, n)
-                j = n if j < 0 else j
-                value.append(text[i:j])
-                i = j + 1
-            elif c == '"':
-                i += 1
-                while i < n and text[i] != '"':
-                    if text[i] == "\\" and text[i + 1:i + 2] in ('"', "\\", "$", "`"):
-                        i += 1
-                    value.append(text[i:i + 1])
-                    i += 1
-                i += 1
-            elif c in "$<>" and text.startswith("(", i + 1):  # $(…), <(…), >(…): raw
-                j = _skip_balanced(text, i + 1, n)
-                value.append(text[i:j])
-                i = j
-            elif c == "`":
-                j = text.find("`", i + 1, n)
-                j = n if j < 0 else j + 1
-                value.append(text[i:j])
-                i = j
-            else:
-                value.append(c)
-                i += 1
-        tokens.append(("word", "".join(value), start, min(i, n)))
-    return tuple(tokens)
-
-
-def dequoted(text: str) -> str:
-    """``text`` as the words the shell sees, joined by spaces (separators and
-    operators kept), for the checks that look for a program by name."""
-    return " ".join(value for _kind, value, _s, _e in _shell_tokens(text))
-
-
-_READER_NAME_RE = re.compile(
-    rf"(?:{'|'.join(sorted(_SHELLS))}|python[\d.]*|perl|ruby|node|php|lua)")
-
-
-def _readers(tokens: tuple[_Token, ...]) -> list[int]:
-    """The indexes of the words that name a shell or interpreter (``sh``,
-    ``'sh'``, ``\\sh``, ``/bin/sh``, ``/usr/bin/python3``)."""
-    return [k for k, (kind, value, _s, _e) in enumerate(tokens)
-            if kind == "word" and _READER_NAME_RE.fullmatch(_basename(value))]
-
-
 def _stdin_op(tokens: tuple[_Token, ...], k: int) -> tuple[str, str, int] | None:
     """What the operator at ``k`` makes standard input, with its target word:
     ``("file", NAME, end)``, ``("generated", OP, end)`` for a here-document or
@@ -1281,67 +1180,35 @@ def _compound_stdins(command: str) -> list[tuple[str, str, int, int]]:
     return found
 
 
-def _c_string_at(tokens: tuple[_Token, ...], k: int) -> int | None:
-    """For a shell word at ``k``: the index of its ``-c`` string word, after
-    its options (``-o NAME``, clusters, ``--long``; at most a few dozen words,
-    so callers stay linear); ``None`` when it has none."""
-    if _basename(tokens[k][1]) not in _SHELLS:
-        return None
-    j = k + 1
-    while j < min(len(tokens), k + 64) and tokens[j][0] == "word":
-        word = tokens[j][1]
-        if word in ("-o", "+o", "-O", "+O"):
-            j += 2
-        elif re.fullmatch(r"-[a-zA-Z]*c[a-zA-Z]*", word):
-            return j + 1 if j + 1 < len(tokens) and tokens[j + 1][0] == "word" else None
-        elif re.fullmatch(r"[-+][a-zA-Z]+|--[\w-]+", word):
-            j += 1
-        else:
-            return None
-    return None
-
-
 def _c_strings_with_stdin(command: str) -> list[tuple[str, str, str]]:
-    """``(string, kind, value)`` for each ``sh -c STRING [ARGS…]`` whose
-    standard input is redirected (the last ``<`` wins): ``kind`` is ``"file"``,
-    ``"generated"`` or ``"fd"`` as in :func:`_stdin_after`."""
+    """``(string, kind, value)`` for each ``sh -c STRING [ARGS…]`` and each
+    ``eval WORDS`` (``string``: the words joined) whose standard input is
+    redirected (the last ``<`` wins): ``kind`` is ``"file"``, ``"generated"``
+    or ``"fd"`` as in :func:`_stdin_after`."""
     tokens = _shell_tokens(command)
     found = []
     last = None
-    for k in _readers(tokens):
-        j = _c_string_at(tokens, k)
-        if j is not None and j + 1 < len(tokens):
-            last = last or _last_stdin(tokens)
-            stdin = last[j + 1]  # after the string's arguments and other redirections
-            if stdin is not None:
-                found.append((tokens[j][1], stdin[0], stdin[1]))
-    return found
-
-
-def _nested_commands(command: str, depth: int = 0) -> list[str]:
-    """``command`` and the command lines inside it: ``sh -c`` strings and the
-    words of ``eval``, to four levels (each level is part of the one above, so
-    this stays linear)."""
-    found = [command]
-    if depth >= 4:
-        return found
-    tokens = _shell_tokens(command)
-    for k, (kind, value, _s, _e) in enumerate(tokens):
+    k = 0
+    while k < len(tokens):
+        kind, value, _s, _e = tokens[k]
+        k += 1
         if kind != "word":
             continue
-        inner = None
-        if value == "eval":
-            words = []
-            for token in tokens[k + 1:]:
-                if token[0] != "word" or token[1] == "eval":
-                    break
-                words.append(token[1])
-            inner = " ".join(words)
+        first, after = None, None
+        if value == "eval":  # its words, a later eval among them included: read once
+            first, after = k, _eval_words_end(tokens, k - 1)
         elif _READER_NAME_RE.fullmatch(_basename(value)):
-            j = _c_string_at(tokens, k)
-            inner = tokens[j][1] if j is not None else None
-        if inner:
-            found += _nested_commands(inner, depth + 1)
+            j = _c_string_at(tokens, k - 1)
+            if j is not None:
+                first, after = j, j + 1
+        if first is None:
+            continue
+        k = after
+        if after < len(tokens):
+            last = last or _last_stdin(tokens)
+            stdin = last[after]  # after the arguments and other redirections
+            if stdin is not None:
+                found.append((" ".join(t[1] for t in tokens[first:after]), stdin[0], stdin[1]))
     return found
 
 
@@ -1352,32 +1219,60 @@ _PIPED_COMPOUND_RE = re.compile(
 
 def _bare_reader(command: str, start: int, end: int) -> bool:
     """Whether ``command[start:end]`` runs a shell or interpreter that reads its
-    code from standard input: after its options (``-e``, ``-o pipefail``) comes
-    no script, module or code argument (``sh``, ``bash -e``, ``bash -s``; not
+    code from standard input (:func:`_bare_at`)."""
+    tokens = _shell_tokens(command[start:end])
+    return any(_bare_at(tokens, r) for r in _readers(tokens))
+
+
+def _bare_at(tokens: tuple[_Token, ...], r: int) -> bool:
+    """Whether the shell or interpreter word at ``r`` reads its code from
+    standard input: after its options (``-e``, ``-o pipefail``) comes no
+    script, module or code argument (``sh``, ``bash -e``, ``bash -s``; not
     ``python3 -m mod``, ``bash -c '…'`` or ``bash x.sh``). Words are dequoted
     (``'sh'``, ``\\sh``); the command ends at a separator, with or without a
-    space before it (``sh;echo``), and at a ``}``."""
-    tokens = _shell_tokens(command[start:end])
-    for r in _readers(tokens):
-        shell = _basename(tokens[r][1]) in _SHELLS
-        k, limit = r + 1, min(len(tokens), r + 64)
-        while k < limit:
-            kind, word, _s, _e = tokens[k]
-            if kind == "sep" or word == "}":
-                return True
-            if kind == "op":  # sh 2>/dev/null, sh > out
-                k += 2
+    space before it (``sh;echo``), and at a ``}``. At most 64 words are read."""
+    shell = _basename(tokens[r][1]) in _SHELLS
+    k, limit = r + 1, min(len(tokens), r + 64)
+    while k < limit:
+        kind, word, _s, _e = tokens[k]
+        if kind == "sep" or word == "}":
+            return True
+        if kind == "op":  # sh 2>/dev/null, sh > out
+            k += 2
+            continue
+        if not word.startswith("-") or word in ("-", "--"):
+            return word in ("-", "--") or word in _STDIN_PATHS  # python3 /dev/stdin
+        if word in ("-c", "-m", "--version", "--help") or (not shell and (
+                word[:2] in ("-e", "-E", "-r") or word in ("-V", "-v", "-h"))):
+            return False  # code or a module on the command line, or a version/help check
+        k += 2 if word in ("-o", "+o", "-O", "+O") else 1
+    return k >= len(tokens)
+
+
+# Words that may stand before the program a pipe feeds (`| exec sh`, `| env X=1 sh`).
+_BEFORE_PROGRAM = frozenset({"exec", "command", "builtin", "time", "nohup", "!", "{", "env",
+                             "sudo", "then", "do", "else"})
+
+
+def _piped_into_reader(command: str) -> bool:
+    """Whether a pipe, here or in a ``sh -c`` string, ``eval`` words or a
+    here-document body inside, feeds a shell or interpreter that reads its
+    code from it (:func:`_bare_at`), read from the dequoted words. For a
+    command the parser cannot read (``echo $'a\\'b'; curl x | sh``); only for
+    asking."""
+    for text in nested_commands(command):
+        tokens = _shell_tokens(text)
+        for k, (kind, value, _s, _e) in enumerate(tokens):
+            if kind != "sep" or value not in ("|", "|&"):
                 continue
-            if not word.startswith("-") or word in ("-", "--"):
-                if word in ("-", "--") or word in _STDIN_PATHS:  # python3 /dev/stdin
-                    return True
-                break  # a script argument
-            if word in ("-c", "-m", "--version", "--help") or (not shell and (
-                    word[:2] in ("-e", "-E", "-r") or word in ("-V", "-v", "-h"))):
-                break  # code or a module on the command line, or a version/help check
-            k += 2 if word in ("-o", "+o", "-O", "+O") else 1
-        else:
-            if k >= len(tokens):
+            j = k + 1
+            while j < len(tokens) and tokens[j][0] == "word" and (
+                    tokens[j][1] in _BEFORE_PROGRAM or tokens[j][1].startswith("-")
+                    or _ASSIGNMENT_RE.match(tokens[j][1])):
+                j += 1
+            if (j < len(tokens) and tokens[j][0] == "word"
+                    and _READER_NAME_RE.fullmatch(_basename(tokens[j][1]))
+                    and _bare_at(tokens, j)):
                 return True
     return False
 
@@ -1389,11 +1284,14 @@ _FD_STDIN_RE = re.compile(r"(?:^|[\s;&|])0?(?:<&\s*(?!-)\S|<>)")  # <&3, <&$fd, 
 def _group_stdin_files(command: str) -> list[str]:
     """The files redirected onto a group, subshell, ``if`` or loop that runs a
     shell or interpreter (``{ bash; } < c.sh``), read like ``sh < c.sh``."""
+    # bash -c 'eval sh' < FILE, eval 'true; sh' < FILE: a reader inside the
+    # string reads FILE
+    files = [value for string, kind, value in _c_strings_with_stdin(command)
+             if kind == "file" and string_reader(string)]
     tokens = _shell_tokens(command)
     readers = [tokens[k][2] for k in _readers(tokens)]
     if not readers:
-        return []
-    files = []
+        return files
     for kind, value, end, anchor in _compound_stdins(command):
         if kind != "file":
             continue
@@ -1401,9 +1299,6 @@ def _group_stdin_files(command: str) -> list[str]:
         # shell reads FILE as its standard input
         if (anchor >= 0 and readers[0] < anchor) or (anchor < 0 and end <= readers[-1]):
             files.append(value)
-    # bash -c 'eval sh' < FILE: a reader inside the string reads FILE
-    files += [value for string, kind, value in _c_strings_with_stdin(command)
-              if kind == "file" and string_reader(string)]
     return files
 
 

@@ -42,6 +42,7 @@ set them (an explicit ``--namespace`` beats the environment). The
 launchers that were stripped are listed in ``metadata["wrappers"]``.
 """
 
+import functools
 import re
 import shlex
 from collections.abc import Iterator
@@ -689,6 +690,7 @@ _SUDO_VALUE_LONG = frozenset(
 _SUDO_SHELL_OPTIONS = frozenset({"-i", "-s", "--login", "--shell", "-e", "--edit"})
 
 
+@functools.lru_cache(maxsize=4096)  # called for every word, often the same few
 def _basename(token: str) -> str:
     # Path(".").name is "" — keep the dot so the `.` builtin is recognised.
     return Path(token).name or token
@@ -1521,23 +1523,318 @@ def code_run(simple: SimpleCommand) -> dict[str, str] | None:
     return None
 
 
+# --- shell words, dequoted ------------------------------------------------------------
+#
+# The hook's checks for shells reading standard input match on the words the
+# shell will see (`'sh'`, `"sh"` and `\sh` are all `sh`), not on the raw text,
+# and model redirections in order (the last `<` is standard input). The lexer
+# below follows bash's quoting: '…', "…", $'…' with its backslash escapes,
+# backslashes, $(…)/<(…)/>(…) read recursively, `…`, comments, and here-document
+# bodies (<<, <<-, quoted delimiters, several on one line), which are set aside
+# rather than read as commands. One linear pass.
+
+# A token: (kind, value, start, end). kind is "word" (value dequoted; a
+# `$(…)`, `` `…` `` or `<(…)` stays raw inside it), "op" (a redirection
+# operator, its descriptor number in front: `<`, `2>`, `<<<`, `&>`, `<&`) or
+# "sep" (`;`, `&`, `&&`, `|`, `||`, `|&`, newline, `(`, `)`).
+_Token = tuple[str, str, int, int]
+_LEX_REDIRECT_OPS = ("&>>", "<<<", "<<-", "&>", "<<", "<>", "<&", ">>", ">&", ">|", "<", ">")
+_ANSI_C_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "a": "\a", "b": "\b", "e": "\x1b",
+                   "f": "\f", "v": "\v"}
+# $(…) nested deeper than this is skipped by counting brackets, not read.
+_MAX_SUBSTITUTION_DEPTH = 32
+
+
+@dataclass(frozen=True)
+class Lexed:
+    """The tokens of a command line, the here-document bodies it holds, and
+    whether a quote, ``$(…)`` or backtick is left open at its end."""
+
+    tokens: tuple[_Token, ...]
+    bodies: tuple[str, ...]
+    unclosed: bool
+    # the command lines of the outermost $(…), <(…), >(…) and `…`
+    substitutions: tuple[str, ...] = ()
+
+
+def _skip_balanced(text: str, i: int, n: int) -> tuple[int, bool]:
+    """The index after the `)` that closes the `(` at ``text[i]``, quotes and
+    backslashes heeded, and whether it was closed (else ``n``)."""
+    depth = 0
+    while i < n:
+        c = text[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "'":
+            j = text.find("'", i + 1, n)
+            if j < 0:
+                return n, False
+            i = j + 1
+            continue
+        if c == '"':
+            i += 1
+            while i < n and text[i] != '"':
+                i += 2 if text[i] == "\\" else 1
+            i += 1
+            continue
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return i + 1, True
+        i += 1
+    return n, False
+
+
+def _skip_bodies(text: str, i: int, pending: list[tuple[str, bool]], bodies: list[str]) -> int:
+    """Past the here-document bodies that start at ``i`` (one per ``<<`` on the
+    line before, in order), each up to its delimiter line; collects them."""
+    n = len(text)
+    for delimiter, strip_tabs in pending:
+        start = i
+        while i < n:
+            j = text.find("\n", i)
+            line = text[i:n if j < 0 else j]
+            if (line.lstrip("\t") if strip_tabs else line) == delimiter:
+                break
+            i = n if j < 0 else j + 1
+        bodies.append(text[start:i])  # never ended: the body runs to the end
+        if i < n:  # past the delimiter line
+            j = text.find("\n", i)
+            i = n if j < 0 else j + 1
+    return i
+
+
+def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dict,
+          depth: int, nested: bool) -> int:
+    """Tokens of ``text`` from ``i`` into ``tokens``; inside a ``$(…)``
+    (``nested``) up to its closing ``)``, whose index + 1 is returned."""
+    n = len(text)
+    pending: list[tuple[str, bool]] = []  # here-documents whose bodies start at the next line
+    want: str | None = None  # a << just read: the next word is its delimiter
+    parens = 0
+    while i < n:
+        c = text[i]
+        if c in " \t\r":
+            i += 1
+            continue
+        if c == "#":  # a comment, where a word would start
+            j = text.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        if c == ")" and nested and parens == 0:
+            return i + 1
+        if c in "\n;()" or (c in "|&" and not text.startswith("&>", i)):
+            two = text[i:i + 2]
+            sep = two if two in ("&&", "||", "|&", ";;") else c
+            parens += 1 if c == "(" else -1 if c == ")" and parens else 0
+            tokens.append(("sep", sep, i, i + len(sep)))
+            i += len(sep)
+            if c == "\n" and pending:
+                i = _skip_bodies(text, i, pending, bodies)
+                pending = []
+            continue
+        start = j = i
+        while j < n and text[j].isdigit():
+            j += 1
+        if j < n and text[j] in "<>&" and not text.startswith(("<(", ">("), j):
+            op = next((o for o in _LEX_REDIRECT_OPS if text.startswith(o, j)), None)
+            if op is not None and not (op.startswith("&") and j > i):
+                tokens.append(("op", text[i:j] + op, start, j + len(op)))
+                want = op if op in ("<<", "<<-") else None
+                i = j + len(op)
+                continue
+        value: list[str] = []
+        while i < n:
+            c = text[i]
+            if c in " \t\r\n;|&()<>" and not (c in "<>" and text.startswith("(", i + 1)):
+                break
+            if c == "\\":
+                if not text.startswith("\n", i + 1):  # else a line continuation
+                    value.append(text[i + 1:i + 2])
+                i += 2
+            elif c == "$" and text.startswith("'", i + 1):  # $'…': backslash escapes
+                i += 2
+                while i < n and text[i] != "'":
+                    if text[i] == "\\" and i + 1 < n:
+                        value.append(_ANSI_C_ESCAPES.get(text[i + 1], text[i + 1]))
+                        i += 2
+                    else:
+                        value.append(text[i])
+                        i += 1
+                state["unclosed"] |= i >= n
+                i += 1
+            elif c == "'":
+                j = text.find("'", i + 1)
+                state["unclosed"] |= j < 0
+                j = n if j < 0 else j
+                value.append(text[i + 1:j])
+                i = j + 1
+            elif c == '"':
+                i += 1
+                while i < n and text[i] != '"':
+                    if text.startswith("$(", i):
+                        j = _substitution(text, i, bodies, state, depth)
+                        value.append(text[i:j])
+                        i = j
+                        continue
+                    if text[i] == "\\" and text[i + 1:i + 2] in ('"', "\\", "$", "`", "\n"):
+                        i += 1
+                        if text[i] == "\n":
+                            i += 1
+                            continue
+                    value.append(text[i:i + 1])
+                    i += 1
+                state["unclosed"] |= i >= n
+                i += 1
+            elif c in "$<>" and text.startswith("(", i + 1):  # $(…), <(…), >(…): raw
+                j = _substitution(text, i, bodies, state, depth)
+                value.append(text[i:j])
+                i = j
+            elif c == "`":
+                j = text.find("`", i + 1)
+                state["unclosed"] |= j < 0
+                if depth == 0 and j > 0:
+                    state["substitutions"].append(text[i + 1:j])
+                j = n if j < 0 else j + 1
+                value.append(text[i:j])
+                i = j
+            else:
+                value.append(c)
+                i += 1
+        i = min(i, n)
+        if not value and not text[start:i].replace("\\\n", ""):
+            continue  # only line continuations
+        word = "".join(value)
+        tokens.append(("word", word, start, i))
+        if want is not None:
+            pending.append((word, want == "<<-"))
+            want = None
+    if nested:
+        state["unclosed"] = True  # a $( never closed
+    return n
+
+
+def _substitution(text: str, i: int, bodies: list[str], state: dict, depth: int) -> int:
+    """The index after the ``$(…)``/``<(…)``/``>(…)`` at ``i``, read as a
+    command line of its own (its here-documents included)."""
+    if depth >= _MAX_SUBSTITUTION_DEPTH:
+        j, closed = _skip_balanced(text, i + 1, len(text))
+        state["unclosed"] |= not closed
+        return j
+    j = _scan(text, i + 2, [], bodies, state, depth + 1, True)
+    if depth == 0:
+        state["substitutions"].append(text[i + 2:j - 1])
+    return j
+
+
+@functools.lru_cache(maxsize=32)
+def lex(text: str) -> Lexed:
+    """The tokens of ``text`` (see :data:`_Token`). Never raises; an unclosed
+    quote runs to the end and is reported in :attr:`Lexed.unclosed`."""
+    tokens: list[_Token] = []
+    bodies: list[str] = []
+    state: dict = {"unclosed": False, "substitutions": []}
+    _scan(text, 0, tokens, bodies, state, 0, False)
+    return Lexed(tuple(tokens), tuple(bodies), state["unclosed"], tuple(state["substitutions"]))
+
+
+def _shell_tokens(text: str) -> tuple[_Token, ...]:
+    return lex(text).tokens
+
+
+def dequoted(text: str) -> str:
+    """``text`` as the words the shell sees, joined by spaces (separators and
+    operators kept), for the checks that look for a program by name."""
+    return " ".join(value for _kind, value, _s, _e in _shell_tokens(text))
+
+
+_READER_NAME_RE = re.compile(
+    rf"(?:{'|'.join(sorted(_SHELLS))}|python[\d.]*|perl|ruby|node|php|lua)")
+
+
+def _readers(tokens: tuple[_Token, ...]) -> list[int]:
+    """The indexes of the words that name a shell or interpreter (``sh``,
+    ``'sh'``, ``\\sh``, ``/bin/sh``, ``/usr/bin/python3``)."""
+    return [k for k, (kind, value, _s, _e) in enumerate(tokens)
+            if kind == "word" and _READER_NAME_RE.fullmatch(_basename(value))]
+
+
+def _c_string_at(tokens: tuple[_Token, ...], k: int) -> int | None:
+    """For a shell word at ``k``: the index of its ``-c`` string word, after
+    its options (``-o NAME``, clusters, ``--long``; at most a few dozen words,
+    so callers stay linear); ``None`` when it has none."""
+    if _basename(tokens[k][1]) not in _SHELLS:
+        return None
+    j = k + 1
+    while j < min(len(tokens), k + 64) and tokens[j][0] == "word":
+        word = tokens[j][1]
+        if word in ("-o", "+o", "-O", "+O"):
+            j += 2
+        elif re.fullmatch(r"-[a-zA-Z]*c[a-zA-Z]*", word):
+            return j + 1 if j + 1 < len(tokens) and tokens[j + 1][0] == "word" else None
+        elif re.fullmatch(r"[-+][a-zA-Z]+|--[\w-]+", word):
+            j += 1
+        else:
+            return None
+    return None
+
+
+def _eval_words_end(tokens: tuple[_Token, ...], k: int) -> int:
+    """For an ``eval`` word at ``k``: the index after its words."""
+    j = k + 1
+    while j < len(tokens) and tokens[j][0] == "word":
+        j += 1
+    return j
+
+
+def _inner_commands(text: str) -> list[tuple[str, int, int]]:
+    """The command lines one level inside ``text``: each ``sh -c`` string and
+    the words of each ``eval`` (joined), with the range of ``text`` they take
+    up (from the shell or ``eval`` word to the string or last word). An
+    ``eval``'s words are not searched again for a ``-c`` string at this level;
+    that is the next level's job."""
+    tokens = _shell_tokens(text)
+    found = []
+    k = 0
+    while k < len(tokens):
+        kind, value, start, _end = tokens[k]
+        if kind == "word" and value == "eval":
+            j = _eval_words_end(tokens, k)
+            if j > k + 1:
+                found.append((" ".join(t[1] for t in tokens[k + 1:j]), start, tokens[j - 1][3]))
+            k = j
+            continue
+        if kind == "word":
+            j = _c_string_at(tokens, k)
+            if j is not None:
+                found.append((tokens[j][1], start, tokens[j][3]))
+                k = j + 1
+                continue
+        k += 1
+    return found
+
+
+def nested_commands(command: str, depth: int = 0) -> list[str]:
+    """``command`` and the command lines inside it: ``sh -c`` strings, the
+    words of ``eval``, here-document bodies and command substitutions, to four
+    levels (each level is part of the one above, so this stays linear)."""
+    found = [command]
+    if depth >= 4:
+        return found
+    inner = [string for string, _s, _e in _inner_commands(command)]
+    lexed = lex(command)
+    for text in dict.fromkeys([*inner, *lexed.bodies, *lexed.substitutions]):
+        if text:
+            found += nested_commands(text, depth + 1)
+    return found
+
+
 # Where a loose part ends: the shell's separators, and the edges of $(…), `…`,
 # <(…), >(…), (…), { …; } and case patterns.
 _LOOSE_SPLIT_RE = re.compile(r"(\|\||&&|;;|\$\(|[<>]\(|[;|&\n()`])")
-
-
-# Linear in the command: the shell word starts after a separator and its
-# directory part holds none of them (possessive), so no character is scanned
-# from two starts; its options are disjoint and possessive (`-o NAME`, a
-# cluster without `c`, `--long`; NAME is never a shell's name, which no shell
-# takes as an option), so no later shell word lies inside them; then comes the
-# cluster with `c`.
-_QUOTED_C_STRING_RE = re.compile(
-    r"(?<![^\s;&|()`])(?:[^\s;&|()`/]*+/)*+(?:ba|z|da|k|a|mk|po|rba)?sh"
-    r"(?:\s++(?:[-+]o\s++(?!(?:ba|z|da|k|a|mk|po|rba)?sh(?![\w-]))[\w-]++"
-    r"|-(?![a-zA-Z]*c)[a-zA-Z]++|--[\w-]++))*+"
-    r"\s++-[a-zA-Z]*c[a-zA-Z]*\s+\$?"
-    r"('([^']*)'|\"((?:[^\"\\]|\\.)*)\")")
 
 
 def script_runs_loosely(command: str, _depth: int = 0) -> list[dict[str, str]]:
@@ -1550,12 +1847,15 @@ def script_runs_loosely(command: str, _depth: int = 0) -> list[dict[str, str]]:
     asking, never for allowing."""
     found = []
     if _depth < 4:
-        # a quoted sh -c string holds separators of its own: read it on its own
-        # (bash -c 'set -e; bash x.sh "$@"') before the split cuts it up
-        for match in _QUOTED_C_STRING_RE.finditer(command):
-            inner = match.group(2) if match.group(2) is not None else match.group(3)
+        # a sh -c string or eval's words hold separators of their own: read them
+        # on their own (bash -c 'set -e; bash x.sh "$@"', eval 'bash x.sh; true'),
+        # dequoted as the shell does ('\'' included), before the split cuts them up
+        kept, at = [], 0
+        for inner, start, end in _inner_commands(command):
             found.extend(script_runs_loosely(inner, _depth + 1))
-        command = _QUOTED_C_STRING_RE.sub(" ", command)
+            kept.append(command[at:start] + " ")
+            at = end
+        command = "".join(kept) + command[at:]
     pieces = _LOOSE_SPLIT_RE.split(command)
     opened: list[str] = []  # brackets and backticks still open
     continuation = False  # this part follows a closing `)`/`` ` ``: the rest of a word
