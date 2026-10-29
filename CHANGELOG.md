@@ -249,6 +249,13 @@ behaviour.
   shell's options that take a value (`-o`, `+o`, `-O`, `+O`, `--rcfile`, `--init-file`) are
   skipped with it, so `bash --rcfile FILE -c '…'` and `bash -O extglob -c '…'` read the `-c`
   string instead of taking FILE or the option name for the script.
+- Agent hook: a launcher's command string (`watch 'cmd'`, `script -c 'cmd'`, `mise exec -c
+  'cmd'`, also behind `sudo`/`nohup`) is a nested command line like a `sh -c` string, so every
+  check reads it, also in a command the parser rejects (`watch 'bash x.sh' "$HOME"`). A shell
+  given a script whose name is only known at run time and a `< FILE` (`sh < x.sh $X`) also has
+  FILE read, since with `$X` empty it runs FILE. An interactive shell (`-i`, `-ic`, …) sources
+  its `--rcfile`/`--init-file`, which is read as a script (`bash --rcfile x.sh -i`); with `-c`
+  alone the file is not read, as bash does.
 - Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
   own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
   policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a

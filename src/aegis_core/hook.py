@@ -91,6 +91,7 @@ from aegis_core.shell import (
     dequoted,
     find_heredoc,
     intents_from_command,
+    interactive_rcfiles,
     lex,
     loose_argv,
     loose_code_reader,
@@ -558,6 +559,14 @@ def _precheck(command: str, config_dir: Path, extra_args: list[str] | None,
             asks.append(verdict.reason)
     if scan:
         for runs, here in _scripts_with_directory(command, cwd):
+            verdict = _scan_script(runs, config_dir, extra_args, here, command=command)
+            if verdict is not None:
+                if verdict.decision == "deny":
+                    return verdict
+                asks.append(verdict.reason)
+        # bash --rcfile x.sh -i: an interactive shell sources its startup file
+        here = None if _changes_directory(command) else cwd
+        for runs in interactive_rcfiles(command):
             verdict = _scan_script(runs, config_dir, extra_args, here, command=command)
             if verdict is not None:
                 if verdict.decision == "deny":

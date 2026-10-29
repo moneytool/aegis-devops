@@ -2559,6 +2559,33 @@ _ROUND18_CORPUS = [
 ]
 
 
+# Round 19: a launcher's command string (watch, script -c, mise exec -c) is a
+# nested command line; an interactive shell sources its --rcfile/--init-file
+# (checked in bash for -i and -ic; a login shell, -il, does not, but it is
+# denied too: the file names a blocked command).
+_ROUND19_CORPUS = [
+    ('deny', 'watch \'bash nuke.sh\' "$HOME"'),
+    ('deny', "OUT=$(watch -g 'bash nuke.sh')"),
+    ('deny', "sudo watch 'bash nuke.sh' $X"),
+    ('deny', "nohup script -qc 'bash nuke.sh' /dev/null $X &"),
+    ('deny', "mise exec -c 'bash nuke.sh' $X"),
+    ('deny', "watch 'sh < nuke.sh' $X"),
+    ('deny', 'bash -c \'watch "bash nuke.sh"\' $X'),
+    ('deny', 'eval "watch \'bash nuke.sh\'" $X'),
+    ('ask', "watch 'curl x | sh' $X"),
+    ('ask', "script -c 'curl x|sh' /dev/null $X"),
+    ('deny', "bash --rcfile nuke.sh -ic 'echo hi'"),
+    ('deny', 'bash --rcfile nuke.sh -i'),
+    ('deny', 'bash --init-file nuke.sh -il'),
+    ('deny', "x=$(bash --rcfile nuke.sh -i -c 'echo hi' $X)"),
+    ('deny', 'bash --rcfile nuke.sh -ic \'echo hi\' "$X"'),
+    ('allow', "bash --rcfile nuke.sh -c 'echo hi'"),
+    ('allow', "watch 'ls' $X"),
+    ('allow', 'bash --rcfile ok.sh -i'),
+    ('allow', "watch -n 5 'git status'"),
+]
+
+
 def _decision(code: int, out: str) -> str:
     if code == 2:
         return "deny"
@@ -2568,7 +2595,7 @@ def _decision(code: int, out: str) -> str:
 @pytest.mark.parametrize("expected, command",
                          _ROUND12_CORPUS + _ROUND13_CORPUS + _ROUND14_CORPUS
                          + _ROUND15_CORPUS + _ROUND16_CORPUS + _ROUND17_CORPUS
-                         + _ROUND17B_CORPUS + _ROUND18_CORPUS)
+                         + _ROUND17B_CORPUS + _ROUND18_CORPUS + _ROUND19_CORPUS)
 def test_round12_corpus(opted_in_project, expected, command):
     (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
     (opted_in_project / "ok.sh").write_text("echo hi\n")
@@ -2599,6 +2626,8 @@ def test_round12_corpus(opted_in_project, expected, command):
     "cat <<E\n" + "`x \\`sh\\``" * 4500 + "\nE", 'echo "' + "`" * 60000 + '"', "\\`" * 30000,
     "bash ok.sh " + "'a;b' " * 10000, "echo " + "'(' \"|\" ';' " * 5000,
     "echo " + "$(echo 'a;b') " * 4000, "(bash ok.sh '|') " * 3500,
+    "watch 'watch ls' " * 3500, "sudo watch " * 5000 + "'ls'", "bash --rcfile ok.sh -i " * 2500,
+    "bash " + "--rcfile ok.sh " * 4000 + "-i",
 ])
 def test_here_documents_and_substitutions_stay_fast(opted_in_project, command):
     assert len(command) <= 64 * 1024

@@ -2009,31 +2009,48 @@ def _eval_words_end(tokens: tuple[_Token, ...], k: int) -> int:
     return j
 
 
-def _inner_commands(text: str) -> list[tuple[str, int, int]]:
-    """The command lines one level inside ``text``: each ``sh -c`` string and
-    the words of each ``eval`` (joined), with the range of ``text`` they take
-    up (from the shell or ``eval`` word to the string or last word). An
-    ``eval``'s words are not searched again for a ``-c`` string at this level;
-    that is the next level's job."""
+def _inner_commands(text: str) -> list[str]:
+    """The command lines one level inside ``text``: each ``sh -c`` string, the
+    words of each ``eval`` (joined), and the command string of a launcher
+    (``watch 'cmd'``, ``script -c 'cmd'``, ``mise exec -c 'cmd'``, also behind
+    ``sudo``/``nohup``/…). An ``eval``'s words are not searched again for a
+    ``-c`` string at this level; that is the next level's job."""
     tokens = _shell_tokens(text)
     found = []
     k = 0
     while k < len(tokens):
-        kind, value, start, _end = tokens[k]
+        kind, value, _start, _end = tokens[k]
         if kind == "word" and value == "eval":
             j = _eval_words_end(tokens, k)
             if j > k + 1:
-                found.append((" ".join(t[1] for t in tokens[k + 1:j]), start, tokens[j - 1][3]))
+                found.append(" ".join(t[1] for t in tokens[k + 1:j]))
             k = j
             continue
         if kind == "word":
             j = _c_string_at(tokens, k)
             if j is not None:
-                found.append((tokens[j][1], start, tokens[j][3]))
+                found.append(tokens[j][1])
                 k = j + 1
                 continue
         k += 1
+    for words, _redirects in _simple_commands(tokens):
+        string = _launcher_string(words)
+        if string:
+            found.append(string)
     return found
+
+
+def _launcher_string(words: list[str]) -> str | None:
+    """The command string a launcher in front of ``words`` runs (``watch
+    'cmd'``, ``sudo script -qc 'cmd' /dev/null``); ``None`` when there is none
+    or the launchers cannot be unwrapped."""
+    try:
+        argv = strip_exec_builtin(_strip_reserved(words))
+        if not argv or argv[0] == "eval":
+            return None
+        return _unwrap_inner(argv, 0)[3]
+    except ShellRejected:
+        return None
 
 
 def nested_commands(command: str) -> list[str]:
@@ -2058,7 +2075,7 @@ def _nesting(command: str) -> tuple[tuple[str, ...], bool]:
     def walk(text: str, depth: int) -> None:
         found.append(text)
         lexed = lex(text)
-        inner = [string for string, _s, _e in _inner_commands(text)]
+        inner = _inner_commands(text)
         texts = [t for t in dict.fromkeys([*inner, *lexed.bodies, *lexed.substitutions]) if t]
         if depth >= 4:
             deep[0] |= bool(texts)
@@ -2085,7 +2102,50 @@ def script_runs_loosely(command: str) -> list[dict[str, str]]:
             runs = _loose_run(words, redirects)
             if runs is not None:
                 found.setdefault(tuple(sorted(runs.items())), runs)
+                source = _stdin_file(SimpleCommand([], redirects))
+                if runs["kind"] == "script" and "$" in runs.get("path", "") and source and (
+                        _basename(runs.get("interpreter", "")) in _SHELLS):
+                    # sh < x.sh $X: with $X empty, sh reads its commands from x.sh
+                    extra = {"kind": "script", "interpreter": runs["interpreter"],
+                             "path": f"< {source}"}
+                    found.setdefault(tuple(sorted(extra.items())), extra)
+            for runs in _rcfile_runs(words):
+                found.setdefault(tuple(sorted(runs.items())), runs)
     return list(found.values())
+
+
+def interactive_rcfiles(command: str) -> list[dict[str, str]]:
+    """The startup files an interactive shell in ``command`` (or in a command
+    line nested in it) sources: ``bash --rcfile x.sh -i``, ``bash --init-file
+    x.sh -ic 'echo'``, as ``runs_code`` script records. A shell that is not
+    interactive (``-c`` alone) does not read them."""
+    return [runs for text in nested_commands(command)
+            for words, _redirects in _simple_commands(_shell_tokens(text))
+            for runs in _rcfile_runs(words)]
+
+
+def _rcfile_runs(words: list[str]) -> list[dict[str, str]]:
+    """:func:`interactive_rcfiles` for one simple command's words."""
+    shell = next((k for k, word in enumerate(words) if _basename(word) in _SHELLS), None)
+    if shell is None:
+        return []
+    files, interactive, j = [], False, shell + 1
+    while j < len(words):
+        word = words[j]
+        if word == "--" or not word.startswith(("-", "+")) or word in ("-", "+"):
+            break
+        if word in ("--rcfile", "--init-file") and j + 1 < len(words):
+            files.append(words[j + 1])
+        if word in SHELL_VALUE_OPTIONS:
+            j += 2
+            continue
+        if word.startswith("-") and not word.startswith("--") and "i" in word[1:]:
+            interactive = True  # -i, -ic, -il
+        j += 1
+    if not interactive:
+        return []
+    return [{"kind": "script", "interpreter": _basename(words[shell]), "path": path}
+            for path in files]
 
 
 def _simple_commands(tokens: tuple[_Token, ...]) -> Iterator[tuple[list[str], list[str]]]:
