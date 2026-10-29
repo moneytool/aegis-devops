@@ -384,6 +384,22 @@ behaviour.
   or follows a `cd` the hook cannot follow (computed, in the background or a pipeline, `env
   -C`) asks; a relative path follows a literal `cd DIR` earlier in the command. What a script
   sources or runs in turn is not read, nor are other interpreters' scripts (`python3 x.py`).
+- Agent hook (PR #60 review): a file sourced before an infrastructure command (`source env.sh;
+  aws s3 rm …`, `. env.sh; …`) is read for what it sets, and its literal `export
+  AWS_PROFILE=prod` / `AWS_PROFILE=prod` / `declare -x …` settings of the variables that pick an
+  account, cluster or program reach the commands after it, as do the same settings written in
+  the command itself (`export AWS_PROFILE=prod; aws …`), so a policy scoped to that profile
+  applies with `--resolve-current-context`; before, the later command was judged with the
+  invoking environment and allowed. A sourced file that may change the environment in any
+  other way (`cd`, `unset`, `alias`, a function, `set -a`, a computed value, control flow,
+  another sourced file or program; also a file that is missing or cannot be read), and a
+  setting that may not reach the later commands (in the background, a pipeline, after `&&` /
+  `||`, inside an if or loop body, in a `sh -c` string) or cannot be followed (`unset`,
+  `export -n`), deny the infrastructure commands after it as a computed scope does. A script
+  line whose program word is a glob or brace (`/usr/local/bin/kubec?l delete nodes --all`,
+  `kube{ctl,x} delete …`) is now kept when a script is read (`bash x.sh`, `./x.sh`, `source
+  x.sh`, `sh < x.sh`) and asks like the same command typed directly; a glob in an argument
+  (`rm -f *.tmp`) still allows.
 
 ### Changed
 - Agent hook: code piped into a shell or interpreter, or fed to one by a here-string or here-doc

@@ -80,6 +80,10 @@ class SimpleCommand:
     # the program word holds a glob character the shell expands (unquoted where
     # it is written, in the text this command was read from)
     globbed: bool = False
+    # an assignment here may not reach the commands after it: the command runs
+    # in the background (`&`), after `&&` / `||`, or inside an if/while/until/
+    # for/select body (see :func:`intents_from_command`)
+    unsettled: bool = False
 
 
 # --- tokenising --------------------------------------------------------------
@@ -279,15 +283,26 @@ def split_compound(command: str) -> list[SimpleCommand]:
     pending_fd: str | None = None
     pending_op: str | None = None
     in_pipeline = False
+    conditional = False  # after `&&` / `||`
+    depth = 0  # open if/while/until/for/select bodies
 
-    def flush(pipeline: bool) -> None:
-        nonlocal argv, redirects
+    def flush(pipeline: bool, background: bool = False) -> None:
+        nonlocal argv, redirects, depth
         if pending_op is not None:
             raise ShellRejected(f"redirection {pending_op!r} without a target", command)
+        k = 0
+        while k < len(argv) and (argv[k] in _GROUPING_WORDS or argv[k] in _LEADING_RESERVED):
+            depth += argv[k] in ("if", "while", "until")
+            k += 1
+        opening = k < len(argv) and argv[k] in _HEADER_RESERVED
+        closing = k < len(argv) and argv[k] in _CLOSING_RESERVED and len(argv) == k + 1
+        nested = depth > 0 or opening
         argv = _strip_reserved(argv)
         if argv:
             _check_builtin(argv)
-            commands.append(SimpleCommand(argv, redirects, pipeline, in_pipeline))
+            commands.append(SimpleCommand(argv, redirects, pipeline, in_pipeline,
+                                          unsettled=background or conditional or nested))
+        depth = max(depth + opening - closing, 0)
         argv, redirects = [], []
 
     for tok in _tokens(command):
@@ -305,8 +320,9 @@ def split_compound(command: str) -> list[SimpleCommand]:
             raise ShellRejected("unsupported redirection", command)
         if tok in _SEPARATORS:
             is_pipe = tok in _PIPE_SEPARATORS
-            flush(in_pipeline or is_pipe)
+            flush(in_pipeline or is_pipe, tok == "&")
             in_pipeline = is_pipe
+            conditional = tok in ("&&", "||") or (conditional and is_pipe)
             continue
         if set(tok) <= _PUNCTUATION:
             raise ShellRejected(f"unsupported shell operator {tok!r}", command)
@@ -3029,7 +3045,7 @@ def _expand(
         argv, env, wrappers, string = _unwrap_inner(simple.argv, depth)
         if string is None:
             yield (SimpleCommand(argv, simple.redirects, simple.in_pipeline, simple.stdin_pipe,
-                                 bool(argv) and globbed(argv[0], wrappers)),
+                                 bool(argv) and globbed(argv[0], wrappers), simple.unsettled),
                    env, wrappers)
             for inner_argv in find_exec_commands(argv):
                 # find runs CMD without a shell, but the outer shell has already
@@ -3074,6 +3090,46 @@ def _annotate(
         metadata["redirects"] = list(simple.redirects)
 
 
+ENV_CHANGE_REASON = "an earlier part changes the environment in a way the hook cannot follow"
+
+
+def _env_change(argv: list[str], env: dict[str, str]) -> tuple[dict[str, str], bool] | None:
+    """What a simple command does to the variables that pick a later
+    infrastructure tool's account, cluster or program (:func:`_infra_env`):
+    ``(values, unsure)`` -- the literal values it sets (``AWS_PROFILE=x``,
+    ``export AWS_PROFILE=x``, ``declare -x …``) and whether it changes one in a
+    way that cannot be followed (``unset``, ``export -n``, ``declare +x``,
+    ``read``); ``None`` when it changes none. A bare assignment counts: the
+    variable may already be exported."""
+    if not argv:
+        values = {k: v for k, v in env.items() if _infra_env(k)}
+        return (values, False) if values else None
+    name = _basename(argv[0])
+    if name in _DECLARATION_BUILTINS:
+        values: dict[str, str] = {}
+        unsure = False
+        for word in argv[1:]:
+            if _ASSIGNMENT_RE.match(word):
+                key, _, value = word.partition("=")
+                if _infra_env(key.rstrip("+")):
+                    if key.endswith("+") or "[" in key:
+                        unsure = True
+                    else:
+                        values[key] = value
+            elif word.startswith(("-", "+")) and word not in ("--",):
+                if set(word[1:]) - set("xgr") or word.startswith("+"):
+                    unsure = True  # export -n, declare +x / -n / -a: not followed
+            elif _infra_env(word) and name == "local":
+                unsure = True
+        if values or unsure:
+            return values, unsure
+        return None
+    if (name in ("unset", "read", "mapfile", "readarray", "getopts")
+            or name == "printf" and "-v" in argv) and any(_infra_env(w) for w in argv[1:]):
+        return {}, True
+    return None
+
+
 def intents_from_command(command: str, *,
                          keep_pipeline_stages: bool = False) -> list[InfrastructureIntent]:
     """Every InfrastructureIntent a shell command string would give rise
@@ -3083,7 +3139,13 @@ def intents_from_command(command: str, *,
     (the hook's own checks of their arguments); on their own they produce the
     synthetic ``shell`` / ``binary/<name>`` / ``exec`` intent described in
     the module docstring. Environment assignments and stripped launchers
-    are recorded in each intent's metadata.
+    are recorded in each intent's metadata -- also a literal ``export
+    AWS_PROFILE=x`` / ``AWS_PROFILE=x`` made earlier in the command, as if
+    written in front of each later command; one made where it may not reach
+    the later commands (in a pipeline, the background, after ``&&`` / ``||``,
+    in an if/loop body or a ``sh -c`` string) or that cannot be followed
+    (``unset``, ``export -n``) makes every later known infrastructure command
+    a :class:`ShellRejected` (:data:`ENV_CHANGE_REASON`).
 
     Raises :class:`ShellRejected` (a ``ValueError``) for the shell
     constructs that cannot be checked statically, and ``ValueError`` from
@@ -3092,13 +3154,26 @@ def intents_from_command(command: str, *,
     """
     intents: list[InfrastructureIntent] = []
     previous: SimpleCommand | None = None
+    exported: dict[str, str] = {}  # literal settings that reach every later command
+    lost: str | None = None  # a change that cannot be followed came first
     for simple, env, wrappers in _expand(command, 0):
+        change = _env_change(simple.argv, env)
+        if change is not None:
+            values, unsure = change
+            if unsure or wrappers or simple.in_pipeline or simple.unsettled:
+                lost = lost or shlex.join(simple.argv) or " ".join(f"{k}=" for k in values)
+            else:
+                exported.update(values)
         if not simple.argv:
             continue
         feeder, previous = (previous if simple.stdin_pipe else None), simple
         if simple.globbed:
             raise ShellRejected(GLOB_REASON, simple.argv[0])  # .command: the program word
         name = _basename(simple.argv[0])
+        if lost is not None and (name in _KNOWN_BINARIES or name in ("terraform", "tofu")):
+            raise ShellRejected(ENV_CHANGE_REASON, lost)
+        if exported:
+            env = {**exported, **env}
         destroy = (
             from_terraform_argv(simple.argv) if name in ("terraform", "tofu") else None
         )

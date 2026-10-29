@@ -3654,3 +3654,184 @@ def test_value_flag_without_value_still_denied(opted_in_project):
     verdict = hook.decide("kubectl get pods -n", opted_in_project / ".aegis")
     assert verdict.decision == "deny"
     assert "missing its value" in verdict.reason
+
+
+# --- PR #60 review: sourced files can change scope; obfuscated words in scripts ---
+
+
+@pytest.fixture
+def prod_scope_project(opted_in_project, monkeypatch):
+    """A signed policy that blocks AWS deletes in env prod (profile prod-admin
+    in the example environments), the invoking profile staging, and env.sh
+    variants on disk. Returns (project, config_dir)."""
+    import yaml
+
+    from aegis_core.provenance import compute_provenance_hash
+    from aegis_core.signing import load_key, sign_file, sign_tree
+
+    project = opted_in_project
+    config_dir = project / ".aegis"
+    rule = dict(provider="aws", resource_pattern="*", actions=["delete"], scope={"env": "prod"},
+                time_window=None, effect="BLOCK", constraint_class="deletion",
+                principal="admin", source_ref="git-9901",
+                source_timestamp="2026-03-18T10:00:00+00:00",
+                rule_text="Block AWS deletes in prod.")
+    rule = {"id": "no-aws-delete-in-prod", **rule,
+            "provenance_hash": compute_provenance_hash(**rule)}
+    constraints = config_dir / "constraints.yaml"
+    constraints.write_text(yaml.safe_dump({"constraints": [rule]}, sort_keys=False))
+    sources = config_dir / "sources"
+    (sources / "git-9901.json").write_text(json.dumps(
+        {k: v for k, v in rule.items() if k not in ("id", "provenance_hash")}))
+    principals = sources / "PRINCIPALS.yaml"
+    principals.write_text(principals.read_text().replace(
+        "principals:\n", "principals:\n  git-9901: admin\n", 1))
+    for old in sources.glob("*.sig"):
+        old.unlink()
+    key = load_key(f"file:{EXAMPLE_SIGNING_KEY_PATH}")
+    sign_tree(sources, key)
+    sign_file(constraints, key)
+    monkeypatch.setenv("AWS_PROFILE", "staging")
+    (project / "env.sh").write_text("# prod\nexport AWS_PROFILE=prod-admin\n")
+    (project / "bare.sh").write_text("AWS_PROFILE=prod-admin\n")
+    (project / "declared.sh").write_text("declare -x AWS_PROFILE='prod-admin'; echo ok\n")
+    (project / "sub").mkdir()
+    (project / "cdenv.sh").write_text("cd sub\n")
+    (project / "cdexport.sh").write_text("cd sub\nexport AWS_PROFILE=prod-admin\n")
+    (project / "plain.sh").write_text("echo hi\n")
+    (project / "dyn.sh").write_text('export AWS_PROFILE="$(cat p)"\n')
+    (project / "unset.sh").write_text("unset AWS_PROFILE\n")
+    (project / "alias.sh").write_text("alias aws='aws --profile prod-admin'\n")
+    (project / "seta.sh").write_text("set -a\nAWS_PROFILE=prod-admin\n")
+    (project / "nested.sh").write_text("source env.sh\n")
+    (project / "cond.sh").write_text("if true; then\nexport AWS_PROFILE=prod-admin\nfi\n")
+    return project, config_dir
+
+
+def _scoped(project, config_dir, command):
+    return hook.decide(command, config_dir, ["--resolve-current-context"], cwd=project)
+
+
+_RM = "aws s3 rm s3://bucket/key"
+
+
+@pytest.mark.parametrize("command", [
+    _RM,
+    f"source plain.sh; {_RM}",
+    "source cdenv.sh; ls",
+    "source dyn.sh; ls",
+    "export AWS_PROFILE=prod-admin; ls",
+])
+def test_sourced_files_that_leave_scope_alone_allow(prod_scope_project, command):
+    assert _scoped(*prod_scope_project, command).decision == "allow"
+
+
+@pytest.mark.parametrize("command", [
+    f"AWS_PROFILE=prod-admin {_RM}",
+    f"source env.sh; {_RM}",
+    f". env.sh; {_RM}",
+    f". ./env.sh && {_RM}",
+    f"source env.sh\n{_RM}",
+    f"builtin source env.sh; {_RM}",
+    f"command . env.sh; {_RM}",
+    f"source bare.sh; {_RM}",
+    f". bare.sh; {_RM}",
+    f"source declared.sh; {_RM}",
+    f"export AWS_PROFILE=prod-admin; {_RM}",
+    f"AWS_PROFILE=prod-admin; {_RM}",
+    f"declare -x AWS_PROFILE=prod-admin; {_RM}",
+])
+def test_sourced_or_exported_prod_profile_is_blocked(prod_scope_project, command):
+    verdict = _scoped(*prod_scope_project, command)
+    assert verdict.decision == "deny"
+    assert "no-aws-delete-in-prod" in verdict.reason or "statically" in verdict.reason
+
+
+@pytest.mark.parametrize("command", [
+    f"source env.sh; {_RM}",
+    f". env.sh; {_RM}",
+    f"export AWS_PROFILE=prod-admin; {_RM}",
+])
+def test_exported_prod_profile_reaches_the_policy(prod_scope_project, command):
+    verdict = _scoped(*prod_scope_project, command)
+    assert verdict.decision == "deny"
+    assert "no-aws-delete-in-prod" in verdict.reason
+
+
+@pytest.mark.parametrize("command", [
+    f"source cdenv.sh; {_RM}",
+    f". cdexport.sh; {_RM}",
+    f"source dyn.sh; {_RM}",
+    f"source unset.sh; {_RM}",
+    f"source alias.sh; {_RM}",
+    f"source seta.sh; {_RM}",
+    f"source nested.sh; {_RM}",
+    f"source cond.sh; {_RM}",
+    f"source missing.sh; {_RM}",
+    f"source env.sh & {_RM}",
+    f"true && export AWS_PROFILE=staging; {_RM}",
+    f"if true; then export AWS_PROFILE=staging; fi; {_RM}",
+    f"export AWS_PROFILE=staging & {_RM}",
+    f"export AWS_PROFILE=staging | true; {_RM}",
+    f"unset AWS_PROFILE; {_RM}",
+    f"export -n AWS_PROFILE; {_RM}",
+    f"bash -c 'export AWS_PROFILE=staging'; {_RM}",
+])
+def test_environment_changes_the_hook_cannot_follow_deny(prod_scope_project, command):
+    verdict = _scoped(*prod_scope_project, command)
+    assert verdict.decision == "deny"
+    assert "statically" in verdict.reason
+
+
+def test_unsettled_export_does_not_lend_its_scope(prod_scope_project, monkeypatch):
+    """Invoked in prod: a conditional or background export of a staging profile
+    must not make the delete look like staging."""
+    monkeypatch.setenv("AWS_PROFILE", "prod-admin")
+    project, config_dir = prod_scope_project
+    for command in (f"false && export AWS_PROFILE=staging; {_RM}",
+                    f"export AWS_PROFILE=staging & {_RM}",
+                    f"if false; then export AWS_PROFILE=staging; fi; {_RM}"):
+        assert _scoped(project, config_dir, command).decision == "deny", command
+    assert _scoped(project, config_dir,
+                   f"export AWS_PROFILE=staging; {_RM}").decision == "allow"
+
+
+def test_shell_propagates_literal_exports():
+    intents = shell.intents_from_command("export AWS_PROFILE=p; aws s3 rm s3://b/k")
+    aws = [i for i in intents if i.provider == "aws"]
+    assert aws and aws[0].metadata["profile"] == "p"
+    intents = shell.intents_from_command(
+        "export AWS_PROFILE=p; AWS_PROFILE=q aws s3 rm s3://b/k")
+    assert [i for i in intents if i.provider == "aws"][0].metadata["profile"] == "q"
+    with pytest.raises(ShellRejected):
+        shell.intents_from_command("true || export AWS_PROFILE=p; aws s3 rm s3://b/k")
+
+
+_OBFUSCATED_SCRIPT_LINES = [
+    "/usr/local/bin/kubec?l delete nodes --all",
+    "kube{ctl,x} delete nodes --all",
+    "kube[c]tl delete nodes --all",
+    "echo start; /usr/bin/kube*ctl delete nodes --all",
+]
+
+
+@pytest.mark.parametrize("line", _OBFUSCATED_SCRIPT_LINES)
+@pytest.mark.parametrize("run_it", ["bash cleanup.sh", "./cleanup.sh", "source cleanup.sh",
+                                    ". cleanup.sh", "sh < cleanup.sh"])
+def test_script_lines_with_globbed_program_words_are_kept(opted_in_project, line, run_it):
+    script = opted_in_project / "cleanup.sh"
+    script.write_text(f"#!/bin/bash\n{line}\n")
+    script.chmod(0o755)
+    verdict = hook.decide(run_it, opted_in_project / ".aegis", [], cwd=opted_in_project)
+    assert verdict.decision in ("ask", "deny"), (line, run_it)
+    assert "glob" in verdict.reason
+
+
+@pytest.mark.parametrize("run_it", ["bash cleanup.sh", "./cleanup.sh", "source cleanup.sh",
+                                    "sh < cleanup.sh"])
+def test_script_lines_with_plain_globs_in_arguments_allow(opted_in_project, run_it):
+    script = opted_in_project / "cleanup.sh"
+    script.write_text("#!/bin/bash\nrm -f *.tmp\necho {a,b}\n'kubec?l' x\nls ./*.sh\n")
+    script.chmod(0o755)
+    verdict = hook.decide(run_it, opted_in_project / ".aegis", [], cwd=opted_in_project)
+    assert verdict.decision == "allow", verdict.reason

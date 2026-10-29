@@ -83,6 +83,7 @@ from aegis_core.shell import (
     ShellRejected,
     _basename,
     _c_string_at,
+    _env_change,
     _eval_words_end,
     _interpreter,
     _readers,
@@ -1136,7 +1137,7 @@ def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
         asks.append(_PIPED_READER_ASK)
     here = cwd
     previous_sep = ""
-    for text, sep in segments:
+    for index, (text, sep) in enumerate(segments):
         loose = loose_argv(text)
         if loose and _basename(loose[0]) in ("cd", "pushd", "popd"):
             subshell = sep in ("&", "|", "|&") or previous_sep in ("|", "|&")
@@ -1183,6 +1184,21 @@ def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
             elif escalate_scripts:
                 asks.append("aegis: this runs a local script, which the hook cannot read "
                             "(--escalate-scripts)")
+            # the sourced file runs in this shell: what it sets reaches the parts after it
+            if mentions_infra("".join(t + s for t, s in segments[index + 1:])):
+                values = _sourced_environment(sourced, here, command) if scan else None
+                if values is None:
+                    return HookVerdict(
+                        "deny",
+                        f"aegis: cannot check this command statically ({shown!r} may change "
+                        "the environment, such as the account, cluster or directory, of the "
+                        "infrastructure command after it); run the infrastructure command on "
+                        "its own",
+                        unchecked=True,
+                    )
+                if values:
+                    kept.append(("export " + " ".join(
+                        f"{k}={shlex.quote(v)}" for k, v in values.items()), sep))
             continue
         binary = plain_binary(text)
         if binary is None:
@@ -1211,6 +1227,76 @@ def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
         last, last_sep = kept[-1]
         rebuilt += last + (last_sep if last_sep == "&" else "")
     return rebuilt, asks
+
+
+# Lines a sourced file may hold and still leave the environment known.
+_SOURCED_HARMLESS = frozenset({"echo", ":", "true", "printf"})
+
+
+def _sourced_environment(runs: dict, cwd: Path | None,
+                         command: str) -> dict[str, str] | None:
+    """The literal settings a sourced file (``source env.sh``) makes to the
+    variables that pick an infrastructure tool's account, cluster or program
+    (``export AWS_PROFILE=prod``, ``KUBECONFIG=…``), in order; ``None`` when
+    it may change the environment in any other way (``cd``, ``unset``, a
+    function or alias, ``set -a``, a computed value, another program or
+    sourced file, control flow, a line the hook cannot read) or cannot be
+    read. Only comments, blank lines, ``echo``/``printf``/``:``/``true`` and
+    such assignments are understood."""
+    path = _known_variables(runs.get("path", "") or "", command)
+    if not path or any(ch in path for ch in "$`") or (path.startswith("~")
+                                                     and _home_changed(command)):
+        return None
+    try:
+        file = Path(path).expanduser()
+    except RuntimeError:
+        return None
+    if not file.is_absolute():
+        if cwd is None:
+            return None
+        file = cwd / file
+    if _written_by_command(file, command, cwd):
+        return None
+    try:
+        with file.open("rb") as handle:
+            data = handle.read(SCRIPT_SCAN_LIMIT + 1)
+    except OSError:
+        return None
+    if len(data) > SCRIPT_SCAN_LIMIT or b"\0" in data:
+        return None
+    values: dict[str, str] = {}
+    for line in data.decode("utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if any(ch in line for ch in "$`\\<>(){}|&!*?[]~"):
+            return None  # an expansion, redirection, group, glob or continuation
+        segments = split_segments(line)
+        if not segments:
+            return None
+        for text, sep in segments:
+            if sep not in ("", ";"):
+                return None
+            try:
+                words = shlex.split(text, comments=True)
+            except ValueError:
+                return None
+            if not words:
+                continue
+            if words[0] in _SOURCED_HARMLESS and not (words[0] == "printf" and "-v" in words):
+                continue
+            assigns = all(_ASSIGNMENT_RE.match(w) for w in words)
+            env = dict(w.partition("=")[::2] for w in words) if assigns else {}
+            if not assigns and words[0] not in ("export", "declare", "typeset", "readonly"):
+                return None
+            change = _env_change([] if assigns else words, env)
+            if change is None:
+                continue
+            found, unsure = change
+            if unsure:
+                return None
+            values.update(found)
+    return values
 
 
 def _sourced_script(segment: str) -> dict[str, str] | None:
@@ -1847,8 +1933,11 @@ def _scan_script_once(runs: dict, config_dir: Path, extra_args: list[str] | None
             return HookVerdict("ask", f"aegis: {path} contains a NUL byte, so its commands "
                                       "were not checked")
         return None  # ./x without #!: a binary, not a shell script
+    # a line whose program word is a glob or brace (`kube{ctl,x} …`, `/usr/bin/kubec?l …`)
+    # may run an infrastructure tool it does not name: kept, so the glob check sees it
     lines = [(n, line, ask) for n, line, ask in _script_lines(text)
-             if ask is not None or mentions_infra(line)]
+             if ask is not None or mentions_infra(line)
+             or globbed_program_word(line) is not None]
     if not lines:
         return None
     if len(lines) > SCRIPT_SCAN_MAX_LINES:
