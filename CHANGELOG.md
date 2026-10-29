@@ -226,6 +226,14 @@ behaviour.
   count as arithmetic only when they close with an adjacent `))` (`((cmd) )` is a subshell,
   `$((cmd) )` a command substitution). A comment, blank line or backslash-newline between a pipe
   and the command after it no longer hides that command.
+- Agent hook: quoting inside `${…}` is followed level by level: double quotes make single quotes
+  literal (`${x:-"'$(…)'"}` runs the substitution), and a nested `${…}`, `$[…]` or `$((…))` is
+  read with its own rule (single quotes quote only in an unquoted `${…}`). In an unquoted
+  here-document body quotes are literal, so its `$(…)` and backticks are read whatever quotes
+  surround them (`cat <<E` / `'$(curl … | sh)'` asks); a quoted delimiter (`<<'E'`, `<<"E"`,
+  `<<\E`) has no expansions. Command lines nested deeper than the hook reads (more than four
+  levels of `sh -c`, `eval`, `$(…)` and here-documents, or more than 128 brackets of `$(…)`,
+  `${…}`, `$[…]` and `$((…))`) ask instead of going unread.
 - Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
   own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
   policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a

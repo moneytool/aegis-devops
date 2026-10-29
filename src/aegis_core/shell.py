@@ -1566,6 +1566,7 @@ class Lexed:
     unclosed: bool
     # the command lines of the outermost $(…), <(…), >(…) and `…`
     substitutions: tuple[str, ...] = ()
+    deep: bool = False  # $(…) nested past what the lexer reads
 
 
 def _skip_brackets(text: str, i: int, n: int, opening: str = "(",
@@ -1639,15 +1640,37 @@ def _ansi_c(text: str, i: int, n: int) -> tuple[str, int, bool]:
     return "".join(value), i + 1, i < n
 
 
-def _skip_bodies(text: str, i: int, pending: list[tuple[str, bool]], bodies: list[str],
-                 state: dict) -> int:
+def _body_substitutions(body: str, state: dict) -> None:
+    """Records the command substitutions an unquoted here-document body runs
+    (``$(…)``, backticks, also inside ``${…}``, ``$((…))`` and ``$[…]``); its
+    quotes are literal characters there, so they hide nothing."""
+    i, n = 0, len(body)
+    while i < n:
+        c = body[i]
+        if c == "\\":
+            i += 2
+        elif c == "$" and body[i + 1:i + 2] in ("(", "{", "["):
+            i = _expansion(body, i, [], state, 0, in_double=True)
+        elif c == "`":
+            j = body.find("`", i + 1)
+            if j > 0:
+                state["substitutions"].append(body[i + 1:j])
+            i = n if j < 0 else j + 1
+        else:
+            i += 1
+
+
+def _skip_bodies(text: str, i: int, pending: list[tuple[str, bool, bool]],
+                 bodies: list[str], state: dict, depth: int) -> int:
     """Past the here-document bodies that start at ``i`` (one per ``<<`` on the
     line before, in order), each up to its delimiter line; collects them. Each
     is checked as commands, quoted or not, whatever reads it: which program
     reads a body as code cannot be told reliably (functions, aliases, PATH,
-    ``>(…)``). A body whose delimiter never comes leaves the command unclosed."""
+    ``>(…)``). An unquoted body's ``$(…)`` and backticks also run, quotes or
+    not (in a body they are literal), so they are read as command lines too. A
+    body whose delimiter never comes leaves the command unclosed."""
     n = len(text)
-    for delimiter, strip_tabs in pending:
+    for delimiter, strip_tabs, quoted in pending:
         start = i
         while i < n:
             j = text.find("\n", i)
@@ -1658,6 +1681,8 @@ def _skip_bodies(text: str, i: int, pending: list[tuple[str, bool]], bodies: lis
         else:
             state["unclosed"] = True  # never ended: the body runs to the end
         bodies.append(text[start:i])
+        if not quoted and depth == 0:
+            _body_substitutions(text[start:i], state)
         if i < n:  # past the delimiter line
             j = text.find("\n", i)
             i = n if j < 0 else j + 1
@@ -1669,8 +1694,8 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
     """Tokens of ``text`` from ``i`` into ``tokens``; inside a ``$(…)``
     (``nested``) up to its closing ``)``, whose index + 1 is returned."""
     n = len(text)
-    # here-documents whose bodies start at the next line: (delimiter, <<-)
-    pending: list[tuple[str, bool]] = []
+    # here-documents whose bodies start at the next line: (delimiter, <<-, quoted)
+    pending: list[tuple[str, bool, bool]] = []
     want: str | None = None  # a << just read: the next word is its delimiter
     parens = 0
     joined = False  # after |, |&, && or ||: a newline does not end the command
@@ -1688,7 +1713,7 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
             continue
         if c == "\n" and (joined or pending):
             if pending:
-                i = _skip_bodies(text, i + 1, pending, bodies, state)
+                i = _skip_bodies(text, i + 1, pending, bodies, state, depth)
                 pending = []
                 if not joined:
                     tokens.append(("sep", "\n", i - 1, i))
@@ -1780,7 +1805,8 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
         word = "".join(value)
         tokens.append(("word", word, start, i))
         if want is not None:
-            pending.append((word, want == "<<-"))
+            quoted = any(q in text[start:i] for q in "'\"\\")
+            pending.append((word, want == "<<-", quoted))
             want = None
     if nested:
         state["unclosed"] = True  # a $( never closed
@@ -1799,33 +1825,66 @@ for _ in range(4):
 _ARITHMETIC_RE = re.compile(rf"\(\((?:{_BRACKETED})*+\)\)")
 
 
+# ${…}, $[…], $((…)) and $(…) nested deeper than this, all kinds together, are
+# matched by counting, not read with their own quoting (single quotes then count
+# as literal: more is read), and the command asks (Lexed.deep).
+_MAX_NESTING = 128
+
+
+def _nest(state: dict) -> bool:
+    """Enters one more level of nesting when :data:`_MAX_NESTING` allows it
+    (the caller leaves it again); else marks the command too deep."""
+    if state.get("nesting", 0) >= _MAX_NESTING:
+        state["deep"] = True
+        return False
+    state["nesting"] = state.get("nesting", 0) + 1
+    return True
+
+
 def _skip_expansion(text: str, i: int, opening: str, closing: str, bodies: list[str],
                     state: dict, depth: int, quotes: bool = False) -> int:
     """The index after the ``closing`` that matches the ``opening`` at
     ``text[i]`` (an arithmetic ``((…))``, ``${…}`` or ``$[…]``). A ``<<`` in
     it is a shift or a pattern, not a here-document; the ``$(…)``, ``<(…)``,
     ``>(…)`` and backticks in it are read as commands. Single quotes hide
-    them only where they quote (``quotes``: an unquoted ``${…}``); in
-    arithmetic and in a double-quoted ``"${…}"`` they are literal."""
+    them only where they quote: in an unquoted ``${…}`` (``quotes``) outside
+    double quotes; in arithmetic, ``$[…]`` and anything double-quoted they are
+    literal. A ``${…}``, ``$[…]`` or ``$((…))`` inside is read the same way
+    with its own rule. Each character is read once, so this is linear."""
     n = len(text)
     level = 0
+    in_double = False
     while i < n:
         c = text[i]
         if c == "\\":
             i += 2
-        elif c == "'" and quotes:
+        elif c == "'" and quotes and not in_double:
             j = text.find("'", i + 1)
             i = n if j < 0 else j + 1
-        elif c == "$" and text.startswith("(", i + 1) and not _ARITHMETIC_RE.match(text, i + 1) \
-                or c in "<>" and text.startswith("(", i + 1):
-            i = _substitution(text, i, bodies, state, depth)
+        elif c == '"':
+            in_double = not in_double
+            i += 1
         elif c == "`":
             j = text.find("`", i + 1)
             if depth == 0 and j > 0:
                 state["substitutions"].append(text[i + 1:j])
             i = n if j < 0 else j + 1
+        elif c == "$" and text[i + 1:i + 2] in ("{", "[") and _nest(state):
+            pair = ("{", "}") if text[i + 1] == "{" else ("[", "]")
+            i = _skip_expansion(text, i + 1, *pair, bodies, state, depth,
+                                quotes=pair[0] == "{" and quotes and not in_double)
+            state["nesting"] -= 1
+        elif c == "$" and text.startswith("(", i + 1) and _ARITHMETIC_RE.match(text, i + 1) \
+                and _nest(state):
+            i = _skip_expansion(text, i + 1, "(", ")", bodies, state, depth)
+            state["nesting"] -= 1
+        elif (c == "$" and text.startswith("(", i + 1) and not _ARITHMETIC_RE.match(text, i + 1)) \
+                or (c in "<>" and text.startswith("(", i + 1)):
+            i = _substitution(text, i, bodies, state, depth)
         else:
-            if c == opening:
+            if in_double and opening != "(":
+                pass  # a `}` or `]` inside double quotes does not close
+            elif c == opening:
                 level += 1
             elif c == closing:
                 level -= 1
@@ -1855,11 +1914,13 @@ def _expansion(text: str, i: int, bodies: list[str], state: dict, depth: int,
 def _substitution(text: str, i: int, bodies: list[str], state: dict, depth: int) -> int:
     """The index after the ``$(…)``/``<(…)``/``>(…)`` at ``i``, read as a
     command line of its own (its here-documents included)."""
-    if depth >= _MAX_SUBSTITUTION_DEPTH:
+    if depth >= _MAX_SUBSTITUTION_DEPTH or not _nest(state):
         j, closed = _skip_brackets(text, i + 1, len(text))
         state["unclosed"] |= not closed
+        state["deep"] = True
         return j
     j = _scan(text, i + 2, [], bodies, state, depth + 1, True)
+    state["nesting"] -= 1
     if depth == 0:
         state["substitutions"].append(text[i + 2:j - 1])
     return j
@@ -1871,9 +1932,10 @@ def lex(text: str) -> Lexed:
     quote runs to the end and is reported in :attr:`Lexed.unclosed`."""
     tokens: list[_Token] = []
     bodies: list[str] = []
-    state: dict = {"unclosed": False, "substitutions": []}
+    state: dict = {"unclosed": False, "substitutions": [], "deep": False}
     _scan(text, 0, tokens, bodies, state, 0, False)
-    return Lexed(tuple(tokens), tuple(bodies), state["unclosed"], tuple(state["substitutions"]))
+    return Lexed(tuple(tokens), tuple(bodies), state["unclosed"], tuple(state["substitutions"]),
+                 state["deep"])
 
 
 def _shell_tokens(text: str) -> tuple[_Token, ...]:
@@ -1952,19 +2014,38 @@ def _inner_commands(text: str) -> list[tuple[str, int, int]]:
     return found
 
 
-def nested_commands(command: str, depth: int = 0) -> list[str]:
+def nested_commands(command: str) -> list[str]:
     """``command`` and the command lines inside it: ``sh -c`` strings, the
     words of ``eval``, here-document bodies and command substitutions, to four
     levels (each level is part of the one above, so this stays linear)."""
-    found = [command]
-    if depth >= 4:
-        return found
-    inner = [string for string, _s, _e in _inner_commands(command)]
-    lexed = lex(command)
-    for text in dict.fromkeys([*inner, *lexed.bodies, *lexed.substitutions]):
-        if text:
-            found += nested_commands(text, depth + 1)
-    return found
+    return list(_nesting(command)[0])
+
+
+def nested_too_deep(command: str) -> bool:
+    """Whether ``command`` holds command lines nested deeper than
+    :func:`nested_commands` reads (``$($($($($(…)))))``), or deeper than the
+    lexer reads ``$(…)``: what runs there is not checked."""
+    return _nesting(command)[1] or lex(command).deep
+
+
+@functools.lru_cache(maxsize=32)
+def _nesting(command: str) -> tuple[tuple[str, ...], bool]:
+    found: list[str] = []
+    deep = [False]
+
+    def walk(text: str, depth: int) -> None:
+        found.append(text)
+        lexed = lex(text)
+        inner = [string for string, _s, _e in _inner_commands(text)]
+        texts = [t for t in dict.fromkeys([*inner, *lexed.bodies, *lexed.substitutions]) if t]
+        if depth >= 4:
+            deep[0] |= bool(texts)
+            return
+        for t in texts:
+            walk(t, depth + 1)
+
+    walk(command, 0)
+    return tuple(found), deep[0]
 
 
 # Where a loose part ends: the shell's separators, and the edges of $(…), `…`,

@@ -94,6 +94,7 @@ from aegis_core.shell import (
     loose_argv,
     loose_code_reader,
     nested_commands,
+    nested_too_deep,
     opaque_launcher_code,
     plain_binary,
     runs_expansion,
@@ -432,6 +433,9 @@ def _stdin_redirects(command: str, config_dir: Path, extra_args: list[str] | Non
         asks.append("aegis: a quote, $(…) or backtick in this command is never closed, so "
                     "where its words end cannot be told; it names a shell, interpreter or "
                     "infrastructure tool, so it cannot be checked")
+    if nested_too_deep(command):
+        asks.append("aegis: this command nests commands (sh -c, eval, $(…), here-documents) "
+                    "deeper than the hook reads, so the innermost cannot be checked")
     for text in nested_commands(command):  # bash -c 'exec < x.sh; bash' too
         asks += [ask for ask in _stdin_asks(text) if ask not in asks]
     if scan:
