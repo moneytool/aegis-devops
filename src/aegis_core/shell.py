@@ -525,7 +525,7 @@ def globbed_program_word(command: str) -> str | None:
     parser rejects, whose nested lines it never reads."""
     for text in _glob_texts(command):
         spellings = None
-        for words, _redirects in _simple_commands(_shell_tokens(text)):
+        for words, _redirects in _simple_commands(_shell_tokens(text), case_patterns=True):
             try:
                 argv = _peel_precommands(strip_exec_builtin(_strip_reserved(words)))
                 if not argv or argv[0] == "eval":
@@ -552,11 +552,31 @@ def _glob_texts(command: str, depth: int = 0) -> list[str]:
     if depth >= 4:
         return found
     lexed = lex(command)
-    for text in dict.fromkeys([*_inner_commands(command), *lexed.shell_bodies,
+    for text in dict.fromkeys([*_inner_commands(command), *lexed.glob_bodies,
                                *lexed.substitutions]):
         if text:
             found += _glob_texts(text, depth + 1)
     return found
+
+
+def globbed_word_in_unknown_bodies(command: str) -> str | None:
+    """:func:`globbed_program_word` for the here-document bodies whose reader
+    is not known (not a shell, not only data sinks: ``tee >(sh)``, a function):
+    such a word asks rather than denies."""
+    texts = _glob_texts(command)
+    # an eval anywhere may run a body that looked like data (x=$(cat <<E …); eval "$x")
+    evals = any(kind == "word" and value == "eval"
+                for text in texts for kind, value, _s, _e in _shell_tokens(text))
+    for text in texts:
+        lexed = lex(text)
+        shell_run = set(lexed.glob_bodies)
+        bodies = lexed.ask_bodies if not evals else [
+            b for b in lexed.bodies if b not in shell_run]
+        for body in bodies:
+            word = globbed_program_word(body)
+            if word is not None:
+                return word
+    return None
 
 
 def _glob_spellings(text: str) -> tuple[frozenset[str], frozenset[str]]:
@@ -1785,8 +1805,9 @@ class Lexed:
     unclosed: bool
     # the command lines of the outermost $(…), <(…), >(…) and `…`
     substitutions: tuple[str, ...] = ()
-    # the bodies a shell or interpreter named on their opening line reads
-    shell_bodies: tuple[str, ...] = ()
+    # for the glob check: the bodies a shell runs, and those an unknown reader gets
+    glob_bodies: tuple[str, ...] = ()
+    ask_bodies: tuple[str, ...] = ()
     deep: bool = False  # $(…) nested past what the lexer reads
 
 
@@ -1902,6 +1923,61 @@ def _body_substitutions(body: str, state: dict) -> None:
             i += 1
 
 
+# Programs that only read a here-document as data (to a file, the terminal, a
+# filter or a commit message). Not sed (its e command), awk (system()), xargs,
+# ssh, sudo, …: for the glob check, a body only these read is not run.
+_DATA_SINKS = frozenset({"cat", "tee", "head", "tail", "wc", "grep", "sort", "uniq", "cut",
+                         "tr", "jq", "yq", "base64", "diff", "git", "gh", "true", ":"})
+_COMPOUND_WORDS = frozenset({"{", "}", "if", "then", "else", "elif", "fi", "do", "done",
+                             "while", "until", "!", "time"})
+_DESCRIPTOR_PATHS = ("/dev/fd/", "/dev/stdin", "/dev/stdout", "/dev/stderr", "/proc/")
+
+
+_NON_SHELL_READERS = re.compile(r"python[\d.]*|pypy[\d.]*|node|perl|ruby|php|lua")
+
+
+def _pipelines(tokens: list[_Token], start: int) -> list[tuple[int, int]]:
+    """For each token from ``start`` on: the ``(low, high)`` bounds of the
+    pipeline it is in (separators other than ``|``/``|&`` end one). One pass."""
+    bounds: list[tuple[int, int]] = []
+    low = start
+    for k in range(start, len(tokens) + 1):
+        if k == len(tokens) or (tokens[k][0] == "sep" and tokens[k][1] not in ("|", "|&")):
+            bounds += [(low, k)] * (k - low + (k < len(tokens)))
+            low = k + 1
+    return bounds
+
+
+def _body_reader(line: list[_Token]) -> str:
+    """Who reads a here-document whose opening line is ``line``, for the glob
+    check: ``"shell"`` when a shell, ``eval``, ``source``, ``.`` or ``exec`` is
+    a program there (``bash <<EOF``, ``cat <<EOF | sh``); ``"data"`` when every
+    program is a data sink (:data:`_DATA_SINKS`) or an interpreter of another
+    language (``python3``, ``node``), with no ``<(…)``/``>(…)`` and no
+    descriptor path (``/dev/fd/3``); ``"unknown"`` otherwise. Only words in
+    command position count (``jq .``: the ``.`` is jq's)."""
+    command_start, data = True, True
+    for kind, value, _s, _e in line:
+        if kind == "sep":
+            command_start = True
+            continue
+        if kind == "op":
+            continue
+        if "<(" in value or ">(" in value or value.startswith(_DESCRIPTOR_PATHS):
+            data = False
+        if not command_start:
+            continue
+        if value in _COMPOUND_WORDS or _ASSIGNMENT_RE.match(value):
+            continue
+        name = _basename(value)
+        if name in _SHELLS or value in ("eval", "source", ".", "exec"):
+            return "shell"
+        if name not in _DATA_SINKS and not _NON_SHELL_READERS.fullmatch(name):
+            data = False  # sudo, xargs, ssh, $SHELL, a function, …
+        command_start = False
+    return "data" if data else "unknown"
+
+
 def _skip_bodies(text: str, i: int, pending: list[tuple[str, bool, bool]],
                  bodies: list[str], state: dict, depth: int) -> int:
     """Past the here-document bodies that start at ``i`` (one per ``<<`` on the
@@ -1938,6 +2014,7 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
     n = len(text)
     # here-documents whose bodies start at the next line: (delimiter, <<-, quoted)
     pending: list[tuple[str, bool, bool]] = []
+    pending_ops: list[int] = []  # the token index of each pending body's <<
     want: str | None = None  # a << just read: the next word is its delimiter
     parens = 0
     joined = False  # after |, |&, && or ||: a newline does not end the command
@@ -1958,11 +2035,19 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
             if pending:
                 code = len(bodies)
                 i = _skip_bodies(text, i + 1, pending, bodies, state, depth)
-                if any(kind == "word" and (value in ("eval", "source", ".") or
-                                           _READER_NAME_RE.fullmatch(_basename(value)))
-                       for kind, value, _s, _e in tokens[line_start:]):
-                    state["shell_bodies"].extend(bodies[code:])  # bash <<EOF, cat <<EOF | sh
-                pending = []
+                pipelines = _pipelines(tokens, line_start)
+                readers: dict[int, str] = {}
+                for body, at in zip(bodies[code:], pending_ops, strict=False):
+                    # the reader is the pipeline the << is in, not the whole line
+                    low, high = pipelines[at - line_start]
+                    if low not in readers:
+                        readers[low] = _body_reader(tokens[low:high])
+                    reader = readers[low]
+                    if reader == "shell":
+                        state["glob_bodies"].append(body)  # bash <<EOF, cat <<EOF | sh
+                    elif reader == "unknown":
+                        state["ask_bodies"].append(body)
+                pending, pending_ops = [], []
                 line_start = len(tokens)
                 if not joined:
                     tokens.append(("sep", "\n", i - 1, i))
@@ -1978,6 +2063,8 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
             i = j
             continue
         if c in "\n;()" or (c in "|&" and not text.startswith("&>", i)):
+            if c == ")" and tokens and tokens[-1][:2] == ("sep", "("):
+                state["defines"] = True  # name() …: a function, maybe a reader
             two = text[i:i + 2]
             sep = two if two in ("&&", "||", "|&", ";;") else c
             parens += 1 if c == "(" else -1 if c == ")" and parens else 0
@@ -2059,9 +2146,12 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
             continue  # only line continuations
         word = "".join(value)
         tokens.append(("word", word, start, i))
+        if word in ("function", "alias"):
+            state["defines"] = True
         if want is not None:
             quoted = any(q in text[start:i] for q in "'\"\\")
             pending.append((word, want == "<<-", quoted))
+            pending_ops.append(len(tokens) - 2)  # the << just before the delimiter
             want = None
     if nested:
         state["unclosed"] = True  # a $( never closed
@@ -2184,11 +2274,16 @@ def lex(text: str) -> Lexed:
     quote runs to the end and is reported in :attr:`Lexed.unclosed`."""
     tokens: list[_Token] = []
     bodies: list[str] = []
-    state: dict = {"unclosed": False, "substitutions": [], "deep": False, "shell_bodies": []}
+    state: dict = {"unclosed": False, "substitutions": [], "deep": False, "glob_bodies": [],
+                   "ask_bodies": [], "defines": False}
     _scan(text, 0, tokens, bodies, state, 0, False)
+    shell_run = set(state["glob_bodies"])
     return Lexed(tuple(tokens), tuple(bodies), state["unclosed"],
                  substitutions=tuple(state["substitutions"]), deep=state["deep"],
-                 shell_bodies=tuple(state["shell_bodies"]))
+                 glob_bodies=tuple(state["glob_bodies"]),
+                 # a function or alias anywhere may be a reader: no body is data then
+                 ask_bodies=tuple(b for b in bodies if b not in shell_run)
+                 if state["defines"] else tuple(state["ask_bodies"]))
 
 
 def _shell_tokens(text: str) -> tuple[_Token, ...]:
@@ -2461,14 +2556,16 @@ def _rcfile_runs(words: list[str]) -> list[dict[str, str]]:
     return [{"kind": "script", "interpreter": shell, "path": path} for path in files]
 
 
-def _simple_commands(tokens: tuple[_Token, ...]) -> Iterator[tuple[list[str], list[str]]]:
+def _simple_commands(tokens: tuple[_Token, ...], *, case_patterns: bool = False
+                     ) -> Iterator[tuple[list[str], list[str]]]:
     """The words and the standard-input redirections (``<x.sh``) of each simple
     command in ``tokens``, split at every separator (``;``, ``&``, ``|``,
     ``&&``, ``||``, newline, ``(``, ``)``, ``;;``)."""
     words: list[str] = []
     redirects: list[str] = []
-    cases = 0  # open case … esac
+    cases = 0  # open case … esac (only read with case_patterns, for the glob check)
     pattern = False  # in a case arm's pattern, up to its )
+    plain_case = False
     k = 0
     while k < len(tokens):
         kind, value, _s, _e = tokens[k]
@@ -2480,7 +2577,8 @@ def _simple_commands(tokens: tuple[_Token, ...]) -> Iterator[tuple[list[str], li
                 pattern = False
             k += 1
             continue
-        if kind == "word" and value == "in" and words[:1] == ["case"] and len(words) == 2:
+        if (case_patterns and kind == "word" and value == "in" and len(words) == 2
+                and plain_case and not redirects):
             pattern, words = True, []  # case WORD in: an arm's pattern comes next
             cases += 1
             k += 1
@@ -2500,6 +2598,8 @@ def _simple_commands(tokens: tuple[_Token, ...]) -> Iterator[tuple[list[str], li
         elif kind == "word" and value == "esac" and cases and not words:
             cases -= 1
         else:
+            if not words:  # an unquoted `case` first, nothing before it, starts one
+                plain_case = value == "case" and _e - _s == 4 and not redirects
             words.append(value)
         k += 1
     if words or redirects:

@@ -92,6 +92,7 @@ from aegis_core.shell import (
     dequoted,
     find_heredoc,
     globbed_program_word,
+    globbed_word_in_unknown_bodies,
     intents_from_command,
     interactive_rcfiles,
     lex,
@@ -523,6 +524,9 @@ def _precheck(command: str, config_dir: Path, extra_args: list[str] | None,
     if word is not None:
         return _glob_denied(command, word)
     asks: list[str] = []
+    unknown = globbed_word_in_unknown_bodies(command)
+    if unknown is not None:
+        asks.append(_UNKNOWN_BODY_GLOB_ASK.format(word=unknown))
     for intent in intents:
         runs = intent.params.get("runs_code") if intent.provider == "shell" else None
         if runs is not None and runs["kind"] == "inline" and mentions_infra(runs.get("code", "")):
@@ -1029,6 +1033,11 @@ _PIPED_READER_ASK = ("aegis: a shell or interpreter reads code from a pipe in a 
                      "that")
 
 
+_UNKNOWN_BODY_GLOB_ASK = ("aegis: a here-document whose reader the hook cannot tell may run "
+                          "{word!r}, which the shell may expand into another program's name; "
+                          "spell the program out")
+
+
 def _rejected(command: str, reason: str, config_dir: Path, extra_args: list[str] | None,
               cwd: Path | None, *, scan: bool, escalate_scripts: bool) -> HookVerdict:
     """A command (or a part of it) that cannot be parsed, judged as a whole:
@@ -1045,6 +1054,9 @@ def _rejected(command: str, reason: str, config_dir: Path, extra_args: list[str]
             "run the infrastructure command on its own, without shell expansion",
             unchecked=True,
         )
+    word = globbed_word_in_unknown_bodies(command)
+    if word is not None:
+        return HookVerdict("ask", _UNKNOWN_BODY_GLOB_ASK.format(word=word))
     generated = _GENERATED_CODE_RE.search(command)
     if generated:
         return HookVerdict(
@@ -1102,6 +1114,9 @@ def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
                          scan=scan, escalate_scripts=escalate_scripts)
     kept: list[tuple[str, str]] = []
     asks: list[str] = []
+    unknown = globbed_word_in_unknown_bodies(command)
+    if unknown is not None:
+        asks.append(_UNKNOWN_BODY_GLOB_ASK.format(word=unknown))
     opaque: tuple[str, str] | None = None
     # a script run anywhere in the command, also inside a part that drops out
     # (`OUT=$(bash x.sh)`) or cannot be split out (`for …; do ./x.sh "$i"; done`)

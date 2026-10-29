@@ -323,9 +323,15 @@ behaviour.
   produces (`uvx 'kube[a]x'`) counts as a glob when it holds one. A `find … -exec` program
   word is a glob as the outer shell spells it (it expands find's words before find runs:
   `find . -exec k* …`, also inside `eval` or `$(…)`), and program words in nested lines the
-  parser rejects (`eval` words, a `-c` string in a `-c` string, substitutions, and the
-  here-document bodies a shell named on their line runs: `bash <<EOF`, `cat <<EOF | sh`; not
-  data bodies such as a Markdown `* item` written with `cat` or `tee`) are checked too; a word
+  parser rejects (`eval` words, a `-c` string in a `-c` string, substitutions, here-document
+  bodies) are checked too. For this check a here-document body is shell-run when a shell,
+  `eval`, `source`, `.` or `exec` is a program of the pipeline its `<<` is in (`bash <<EOF`,
+  `cat <<EOF | sh`: as for a command), data when every program there is a data sink (`cat`,
+  `tee`, `jq`, `git`, …) or an interpreter of another language (`python3`, `node`), with no
+  `<(…)`/`>(…)` and no descriptor path (not checked: a Markdown `* item`), and otherwise
+  unknown (`tee >(sh)`, a function or alias in the command, `sed`, `xargs`, an `eval`
+  anywhere), where a globbed word asks. Only an unquoted `case` at the start of a command,
+  with nothing before it, starts a case statement whose arm patterns are passed over; a
   whose quoting is not known counts as a glob. Each text's quoting is read once per
   decision. A `case` arm's pattern (`*)`, `a|b*)`) is not a program word, and `x+=1` and
   `a[1]=2` are assignments like `x=1`. Two other regexes that

@@ -350,6 +350,8 @@ def test_glob_program_words_stay_linear(opted_in_project, command):
     "find . -exec k* \\; " * 3000,
     "case x in " + "a|b*) echo;; " * 4000 + "esac", "x+=1 " * 12000 + "ls",
     "cat <<'EOF'\n" + "* item\n" * 8000 + "EOF",
+    "cat " + "<<E " * 6000 + "\n" + "x\nE\n" * 6000,
+    "cat <<E | tee >(sh)\n" + "k* x\n" * 7000 + "E",
 ])
 def test_many_nested_lines_and_quoted_globs_stay_linear(opted_in_project, command):
     # many distinct nested texts must not push the outer text's quoting out of
@@ -3086,6 +3088,50 @@ _ROUND30_CORPUS = [
 ]
 
 
+# Round 31: for the glob check a here-document body is shell-run (a shell,
+# eval, source, . or exec in command position of its pipeline: deny/ask as
+# for a command), data (only data sinks or other languages' interpreters: not
+# checked) or unknown (>(…), a function or alias, sed, xargs, an eval anywhere:
+# a globbed word asks). A quoted, escaped or redirected `case` is a plain command.
+_ROUND31_CORPUS = [
+    ('ask|deny', 'cat <<E | tee >(sh)\n/usr/bin/kubec?l delete nodes --all\nE'),
+    ('ask|deny', 'f() { sh; }\nf <<E\n/usr/bin/kubec?l delete nodes --all\nE'),
+    ('ask|deny', 'cat <<E | tee /dev/fd/3 3> >(sh)\n/usr/bin/kubec?l delete nodes --all\nE'),
+    ('ask|deny', 'exec 3> >(sh); tee /dev/fd/3 <<E\n/usr/bin/kubec?l delete nodes --all\nE'),
+    ('ask|deny', 'alias c=sh; c <<E\n/usr/bin/kubec?l delete nodes --all\nE'),
+    ('ask|deny', 'xargs sh -c <<E\n/usr/bin/kubec?l delete nodes --all\nE'),
+    ('ask|deny', 'function g { sh; }\ng <<E\n/usr/bin/kubec?l delete nodes --all\nE'),
+    ('ask|deny', 'cat <<E | sed e\n/usr/bin/kubec?l delete nodes --all\nE'),
+    ('deny', "bash <<'EOF'\nk* delete nodes --all\nEOF"),
+    ('deny', 'cat <<E | sh\nk* delete nodes --all\nE'),
+    ('allow', "cat <<'EOF' | tee notes.md\n* item\nEOF"),
+    ('ask|allow', "python3 - <<'EOF'\ndef f(*args): pass\nEOF"),
+    ('ask|allow', "node <<'EOF'\n/* c */\nconsole.log(1)\nEOF"),
+    ('ask|allow', "cat <<'EOF' | python3\ndef f(*a): pass\nEOF"),
+    ('allow', 'jq . <<\'EOF\'\n[{"a": 1}]\nEOF'),
+    ('allow', "python3 -m json.tool <<'EOF'\n[1, 2]\nEOF"),
+    ('allow', "cat > n.md <<'EOF'; bash ok.sh\n* a\nEOF"),
+    ('allow', "cat > n.md <<'EOF' && echo source\n* a\nEOF"),
+    ('deny', '>/dev/null case a in; bash nuke.sh "$X"'),
+    ('deny', '"case" a in; bash nuke.sh "$X"'),
+    ('deny', '\\case a in; bash nuke.sh "$X"'),
+    ('deny', 'x=$(>/dev/null case a in; bash nuke.sh)'),
+    ('deny', 'eval \'"case" a in; bash nuke.sh $X\''),
+    ('allow', 'case "$1" in start) echo s;; *) echo usage;; esac'),
+    ('allow', 'jq . <<\'EOF\'\n{"a": 1}\nEOF'),
+    ('allow', 'cat <<\'EOF\' | jq .\n{"a": 1}\nEOF'),
+    ('allow', 'cd . && cat <<\'EOF\' > a.json\n{"a": 1}\nEOF'),
+    ('allow', "cp -r . /tmp/x && cat <<'EOF' > a.md\n* item\nEOF"),
+    ('allow', 'python3 -m json.tool <<\'EOF\'\n{"a": 1}\nEOF'),
+    ('ask|allow', "python3 - <<'EOF'\nprint(2*3)\nEOF"),
+    ('ask|allow', "python3 - <<'EOF'\ndef f(*args, **kw): ...\nEOF"),
+    ('ask|allow', "cat <<'EOF' | python3\nprint(2*3)\nEOF"),
+    ('ask|allow', "ruby <<'EOF'\nputs [1,2].map { |x| x*2 }\nEOF"),
+    ('ask|deny', 'cat <<E | while read l; do $l; done\n/usr/bin/kubec?l delete nodes --all\nE'),
+    ('ask|deny', 'x=$(cat <<E\n/usr/bin/kubec?l delete nodes --all\nE\n); eval "$x"'),
+]
+
+
 def _decision(code: int, out: str) -> str:
     if code == 2:
         return "deny"
@@ -3140,7 +3186,8 @@ def test_a_shell_script_named_like_an_option_is_read(opted_in_project, command):
                          + _ROUND19B_CORPUS + _ROUND20_CORPUS + _ROUND21_CORPUS
                          + _ROUND22_CORPUS + _ROUND23_CORPUS + _ROUND24_CORPUS
                          + _ROUND25_CORPUS + _ROUND26_CORPUS + _ROUND27_CORPUS
-                         + _ROUND28_CORPUS + _ROUND29_CORPUS + _ROUND30_CORPUS)
+                         + _ROUND28_CORPUS + _ROUND29_CORPUS + _ROUND30_CORPUS
+                         + _ROUND31_CORPUS)
 def test_round12_corpus(opted_in_project, expected, command):
     (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
     (opted_in_project / "ok.sh").write_text("echo hi\n")
