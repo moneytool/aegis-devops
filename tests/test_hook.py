@@ -14,6 +14,7 @@ import json
 import shlex
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -2824,10 +2825,69 @@ _ROUND25_CORPUS = [
 ]
 
 
+# Round 26: assignments, --, !, {, reserved words and coproc in any mix are
+# passed over in one pass (time coproc sh x.sh reads x.sh); command -p -p;
+# GNU time's options.
+_ROUND26_CORPUS = [
+    ('deny', 'time coproc sh nuke.sh'),
+    ('deny', 'coproc sh nuke.sh'),
+    ('deny', 'coproc W { sh nuke.sh; }'),
+    ('deny', '-- ! bash nuke.sh'),
+    ('deny', 'A=1 do bash nuke.sh'),
+    ('deny', 'A=1 { bash nuke.sh; }'),
+    ('deny', 'exec exec bash nuke.sh'),
+    ('deny', 'exec -a x exec bash nuke.sh'),
+    ('deny', 'time ! A=1 -- sh nuke.sh'),
+    ('allow', 'for x in a b; do echo $x; done'),
+    ('allow', 'A=1 ls'),
+    ('allow', 'time coproc ls'),
+    ('deny', 'command -p -p sh nuke.sh'),
+    ('deny', 'command -pp sh nuke.sh'),
+    ('deny', "/usr/bin/time -f '%e' -o log sh nuke.sh"),
+    ('deny', 'gtime --format=%e --output=log -v sh nuke.sh'),
+    ('deny', "env -S 'sudo kubectl delete nodes --all'"),
+    ('allow', 'command -v sh'),
+    ('allow', '/usr/bin/time -p ls'),
+]
+
+
 def _decision(code: int, out: str) -> str:
     if code == 2:
         return "deny"
     return "ask" if out and _ask_reason(out) else "allow"
+
+
+@pytest.mark.parametrize("program", [
+    "./--", "/x/--", "./!", "/usr/bin/{", "./time", "./command", '"--"', "\\--", "./noglob",
+    "./repeat", "./do", "./coproc", "./exec", "./builtin", "./nohup", "./sudo", "./env",
+    "./nice", "./timeout", "./eval", "./A=1", "'!'", "./}",
+])
+def test_a_path_named_like_a_launcher_word_never_hangs(opted_in_project, program):
+    # ./-- has the basename -- but is not the word --: a loop that tested one
+    # and stripped the other never ended (a hang lets the command run)
+    result: list = []
+    worker = threading.Thread(daemon=True, target=lambda: result.append(
+        run("claude", payload_for("claude", f"{program} ; {BLOCK_COMMAND}"))))
+    started = time.monotonic()
+    worker.start()
+    worker.join(5)
+    assert result, f"hung on {program!r}"
+    assert time.monotonic() - started < 1
+    assert result[0][0] == 2
+
+
+@pytest.mark.parametrize("command", [
+    "-- ! " * 13000 + "ls", "A= ! " * 13000 + "ls", "time " + "-- ! " * 12999 + "ls",
+    "A=1 do " * 9000 + "ls", "A=1 { " * 10000 + "ls", "bash -c '" + "-- ! " * 13000 + "ls'",
+    "exec " * 13000 + "ls", "exec -a x " * 6500 + "ls", "coproc " * 9000 + "ls",
+])
+def test_mixed_launcher_words_stay_linear(opted_in_project, command):
+    # assignments, --, ! and reserved words were each stripped with a copy of the
+    # words (3-4 s at 64 KB)
+    assert len(command) <= 64 * 1024
+    started = time.monotonic()
+    run("claude", payload_for("claude", command))
+    assert time.monotonic() - started < 1
 
 
 @pytest.mark.parametrize("command", ["bash -- -x", "zsh -- -x", "bash - -x",
@@ -2844,7 +2904,7 @@ def test_a_shell_script_named_like_an_option_is_read(opted_in_project, command):
                          + _ROUND17B_CORPUS + _ROUND18_CORPUS + _ROUND19_CORPUS
                          + _ROUND19B_CORPUS + _ROUND20_CORPUS + _ROUND21_CORPUS
                          + _ROUND22_CORPUS + _ROUND23_CORPUS + _ROUND24_CORPUS
-                         + _ROUND25_CORPUS)
+                         + _ROUND25_CORPUS + _ROUND26_CORPUS)
 def test_round12_corpus(opted_in_project, expected, command):
     (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
     (opted_in_project / "ok.sh").write_text("echo hi\n")

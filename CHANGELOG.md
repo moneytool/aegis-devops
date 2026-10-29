@@ -298,6 +298,14 @@ behaviour.
   shell's options the same way in every place that reads them, so after `-c` the next word is
   the command string (`bash -c - 'cmd'` runs cmd). `noglob source x.sh` and `noglob . x.sh` read
   x.sh like `source x.sh`.
+- Agent hook: assignments, `--`, `!`, `{`, reserved words and `coproc` in front of a command are
+  passed over in one pass in any mix (`-- ! A=1 do …` took 3-4 s at 64 KB; `time coproc sh x.sh`
+  reads x.sh), as are runs of `exec`/`builtin`; each pass over the launchers counts toward the
+  limit of 32, and a pass that changes nothing ends the unwrapping. A program whose path ends in
+  such a word (`./-- ; …`) no longer makes the unwrapping loop forever (a hang lets the command
+  run); the shell-word reader also never stays on a character. `command` takes repeated or
+  clustered `-p` (`command -p -p`, `-pp`), and GNU time (`/usr/bin/time`, `gtime`) takes its
+  options (`-f FMT`, `-o FILE`, `--format=`, `--output=`, `-v`, `-l`, `-a`, `-q`, `-p`).
 - Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
   own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
   policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a

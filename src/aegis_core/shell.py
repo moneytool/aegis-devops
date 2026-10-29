@@ -229,14 +229,18 @@ def strip_exec_builtin(argv: list[str]) -> list[str]:
     NAME`` / ``-c`` / ``-l`` options), and without the ``--`` after ``source`` /
     ``.`` (also after ``command``): ``exec -a x ./x.sh`` -> ``./x.sh``, ``builtin . --
     x.sh`` -> ``. x.sh``, ``command source x.sh`` -> ``source x.sh``."""
-    while argv and argv[0] in ("exec", "builtin"):
-        head, argv = argv[0], argv[1:]
-        while head == "exec" and argv and argv[0].startswith("-"):
-            opt, argv = argv[0], argv[1:]
+    i = 0  # one slice at the end: exec exec … stays linear
+    while i < len(argv) and argv[i] in ("exec", "builtin"):
+        head = argv[i]
+        i += 1
+        while head == "exec" and i < len(argv) and argv[i].startswith("-"):
+            opt = argv[i]
+            i += 1
             if opt == "--":
                 break
             if "a" in opt[1:]:
-                argv = argv[1:]  # -a NAME
+                i += 1  # -a NAME
+    argv = argv[i:] if i else argv
     if argv and argv[0] == "command":  # command [-p] source x.sh runs the builtin
         rest = argv[2:] if argv[1:2] == ["-p"] else argv[1:]
         if rest and _basename(rest[0]) in ("source", "."):
@@ -835,6 +839,31 @@ def _strip_timeout(rest: list[str]) -> list[str]:
     return rest[i + 1 :]
 
 
+# Options of GNU time (/usr/bin/time, gtime); the time keyword only takes -p.
+_TIME_VALUE_OPTIONS = frozenset({"-f", "-o", "--format", "--output"})
+_TIME_FLAGS = frozenset({"-p", "-v", "-l", "-a", "-q", "--verbose", "--quiet", "--append",
+                         "--portability"})
+
+
+def _strip_time(rest: list[str]) -> list[str]:
+    i = 0
+    while i < len(rest):
+        tok = rest[i]
+        if tok == "--":
+            i += 1
+            break
+        if tok in _TIME_VALUE_OPTIONS:
+            i += 2
+            continue
+        if tok in _TIME_FLAGS or tok.startswith(("--format=", "--output=")):
+            i += 1
+            continue
+        if tok.startswith("-"):
+            raise ShellRejected(f"unrecognised time option {tok!r}")
+        break
+    return rest[i:]
+
+
 def _strip_nice(rest: list[str]) -> list[str]:
     i = 0
     while i < len(rest):
@@ -1132,21 +1161,39 @@ def _unwrap_inner(
     ``sh -c`` at depth >= 1 is rejected)."""
     env: dict[str, str] = {}
     wrappers: list[str] = []
+    turns = 0
+    last: list[str] | None = None
     while True:
+        if argv == last:
+            break  # a turn that changed nothing: stop rather than loop forever
+        last = argv
+        # assignments, `--`, `!`, `{`, reserved words (`do`, `then`) and `coproc`, in
+        # any mix (-- ! A=1 do …), are passed over in one pass and one copy
+        k = 0
+        while k < len(argv):
+            word = argv[k]
+            if word == "--" or word in _GROUPING_WORDS or word in _LEADING_RESERVED:
+                k += 1
+            elif word == "coproc":
+                k += 3 if len(argv) > k + 2 and argv[k + 2] == "{" else 1
+            elif _ASSIGNMENT_RE.match(word):
+                key, _, value = word.partition("=")
+                env[key] = value
+                k += 1
+            else:
+                break
+        if k:
+            argv = argv[k:]
+        if argv and (argv[0] in _HEADER_RESERVED or argv[0] in _CLOSING_RESERVED
+                     or argv[0] == "function"):
+            argv = _strip_reserved(argv)  # for … in, a lone done: nothing runs
         if not argv:
             raise ShellRejected("nothing left to run after unwrapping launchers")
-        if len(wrappers) >= _MAX_LAUNCHERS:  # each one copies the words: keep it linear
+        turns += 1
+        if len(wrappers) >= _MAX_LAUNCHERS or turns > 2 * _MAX_LAUNCHERS:
+            # each turn copies the words: keep it linear
             raise ShellRejected(f"more than {_MAX_LAUNCHERS} launchers in a row")
         head = _basename(argv[0])
-        if _ASSIGNMENT_RE.match(argv[0]) or head == "--":
-            k = 0  # a run of assignments and `--`, dropped in one copy
-            while k < len(argv) and (argv[k] == "--" or _ASSIGNMENT_RE.match(argv[k])):
-                key, _, value = argv[k].partition("=")
-                if argv[k] != "--":
-                    env[key] = value
-                k += 1
-            argv = argv[k:]
-            continue
         if head in _REJECTED_BUILTINS:
             raise ShellRejected(f"{head!r} cannot be checked statically")
         if head == "sudo":
@@ -1175,10 +1222,8 @@ def _unwrap_inner(
             wrappers.append("nice")
             argv = rest
             continue
-        if head in ("nohup", "time"):
-            rest = argv[1:]
-            if head == "time" and rest and rest[0] == "-p":
-                rest = rest[1:]
+        if head in ("nohup", "time", "gtime"):
+            rest = argv[1:] if head == "nohup" else _strip_time(argv[1:])
             if not rest:
                 break
             wrappers.append(head)
@@ -1215,16 +1260,13 @@ def _unwrap_inner(
             wrappers.append(head)
             argv = argv[2:] if head == "repeat" else argv[1:]
             continue
-        if argv[0] in _GROUPING_WORDS or argv[0] in _LEADING_RESERVED:
-            # time ! cmd, ! time ! cmd, repeat 3 do cmd: reserved words at once
-            argv = _strip_reserved(argv)
-            continue
         if head == "command":
-            rest = argv[1:]
-            if rest and rest[0] == "-p":
-                rest = rest[1:]
-            if rest and rest[0] == "--":  # command -- cmd, command -p -- cmd
-                rest = rest[1:]
+            k = 1
+            while k < len(argv) and re.fullmatch(r"-p+", argv[k]):  # -p -p, -pp
+                k += 1
+            if k < len(argv) and argv[k] == "--":  # command -- cmd, command -p -- cmd
+                k += 1
+            rest = argv[k:]
             if not rest or rest[0].startswith("-"):
                 break  # `command -v x` only prints a path
             wrappers.append("command")
@@ -1888,6 +1930,9 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
             else:
                 value.append(c)
                 i += 1
+        if i == start:  # no rule took the character: pass it, never loop on it
+            i += 1
+            continue
         i = min(i, n)
         if not value and not text[start:i].replace("\\\n", ""):
             continue  # only line continuations
