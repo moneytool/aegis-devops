@@ -354,6 +354,7 @@ def test_glob_program_words_stay_linear(opted_in_project, command):
     "cat <<E | tee >(sh)\n" + "k* x\n" * 7000 + "E",
     "cat <<< 'k* x' " * 4000, "python3 -c x <<< k* | if true; then :; fi; " * 1500,
     "a <<< x | " * 6000 + "sh", "cat <<E | " * 6000 + "sh\nk\nE",
+    ":<<<x|\n" * 8000 + ":", ":<<E|\nx\nE\n" * 6000 + ":",
 ])
 def test_many_nested_lines_and_quoted_globs_stay_linear(opted_in_project, command):
     # many distinct nested texts must not push the outer text's quoting out of
@@ -3256,6 +3257,23 @@ _ROUND35_CORPUS = [
 ]
 
 
+# Round 36: a here-document or here-string whose pipeline goes on past its line
+# (the line ends with |) has readers not read yet: unknown, a globbed word asks
+# (also when the next stage is only tee: the accepted over-ask).
+_GLOB_NS = "ku?ectl delete ns x"
+_ROUND36_CORPUS = [
+    ("ask|deny", f"cat <<< '{_GLOB_NS}' |\n{_PY_OS}"),
+    ("ask|deny", f"cat <<'E' |\n{_GLOB_NS}\nE\n{_PY_OS}"),
+    ("ask|deny", f"cat <<'E' |\n{_GLOB_NS}\nE\nsed 's/x/y/e'"),
+    ("ask|deny", f"cat <<'E' |\n{_GLOB_NS}\nE\nperl -e 'system(<STDIN>)'"),
+    ("ask|deny", f"cat <<'E' |\n{_GLOB_NS}\nE\ntee >(sh)"),
+    ("ask|deny", f"cat <<'E' |\n{_GLOB_NS}\nE\ncat | {_PY_OS}"),
+    ("ask|deny", f"cat <<< '{_GLOB_NS}' |\ncat | {_PY_OS}"),
+    ("allow", "cat > n.md <<'EOF' &&\n* item\nEOF\necho done"),
+    ("ask", "cat <<'EOF' |\n* item\nEOF\ntee n.md"),
+]
+
+
 def _decision(code: int, out: str) -> str:
     if code == 2:
         return "deny"
@@ -3313,7 +3331,7 @@ def test_a_shell_script_named_like_an_option_is_read(opted_in_project, command):
                          + _ROUND28_CORPUS + _ROUND29_CORPUS + _ROUND30_CORPUS
                          + _ROUND31_CORPUS + _ROUND32_CORPUS + _ROUND33_CORPUS
                          + _ROUND33B_CORPUS + _ROUND34_CORPUS + _ROUND34B_CORPUS
-                         + _ROUND35_CORPUS)
+                         + _ROUND35_CORPUS + _ROUND36_CORPUS)
 def test_round12_corpus(opted_in_project, expected, command):
     (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
     (opted_in_project / "ok.sh").write_text("echo hi\n")

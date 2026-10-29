@@ -2093,12 +2093,26 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
         """Classifies this line's here-strings like one-line here-document bodies."""
         if not strings:
             return
-        pipelines = _pipelines(tokens, line_start)
+        base = command_start(min(at for _value, at in strings))
+        pipelines = _pipelines(tokens, base)  # from these commands on only: linear
         readers: dict[int, str] = {}  # each stage read once, however many strings
         for value, at in strings:
-            low, high = pipelines[at - line_start]
-            state["strings"].append((value, _tail_reader(tokens, low, high, readers), depth))
+            low, high = pipelines[at - base]
+            reader = _tail_reader(tokens, low, high, readers)
+            if reader != "shell" and piped_on():
+                reader = "unknown"  # the pipeline goes on past this line: unread readers
+            state["strings"].append((value, reader, depth))
         strings.clear()
+
+    def command_start(at: int) -> int:
+        """Where the command holding ``tokens[at]`` starts (within this line)."""
+        while at > line_start and tokens[at - 1][0] != "sep":
+            at -= 1
+        return at
+
+    def piped_on() -> bool:
+        """Whether this line ends with a | whose next stage is on a later line."""
+        return bool(tokens) and tokens[-1][0] == "sep" and tokens[-1][1] in ("|", "|&")
     while i < n:
         c = text[i]
         if c in " \t\r":
@@ -2116,12 +2130,15 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
             if pending:
                 code = len(bodies)
                 i = _skip_bodies(text, i + 1, pending, bodies, state, depth)
-                pipelines = _pipelines(tokens, line_start)
+                base = command_start(min(pending_ops)) if pending_ops else line_start
+                pipelines = _pipelines(tokens, base)
                 readers: dict[int, str] = {}
                 for body, at in zip(bodies[code:], pending_ops, strict=False):
                     # the reader is the pipeline the << is in, not the whole line
-                    low, high = pipelines[at - line_start]
+                    low, high = pipelines[at - base]
                     reader = _tail_reader(tokens, low, high, readers)
+                    if reader != "shell" and piped_on():
+                        reader = "unknown"  # cat <<E |, then the reader after the body
                     if reader == "shell":
                         state["glob_bodies"].append(body)  # bash <<EOF, cat <<EOF | sh
                     elif reader == "unknown" or depth > 0:

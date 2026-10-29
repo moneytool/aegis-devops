@@ -336,7 +336,12 @@ behaviour.
   here-document inside `$(…)`, backticks, `<(…)` or `>(…)`, whose output goes on, and a
   pipe into or out of a compound command: `cat <<E | if …; then …; fi`), where a globbed
   word asks (an `eval` anywhere adds every body to these). A here-string (`<<< word`) is
-  read like a one-line body, also inside a substitution. The reader of a body is its own
+  read like a one-line body, also inside a substitution. A body whose pipeline goes on past
+  its line (`cat <<E |`, the next stage after the body) has an unknown reader too (accepted
+  over-ask: `… | tee f` on the next line asks when the body has a globbed word); each body
+  and here-string is classified once, from its own command on (`:<<<x|` on 8000 lines took
+  11 s). The reader
+  of a body is its own
   command and the pipeline stages after it (`echo x | cat <<E`: echo never sees it), and a
   reserved word counts for the compound rule only where a command starts (`echo done`
   does not). Only an unquoted `case` at the start of a command
