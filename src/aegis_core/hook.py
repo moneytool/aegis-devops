@@ -652,6 +652,8 @@ def _glob_match(name: str, pattern: str) -> bool:
             continue
         if c == "[":
             q = p + 1 + (p + 1 < n and pattern[p + 1] in "!^")
+            if pattern.startswith(("[:", "[.", "[="), q):
+                return True  # a POSIX class ([[:alpha:]]): taken as matching, to be safe
             end = close[q + 1] if q + 1 <= n else -1  # a ] first in the class is a member
             if end != -1:
                 members, negated = pattern[q:end], q > p + 1
@@ -2036,6 +2038,13 @@ TOO_SLOW_REASON = ("aegis: the command took too long to check (over {seconds:g} 
 # the policy run (which writes --log-json and the ledger) is then skipped.
 _ABANDONED: contextvars.ContextVar[threading.Event | None] = contextvars.ContextVar(
     "aegis_abandoned", default=None)
+
+
+def decision_abandoned() -> bool:
+    """Whether the hook has stopped waiting for the decision this thread runs:
+    ``aegis check`` then writes no log line or ledger entry."""
+    abandoned = _ABANDONED.get()
+    return abandoned is not None and abandoned.is_set()
 
 
 def _decide_in_time(command: str, config_dir: Path, extra_args: list[str] | None,

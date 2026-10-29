@@ -77,6 +77,9 @@ class SimpleCommand:
     redirects: list[str] = field(default_factory=list)
     in_pipeline: bool = False
     stdin_pipe: bool = False
+    # the program word holds a glob character the shell expands (unquoted where
+    # it is written, in the text this command was read from)
+    globbed: bool = False
 
 
 # --- tokenising --------------------------------------------------------------
@@ -497,14 +500,31 @@ def _globbed(program: str) -> bool:
     return program not in ("[", "[[") and any(ch in program for ch in "{}*?[")
 
 
-def _quoted_word(command: str, word: str) -> bool:
-    """Whether every place ``word`` is written in ``command`` quotes its glob
-    characters (``"[[["``, ``'k*'``, ``k\\*``), so the shell does not expand it.
-    ``False`` when it is not written there as a word of its own (it comes from
-    a ``-c`` string: read as a glob, to be safe)."""
-    spellings = [command[start:end] for kind, value, start, end in _shell_tokens(command)
-                 if kind == "word" and value == word]
-    return bool(spellings) and not any(_unquoted_glob(raw) for raw in spellings)
+def _program_globbed(text: str, word: str, wrappers: list[str]) -> bool:
+    """Whether the program word ``word`` of a command read from ``text`` is a
+    glob the shell expands: a glob character in it is unquoted where ``text``
+    spells it (``"[[["`` and ``'k*'`` are names). A word that reached the
+    program position through a launcher (``uvx 'kube[a]x'``), or that ``text``
+    does not spell as a word of its own, counts as a glob when it holds one."""
+    if not _globbed(word):
+        return False
+    if wrappers:
+        return True
+    unquoted, spelt = _glob_spellings(text)
+    return word in unquoted or word not in spelt
+
+
+@functools.lru_cache(maxsize=32)
+def _glob_spellings(text: str) -> tuple[frozenset[str], frozenset[str]]:
+    """The words of ``text`` (dequoted) that some spelling writes with an
+    unquoted glob character, and all its words: one pass over the tokens."""
+    unquoted, spelt = set(), set()
+    for kind, value, start, end in _shell_tokens(text):
+        if kind == "word":
+            spelt.add(value)
+            if _unquoted_glob(text[start:end]):
+                unquoted.add(value)
+    return frozenset(unquoted), frozenset(spelt)
 
 
 def _unquoted_glob(raw: str) -> bool:
@@ -2643,12 +2663,14 @@ def _expand(
     for simple in split_compound(command):
         argv, env, wrappers, string = _unwrap_inner(simple.argv, depth)
         if string is None:
-            yield (SimpleCommand(argv, simple.redirects, simple.in_pipeline, simple.stdin_pipe),
+            yield (SimpleCommand(argv, simple.redirects, simple.in_pipeline, simple.stdin_pipe,
+                                 bool(argv) and _program_globbed(command, argv[0], wrappers)),
                    env, wrappers)
             for inner_argv in find_exec_commands(argv):
+                # find runs CMD itself, without a shell: its words are never globs
                 for inner, inner_env, inner_wrappers in _expand(shlex.join(inner_argv),
                                                                 depth + 1):
-                    yield (SimpleCommand(inner.argv, inner.redirects),
+                    yield (SimpleCommand(inner.argv, inner.redirects, globbed=inner.globbed),
                            {**env, **inner_env}, [*wrappers, "find -exec", *inner_wrappers])
             continue
         for inner, inner_env, inner_wrappers in _expand(string, depth + 1):
@@ -2658,6 +2680,7 @@ def _expand(
                     [*simple.redirects, *inner.redirects],
                     simple.in_pipeline or inner.in_pipeline,
                     simple.stdin_pipe or inner.stdin_pipe,
+                    inner.globbed,
                 ),
                 {**env, **inner_env},
                 [*wrappers, *inner_wrappers],
@@ -2705,7 +2728,7 @@ def intents_from_command(command: str, *,
         if not simple.argv:
             continue
         feeder, previous = (previous if simple.stdin_pipe else None), simple
-        if _globbed(simple.argv[0]) and not _quoted_word(command, simple.argv[0]):
+        if simple.globbed:
             raise ShellRejected(GLOB_REASON, simple.argv[0])  # .command: the program word
         name = _basename(simple.argv[0])
         destroy = (

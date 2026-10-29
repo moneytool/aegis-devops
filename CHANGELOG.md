@@ -316,12 +316,15 @@ behaviour.
   tools' names with a small glob matcher that runs once along the word, not with `fnmatch`,
   which compiled the word to a regex and was quadratic on runs of `[` (64 KB of `[` took 36 s;
   `{a,b}`×8 + 2 KB of `[` took 10 s). More than 16 KB of glob text across the brace
-  alternatives counts as possibly a tool's name (denied). Quoted glob characters are literal,
-  as in the shell (`"[[[["` and `'k*'` are program names, not globs). Two other regexes that
+  alternatives counts as possibly a tool's name (denied), as does a POSIX class (`[[:alpha:]]`).
+  Quoted glob characters are literal, as in the shell (`"[[[["` and `'k*'` are program names,
+  not globs): whether they are quoted is read where the word is read, in the command or in its
+  `-c` string, in one pass (`bash -c 'k* …' 'k*'` is still a glob); a program word a launcher
+  produces (`uvx 'kube[a]x'`) counts as a glob when it holds one. Two other regexes that
   were quadratic on `[` runs (a package spec in `uv run`/`uvx`, a Terraform address index)
   are plain string scans now. With `--log-json`, a decision ended by the time budget logs its
-  ask or deny, and the abandoned worker's policy run (with its log line and ledger entry) is
-  skipped.
+  ask or deny, and the abandoned worker writes no log line or ledger entry (checked when its
+  policy run starts and again before it writes).
 - Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
   own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
   policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a

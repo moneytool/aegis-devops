@@ -1174,7 +1174,9 @@ def _evaluate(intents: list[InfrastructureIntent], args: argparse.Namespace) -> 
             f"--max-quarantine-ratio {args.max_quarantine_ratio}); refusing to decide"
         )
 
-    ledger = _open_ledger(args.ledger, store, now) if args.ledger else None
+    # a hook decision past its time budget writes nothing (the hook logged its answer)
+    ledger = _open_ledger(args.ledger, store, now) \
+        if args.ledger and not hook_module.decision_abandoned() else None
     interceptor = AegisInterceptor(
         store,
         ledger=ledger,
@@ -1223,7 +1225,7 @@ def _evaluate(intents: list[InfrastructureIntent], args: argparse.Namespace) -> 
         output.plan(plan_decision, plan_health=plan_store.health)
         if structured_log is not None:
             structured_log.record(intent=None, decision=plan_decision)
-            if args.log_json:
+            if args.log_json and not hook_module.decision_abandoned():
                 structured_log.write_log(args.log_json)
             if args.metrics_textfile:
                 structured_log.write_metrics(args.metrics_textfile)
@@ -1250,7 +1252,7 @@ def _evaluate(intents: list[InfrastructureIntent], args: argparse.Namespace) -> 
         citations.extend(c for c in decision.citations if c not in citations)
         fail_closed_notes.extend(n for n in decision.notes if _is_fail_closed_note(n))
     if structured_log is not None:
-        if args.log_json:
+        if args.log_json and not hook_module.decision_abandoned():
             structured_log.write_log(args.log_json)
         if args.metrics_textfile:
             structured_log.write_metrics(args.metrics_textfile)

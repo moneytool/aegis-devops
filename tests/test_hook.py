@@ -10,6 +10,7 @@ project directory before touching ``aegis_core.hook``.
 
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import shlex
@@ -23,7 +24,8 @@ import pytest
 
 from aegis_core import cli as cli_module
 from aegis_core import config as config_module
-from aegis_core import hook
+from aegis_core import hook, shell
+from aegis_core.shell import ShellRejected
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLE_SIGNING_KEY_PATH = REPO_ROOT / "data" / "example-signing.key"
@@ -339,6 +341,25 @@ def test_glob_program_words_stay_linear(opted_in_project, command):
     code, _out, _err = run("claude", payload_for("claude", command))
     assert time.monotonic() - started < 1
     assert code == 2
+
+
+@pytest.mark.parametrize("command", [
+    "'*';" * 12000, "echo 'k*'; " * 5000 + "ls", "bash -c 'k*' 'k*';" * 3000, '"[["; ' * 8000,
+])
+def test_quoted_glob_program_words_stay_linear(opted_in_project, command):
+    # each quoted glob program word re-read the whole command (23 s at 48 KB)
+    started = time.monotonic()
+    with contextlib.suppress(ShellRejected):
+        shell.intents_from_command(command)
+    assert time.monotonic() - started < 1
+    started = time.monotonic()
+    run("claude", payload_for("claude", command))
+    assert time.monotonic() - started < 1
+    started = time.monotonic()
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        cli_module.main(["check", "command", "--config-dir", str(opted_in_project / ".aegis"),
+                  "--", command])
+    assert time.monotonic() - started < 1
 
 
 def test_glob_match_agrees_with_fnmatch_without_shell_only_syntax():
@@ -2968,6 +2989,27 @@ _ROUND27_CORPUS = [
 ]
 
 
+# Round 28: whether a program word's glob characters are quoted is read from
+# the text that word was read from (a -c string's own), never from the outer
+# command; launcher-made program words and POSIX classes count as globs.
+_ROUND28_CORPUS = [
+    ('deny', "echo 'k*'; bash -c 'k* delete nodes --all'"),
+    ('deny', "bash -c 'k* delete nodes --all' 'k*'"),
+    ('deny', "echo 'k*' | bash -c 'k* get pods'"),
+    ('deny', '[[:alpha:]]ubectl delete nodes --all'),
+    ('deny', 'kube[[.c.]]tl delete nodes --all'),
+    ('deny', 'kube[![:digit:]]tl delete nodes --all'),
+    ('deny', "uvx 'kubectl[a]x'"),
+    ('deny', "uvx 'kubectl[a]]'"),
+    ('deny', "sudo 'k*' get pods"),
+    ('allow', '"[[[["'),
+    ('allow', "'k*' x"),
+    ('allow', "find . -exec 'k*' \\;"),
+    ('allow', '"\'*\'"'),
+    ('deny', 'bash -c "\'k*\' x; k* get pods"'),
+]
+
+
 def _decision(code: int, out: str) -> str:
     if code == 2:
         return "deny"
@@ -3021,7 +3063,8 @@ def test_a_shell_script_named_like_an_option_is_read(opted_in_project, command):
                          + _ROUND17B_CORPUS + _ROUND18_CORPUS + _ROUND19_CORPUS
                          + _ROUND19B_CORPUS + _ROUND20_CORPUS + _ROUND21_CORPUS
                          + _ROUND22_CORPUS + _ROUND23_CORPUS + _ROUND24_CORPUS
-                         + _ROUND25_CORPUS + _ROUND26_CORPUS + _ROUND27_CORPUS)
+                         + _ROUND25_CORPUS + _ROUND26_CORPUS + _ROUND27_CORPUS
+                         + _ROUND28_CORPUS)
 def test_round12_corpus(opted_in_project, expected, command):
     (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
     (opted_in_project / "ok.sh").write_text("echo hi\n")
