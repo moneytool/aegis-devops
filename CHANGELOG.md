@@ -292,6 +292,12 @@ behaviour.
   its `< FILE` as the script. zsh's `noglob`, `nocorrect` and `repeat N` are unwrapped like
   `command` (`noglob bash x.sh`). A long run of `!` or `{` before a command is stripped in one
   pass (65 KB of `! ` took over 2 s).
+- Agent hook: `!`, `time [-p]` and grouping words in front of a command are stripped in any
+  order (`time ! sh x.sh`, `! time ! sh x.sh`), as are zsh's `repeat N do … done`; `command --`
+  (also `command -p --`), `nice --` and `timeout -- N` are unwrapped. A `-` or `--` ends a
+  shell's options the same way in every place that reads them, so after `-c` the next word is
+  the command string (`bash -c - 'cmd'` runs cmd). `noglob source x.sh` and `noglob . x.sh` read
+  x.sh like `source x.sh`.
 - Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
   own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
   policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a

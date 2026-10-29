@@ -90,6 +90,9 @@ _ESCAPE_MARK = "\x02"
 # Reserved words that only group or negate ("{ a; b; }", "! cmd") -- they
 # never change what runs, so they are dropped from the simple command.
 _GROUPING_WORDS = frozenset({"{", "}", "!"})
+# Words that end a shell's options: the next word is the -c string or script
+# (bash -c - 'cmd', bash - x.sh, bash -- x.sh).
+SHELL_OPTIONS_END = frozenset({"--", "-"})
 # Reserved words in front of a command ("if kubectl get ns x; then kubectl delete
 # ns x; fi" runs both kubectl commands) are dropped the same way. A word that only
 # closes a construct, or a "for x in a b" header (its words are literal here, any
@@ -811,6 +814,9 @@ def _strip_timeout(rest: list[str]) -> list[str]:
     i = 0
     while i < len(rest):
         tok = rest[i]
+        if tok == "--":  # timeout -- 5 cmd
+            i += 1
+            break
         if tok in ("-s", "--signal", "-k", "--kill-after"):
             i += 2
             continue
@@ -833,6 +839,9 @@ def _strip_nice(rest: list[str]) -> list[str]:
     i = 0
     while i < len(rest):
         tok = rest[i]
+        if tok == "--":  # nice -- cmd
+            i += 1
+            break
         if tok in ("-n", "--adjustment"):
             i += 2
             continue
@@ -1093,7 +1102,7 @@ def _shell_c_string(rest: list[str], shell: str = "sh") -> str | None:
     saw_c = False
     while i < len(rest):
         tok = rest[i]
-        if tok == "--":
+        if tok in SHELL_OPTIONS_END:
             i += 1
             break
         if tok.startswith(("-", "+")) and len(tok) > 1:
@@ -1206,9 +1215,15 @@ def _unwrap_inner(
             wrappers.append(head)
             argv = argv[2:] if head == "repeat" else argv[1:]
             continue
+        if argv[0] in _GROUPING_WORDS or argv[0] in _LEADING_RESERVED:
+            # time ! cmd, ! time ! cmd, repeat 3 do cmd: reserved words at once
+            argv = _strip_reserved(argv)
+            continue
         if head == "command":
             rest = argv[1:]
             if rest and rest[0] == "-p":
+                rest = rest[1:]
+            if rest and rest[0] == "--":  # command -- cmd, command -p -- cmd
                 rest = rest[1:]
             if not rest or rest[0].startswith("-"):
                 break  # `command -v x` only prints a path
@@ -1549,7 +1564,7 @@ def code_run(simple: SimpleCommand) -> dict[str, str] | None:
             if tok == "-m" and interp == "python":
                 return {"kind": "script", "interpreter": name,
                         "path": f"-m {following}".strip()}
-            if interp in _SHELLS and tok in ("-", "--") and following:
+            if interp in _SHELLS and tok in SHELL_OPTIONS_END and following:
                 # bash - x.sh: a lone - ends the options like --; x.sh is the script
                 return {"kind": "script", "interpreter": name, "path": following}
             if tok == "-" or (interp in _SHELLS and tok == "-s"):
@@ -2053,7 +2068,7 @@ def _shell_scan(tokens: tuple[_Token, ...], k: int) -> tuple[int | None, bool]:
         if j >= k + _MAX_SHELL_OPTIONS:
             return None, True  # more options than are read
         word = tokens[j][1]
-        if word == "--":
+        if word in SHELL_OPTIONS_END:
             j += 1
             break
         if re.fullmatch(r"[-+][a-zA-Z]+|--[\w-]+", word):
@@ -2210,7 +2225,7 @@ def _value_reading_runs(words: list[str], redirects: list[str] | None = None
     shell, ambiguous, j = _basename(argv[0]), False, 1
     while j < len(argv):
         word = argv[j]
-        if word in ("--", "-"):  # bash - x.sh: a lone - ends the options too
+        if word in SHELL_OPTIONS_END:  # bash - x.sh: a lone - ends the options too
             j += 1
             break
         if not word.startswith(("-", "+")) or word == "+":
@@ -2310,10 +2325,25 @@ def _without_function_header(words: list[str]) -> list[str]:
     return words[2:] if words[:1] == ["function"] else words
 
 
+def _peel_precommands(argv: list[str]) -> list[str]:
+    """``argv`` without zsh's precommand words in front (``noglob``,
+    ``nocorrect``, ``repeat N``) and the ``exec``/``builtin`` after them, so
+    ``noglob source x.sh`` is read like ``source x.sh``."""
+    i = 0
+    while i < len(argv):
+        if argv[i] in ("noglob", "nocorrect"):
+            i += 1
+        elif argv[i] == "repeat" and i + 2 < len(argv):
+            i += 2
+        else:
+            break
+    return strip_exec_builtin(argv[i:]) if i else argv
+
+
 def _loose_run(words: list[str], redirects: list[str]) -> dict[str, str] | None:
     """What one simple command of :func:`script_runs_loosely` runs."""
     try:
-        argv = strip_exec_builtin(_strip_reserved(words))  # exec bash x.sh
+        argv = _peel_precommands(strip_exec_builtin(_strip_reserved(words)))  # exec bash x.sh
     except ShellRejected:
         return None
     if not argv or argv[0] == "eval":  # eval's words: a nested command line
@@ -2345,7 +2375,7 @@ def opaque_launcher_code(command: str) -> str | None:
              for words, _redirects in _simple_commands(_shell_tokens(text)))
     for words in parts:
         try:
-            argv = strip_exec_builtin(_strip_reserved(words))
+            argv = _peel_precommands(strip_exec_builtin(_strip_reserved(words)))
         except ShellRejected:
             continue
         if not argv or _basename(argv[0]) in _REJECTED_BUILTINS:

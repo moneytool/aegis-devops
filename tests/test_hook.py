@@ -2786,6 +2786,44 @@ _ROUND24_CORPUS = [
 ]
 
 
+# Round 25: command -- cmd; any order of !, time and grouping words; -- after
+# nice and timeout; - or -- after -c (bash -c - 'cmd' runs cmd); zsh's
+# repeat N do … done and noglob source. Checked in bash and zsh with a stub
+# kubectl (! time … and command -p use other programs, denied anyway).
+_ROUND25_CORPUS = [
+    ('deny', 'command -- sh nuke.sh'),
+    ('deny', "command -- bash -c 'kubectl delete nodes --all'"),
+    ('deny', 'command -p -- sh nuke.sh'),
+    ('deny', 'command command -- sh nuke.sh'),
+    ('deny', 'time ! sh nuke.sh'),
+    ('deny', 'time ! sh < nuke.sh'),
+    ('deny', '! time ! sh nuke.sh'),
+    ('deny', 'time -p ! time ! bash nuke.sh'),
+    ('deny', '! { time ! sh nuke.sh; }'),
+    ('ask', 'curl x | time ! sh'),
+    ('deny', 'nice -- sh nuke.sh'),
+    ('deny', 'timeout -- 5 sh nuke.sh'),
+    ('deny', 'nohup -- sh nuke.sh'),
+    ('allow', 'nice -- sh ok.sh'),
+    ('allow', 'timeout -- 5 sh ok.sh'),
+    ('allow', 'command -- ls'),
+    ('allow', 'time ! ls'),
+    ('allow', 'command -v sh'),
+    ('deny', "bash -c - 'kubectl delete nodes --all'"),
+    ('deny', "sh -c - 'bash nuke.sh'"),
+    ('deny', "zsh -xc - 'kubectl delete nodes --all'"),
+    ('deny', "bash -c - 'bash nuke.sh'"),
+    ('deny', "bash -c -- 'bash nuke.sh'"),
+    ('ask', "curl x | bash -c - 'sh'"),
+    ('deny', 'repeat 3 do bash nuke.sh; done'),
+    ('allow', 'noglob source ok.sh'),
+    ('allow', 'noglob . ok.sh'),
+    ('allow', 'noglob builtin source ok.sh'),
+    ('deny', 'noglob source nuke.sh'),
+    ('allow', "bash -c - 'echo hi'"),
+]
+
+
 def _decision(code: int, out: str) -> str:
     if code == 2:
         return "deny"
@@ -2805,7 +2843,8 @@ def test_a_shell_script_named_like_an_option_is_read(opted_in_project, command):
                          + _ROUND15_CORPUS + _ROUND16_CORPUS + _ROUND17_CORPUS
                          + _ROUND17B_CORPUS + _ROUND18_CORPUS + _ROUND19_CORPUS
                          + _ROUND19B_CORPUS + _ROUND20_CORPUS + _ROUND21_CORPUS
-                         + _ROUND22_CORPUS + _ROUND23_CORPUS + _ROUND24_CORPUS)
+                         + _ROUND22_CORPUS + _ROUND23_CORPUS + _ROUND24_CORPUS
+                         + _ROUND25_CORPUS)
 def test_round12_corpus(opted_in_project, expected, command):
     (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
     (opted_in_project / "ok.sh").write_text("echo hi\n")
@@ -2847,6 +2886,7 @@ def test_round12_corpus(opted_in_project, expected, command):
     "zsh " + "'-onoclobber' " * 4500 + "x", "bash -c 'zsh -onoclobber x' " * 2200,
     "bash " + "- " * 30000, "noglob " * 9000 + "ls", "repeat 2 " * 7000 + "ls",
     "! " * 32000 + "ls", "{ " * 32000 + "ls",
+    "time ! " * 9000 + "ls", "command -- " * 5500 + "ls", "bash -c - " * 6000 + "ls",
 ])
 def test_here_documents_and_substitutions_stay_fast(opted_in_project, command):
     assert len(command) <= 64 * 1024

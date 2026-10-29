@@ -78,6 +78,7 @@ from aegis_core.shell import (
     _SHELLS,
     ARGS_ONLY_PROGRAMS,
     GLOB_REASON,
+    SHELL_OPTIONS_END,
     ShellRejected,
     _basename,
     _c_string_at,
@@ -1285,7 +1286,7 @@ def _bare_scan(tokens: tuple[_Token, ...], r: int, *, as_value: bool) -> bool:
             k += 2
             continue
         option = word.startswith("-") or (shell and word.startswith("+"))  # bash +x
-        if shell and word in ("-", "--"):
+        if shell and word in SHELL_OPTIONS_END:
             # bash - x.sh: the options end, x.sh is the script; a lone - reads stdin
             return not (k + 1 < len(tokens) and tokens[k + 1][0] == "word")
         if not option or word in ("-", "--"):
