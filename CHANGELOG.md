@@ -193,6 +193,17 @@ behaviour.
   `eval` words, to four levels. At most 32 launchers (`env`, `sudo`, `nice`, …) are unwrapped in
   front of one command, so a chain of `env -S`/`env -u` words stays linear (it took 5-7 s); a
   longer chain cannot be checked and is judged like any command the parser rejects.
+- Agent hook: the shell-word reader follows bash's quoting more closely: here-document bodies
+  (`<<`, `<<-`, quoted delimiters, several on one line) are set aside instead of read as commands
+  (an apostrophe in one no longer hides the rest of the command), `$'…'` keeps its backslash
+  escapes (`$'\''`), and `$(…)` is read as a command line of its own. A quote, `$(…)` or backtick
+  never closed asks when the command names a shell, interpreter or infrastructure tool.
+  Here-document bodies and command substitutions are checked like `sh -c` strings and `eval`
+  words (`x=$(curl … | sh)` asks); `sh -c` strings and `eval` words in a command the parser
+  rejects are dequoted the same way (`bash -c 'bash -c '\''sh < x.sh'\'''`, `eval 'bash x.sh;
+  true'`), a `<` given to `eval` reaches a shell in its words (`eval 'true; sh' < x.sh`), and a
+  pipe into a shell in such a command asks. A file redirected onto a group, loop, `exec` or `-c`
+  string after a `cd` is no longer read from the hook's directory (asked).
 - Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
   own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
   policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a
