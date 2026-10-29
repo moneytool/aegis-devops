@@ -72,6 +72,7 @@ from pathlib import Path
 
 from aegis_core import config as config_module
 from aegis_core.shell import (
+    _ASSIGNMENT_RE,
     _KNOWN_BINARIES,
     _SHELLS,
     ARGS_ONLY_PROGRAMS,
@@ -285,19 +286,67 @@ SCRIPT_SCAN_LIMIT = 64 * 1024
 # At most this many of its lines may name an infrastructure tool; more asks.
 SCRIPT_SCAN_MAX_LINES = 64
 _SHELL_SUFFIXES = (".sh", ".bash", ".zsh", ".ksh")
-# A change of directory: cd/pushd/popd however spelt (`\cd`, `"cd"`, `'cd'`),
-# and the working-directory options of env and sudo (`env -C dir`, `sudo -D dir`).
-# env's own -C (also in a cluster, `-iC`, `-iCdir`, after `-u NAME`) and sudo's
-# -D, not make -C; possessive, so linear.
-_LAUNCHER_CD_RE = re.compile(
-    r"(?<![\w.-])env\s++(?:(?:-[iv0]*+[uS](?:\s++)?+\S++|-[iv0]++(?!\S)"
-    r"|--(?:unset|split-string)\s++\S++|--(?!chdir)[\w-]++(?:=\S*+)?|\w++=\S*+)\s++)*+"
-    r"(?:-[iv0]*+C|--chdir)"
-    r"|(?<![\w.-])sudo\s++(?:(?:-[EHnkKbAlvS]*+[ugpCrtTUh](?:\s++)?+\S++|-[EHnkKbAlvS]++(?!\S)"
-    r"|--(?:user|group|prompt|host|role|type|command-timeout|other-user)\s++\S++"
-    r"|--(?!chdir)[\w-]++(?:=\S*+)?)\s++)*+(?:-[EHnkKbAlvS]*+D|--chdir)")
-_CD_RE = re.compile(
-    r"(?:^|[;&|(\n\s'\"])\\?['\"]?(?:cd|pushd|popd)['\"]?(?![\w.-])|" + _LAUNCHER_CD_RE.pattern)
+# A change of directory: cd/pushd/popd however spelt (`\cd`, `"cd"`, `'cd'`);
+# the working-directory options of env and sudo are :func:`_launcher_chdir`.
+_CD_RE = re.compile(r"(?:^|[;&|(\n\s'\"])\\?['\"]?(?:cd|pushd|popd)['\"]?(?![\w.-])")
+_SUDO_VALUE_LONG = frozenset({"--user", "--group", "--prompt", "--host", "--role", "--type",
+                              "--command-timeout", "--other-user"})
+
+
+def _launcher_chdir(command: str) -> bool:
+    """Whether an ``env`` or ``sudo`` in ``command`` changes the directory:
+    env's own ``-C``/``--chdir`` (also in a cluster, ``-iC DIR``, ``-iCDIR``,
+    after ``-u NAME``, quoted, or inside ``-S STRING``) or sudo's ``-D``, not
+    ``make -C``. On the dequoted words; a launcher word that is the value of an
+    earlier one's option is not read again, so this is linear."""
+    tokens = _shell_tokens(command)
+    k = 0
+    while k < len(tokens):
+        kind, value, _s, _e = tokens[k]
+        name = _basename(value) if kind == "word" else ""
+        k += 1
+        if name not in ("env", "sudo"):
+            continue
+        while k < len(tokens) and tokens[k][0] == "word":
+            word = tokens[k][1]
+            if word == "--" or not word.startswith("-") and not (
+                    name == "env" and _ASSIGNMENT_RE.match(word)):
+                break  # the command (`sudo env -C …`: read as a launcher in turn)
+            k += 1
+            if word.startswith("--"):
+                key = word.partition("=")[0]
+                if key == "--chdir":
+                    return True
+                if key == "--split-string" and re.search(r"(?:^|\s)-\w*C|--chdir", word):
+                    return True
+                if "=" not in word and key in (("--unset", "--split-string") if name == "env"
+                                               else _SUDO_VALUE_LONG):
+                    k += 1
+                continue
+            if not word.startswith("-"):
+                continue  # env NAME=value
+            flags, values = ("i0v", "uCS") if name == "env" else ("EHnkKbAlvS", "ugpCDrtTUh")
+            for at, letter in enumerate(word[1:], start=2):
+                if letter in flags:
+                    continue
+                if letter not in values:
+                    break
+                if letter == ("C" if name == "env" else "D"):
+                    return True
+                attached = word[at:]
+                value = attached or (tokens[k][1] if k < len(tokens) else "")
+                k += 0 if attached else 1
+                if letter == "S" and name == "env" and re.search(r"(?:^|\s)-\w*C|--chdir",
+                                                                  value):
+                    return True
+                break
+    return False
+
+
+def _changes_directory(command: str) -> bool:
+    """A ``cd`` (raw or dequoted) or an ``env -C``/``sudo -D`` in ``command``."""
+    return bool(_CD_RE.search(command) or _CD_RE.search(dequoted(command))
+                or _launcher_chdir(command))
 
 
 def decide(command: str, config_dir: Path, extra_args: list[str] | None = None, *,
@@ -368,18 +417,36 @@ def _stdin_redirects(command: str, config_dir: Path, extra_args: list[str] | Non
     before parsing, so a command the parser rejects (``( sh ) < x.sh``) is
     covered too."""
     asks: list[str] = []
-    if _FD_STDIN_RE.search(command) and _READER_WORD_RE.search(command):
+    for text in _nested_commands(command):  # bash -c 'exec < x.sh; bash' too
+        asks += [ask for ask in _stdin_asks(text) if ask not in asks]
+    if scan:
+        for path in dict.fromkeys(p for text in _nested_commands(command)
+                                  for p in _group_stdin_files(text)):
+            verdict = _scan_script({"kind": "script", "interpreter": "sh", "path": path},
+                                   config_dir, extra_args, cwd, command=command)
+            if verdict is not None:
+                if verdict.decision == "deny":
+                    return verdict
+                asks.append(verdict.reason)
+    return asks
+
+
+def _stdin_asks(command: str) -> list[str]:
+    """The asks of :func:`_stdin_redirects` for one command line."""
+    asks: list[str] = []
+    tokens = _shell_tokens(command)
+    readers = [tokens[k][2] for k in _readers(tokens)]
+    if readers and _FD_STDIN_RE.search(command):
         asks.append("aegis: a shell or interpreter here may read its commands through a "
                     "copied or read-write file descriptor (<&N, <>), which the hook cannot "
                     "follow; use `bash FILE` or `sh < FILE`")
-    readers = [m.start() for m in _READER_WORD_RE.finditer(command)]
-    if any(generated and string_reader(string[1:-1])
-           for string, _file, generated in _c_strings_with_stdin(command)):
+    if any(kind == "generated" and string_reader(string)
+           for string, kind, _value in _c_strings_with_stdin(command)):
         asks.append("aegis: a shell's -c string reads code from a process substitution or "
                     "here-string, which the hook cannot check")
     if readers and any(  # exec: a reader after it; a group or loop: a reader inside it
-            m.end() <= readers[-1] if m.group("exec") else readers[0] < m.start()
-            for m in _GENERATED_STDIN_RE.finditer(command)):
+            end <= readers[-1] if anchor < 0 else readers[0] < anchor
+            for kind, _value, end, anchor in _compound_stdins(command) if kind == "generated"):
         asks.append("aegis: a shell or interpreter here may read its commands from a process "
                     "substitution or here-string given to exec or to a group, loop or if, "
                     "which the hook cannot check")
@@ -389,14 +456,6 @@ def _stdin_redirects(command: str, config_dir: Path, extra_args: list[str] | Non
     if stage is not None and _bare_reader(command, stage.start() + 1, len(command)):
         asks.append("aegis: a pipe feeds a group, loop or if that runs a shell or interpreter, "
                     "which may read its commands from the pipe; the hook cannot check them")
-    if scan:
-        for path in _group_stdin_files(command):
-            verdict = _scan_script({"kind": "script", "interpreter": "sh", "path": path},
-                                   config_dir, extra_args, cwd, command=command)
-            if verdict is not None:
-                if verdict.decision == "deny":
-                    return verdict
-                asks.append(verdict.reason)
     return asks
 
 
@@ -753,9 +812,8 @@ def _scripts_with_directory(command: str, cwd: Path | None) -> list[tuple[dict, 
             intents = intents_from_command(text)
         except ValueError:
             continue
-        words = set(text.split())
-        chdir = bool(words & {"-C", "--chdir", "-D"}) or "--chdir=" in text or bool(
-            _LAUNCHER_CD_RE.search(text))
+        words = set(dequoted(text).split())
+        chdir = bool(words & {"-C", "--chdir", "-D"}) or _launcher_chdir(text)
         for intent in intents:
             if intent.provider != "shell":
                 continue
@@ -806,9 +864,6 @@ def _literal_code(argv: list[str]) -> str | None:
     return None
 
 
-_CD_WORD_RE = _CD_RE
-
-
 def _piped_code(command: str, reader: list[str], feeder: list[str] | None, config_dir: Path,
                 extra_args: list[str] | None, cwd: Path | None, *,
                 rebuilt: bool) -> HookVerdict | None:
@@ -847,7 +902,7 @@ def _piped_code(command: str, reader: list[str], feeder: list[str] | None, confi
     decide = _decide_once if _SCANNED.get() is not None else _decide
     state = _SCANNED.get()
     outer = state["command"] if state is not None else ""
-    here = None if _CD_WORD_RE.search(command) or _CD_WORD_RE.search(outer) else cwd
+    here = None if _changes_directory(command) or _changes_directory(outer) else cwd
     verdict = decide(code, config_dir, extra_args, here, scan=True)
     if verdict.decision == "allow":
         return None
@@ -884,7 +939,7 @@ def _rejected(command: str, reason: str, config_dir: Path, extra_args: list[str]
             "cannot read; save it to a file and run that, so its commands are checked")
     scripts = script_runs_loosely(command)
     if scan:
-        here = None if _CD_RE.search(command) else cwd
+        here = None if _changes_directory(command) else cwd
         for runs in scripts:
             verdict = _scan_script(runs, config_dir, extra_args, here, command=command)
             if verdict is not None:
@@ -927,7 +982,7 @@ def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
     # (`OUT=$(bash x.sh)`) or cannot be split out (`for …; do ./x.sh "$i"; done`)
     loose_scripts = script_runs_loosely(command)
     if scan:
-        start = None if _CD_RE.search(command) else cwd
+        start = None if _changes_directory(command) else cwd
         for runs in loose_scripts:
             verdict = _scan_script(runs, config_dir, extra_args, start, command=command)
             if verdict is not None:
@@ -1028,129 +1083,327 @@ def _sourced_script(segment: str) -> dict[str, str] | None:
     return None
 
 
-# A file redirected onto a group, subshell, `if` or loop (`{ sh; } < x.sh`,
-# `for …; do bash; done < x.sh`): a bare shell inside reads its commands from it.
-# Other redirections that may stand before the one of standard input
-# (`{ sh; } 2>/dev/null < x.sh`, `exec 2>&1 < x.sh`); possessive, so linear.
-_OTHER_REDIRECTS = r"(?:(?:\d*>>?|&>>?|[1-9]\d*<)&?\s*[^\s;&|()<>]++\s*+)*+"
-_GROUP_STDIN_RE = re.compile(
-    rf"(?:[}})]|\b(?:fi|done|esac))\s*{_OTHER_REDIRECTS}0?<(?![<&(>])\s*([^\s;&|)<>]+)")
-_EXEC_STDIN_RE = re.compile(
-    rf"(?:^|[;&|\n('\"]\s*|\s)exec\s+{_OTHER_REDIRECTS}0?<(?![<&(>])\s*([^\s;&|)<>]+)")
-# A shell with a quoted -c string (`bash -o pipefail -c 'eval sh'`). Linear:
-# the shell word starts after a separator and its directory part (possessive,
-# one segment per slash) holds none of them, so no character is scanned from
-# two starts; its options are disjoint and possessive (`-o NAME`, a cluster
-# without `c`, `--long`; NAME is never a shell's name, which no shell takes as
-# an option), so no later shell word lies inside them; then the cluster with
-# `c`, then the string (closed at the latest by the next start's own quote).
-_C_STRING_RE = re.compile(
-    r"(?<![^\s;&|()`])(?:[^\s;&|()<>`/]*+/)*+(?:ba|z|da|k|a|mk|po)?sh"
-    r"(?:\s++(?:[-+]o\s++(?!(?:ba|z|da|k|a|mk|po|rba)?sh(?![\w-]))[\w-]++"
-    r"|-(?![a-zA-Z]*c)[a-zA-Z]++|--[\w-]++))*+"
-    r"\s++-[a-zA-Z]*c[a-zA-Z]*\s+\$?('[^']*'|\"[^\"]*\")")
-# What may follow the string's arguments: other redirections, then standard
-# input from a file, a process substitution or a here-document/string.
-_C_STRING_TAIL_RE = re.compile(
-    rf"\s*{_OTHER_REDIRECTS}0?<(?:(?![<&(>])\s*([^\s;&|)<>]+)|\s*(?P<generated><\(|<<))")
-_ARGS_END_RE = re.compile(r"[;&|<>()]")  # the string's arguments end at a separator
+# --- shell words, dequoted ------------------------------------------------------------
+#
+# The checks below match on the words the shell will see (`'sh'`, `"sh"` and
+# `\sh` are all `sh`), not on the raw text, and model redirections in order
+# (the last `<` is standard input). One linear pass over the command.
+
+# A token: (kind, value, start, end). kind is "word" (value dequoted; a
+# `$(…)`, `` `…` `` or `<(…)` stays raw inside it), "op" (a redirection
+# operator, its descriptor number in front: `<`, `2>`, `<<<`, `&>`, `<&`) or
+# "sep" (`;`, `&`, `&&`, `|`, `||`, `|&`, newline, `(`, `)`).
+_Token = tuple[str, str, int, int]
+_REDIRECT_OPS = ("&>>", "<<<", "<<-", "&>", "<<", "<>", "<&", ">>", ">&", ">|", "<", ">")
 
 
-def _c_strings_with_stdin(command: str) -> list[tuple[str, str | None, bool]]:
-    """``(string, file, generated)`` for each ``sh -c 'STRING' [ARGS…]`` whose
-    standard input is redirected: from ``file``, or from a process substitution
-    or here-document/string (``generated``). The arguments run to the next
-    separator; strings that share it share one look-up, so this stays linear
-    however many strings there are."""
-    found: list[tuple[str, str | None, bool]] = []
-    scanned_to, tail = -1, None
-    for match in _C_STRING_RE.finditer(command):
-        if match.end() > scanned_to:  # past the last look-up: a new separator
-            sep = _ARGS_END_RE.search(command, match.end())
-            scanned_to = sep.start() if sep else len(command)
-            tail = _C_STRING_TAIL_RE.match(command, scanned_to) if sep else None
-        if tail is not None:
-            found.append((match.group(1), tail.group(1), bool(tail.group("generated"))))
+def _skip_balanced(text: str, i: int, n: int) -> int:
+    """The index after the `)` that closes the `(` at ``text[i]``, quotes and
+    backslashes heeded; ``n`` when it is never closed."""
+    depth = 0
+    while i < n:
+        c = text[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "'":
+            j = text.find("'", i + 1, n)
+            i = n if j < 0 else j + 1
+            continue
+        if c == '"':
+            i += 1
+            while i < n and text[i] != '"':
+                i += 2 if text[i] == "\\" else 1
+            i += 1
+            continue
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return n
+
+
+@functools.lru_cache(maxsize=32)
+def _shell_tokens(text: str) -> tuple[_Token, ...]:
+    """The tokens of ``text``. Never raises; an unclosed quote runs to the end."""
+    tokens: list[_Token] = []
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c in " \t\r":
+            i += 1
+            continue
+        if c == "#":  # a comment, where a word would start
+            j = text.find("\n", i, n)
+            i = n if j < 0 else j
+            continue
+        if c in "\n;()" or (c in "|&" and not text.startswith(("&>",), i)):
+            two = text[i:i + 2]
+            sep = two if two in ("&&", "||", "|&", ";;") else c
+            tokens.append(("sep", sep, i, i + len(sep)))
+            i += len(sep)
+            continue
+        start = i
+        j = i
+        while j < n and text[j].isdigit():
+            j += 1
+        if j < n and text[j] in "<>&" and not text.startswith(("<(", ">("), j):
+            op = next((o for o in _REDIRECT_OPS if text.startswith(o, j)), None)
+            if op is not None and not (op.startswith("&") and j > i):
+                tokens.append(("op", text[i:j] + op, start, j + len(op)))
+                i = j + len(op)
+                continue
+        value: list[str] = []
+        while i < n:
+            c = text[i]
+            if c in " \t\r\n;|&()<>" and not (c in "<>" and text.startswith("(", i + 1)):
+                break
+            if c == "\\":
+                if text.startswith("\n", i + 1):
+                    i += 2  # a line continuation
+                    continue
+                value.append(text[i + 1:i + 2])
+                i += 2
+            elif c == "'" or (c == "$" and text.startswith("'", i + 1)):
+                i += 1 if c == "'" else 2
+                j = text.find("'", i, n)
+                j = n if j < 0 else j
+                value.append(text[i:j])
+                i = j + 1
+            elif c == '"':
+                i += 1
+                while i < n and text[i] != '"':
+                    if text[i] == "\\" and text[i + 1:i + 2] in ('"', "\\", "$", "`"):
+                        i += 1
+                    value.append(text[i:i + 1])
+                    i += 1
+                i += 1
+            elif c in "$<>" and text.startswith("(", i + 1):  # $(…), <(…), >(…): raw
+                j = _skip_balanced(text, i + 1, n)
+                value.append(text[i:j])
+                i = j
+            elif c == "`":
+                j = text.find("`", i + 1, n)
+                j = n if j < 0 else j + 1
+                value.append(text[i:j])
+                i = j
+            else:
+                value.append(c)
+                i += 1
+        tokens.append(("word", "".join(value), start, min(i, n)))
+    return tuple(tokens)
+
+
+def dequoted(text: str) -> str:
+    """``text`` as the words the shell sees, joined by spaces (separators and
+    operators kept), for the checks that look for a program by name."""
+    return " ".join(value for _kind, value, _s, _e in _shell_tokens(text))
+
+
+_READER_NAME_RE = re.compile(
+    rf"(?:{'|'.join(sorted(_SHELLS))}|python[\d.]*|perl|ruby|node|php|lua)")
+
+
+def _readers(tokens: tuple[_Token, ...]) -> list[int]:
+    """The indexes of the words that name a shell or interpreter (``sh``,
+    ``'sh'``, ``\\sh``, ``/bin/sh``, ``/usr/bin/python3``)."""
+    return [k for k, (kind, value, _s, _e) in enumerate(tokens)
+            if kind == "word" and _READER_NAME_RE.fullmatch(_basename(value))]
+
+
+def _stdin_op(tokens: tuple[_Token, ...], k: int) -> tuple[str, str, int] | None:
+    """What the operator at ``k`` makes standard input, with its target word:
+    ``("file", NAME, end)``, ``("generated", OP, end)`` for a here-document or
+    here-string or ``< <(…)``, ``("fd", OP, end)`` for ``<&N``/``<>``; ``None``
+    for any other descriptor."""
+    _kind, value, _start, end = tokens[k]
+    fd = value.rstrip("<>&|-")
+    op = value[len(fd):]
+    if fd not in ("", "0") or not op.startswith("<"):
+        return None  # standard output or another descriptor
+    target = tokens[k + 1] if k + 1 < len(tokens) and tokens[k + 1][0] == "word" else None
+    if op.startswith("<<"):
+        return ("generated", op, end)
+    if op in ("<&", "<>"):
+        return ("fd", op, target[3] if target else end)
+    if target is None:
+        return None
+    return ("generated" if target[1].startswith("<(") else "file", target[1], target[3])
+
+
+def _stdin_after(tokens: tuple[_Token, ...], k: int) -> tuple[str, str, int] | None:
+    """Standard input of the group, subshell, loop or ``exec`` whose remaining
+    tokens start at ``k``: the last ``<`` (:func:`_stdin_op`) among the
+    redirections that follow it; ``None`` when there is none."""
+    stdin = None
+    while k < len(tokens) and tokens[k][0] == "op":
+        stdin = _stdin_op(tokens, k) or stdin
+        k += 2 if k + 1 < len(tokens) and tokens[k + 1][0] == "word" else 1
+    return stdin
+
+
+def _last_stdin(tokens: tuple[_Token, ...]) -> list[tuple[str, str, int] | None]:
+    """For each token, the last ``<`` (:func:`_stdin_op`) from it to the end of
+    its command (the next separator): one pass from the right."""
+    found: list[tuple[str, str, int] | None] = [None] * len(tokens)
+    current = None
+    for k in range(len(tokens) - 1, -1, -1):
+        kind = tokens[k][0]
+        if kind == "sep":
+            current = None
+        elif kind == "op" and current is None:
+            current = _stdin_op(tokens, k)
+        found[k] = current
+    return found
+
+
+# Words after which a redirection is the standard input of a whole group,
+# subshell, `if` or loop: a bare shell inside reads its commands from it.
+_COMPOUND_ENDS = frozenset({"}", "fi", "done", "esac"})
+
+
+def _compound_stdins(command: str) -> list[tuple[str, str, int, int]]:
+    """``(kind, value, end, anchor)`` for each standard input given to a group,
+    subshell, ``if`` or loop (``anchor``: where it ends) and to ``exec``
+    (``anchor``: -1), from :func:`_stdin_after`; only redirections may stand
+    between (``{ sh; } 2>/dev/null < x.sh``, ``exec 2>&1 < x.sh``)."""
+    tokens = _shell_tokens(command)
+    found = []
+    for k, (kind, value, start, _end) in enumerate(tokens):
+        compound = (kind == "sep" and value == ")") or (kind == "word" and value in _COMPOUND_ENDS)
+        if compound or (kind == "word" and value == "exec"):
+            stdin = _stdin_after(tokens, k + 1)
+            if stdin is not None:
+                found.append((*stdin, start if compound else -1))
+    return found
+
+
+def _c_string_at(tokens: tuple[_Token, ...], k: int) -> int | None:
+    """For a shell word at ``k``: the index of its ``-c`` string word, after
+    its options (``-o NAME``, clusters, ``--long``; at most a few dozen words,
+    so callers stay linear); ``None`` when it has none."""
+    if _basename(tokens[k][1]) not in _SHELLS:
+        return None
+    j = k + 1
+    while j < min(len(tokens), k + 64) and tokens[j][0] == "word":
+        word = tokens[j][1]
+        if word in ("-o", "+o", "-O", "+O"):
+            j += 2
+        elif re.fullmatch(r"-[a-zA-Z]*c[a-zA-Z]*", word):
+            return j + 1 if j + 1 < len(tokens) and tokens[j + 1][0] == "word" else None
+        elif re.fullmatch(r"[-+][a-zA-Z]+|--[\w-]+", word):
+            j += 1
+        else:
+            return None
+    return None
+
+
+def _c_strings_with_stdin(command: str) -> list[tuple[str, str, str]]:
+    """``(string, kind, value)`` for each ``sh -c STRING [ARGS…]`` whose
+    standard input is redirected (the last ``<`` wins): ``kind`` is ``"file"``,
+    ``"generated"`` or ``"fd"`` as in :func:`_stdin_after`."""
+    tokens = _shell_tokens(command)
+    found = []
+    last = None
+    for k in _readers(tokens):
+        j = _c_string_at(tokens, k)
+        if j is not None and j + 1 < len(tokens):
+            last = last or _last_stdin(tokens)
+            stdin = last[j + 1]  # after the string's arguments and other redirections
+            if stdin is not None:
+                found.append((tokens[j][1], stdin[0], stdin[1]))
+    return found
+
+
+def _nested_commands(command: str, depth: int = 0) -> list[str]:
+    """``command`` and the command lines inside it: ``sh -c`` strings and the
+    words of ``eval``, to four levels (each level is part of the one above, so
+    this stays linear)."""
+    found = [command]
+    if depth >= 4:
+        return found
+    tokens = _shell_tokens(command)
+    for k, (kind, value, _s, _e) in enumerate(tokens):
+        if kind != "word":
+            continue
+        inner = None
+        if value == "eval":
+            words = []
+            for token in tokens[k + 1:]:
+                if token[0] != "word" or token[1] == "eval":
+                    break
+                words.append(token[1])
+            inner = " ".join(words)
+        elif _READER_NAME_RE.fullmatch(_basename(value)):
+            j = _c_string_at(tokens, k)
+            inner = tokens[j][1] if j is not None else None
+        if inner:
+            found += _nested_commands(inner, depth + 1)
     return found
 
 
 # A pipe into a group, subshell, loop or if: every command in it shares the pipe.
 _PIPED_COMPOUND_RE = re.compile(
     r"(?<!\|)\|(?!\|)&?\s*(?:time\s+(?:-p\s+)?|!\s*)?(?:[{(]|(?:if|while|until|for|select|case)\b)")
-# A process substitution or here-string as the standard input of exec or of a
-# group, subshell, if or loop: `exec < <(curl …); sh`, `{ sh; } <<< "$x"`.
-_GENERATED_STDIN_RE = re.compile(
-    r"(?:(?P<exec>(?:^|[;&|\n('\"]\s*|\s)exec\s+)|[})]\s*|\b(?:fi|done|esac)\s*)"
-    + _OTHER_REDIRECTS + r"0?(?:<\s*<\(|<<<)")
-# A redirection word (`2>/dev/null`, `>`, `&>log`); a bare operator takes the
-# next word as its target.
-_REDIRECT_WORD_RE = re.compile(r"\d*(?:>>?|<|&>>?)&?")
 
 
 def _bare_reader(command: str, start: int, end: int) -> bool:
     """Whether ``command[start:end]`` runs a shell or interpreter that reads its
     code from standard input: after its options (``-e``, ``-o pipefail``) comes
     no script, module or code argument (``sh``, ``bash -e``, ``bash -s``; not
-    ``python3 -m mod``, ``bash -c '…'`` or ``bash x.sh``)."""
-    for m in _READER_WORD_RE.finditer(command, start, end):
-        shell = _basename(m.group(0)) in _SHELLS
-        words = []
-        line = command[m.end():end][:200].split("\n", 1)[0]  # a reader ends its line
-        # ... or its command, at a separator even with no space (`sh;echo`, `sh&&x`),
-        # but not at the `&` of a redirection (`sh 2>&1`, `sh &>log`)
-        line = _COMMAND_END_RE.split(line, maxsplit=1)[0]
-        for raw in re.findall(r"\S+", line):
-            if raw.startswith("#"):
-                break
-            word = raw.rstrip(";&|)}")
-            if word:
-                words.append(word)
-            if word != raw or not word:
-                break  # the command ends here (`-s;`, `sh)`)
-        k = 0
-        while k < len(words) and (_REDIRECT_WORD_RE.match(words[k]) or (
-                words[k].startswith("-") and words[k] not in ("-", "--"))):
-            if _REDIRECT_WORD_RE.match(words[k]):  # sh 2>/dev/null, sh > out
-                k += 2 if _REDIRECT_WORD_RE.fullmatch(words[k]) else 1
+    ``python3 -m mod``, ``bash -c '…'`` or ``bash x.sh``). Words are dequoted
+    (``'sh'``, ``\\sh``); the command ends at a separator, with or without a
+    space before it (``sh;echo``), and at a ``}``."""
+    tokens = _shell_tokens(command[start:end])
+    for r in _readers(tokens):
+        shell = _basename(tokens[r][1]) in _SHELLS
+        k, limit = r + 1, min(len(tokens), r + 64)
+        while k < limit:
+            kind, word, _s, _e = tokens[k]
+            if kind == "sep" or word == "}":
+                return True
+            if kind == "op":  # sh 2>/dev/null, sh > out
+                k += 2
                 continue
-            option = words[k]
-            if option in ("-c", "-m", "--version", "--help") or (not shell and (
-                    option[:2] in ("-e", "-E", "-r") or option in ("-V", "-v", "-h"))):
+            if not word.startswith("-") or word in ("-", "--"):
+                if word in ("-", "--") or word in _STDIN_PATHS:  # python3 /dev/stdin
+                    return True
+                break  # a script argument
+            if word in ("-c", "-m", "--version", "--help") or (not shell and (
+                    word[:2] in ("-e", "-E", "-r") or word in ("-V", "-v", "-h"))):
                 break  # code or a module on the command line, or a version/help check
-            k += 2 if option in ("-o", "+o", "-O", "+O") else 1
+            k += 2 if word in ("-o", "+o", "-O", "+O") else 1
         else:
-            word = words[k] if k < len(words) else ""
-            if not word or word in ("-", "--") or word in _STDIN_PATHS:  # python3 /dev/stdin
+            if k >= len(tokens):
                 return True
     return False
 
 
-_COMMAND_END_RE = re.compile(r"[;|]|(?<![<>])&(?!>)")
-
-
 # Standard input copied from another descriptor or opened read-write.
 _FD_STDIN_RE = re.compile(r"(?:^|[\s;&|])0?(?:<&\s*(?!-)\S|<>)")  # <&3, <&$fd, <>
-_READER_WORDS = "|".join(sorted(_SHELLS))
-_READER_WORD_RE = re.compile(
-    rf"(?<![^\s;&|()<>'\"`{{}}])(?:[^\s;&|()<>'\"`{{}}/]*+/)*+"  # starts and path: disjoint
-    rf"(?:{_READER_WORDS}|python[\d.]*|perl|ruby|node|php|lua)"
-    r"(?![\w.-])")  # sh, /bin/sh, /usr/bin/python3
 
 
 def _group_stdin_files(command: str) -> list[str]:
     """The files redirected onto a group, subshell, ``if`` or loop that runs a
     shell or interpreter (``{ bash; } < c.sh``), read like ``sh < c.sh``."""
-    readers = [m.start() for m in _READER_WORD_RE.finditer(command)]
+    tokens = _shell_tokens(command)
+    readers = [tokens[k][2] for k in _readers(tokens)]
     if not readers:
         return []
-    files = [match.group(1).strip("'\"")
-             for match in _GROUP_STDIN_RE.finditer(command, readers[0])]
+    files = []
+    for kind, value, end, anchor in _compound_stdins(command):
+        if kind != "file":
+            continue
+        # a group or loop: a reader inside it; exec < FILE: the rest of the
+        # shell reads FILE as its standard input
+        if (anchor >= 0 and readers[0] < anchor) or (anchor < 0 and end <= readers[-1]):
+            files.append(value)
     # bash -c 'eval sh' < FILE: a reader inside the string reads FILE
-    files += [file for string, file, _generated in _c_strings_with_stdin(command)
-              if file and string_reader(string[1:-1])]
-    # exec < FILE: the rest of the shell reads FILE as its standard input
-    files += [match.group(1).strip("'\"") for match in _EXEC_STDIN_RE.finditer(command)
-              if match.end() <= readers[-1]]
+    files += [value for string, kind, value in _c_strings_with_stdin(command)
+              if kind == "file" and string_reader(string)]
     return files
 
 

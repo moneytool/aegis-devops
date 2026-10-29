@@ -185,6 +185,14 @@ behaviour.
   unknown. A shell, interpreter or script run under `env`/`sudo` options the hook does not know
   (`env -P DIR bash x.sh`, `sudo -iu USER bash x.sh`, `cat x.sh | env -Q sh`) asks instead of
   being allowed.
+- Agent hook: the checks for shells reading standard input match on the words the shell sees,
+  not the raw text: `'sh'`, `"sh"` and `\sh` are `sh`, a quoted `';'` is an argument, not a
+  separator, and an `env "-iC" DIR` or `sudo "-D" DIR` makes the directory unknown. Redirections
+  are read in order, so the last `<` is standard input (`bash -c 'eval sh' < ok.sh < x.sh` and `{
+  sh; } < ok.sh < x.sh` read x.sh). The words are read in one pass, also inside `sh -c` strings and
+  `eval` words, to four levels. At most 32 launchers (`env`, `sudo`, `nice`, …) are unwrapped in
+  front of one command, so a chain of `env -S`/`env -u` words stays linear (it took 5-7 s); a
+  longer chain cannot be checked and is judged like any command the parser rejects.
 - Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
   own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
   policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a

@@ -1097,6 +1097,11 @@ def _shell_c_string(rest: list[str]) -> str | None:
     return rest[i]
 
 
+# At most this many launchers (sudo, env, nice, …) are unwrapped in front of one
+# command; more is not a real command line, and is rejected.
+_MAX_LAUNCHERS = 32
+
+
 def _unwrap_inner(
     argv: list[str], depth: int
 ) -> tuple[list[str], dict[str, str], list[str], str | None]:
@@ -1109,17 +1114,20 @@ def _unwrap_inner(
     while True:
         if not argv:
             raise ShellRejected("nothing left to run after unwrapping launchers")
+        if len(wrappers) >= _MAX_LAUNCHERS:  # each one copies the words: keep it linear
+            raise ShellRejected(f"more than {_MAX_LAUNCHERS} launchers in a row")
         head = _basename(argv[0])
-        if _ASSIGNMENT_RE.match(argv[0]):
-            key, _, value = argv[0].partition("=")
-            env[key] = value
-            argv = argv[1:]
+        if _ASSIGNMENT_RE.match(argv[0]) or head == "--":
+            k = 0  # a run of assignments and `--`, dropped in one copy
+            while k < len(argv) and (argv[k] == "--" or _ASSIGNMENT_RE.match(argv[k])):
+                key, _, value = argv[k].partition("=")
+                if argv[k] != "--":
+                    env[key] = value
+                k += 1
+            argv = argv[k:]
             continue
         if head in _REJECTED_BUILTINS:
             raise ShellRejected(f"{head!r} cannot be checked statically")
-        if head == "--":
-            argv = argv[1:]
-            continue
         if head == "sudo":
             rest = _strip_sudo(argv[1:])
             if not rest:
@@ -1593,7 +1601,7 @@ def script_runs_loosely(command: str, _depth: int = 0) -> list[dict[str, str]]:
                 found.extend(script_runs_loosely(" ".join(argv[evals:]), _depth + 1))
             continue
         redirects = [t for t in argv if t.startswith(("<", "0<"))]
-        argv = [t for t in argv if t not in redirects]
+        argv = [t for t in argv if not t.startswith(("<", "0<"))]  # linear: no `in` list
         if argv and _basename(argv[0]) in ("source", "."):
             found.append({"kind": "script", "interpreter": argv[0],
                           "path": argv[1] if len(argv) > 1 else ""})
