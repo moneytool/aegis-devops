@@ -322,10 +322,13 @@ behaviour.
   `-c` string, in one pass (`bash -c 'k* …' 'k*'` is still a glob); a program word a launcher
   produces (`uvx 'kube[a]x'`) counts as a glob when it holds one. A `find … -exec` program
   word is a glob as the outer shell spells it (it expands find's words before find runs:
-  `find . -exec k* …`), and program words in nested lines the parser rejects (`eval` words, a
-  `-c` string in a `-c` string, here-document bodies, substitutions) are checked too; a word
+  `find . -exec k* …`, also inside `eval` or `$(…)`), and program words in nested lines the
+  parser rejects (`eval` words, a `-c` string in a `-c` string, substitutions, and the
+  here-document bodies a shell named on their line runs: `bash <<EOF`, `cat <<EOF | sh`; not
+  data bodies such as a Markdown `* item` written with `cat` or `tee`) are checked too; a word
   whose quoting is not known counts as a glob. Each text's quoting is read once per
-  decision. Two other regexes that
+  decision. A `case` arm's pattern (`*)`, `a|b*)`) is not a program word, and `x+=1` and
+  `a[1]=2` are assignments like `x=1`. Two other regexes that
   were quadratic on `[` runs (a package spec in `uv run`/`uvx`, a Terraform address index)
   are plain string scans now. With `--log-json`, a decision ended by the time budget logs its
   ask or deny, and the abandoned worker writes no log line or ledger entry (checked when its

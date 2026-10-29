@@ -348,6 +348,8 @@ def test_glob_program_words_stay_linear(opted_in_project, command):
     "".join(f"eval 'ls {i}'; 'k*' x; " for i in range(2600)),
     "".join(f"echo $(ls {i}); 'k*' x; " for i in range(2600)),
     "find . -exec k* \\; " * 3000,
+    "case x in " + "a|b*) echo;; " * 4000 + "esac", "x+=1 " * 12000 + "ls",
+    "cat <<'EOF'\n" + "* item\n" * 8000 + "EOF",
 ])
 def test_many_nested_lines_and_quoted_globs_stay_linear(opted_in_project, command):
     # many distinct nested texts must not push the outer text's quoting out of
@@ -3046,6 +3048,44 @@ _ROUND29_CORPUS = [
 ]
 
 
+# Round 30: find -exec's program word is judged as spelt in the text it is
+# in (also inside eval and $(…)); the glob check reads only the here-document
+# bodies a shell runs (Markdown, CSS, C, Python, TypeScript bodies written with
+# cat or tee are data; the TypeScript one asks, the accepted here-document
+# over-ask, since its " */" line reads like a script path); case patterns are not
+# program words; x+=1 and a[1]=2 are assignments.
+_ROUND30_CORPUS = [
+    ('deny', "eval 'find . -exec /usr/bin/kubec?l delete nodes --all \\;'"),
+    ('deny', 'echo $(find . -exec /usr/bin/kubec?l delete nodes --all \\;)'),
+    ('deny', 'find "$x" -exec /usr/bin/kubec?l delete nodes --all \\;'),
+    ('allow', "cat <<'EOF'\n* item\nEOF"),
+    ('allow', "cat > a.css <<'EOF'\n* { margin: 0; }\nEOF"),
+    ('allow', "tee CHANGELOG.md <<'EOF'\n## 1.0\n* Added x\nEOF"),
+    ('allow', 'cat > notes.md <<EOF\n* item one\nEOF'),
+    ('allow', "cat > a.md <<'EOF'\n**bold** text\nEOF"),
+    ('allow', "cat > a.c <<'EOF'\nint main() {\n  *p = 1;\n}\nEOF"),
+    ('allow', "cat <<'EOF' > a.py\ndef f(*args, **kw):\n  pass\nEOF"),
+    ('allow|ask', "cat > a.ts <<'EOF'\n/**\n * Adds two numbers.\n */\n"
+                  "export const add = (a: number, b: number) => a + b;\nEOF"),
+    ('allow', "cat > notes.txt <<'EOF'\n[TODO] fix\nEOF"),
+    ('allow', 'cat <<EOF\n{a,b} braces\nEOF'),
+    ('allow', "cat <<'EOF'\n{{{\nEOF"),
+    ('allow', "cat <<'EOF'\n[[[\nEOF"),
+    ('allow', "cat > a.sh <<'EOF'\ncase $1 in\n  *) echo hi;;\nesac\nEOF"),
+    ('allow', "cat > todo.md <<'EOF'\n- [ ] task\n[link](url)\n?\nEOF"),
+    ('allow', "tee x.md <<'EOF'\n* item\nEOF"),
+    ('deny', "bash <<'EOF'\nk* delete nodes --all\nEOF"),
+    ('ask|deny', "cat <<'EOF' | sh\n* item\nEOF"),
+    ('allow', 'case "$1" in start) echo s;; *) echo usage;; esac'),
+    ('allow', 'echo hi; case x in a|b*) echo;; esac'),
+    ('allow', 'case "$1" in\n  start) echo s ;;\n  *) echo usage ;;\nesac'),
+    ('deny', 'case x in a) k* get pods;; esac'),
+    ('deny', 'x+=1 k* delete nodes --all'),
+    ('deny', 'x+=1 /usr/bin/kubec?l delete nodes --all'),
+    ('deny', 'a[1]=2 k* get pods'),
+]
+
+
 def _decision(code: int, out: str) -> str:
     if code == 2:
         return "deny"
@@ -3100,7 +3140,7 @@ def test_a_shell_script_named_like_an_option_is_read(opted_in_project, command):
                          + _ROUND19B_CORPUS + _ROUND20_CORPUS + _ROUND21_CORPUS
                          + _ROUND22_CORPUS + _ROUND23_CORPUS + _ROUND24_CORPUS
                          + _ROUND25_CORPUS + _ROUND26_CORPUS + _ROUND27_CORPUS
-                         + _ROUND28_CORPUS + _ROUND29_CORPUS)
+                         + _ROUND28_CORPUS + _ROUND29_CORPUS + _ROUND30_CORPUS)
 def test_round12_corpus(opted_in_project, expected, command):
     (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
     (opted_in_project / "ok.sh").write_text("echo hi\n")

@@ -517,11 +517,13 @@ def _program_globbed(text: str, word: str, wrappers: list[str],
 
 def globbed_program_word(command: str) -> str | None:
     """The first program word, in ``command`` or any command line nested in it
-    (``eval`` words, ``sh -c`` strings, here-document bodies, substitutions),
-    that is a glob the shell expands (:func:`_program_globbed`, read in the text
-    it is spelt in); ``None`` when there is none. For commands the parser
-    rejects, whose nested lines it never reads."""
-    for text in nested_commands(command):
+    (``eval`` words, ``sh -c`` strings, substitutions, and the here-document
+    bodies a shell reads: ``bash <<EOF``, ``cat <<EOF | sh``; not data bodies,
+    ``cat > notes.md <<EOF`` / ``* item``), that is a glob the shell expands
+    (:func:`_program_globbed`, read in the text it is spelt in), also as the
+    program ``find -exec`` runs; ``None`` when there is none. For commands the
+    parser rejects, whose nested lines it never reads."""
+    for text in _glob_texts(command):
         spellings = None
         for words, _redirects in _simple_commands(_shell_tokens(text)):
             try:
@@ -529,15 +531,32 @@ def globbed_program_word(command: str) -> str | None:
                 if not argv or argv[0] == "eval":
                     continue
                 argv, _env, wrappers, _string = _unwrap_inner(argv, 0)
+                found = [(argv[0], bool(wrappers))]
+                for inner in find_exec_commands(argv):  # spelt here, not re-quoted
+                    inner, _env, inner_wrappers, _string = _unwrap_inner(inner, 1)
+                    found.append((inner[0], bool(inner_wrappers)))
             except ShellRejected:  # launchers not read: the first word that is not
                 # an assignment (x=$(( a[1] )) alone runs nothing)
-                argv = [w for w in words if not _ASSIGNMENT_RE.match(w)][:1]
-                wrappers = []
-            if argv and _globbed(argv[0]):
-                spellings = spellings or _glob_spellings(text)
-                if _program_globbed(text, argv[0], wrappers, spellings):
-                    return argv[0]
+                found = [(w, False) for w in words if not _ASSIGNMENT_RE.match(w)][:1]
+            for word, launched in found:
+                if _globbed(word):
+                    spellings = spellings or _glob_spellings(text)
+                    if launched or _program_globbed(text, word, [], spellings):
+                        return word
     return None
+
+
+def _glob_texts(command: str, depth: int = 0) -> list[str]:
+    """:func:`nested_commands` with only the here-document bodies a shell reads."""
+    found = [command]
+    if depth >= 4:
+        return found
+    lexed = lex(command)
+    for text in dict.fromkeys([*_inner_commands(command), *lexed.shell_bodies,
+                               *lexed.substitutions]):
+        if text:
+            found += _glob_texts(text, depth + 1)
+    return found
 
 
 def _glob_spellings(text: str) -> tuple[frozenset[str], frozenset[str]]:
@@ -770,7 +789,7 @@ _SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "ash", "rbash", "mksh",
                      "fish", "csh", "tcsh", "posh"})
 # Shells that ship versioned binaries (bash5.2, zsh5, ksh93, mksh-R59); not sh2.
 _VERSIONED_SHELL_RE = re.compile(r"(bash|zsh|ksh|mksh|dash|yash)(?:\d[\d.]*|-R\d+[a-z]?)")
-_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\+?=")  # x=, x+=, a[1]=
 
 _SUDO_BOOL_SHORT = frozenset("EHnkKbAlvS")
 _SUDO_VALUE_SHORT = frozenset("ugpCDrtTUh")
@@ -1766,6 +1785,8 @@ class Lexed:
     unclosed: bool
     # the command lines of the outermost $(…), <(…), >(…) and `…`
     substitutions: tuple[str, ...] = ()
+    # the bodies a shell or interpreter named on their opening line reads
+    shell_bodies: tuple[str, ...] = ()
     deep: bool = False  # $(…) nested past what the lexer reads
 
 
@@ -1920,6 +1941,7 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
     want: str | None = None  # a << just read: the next word is its delimiter
     parens = 0
     joined = False  # after |, |&, && or ||: a newline does not end the command
+    line_start = len(tokens)  # where this line's tokens begin (for its here-documents)
     while i < n:
         c = text[i]
         if c in " \t\r":
@@ -1934,8 +1956,14 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
             continue
         if c == "\n" and (joined or pending):
             if pending:
+                code = len(bodies)
                 i = _skip_bodies(text, i + 1, pending, bodies, state, depth)
+                if any(kind == "word" and (value in ("eval", "source", ".") or
+                                           _READER_NAME_RE.fullmatch(_basename(value)))
+                       for kind, value, _s, _e in tokens[line_start:]):
+                    state["shell_bodies"].extend(bodies[code:])  # bash <<EOF, cat <<EOF | sh
                 pending = []
+                line_start = len(tokens)
                 if not joined:
                     tokens.append(("sep", "\n", i - 1, i))
                 continue
@@ -1956,6 +1984,8 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
             tokens.append(("sep", sep, i, i + len(sep)))
             joined = sep in _CONTINUING_SEPS
             i += len(sep)
+            if sep == "\n":
+                line_start = len(tokens)
             continue
         joined = False
         start = j = i
@@ -2154,10 +2184,11 @@ def lex(text: str) -> Lexed:
     quote runs to the end and is reported in :attr:`Lexed.unclosed`."""
     tokens: list[_Token] = []
     bodies: list[str] = []
-    state: dict = {"unclosed": False, "substitutions": [], "deep": False}
+    state: dict = {"unclosed": False, "substitutions": [], "deep": False, "shell_bodies": []}
     _scan(text, 0, tokens, bodies, state, 0, False)
-    return Lexed(tuple(tokens), tuple(bodies), state["unclosed"], tuple(state["substitutions"]),
-                 state["deep"])
+    return Lexed(tuple(tokens), tuple(bodies), state["unclosed"],
+                 substitutions=tuple(state["substitutions"]), deep=state["deep"],
+                 shell_bodies=tuple(state["shell_bodies"]))
 
 
 def _shell_tokens(text: str) -> tuple[_Token, ...]:
@@ -2436,18 +2467,38 @@ def _simple_commands(tokens: tuple[_Token, ...]) -> Iterator[tuple[list[str], li
     ``&&``, ``||``, newline, ``(``, ``)``, ``;;``)."""
     words: list[str] = []
     redirects: list[str] = []
+    cases = 0  # open case … esac
+    pattern = False  # in a case arm's pattern, up to its )
     k = 0
     while k < len(tokens):
         kind, value, _s, _e = tokens[k]
+        if pattern:  # `a|b*)`, `*)`: patterns, not commands
+            if kind == "word" and value == "esac" and not words:
+                cases -= 1
+                pattern = False
+            elif kind == "sep" and value == ")":
+                pattern = False
+            k += 1
+            continue
+        if kind == "word" and value == "in" and words[:1] == ["case"] and len(words) == 2:
+            pattern, words = True, []  # case WORD in: an arm's pattern comes next
+            cases += 1
+            k += 1
+            continue
         if kind == "sep":
             if words or redirects:
                 yield _without_function_header(words), redirects
             words, redirects = [], []
+            if cases and (value == ";;" or (value == ";" and tokens[k + 1:k + 2]
+                                            and tokens[k + 1][:2] == ("sep", "&"))):
+                pattern = True  # ;; ;& ;;&: the next arm's pattern
         elif kind == "op":  # the operator and its target word
             has_target = k + 1 < len(tokens) and tokens[k + 1][0] == "word"
             redirects.append(value + (tokens[k + 1][1] if has_target else ""))
             k += 2 if has_target else 1
             continue
+        elif kind == "word" and value == "esac" and cases and not words:
+            cases -= 1
         else:
             words.append(value)
         k += 1
