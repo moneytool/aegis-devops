@@ -1090,16 +1090,11 @@ def _shell_c_string(rest: list[str]) -> str | None:
         if tok == "--":
             i += 1
             break
-        if tok in SHELL_VALUE_OPTIONS:  # -o pipefail, -O extglob, --rcfile FILE
-            i += 2
-            continue
-        if tok.startswith("--") or (tok.startswith("+") and len(tok) > 1):
-            i += 1  # --norc, --login, --posix, …; +x, +e
-            continue
-        if tok.startswith("-") and len(tok) > 1:
-            if "c" in tok[1:]:
+        if tok.startswith(("-", "+")) and len(tok) > 1:
+            # -o pipefail, -co pipefail 'cmd', --rcfile FILE, --norc, +x
+            if tok.startswith("-") and not tok.startswith("--") and "c" in tok[1:]:
                 saw_c = True
-            i += 1
+            i += 1 + shell_option_values(tok)
             continue
         break
     if not saw_c or i >= len(rest):
@@ -1402,8 +1397,15 @@ _INLINE_FLAGS = {
 }
 # Options that take a value, so the value is not mistaken for a script path.
 _VALUE_FLAGS = frozenset({"-o", "+o", "-O", "+O", "-W", "-X", "-r", "--require"})
-# A shell's options that take the next word as their value (bash --rcfile FILE).
-SHELL_VALUE_OPTIONS = frozenset({"-o", "+o", "-O", "+O", "--rcfile", "--init-file"})
+def shell_option_values(word: str) -> int:
+    """How many of the words after a shell's option are its values: one for
+    ``--rcfile``/``--init-file``, one per ``o``/``O`` in a short cluster, in
+    order (``-o NAME``, ``-eo NAME``, ``-co NAME 'cmd'``, ``-oO A B``)."""
+    if word in ("--rcfile", "--init-file"):
+        return 1
+    if word.startswith("--") or len(word) < 2 or word[0] not in "-+":
+        return 0
+    return word.count("o") + word.count("O")
 _PYTHON_RE = re.compile(r"^python(?:\d+(?:\.\d+)?)?$")
 # Task runners: what they run is in a Makefile / package.json the hook does not read.
 _TASK_RUNNERS = frozenset({"make", "gmake", "just", "task", "rake", "invoke"})
@@ -1479,10 +1481,10 @@ def code_run(simple: SimpleCommand) -> dict[str, str] | None:
     if interp is not None:
         flags = _INLINE_FLAGS.get(interp, ())
         rest = argv[1:]
-        skip = False
+        skip = 0  # values still to pass over
         for i, tok in enumerate(rest):
             if skip:
-                skip = False
+                skip -= 1
                 continue
             following = rest[i + 1] if i + 1 < len(rest) else ""
             if tok in flags:
@@ -1507,10 +1509,12 @@ def code_run(simple: SimpleCommand) -> dict[str, str] | None:
                         "path": f"-m {following}".strip()}
             if tok == "-" or (interp in _SHELLS and tok == "-s"):
                 break  # code from stdin
+            if interp in _SHELLS and shell_option_values(tok):
+                skip = shell_option_values(tok)  # bash -eo pipefail x.sh: pipefail is a value
+                continue
             if (tok in _VALUE_FLAGS and not (interp in _SHELLS and tok == "-r")) or (
-                    interp in ("perl", "ruby") and tok in ("-I", "-C", "-x")) or (
-                    interp in _SHELLS and tok in SHELL_VALUE_OPTIONS):
-                skip = True  # perl -I lib -e …: lib is a value, not the script
+                    interp in ("perl", "ruby") and tok in ("-I", "-C", "-x")):
+                skip = 1  # perl -I lib -e …: lib is a value, not the script
                 continue
             if tok.startswith(("-", "+")):
                 continue
@@ -1987,18 +1991,18 @@ def _c_string_at(tokens: tuple[_Token, ...], k: int) -> int | None:
     so callers stay linear); ``None`` when it has none."""
     if _basename(tokens[k][1]) not in _SHELLS:
         return None
-    j = k + 1
+    j, saw_c = k + 1, False
     while j < min(len(tokens), k + 64) and tokens[j][0] == "word":
         word = tokens[j][1]
-        if word in SHELL_VALUE_OPTIONS:
-            j += 2
-        elif re.fullmatch(r"-[a-zA-Z]*c[a-zA-Z]*", word):
-            return j + 1 if j + 1 < len(tokens) and tokens[j + 1][0] == "word" else None
-        elif re.fullmatch(r"[-+][a-zA-Z]+|--[\w-]+", word):
+        if word == "--":
             j += 1
-        else:
-            return None
-    return None
+            break
+        if re.fullmatch(r"[-+][a-zA-Z]+|--[\w-]+", word):
+            saw_c = saw_c or re.fullmatch(r"-[a-zA-Z]*c[a-zA-Z]*", word) is not None
+            j += 1 + shell_option_values(word)  # -co pipefail 'cmd': the value, then the string
+            continue
+        break
+    return j if saw_c and j < len(tokens) and tokens[j][0] == "word" else None
 
 
 def _eval_words_end(tokens: tuple[_Token, ...], k: int) -> int:
@@ -2136,8 +2140,8 @@ def _rcfile_runs(words: list[str]) -> list[dict[str, str]]:
             break
         if word in ("--rcfile", "--init-file") and j + 1 < len(words):
             files.append(words[j + 1])
-        if word in SHELL_VALUE_OPTIONS:
-            j += 2
+        if shell_option_values(word):
+            j += 1 + shell_option_values(word)
             continue
         if word.startswith("-") and not word.startswith("--") and "i" in word[1:]:
             interactive = True  # -i, -ic, -il
@@ -2159,7 +2163,7 @@ def _simple_commands(tokens: tuple[_Token, ...]) -> Iterator[tuple[list[str], li
         kind, value, _s, _e = tokens[k]
         if kind == "sep":
             if words or redirects:
-                yield words, redirects
+                yield _without_function_header(words), redirects
             words, redirects = [], []
         elif kind == "op":  # the operator and its target word
             has_target = k + 1 < len(tokens) and tokens[k + 1][0] == "word"
@@ -2170,7 +2174,13 @@ def _simple_commands(tokens: tuple[_Token, ...]) -> Iterator[tuple[list[str], li
             words.append(value)
         k += 1
     if words or redirects:
-        yield words, redirects
+        yield _without_function_header(words), redirects
+
+
+def _without_function_header(words: list[str]) -> list[str]:
+    """``words`` without a leading ``function NAME`` (the body that follows is
+    read like that of ``NAME() { …; }``)."""
+    return words[2:] if words[:1] == ["function"] else words
 
 
 def _loose_run(words: list[str], redirects: list[str]) -> dict[str, str] | None:

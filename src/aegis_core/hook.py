@@ -78,7 +78,6 @@ from aegis_core.shell import (
     _SHELLS,
     ARGS_ONLY_PROGRAMS,
     GLOB_REASON,
-    SHELL_VALUE_OPTIONS,
     ShellRejected,
     _basename,
     _c_string_at,
@@ -101,6 +100,7 @@ from aegis_core.shell import (
     plain_binary,
     runs_expansion,
     script_runs_loosely,
+    shell_option_values,
     split_segments,
     stdin_feeders,
     string_reader,
@@ -1282,7 +1282,7 @@ def _bare_at(tokens: tuple[_Token, ...], r: int) -> bool:
             return False  # code or a module on the command line, or a version/help check
         if shell and re.fullmatch(r"-[a-zA-Z]*s[a-zA-Z]*", word) and "c" not in word:
             return True  # bash -s ARGS: the words after it are arguments, the code is stdin
-        k += 2 if word in SHELL_VALUE_OPTIONS else 1
+        k += 1 + shell_option_values(word)
     return k >= len(tokens)
 
 

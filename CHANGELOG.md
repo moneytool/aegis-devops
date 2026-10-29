@@ -256,6 +256,11 @@ behaviour.
   FILE read, since with `$X` empty it runs FILE. An interactive shell (`-i`, `-ic`, …) sources
   its `--rcfile`/`--init-file`, which is read as a script (`bash --rcfile x.sh -i`); with `-c`
   alone the file is not read, as bash does.
+- Agent hook: a shell's short-option cluster takes one value per `o`/`O` in it, in order, and
+  then the `-c` string if it holds a `c` (`bash -co pipefail 'cmd'`, `bash -Oc extglob 'cmd'`,
+  `bash -eo pipefail x.sh` runs x.sh), the same in the parser, the script reader and the
+  checks for shells reading standard input. `function NAME { …; }` is read like `NAME() { …;
+  }`, so the scripts in its body are read.
 - Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
   own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
   policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a

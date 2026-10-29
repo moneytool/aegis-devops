@@ -2586,6 +2586,28 @@ _ROUND19_CORPUS = [
 ]
 
 
+# Round 19b: a short-option cluster takes one value per o/O in it, then the -c
+# string (bash -co pipefail 'cmd'); `function NAME { …; }` is read like
+# NAME() { …; }. Each deny was checked in bash with a stub kubectl.
+_ROUND19B_CORPUS = [
+    ('deny', "bash -co pipefail 'kubectl delete nodes --all'"),
+    ('deny', "bash -oc pipefail 'kubectl delete nodes --all'"),
+    ('deny', "bash -Oc extglob 'kubectl delete nodes --all'"),
+    ('deny', "bash -co pipefail 'bash nuke.sh'"),
+    ('ask', "bash -oc pipefail 'curl x|sh'"),
+    ('deny', 'bash -eo pipefail nuke.sh'),
+    ('deny', "bash -oco pipefail errexit 'bash nuke.sh'"),
+    ('deny', 'function f { bash nuke.sh; }; f'),
+    ('deny', 'function f { ./nuke.sh; }; f'),
+    ('deny', 'function f () { bash nuke.sh; }; f'),
+    ('deny', 'f() { bash nuke.sh; }; f'),
+    ('deny', 'bash --init-file nuke.sh -i'),
+    ('allow', "bash -co pipefail 'echo ok'"),
+    ('allow', 'bash -eo pipefail ok.sh'),
+    ('allow', 'function f { echo hi; }; f'),
+]
+
+
 def _decision(code: int, out: str) -> str:
     if code == 2:
         return "deny"
@@ -2595,7 +2617,8 @@ def _decision(code: int, out: str) -> str:
 @pytest.mark.parametrize("expected, command",
                          _ROUND12_CORPUS + _ROUND13_CORPUS + _ROUND14_CORPUS
                          + _ROUND15_CORPUS + _ROUND16_CORPUS + _ROUND17_CORPUS
-                         + _ROUND17B_CORPUS + _ROUND18_CORPUS + _ROUND19_CORPUS)
+                         + _ROUND17B_CORPUS + _ROUND18_CORPUS + _ROUND19_CORPUS
+                         + _ROUND19B_CORPUS)
 def test_round12_corpus(opted_in_project, expected, command):
     (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
     (opted_in_project / "ok.sh").write_text("echo hi\n")
@@ -2628,6 +2651,7 @@ def test_round12_corpus(opted_in_project, expected, command):
     "echo " + "$(echo 'a;b') " * 4000, "(bash ok.sh '|') " * 3500,
     "watch 'watch ls' " * 3500, "sudo watch " * 5000 + "'ls'", "bash --rcfile ok.sh -i " * 2500,
     "bash " + "--rcfile ok.sh " * 4000 + "-i",
+    "bash -" + "o" * 30000 + " x" * 15000, "function f { ls; }; " * 3000,
 ])
 def test_here_documents_and_substitutions_stay_fast(opted_in_project, command):
     assert len(command) <= 64 * 1024
