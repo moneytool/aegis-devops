@@ -327,7 +327,9 @@ behaviour.
   bodies) are checked too. For this check a here-document body is shell-run when a shell,
   `eval`, `source`, `.` or `exec` is a program of the pipeline its `<<` is in (`bash <<EOF`,
   `cat <<EOF | sh`: as for a command), data when every program there is a data sink (`cat`,
-  `tee`, `jq`, `git`, …) or an interpreter of another language reading the body as its
+  `tee`, `jq`, `git`, …, none with an option that runs a program on what it reads: `sort
+  --compress-program`, `diff --diff-program`, `git -c`) or an interpreter of another
+  language reading the body as its
   program (`python3`, `python3 -`, `node`; also `python3 -m json.tool`; not one given inline
   code or a script, which may hand the body to a shell: `python3 -c '…os.system(input())'`),
   with no `<(…)`/`>(…)` and no descriptor path (not checked: a Markdown `* item`), and otherwise

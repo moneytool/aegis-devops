@@ -2001,13 +2001,16 @@ def _body_reader(line: list[_Token]) -> str:
     the ``.`` is jq's)."""
     data = True
     program: str | None = None  # the interpreter whose arguments are being read
+    sink: str | None = None  # the data sink whose arguments are being read
     arguments: list[str] = []
     command_start, after_op = True, False
     for kind, value, _s, _e in [*line, ("sep", "", 0, 0)]:
         if kind == "sep":
             if program is not None and not _reads_its_program(program, arguments):
                 data = False
-            program, arguments, command_start, after_op = None, [], True, False
+            if sink is not None and _sink_runs_a_program(sink, arguments):
+                data = False  # sort --compress-program=sh: the body reaches a program
+            program, sink, arguments, command_start, after_op = None, None, [], True, False
             continue
         if kind == "op":
             after_op = True
@@ -2018,7 +2021,7 @@ def _body_reader(line: list[_Token]) -> str:
             after_op = False
             continue
         if not command_start:
-            if program is not None:
+            if program is not None or sink is not None:
                 arguments.append(value)
             continue
         if value in _COMPOUND_WORDS or _ASSIGNMENT_RE.match(value):
@@ -2028,10 +2031,26 @@ def _body_reader(line: list[_Token]) -> str:
             return "shell"
         if _NON_SHELL_READERS.fullmatch(name):
             program = name
-        elif name not in _DATA_SINKS:
+        elif name in _DATA_SINKS:
+            sink = name
+        else:
             data = False  # sudo, xargs, ssh, $SHELL, a function, …
         command_start = False
     return "data" if data else "unknown"
+
+
+# Options of the data sinks that run another program on what they read.
+_SINK_PROGRAM_OPTIONS = {"sort": ("--compress-program",), "diff": ("--diff-program",),
+                         "git": ("-c", "--exec-path", "--upload-pack", "--receive-pack",
+                                 "--config-env")}
+
+
+def _sink_runs_a_program(name: str, arguments: list[str]) -> bool:
+    """Whether a data sink's ``arguments`` hold an option that runs a program
+    (``sort --compress-program=sh``, ``git -c alias.x='!sh' x``)."""
+    options = _SINK_PROGRAM_OPTIONS.get(name, ())
+    return any(a == o or a.startswith(o + "=") or (o == "-c" and a.startswith("-c") and len(a) > 2)
+               for a in arguments for o in options)
 
 
 def _reads_its_program(name: str, arguments: list[str]) -> bool:

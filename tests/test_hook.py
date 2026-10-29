@@ -3274,6 +3274,19 @@ _ROUND36_CORPUS = [
 ]
 
 
+# Round 37: a data sink with an option that runs a program on what it reads
+# (sort --compress-program, diff --diff-program, git -c) is not a data reader.
+_LOCAL_GLOB = "/usr/local/bin/kubec?l delete nodes --all"
+_ROUND37_CORPUS = [
+    ("ask|deny", f"sort --compress-program=sh -S1b <<'E'\n{_LOCAL_GLOB}\nE"),
+    ("ask|deny", f"sort --compress-program sh <<'E'\n{_LOCAL_GLOB}\nE"),
+    ("ask|deny", f"diff --diff-program=sh - x <<'E'\n{_LOCAL_GLOB}\nE"),
+    ("ask|deny", f"git -c alias.x='!sh' x <<E\n{_LOCAL_GLOB}\nE"),
+    ("allow", "sort -u <<'EOF'\n* b\n* a\nEOF"),
+    ("deny", "git commit -F - <<'EOF'\n* fix\nEOF"),  # as on main: git with a here-document
+]
+
+
 def _decision(code: int, out: str) -> str:
     if code == 2:
         return "deny"
@@ -3331,7 +3344,7 @@ def test_a_shell_script_named_like_an_option_is_read(opted_in_project, command):
                          + _ROUND28_CORPUS + _ROUND29_CORPUS + _ROUND30_CORPUS
                          + _ROUND31_CORPUS + _ROUND32_CORPUS + _ROUND33_CORPUS
                          + _ROUND33B_CORPUS + _ROUND34_CORPUS + _ROUND34B_CORPUS
-                         + _ROUND35_CORPUS + _ROUND36_CORPUS)
+                         + _ROUND35_CORPUS + _ROUND36_CORPUS + _ROUND37_CORPUS)
 def test_round12_corpus(opted_in_project, expected, command):
     (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
     (opted_in_project / "ok.sh").write_text("echo hi\n")
