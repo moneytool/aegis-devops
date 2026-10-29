@@ -240,6 +240,15 @@ behaviour.
   `\\`, `\$`), so an escaped backtick inside is a nested substitution that is read in turn
   (`` echo "`echo \`bash x.sh\``" `` reads x.sh). `` "`curl … | sh`" `` asks. Scripts named in
   nested command lines are read like those at the top.
+- Agent hook: in a command the parser rejects, scripts (and launchers with unknown options) are
+  found from the shell-word reader's simple commands rather than a split of the raw text, for
+  the command and every command line nested in it (`sh -c`, `eval`, `$(…)`, backticks,
+  subshells, here-document bodies), so a quoted `;`, `|`, `&`, `(`, `)` or backtick is part of
+  a word (`echo $(bash x.sh 'a;b')` and `bash x.sh '('` read x.sh). Backticks directly inside
+  double quotes also unescape `\"`, as bash does there (`` "`eval \"bash x.sh\"`" ``). A
+  shell's options that take a value (`-o`, `+o`, `-O`, `+O`, `--rcfile`, `--init-file`) are
+  skipped with it, so `bash --rcfile FILE -c '…'` and `bash -O extglob -c '…'` read the `-c`
+  string instead of taking FILE or the option name for the script.
 - Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
   own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
   policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a

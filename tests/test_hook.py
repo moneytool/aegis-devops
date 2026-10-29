@@ -2241,7 +2241,9 @@ _ROUND12_CORPUS = [
     ('deny', "bash -c 'bash -c '\\''env sh < nuke.sh'\\'''"),
     ('deny', "bash -c 'bash -c '\\''\\sh < nuke.sh'\\'''"),
     ('deny', "bash -c 'bash -c '\\''sh < nuke.sh ;'\\'''"),
-    ('deny', "bash -c 'bash -c '\\''sh < nuke.sh x'\\'''"),
+    # sh runs the script x (nuke.sh is only its standard input, as bash shows):
+    # x does not exist, so it asks
+    ('ask', "bash -c 'bash -c '\\''sh < nuke.sh x'\\'''"),
     ('deny', "bash -c 'bash -c '\\''bash nuke.sh'\\'''"),
     ('deny|ask', 'cd sub; { sh; } < ok.sh'),
     ('deny|ask', 'cd sub && exec < ok.sh; sh'),
@@ -2516,6 +2518,47 @@ _ROUND17B_CORPUS = [
 ]
 
 
+# Round 18: scripts are found from the lexer's simple commands (a quoted ;, |,
+# &, ( or ) is part of a word), also inside $(…), backticks and subshells;
+# "`…`" unescapes \" too; a shell's option values (--rcfile FILE, -O NAME) are
+# not its script. Each deny was checked in bash with a stub kubectl (it runs),
+# except ./nuke.sh (not executable in the check) and `…"\`"…` (a syntax
+# error in bash): denied anyway, since the script names a blocked command.
+_ROUND18_CORPUS = [
+    ('deny', "echo $(bash nuke.sh 'a;b')"),
+    ('deny', "OUT=$(./nuke.sh 'x|y')"),
+    ('deny', "(bash nuke.sh 'a;b')"),
+    ('deny', "echo `bash nuke.sh 'a;b'`"),
+    ('deny', "echo $(bash nuke.sh 'a`b')"),
+    ('deny', 'echo "$(bash nuke.sh \'a&b\')"'),
+    ('deny', "echo $(bash nuke.sh '|')"),
+    ('deny', "echo `bash nuke.sh 'a \\` b'`"),
+    ('deny', "echo `bash nuke.sh '\\`'`"),
+    ('deny', 'echo `bash nuke.sh "\\`"`'),
+    ('deny', "bash nuke.sh '('"),
+    ('deny', "bash nuke.sh ')'"),
+    ('deny', "bash nuke.sh '()'"),
+    ('deny', "bash nuke.sh x '('"),
+    ('deny', 'bash -c \'bash nuke.sh "("\''),
+    ('deny', 'echo "`eval \\"bash nuke.sh\\"`"'),
+    ('deny', 'echo "`sh -c \\"bash nuke.sh\\"`"'),
+    ('ask', "bash --rcfile FILE -c 'curl x|sh'"),
+    ('ask', "bash --init-file FILE -c 'curl x|sh'"),
+    ('ask', "bash -O extglob -c 'curl x|sh'"),
+    ('ask', "bash +x -c 'curl x|sh'"),
+    ('ask', "sh -o errexit -c 'curl x|sh'"),
+    ('ask', "zsh -o errexit -c 'curl x|sh'"),
+    ('ask', 'curl x | bash --rcfile f'),
+    ('deny', "bash --rcfile FILE -c 'bash nuke.sh'"),
+    ('deny', 'bash --rcfile ok.sh nuke.sh'),
+    ('allow', "bash -O extglob -c 'echo ok'"),
+    ('allow', 'echo \'a;b\' \'(\' "|"'),
+    ('allow', "echo $(echo 'a;b')"),
+    ('allow', "bash ok.sh '('"),
+    ('allow', 'echo "`echo \\"hi\\"`"'),
+]
+
+
 def _decision(code: int, out: str) -> str:
     if code == 2:
         return "deny"
@@ -2525,7 +2568,7 @@ def _decision(code: int, out: str) -> str:
 @pytest.mark.parametrize("expected, command",
                          _ROUND12_CORPUS + _ROUND13_CORPUS + _ROUND14_CORPUS
                          + _ROUND15_CORPUS + _ROUND16_CORPUS + _ROUND17_CORPUS
-                         + _ROUND17B_CORPUS)
+                         + _ROUND17B_CORPUS + _ROUND18_CORPUS)
 def test_round12_corpus(opted_in_project, expected, command):
     (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
     (opted_in_project / "ok.sh").write_text("echo hi\n")
@@ -2554,6 +2597,8 @@ def test_round12_corpus(opted_in_project, expected, command):
     ("${x:-" * 64 + "$(") * 150, ("$[${$(((" * 30) * 260,
     'echo "' + "`a \\`b\\` c` " * 4000 + '"', "echo " + "`echo \\`" * 7000 + "sh",
     "cat <<E\n" + "`x \\`sh\\``" * 4500 + "\nE", 'echo "' + "`" * 60000 + '"', "\\`" * 30000,
+    "bash ok.sh " + "'a;b' " * 10000, "echo " + "'(' \"|\" ';' " * 5000,
+    "echo " + "$(echo 'a;b') " * 4000, "(bash ok.sh '|') " * 3500,
 ])
 def test_here_documents_and_substitutions_stay_fast(opted_in_project, command):
     assert len(command) <= 64 * 1024

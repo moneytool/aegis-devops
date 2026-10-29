@@ -78,6 +78,7 @@ from aegis_core.shell import (
     _SHELLS,
     ARGS_ONLY_PROGRAMS,
     GLOB_REASON,
+    SHELL_VALUE_OPTIONS,
     ShellRejected,
     _basename,
     _c_string_at,
@@ -946,18 +947,6 @@ _PIPED_READER_ASK = ("aegis: a shell or interpreter reads code from a pipe in a 
                      "that")
 
 
-def _loose_scripts(command: str) -> list[dict[str, str]]:
-    """:func:`script_runs_loosely` for ``command`` and for each command line
-    nested in it (:func:`nested_commands`: a substitution inside double quotes
-    or an escaped backtick inside backticks, which the loose split misreads),
-    each script once."""
-    found: dict[tuple, dict[str, str]] = {}
-    for text in nested_commands(command):
-        for runs in script_runs_loosely(text):
-            found.setdefault(tuple(sorted(runs.items())), runs)
-    return list(found.values())
-
-
 def _rejected(command: str, reason: str, config_dir: Path, extra_args: list[str] | None,
               cwd: Path | None, *, scan: bool, escalate_scripts: bool) -> HookVerdict:
     """A command (or a part of it) that cannot be parsed, judged as a whole:
@@ -985,7 +974,7 @@ def _rejected(command: str, reason: str, config_dir: Path, extra_args: list[str]
             "cannot read; save it to a file and run that, so its commands are checked")
     if _piped_into_reader(command):
         return HookVerdict("ask", _PIPED_READER_ASK)
-    scripts = _loose_scripts(command)
+    scripts = script_runs_loosely(command)
     if scan:
         here = None if _changes_directory(command) else cwd
         for runs in scripts:
@@ -1028,7 +1017,7 @@ def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
     opaque: tuple[str, str] | None = None
     # a script run anywhere in the command, also inside a part that drops out
     # (`OUT=$(bash x.sh)`) or cannot be split out (`for …; do ./x.sh "$i"; done`)
-    loose_scripts = _loose_scripts(command)
+    loose_scripts = script_runs_loosely(command)
     if scan:
         start = None if _changes_directory(command) else cwd
         for runs in loose_scripts:
@@ -1284,7 +1273,7 @@ def _bare_at(tokens: tuple[_Token, ...], r: int) -> bool:
             return False  # code or a module on the command line, or a version/help check
         if shell and re.fullmatch(r"-[a-zA-Z]*s[a-zA-Z]*", word) and "c" not in word:
             return True  # bash -s ARGS: the words after it are arguments, the code is stdin
-        k += 2 if word in ("-o", "+o", "-O", "+O") else 1
+        k += 2 if word in SHELL_VALUE_OPTIONS else 1
     return k >= len(tokens)
 
 

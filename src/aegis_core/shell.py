@@ -1090,13 +1090,13 @@ def _shell_c_string(rest: list[str]) -> str | None:
         if tok == "--":
             i += 1
             break
-        if tok in ("-o", "+o"):
+        if tok in SHELL_VALUE_OPTIONS:  # -o pipefail, -O extglob, --rcfile FILE
             i += 2
             continue
-        if tok in ("--login", "--norc", "--noprofile", "--posix", "--restricted"):
-            i += 1
+        if tok.startswith("--") or (tok.startswith("+") and len(tok) > 1):
+            i += 1  # --norc, --login, --posix, …; +x, +e
             continue
-        if tok.startswith("-") and len(tok) > 1 and not tok.startswith("--"):
+        if tok.startswith("-") and len(tok) > 1:
             if "c" in tok[1:]:
                 saw_c = True
             i += 1
@@ -1402,6 +1402,8 @@ _INLINE_FLAGS = {
 }
 # Options that take a value, so the value is not mistaken for a script path.
 _VALUE_FLAGS = frozenset({"-o", "+o", "-O", "+O", "-W", "-X", "-r", "--require"})
+# A shell's options that take the next word as their value (bash --rcfile FILE).
+SHELL_VALUE_OPTIONS = frozenset({"-o", "+o", "-O", "+O", "--rcfile", "--init-file"})
 _PYTHON_RE = re.compile(r"^python(?:\d+(?:\.\d+)?)?$")
 # Task runners: what they run is in a Makefile / package.json the hook does not read.
 _TASK_RUNNERS = frozenset({"make", "gmake", "just", "task", "rake", "invoke"})
@@ -1506,7 +1508,8 @@ def code_run(simple: SimpleCommand) -> dict[str, str] | None:
             if tok == "-" or (interp in _SHELLS and tok == "-s"):
                 break  # code from stdin
             if (tok in _VALUE_FLAGS and not (interp in _SHELLS and tok == "-r")) or (
-                    interp in ("perl", "ruby") and tok in ("-I", "-C", "-x")):
+                    interp in ("perl", "ruby") and tok in ("-I", "-C", "-x")) or (
+                    interp in _SHELLS and tok in SHELL_VALUE_OPTIONS):
                 skip = True  # perl -I lib -e …: lib is a value, not the script
                 continue
             if tok.startswith(("-", "+")):
@@ -1641,14 +1644,17 @@ def _ansi_c(text: str, i: int, n: int) -> tuple[str, int, bool]:
 
 
 _BACKTICK_ESCAPE_RE = re.compile(r"\\([`\\$])")
+_DQ_BACKTICK_ESCAPE_RE = re.compile(r"\\([`\\$\"])")  # "`…`" also unescapes \"
 
 
-def _backtick(text: str, i: int, state: dict, depth: int) -> int:
+def _backtick(text: str, i: int, state: dict, depth: int, in_double: bool = False) -> int:
     """The index after the ``` `…` ``` that opens at ``text[i]``: it ends at
     the first backtick no backslash escapes. Its command line, with bash's
     unescaping (``\\` `` -> `` ` ``, ``\\\\`` -> ``\\``, ``\\$`` -> ``$``, so an
-    escaped backtick inside is a nested substitution), is recorded at the top
-    level and read as a command line in turn (:func:`nested_commands`)."""
+    escaped backtick inside is a nested substitution; directly inside double
+    quotes also ``\\"`` -> ``"``, as bash does there and only there), is
+    recorded at the top level and read as a command line in turn
+    (:func:`nested_commands`)."""
     n = len(text)
     j = i + 1
     while j < n and text[j] != "`":
@@ -1656,7 +1662,8 @@ def _backtick(text: str, i: int, state: dict, depth: int) -> int:
     if j >= n:
         state["unclosed"] = True
     if depth == 0:
-        state["substitutions"].append(_BACKTICK_ESCAPE_RE.sub(r"\1", text[i + 1:min(j, n)]))
+        escapes = _DQ_BACKTICK_ESCAPE_RE if in_double else _BACKTICK_ESCAPE_RE
+        state["substitutions"].append(escapes.sub(r"\1", text[i + 1:min(j, n)]))
     return min(j + 1, n)
 
 
@@ -1792,7 +1799,7 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
                         i = j
                         continue
                     if text[i] == "`":  # "`…`" runs too
-                        j = _backtick(text, i, state, depth)
+                        j = _backtick(text, i, state, depth, in_double=True)
                         value.append(text[i:j])
                         i = j
                         continue
@@ -1983,7 +1990,7 @@ def _c_string_at(tokens: tuple[_Token, ...], k: int) -> int | None:
     j = k + 1
     while j < min(len(tokens), k + 64) and tokens[j][0] == "word":
         word = tokens[j][1]
-        if word in ("-o", "+o", "-O", "+O"):
+        if word in SHELL_VALUE_OPTIONS:
             j += 2
         elif re.fullmatch(r"-[a-zA-Z]*c[a-zA-Z]*", word):
             return j + 1 if j + 1 < len(tokens) and tokens[j + 1][0] == "word" else None
@@ -2063,91 +2070,67 @@ def _nesting(command: str) -> tuple[tuple[str, ...], bool]:
     return tuple(found), deep[0]
 
 
-# Where a loose part ends: the shell's separators, and the edges of $(…), `…`,
-# <(…), >(…), (…), { …; } and case patterns.
-_LOOSE_SPLIT_RE = re.compile(r"(\|\||&&|;;|\$\(|[<>]\(|[;|&\n()`])")
-
-
-def script_runs_loosely(command: str, _depth: int = 0) -> list[dict[str, str]]:
+def script_runs_loosely(command: str) -> list[dict[str, str]]:
     """Best effort for a command the parser rejected (``bash x.sh "$TARGET"``,
-    ``OUT=$(bash x.sh)``, ``for i in 1 2; do ./x.sh "$i"; done``): splits it on
-    the shell's separators and on the edges of command substitutions, process
-    substitutions, subshells and groups, without expanding anything; strips
-    reserved words and launchers, reads one level of ``sh -c STRING``, and
-    returns what :func:`code_run` finds in each part. Never raises; only for
-    asking, never for allowing."""
-    found = []
-    if _depth < 4:
-        # a sh -c string or eval's words hold separators of their own: read them
-        # on their own (bash -c 'set -e; bash x.sh "$@"', eval 'bash x.sh; true'),
-        # dequoted as the shell does ('\'' included), before the split cuts them up
-        kept, at = [], 0
-        for inner, start, end in _inner_commands(command):
-            found.extend(script_runs_loosely(inner, _depth + 1))
-            kept.append(command[at:start] + " ")
-            at = end
-        command = "".join(kept) + command[at:]
-    pieces = _LOOSE_SPLIT_RE.split(command)
-    opened: list[str] = []  # brackets and backticks still open
-    continuation = False  # this part follows a closing `)`/`` ` ``: the rest of a word
-    for k, part in enumerate(pieces):
-        if k % 2:  # a delimiter
-            if part in ("$(", "<(", ">(", "("):
-                opened.append("(")
-                continuation = False
-            elif part == ")":
-                # closes a bracket (`$(pwd)/x.sh` goes on as one word), or ends a
-                # case pattern (`a) bash x.sh`), after which a command starts
-                continuation = bool(opened)
-                if opened:
-                    opened.pop()
-            elif part == "`":
-                if opened and opened[-1] == "`":
-                    opened.pop()
-                    continuation = True
-                else:
-                    opened.append("`")
-                    continuation = False
-            else:
-                continuation = False
+    ``OUT=$(bash x.sh)``, ``for i in 1 2; do ./x.sh "$i"; done``): for the
+    command and every command line nested in it (:func:`nested_commands`:
+    ``sh -c`` strings, ``eval`` words, ``$(…)``, backticks, here-document
+    bodies), splits the lexer's tokens into simple commands at the shell's
+    separators (quotes heeded: ``bash x.sh 'a;b'`` is one command), strips
+    reserved words and launchers, and returns what :func:`code_run` finds in
+    each, each script once. Never raises; only for asking, never for allowing."""
+    found: dict[tuple, dict[str, str]] = {}
+    for text in nested_commands(command):
+        for words, redirects in _simple_commands(_shell_tokens(text)):
+            runs = _loose_run(words, redirects)
+            if runs is not None:
+                found.setdefault(tuple(sorted(runs.items())), runs)
+    return list(found.values())
+
+
+def _simple_commands(tokens: tuple[_Token, ...]) -> Iterator[tuple[list[str], list[str]]]:
+    """The words and the standard-input redirections (``<x.sh``) of each simple
+    command in ``tokens``, split at every separator (``;``, ``&``, ``|``,
+    ``&&``, ``||``, newline, ``(``, ``)``, ``;;``)."""
+    words: list[str] = []
+    redirects: list[str] = []
+    k = 0
+    while k < len(tokens):
+        kind, value, _s, _e = tokens[k]
+        if kind == "sep":
+            if words or redirects:
+                yield words, redirects
+            words, redirects = [], []
+        elif kind == "op":  # the operator and its target word
+            has_target = k + 1 < len(tokens) and tokens[k + 1][0] == "word"
+            redirects.append(value + (tokens[k + 1][1] if has_target else ""))
+            k += 2 if has_target else 1
             continue
-        if continuation:
-            continue
-        try:
-            argv = shlex.split(part, comments=False)
-        except ValueError:
-            continue
-        try:
-            argv = _strip_reserved(argv)
-        except ShellRejected:
-            continue
-        argv = strip_exec_builtin(argv)  # exec bash x.sh, builtin source x.sh
-        if not argv:
-            continue
-        if argv[0] == "eval":  # eval 'bash x.sh': its words are a command line
-            evals = 0
-            while evals < len(argv) and argv[evals] == "eval":
-                evals += 1  # eval eval eval …: one join for the whole chain
-            if _depth < 4:
-                found.extend(script_runs_loosely(" ".join(argv[evals:]), _depth + 1))
-            continue
-        redirects = [t for t in argv if t.startswith(("<", "0<"))]
-        argv = [t for t in argv if not t.startswith(("<", "0<"))]  # linear: no `in` list
-        if argv and _basename(argv[0]) in ("source", "."):
-            found.append({"kind": "script", "interpreter": argv[0],
-                          "path": argv[1] if len(argv) > 1 else ""})
-            continue
-        try:
-            argv, _env, _wrappers, string = _unwrap_inner(argv, 0 if _depth == 0 else 1)
-        except ShellRejected:
-            continue
-        if string is not None:
-            found.extend(script_runs_loosely(string, _depth + 1))
-            continue
-        runs = code_run(SimpleCommand(argv, redirects))
-        if runs is not None:
-            found.append(runs)
-    return found
+        else:
+            words.append(value)
+        k += 1
+    if words or redirects:
+        yield words, redirects
+
+
+def _loose_run(words: list[str], redirects: list[str]) -> dict[str, str] | None:
+    """What one simple command of :func:`script_runs_loosely` runs."""
+    try:
+        argv = strip_exec_builtin(_strip_reserved(words))  # exec bash x.sh
+    except ShellRejected:
+        return None
+    if not argv or argv[0] == "eval":  # eval's words: a nested command line
+        return None
+    if _basename(argv[0]) in ("source", "."):
+        return {"kind": "script", "interpreter": argv[0], "path": argv[1] if len(argv) > 1 else ""}
+    try:
+        argv, _env, _wrappers, string = _unwrap_inner(argv, 0)
+    except ShellRejected:
+        return None
+    if string is not None:  # sh -c STRING: a nested command line
+        return None
+    stdin = [r for r in redirects if r.startswith(("<", "0<"))]
+    return code_run(SimpleCommand(argv, stdin))
 
 
 # Words that name a script to run, rather than a file to read.
@@ -2161,10 +2144,12 @@ def opaque_launcher_code(command: str) -> str | None:
     does not split), so what the launcher runs is unknown: ``env -P x bash
     x.sh``, ``sudo -iu bob bash x.sh``, ``cat x.sh | env -Q sh``. Returns that
     word, else ``None``. Never raises; only for asking."""
-    for part in _LOOSE_SPLIT_RE.split(command)[::2]:
+    parts = (words for text in nested_commands(command)
+             for words, _redirects in _simple_commands(_shell_tokens(text)))
+    for words in parts:
         try:
-            argv = strip_exec_builtin(_strip_reserved(shlex.split(part, comments=False)))
-        except (ShellRejected, ValueError):
+            argv = strip_exec_builtin(_strip_reserved(words))
+        except ShellRejected:
             continue
         if not argv or _basename(argv[0]) in _REJECTED_BUILTINS:
             continue  # eval/source/xargs …: their own checks
