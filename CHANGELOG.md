@@ -335,7 +335,11 @@ behaviour.
   anywhere, a group or subshell in a command with a pipe: `(cat <<E …) | x`, a
   here-document inside `$(…)`, backticks, `<(…)` or `>(…)`, whose output goes on, and a
   pipe into or out of a compound command: `cat <<E | if …; then …; fi`), where a globbed
-  word asks. A here-string (`<<< word`) is read like a one-line body. Only an unquoted `case` at the start of a command
+  word asks (an `eval` anywhere adds every body to these). A here-string (`<<< word`) is
+  read like a one-line body, also inside a substitution. The reader of a body is its own
+  command and the pipeline stages after it (`echo x | cat <<E`: echo never sees it), and a
+  reserved word counts for the compound rule only where a command starts (`echo done`
+  does not). Only an unquoted `case` at the start of a command
   (after `do`, `then`, `else`, `{`, `!` or `time` too, spelt bare in reserved-word position:
   `"do" case …` and `echo do case …` are plain words), with no redirect, assignment or
   other word before it, starts a case statement, whose arm patterns (`*)`, `a|b*)`) are

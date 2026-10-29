@@ -353,6 +353,7 @@ def test_glob_program_words_stay_linear(opted_in_project, command):
     "cat " + "<<E " * 6000 + "\n" + "x\nE\n" * 6000,
     "cat <<E | tee >(sh)\n" + "k* x\n" * 7000 + "E",
     "cat <<< 'k* x' " * 4000, "python3 -c x <<< k* | if true; then :; fi; " * 1500,
+    "a <<< x | " * 6000 + "sh", "cat <<E | " * 6000 + "sh\nk\nE",
 ])
 def test_many_nested_lines_and_quoted_globs_stay_linear(opted_in_project, command):
     # many distinct nested texts must not push the outer text's quoting out of
@@ -3234,6 +3235,27 @@ _ROUND34B_CORPUS = [
 ]
 
 
+# Round 35: here-strings inside a substitution are unknown and read before it
+# ends; an eval adds bodies to the unknown ones; only stages from the
+# here-document's own command on read it (echo x | cat <<E: echo does not).
+_ROUND35_CORPUS = [
+    ("ask|deny", f"echo \"$(cat <<< '{_KUBE_GLOB}')\" | {_PY_OS}"),
+    ("ask|deny", f"echo \"`cat <<< '{_KUBE_GLOB}'`\" | {_PY_OS}"),
+    ('ask|deny', f"{_PY_OS} < <(cat <<< '/usr/bin/kubec?l delete nodes --all')"),
+    ('ask|deny', f"{_PY_OS} <<< '/usr/bin/kubec?l delete nodes --all'; eval :"),
+    ('allow', "echo done | cat > n.md <<'EOF'\n* item\nEOF"),
+    ('allow', "echo if then | tee n.md <<'EOF'\n* item\nEOF"),
+    ('ask|deny', f"cat <<'E' | if true; then {_PY_OS}; fi\nku*l x\nE"),
+    ('ask|deny', f"echo $(cat <<< 'ku?ectl delete ns x') | {_PY_OS}"),
+    ('ask|deny', f"echo `cat <<< 'ku?ectl delete ns x'` | {_PY_OS}"),
+    ('ask|deny', f"cat <(cat <<< 'ku?ectl delete ns x') | {_PY_OS}"),
+    ("ask|deny", f"x=$(cat <<< 'ku?ectl delete ns x'); echo \"$x\" | {_PY_OS}"),
+    ('allow', "read a b <<< 'x y'"),
+    ('allow', 'wc -l <<< hello'),
+    ('allow', 'echo done | cat'),
+]
+
+
 def _decision(code: int, out: str) -> str:
     if code == 2:
         return "deny"
@@ -3290,7 +3312,8 @@ def test_a_shell_script_named_like_an_option_is_read(opted_in_project, command):
                          + _ROUND25_CORPUS + _ROUND26_CORPUS + _ROUND27_CORPUS
                          + _ROUND28_CORPUS + _ROUND29_CORPUS + _ROUND30_CORPUS
                          + _ROUND31_CORPUS + _ROUND32_CORPUS + _ROUND33_CORPUS
-                         + _ROUND33B_CORPUS + _ROUND34_CORPUS + _ROUND34B_CORPUS)
+                         + _ROUND33B_CORPUS + _ROUND34_CORPUS + _ROUND34B_CORPUS
+                         + _ROUND35_CORPUS)
 def test_round12_corpus(opted_in_project, expected, command):
     (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
     (opted_in_project / "ok.sh").write_text("echo hi\n")

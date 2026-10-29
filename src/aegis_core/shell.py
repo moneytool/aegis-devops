@@ -578,9 +578,11 @@ def globbed_word_in_unknown_bodies(command: str) -> str | None:
     for text, substituted in marked:
         lexed = lex(text)
         shell_run = set(lexed.glob_bodies)
-        # in a substitution a data body's output goes on (echo "$(cat <<E …)" | x)
-        bodies = lexed.ask_bodies if not (evals or substituted) else [
-            b for b in lexed.bodies if b not in shell_run]
+        # in a substitution a data body's output goes on (echo "$(cat <<E …)" | x):
+        # every body but the shell-run ones, added to the unknown ones
+        bodies = lexed.ask_bodies if not (evals or substituted) else list(dict.fromkeys(
+            [*lexed.ask_bodies, *(b for b in lexed.bodies if b not in shell_run),
+             *lexed.data_strings]))
         for body in bodies:
             word = globbed_program_word(body)
             if word is not None:
@@ -1817,6 +1819,7 @@ class Lexed:
     # for the glob check: the bodies a shell runs, and those an unknown reader gets
     glob_bodies: tuple[str, ...] = ()
     ask_bodies: tuple[str, ...] = ()
+    data_strings: tuple[str, ...] = ()  # here-strings only data sinks read
     deep: bool = False  # $(…) nested past what the lexer reads
 
 
@@ -1946,15 +1949,43 @@ _NON_SHELL_READERS = re.compile(r"python[\d.]*|pypy[\d.]*|node|perl|ruby|php|lua
 
 
 def _pipelines(tokens: list[_Token], start: int) -> list[tuple[int, int]]:
-    """For each token from ``start`` on: the ``(low, high)`` bounds of the
-    pipeline it is in (separators other than ``|``/``|&`` end one). One pass."""
-    bounds: list[tuple[int, int]] = []
-    low = start
-    for k in range(start, len(tokens) + 1):
-        if k == len(tokens) or (tokens[k][0] == "sep" and tokens[k][1] not in ("|", "|&")):
-            bounds += [(low, k)] * (k - low + (k < len(tokens)))
-            low = k + 1
+    """For each token from ``start`` on: the ``(low, high)`` bounds of what
+    reads a here-document attached there: from the start of its own command
+    (the stages before it in the pipeline never see the body: ``echo x | cat
+    <<E``) to the end of its pipeline (separators other than ``|``/``|&`` end
+    one). Two passes."""
+    ends = [0] * (len(tokens) - start)
+    end = len(tokens)
+    for k in range(len(tokens) - 1, start - 1, -1):  # where each token's pipeline ends
+        if tokens[k][0] == "sep" and tokens[k][1] not in ("|", "|&"):
+            end = k
+        ends[k - start] = end
+    bounds, command = [], start
+    for k in range(start, len(tokens)):  # where each token's command starts
+        bounds.append((command, ends[k - start]))
+        if tokens[k][0] == "sep":
+            command = k + 1
     return bounds
+
+
+def _tail_reader(tokens: list[_Token], low: int, high: int, memo: dict[int, str]) -> str:
+    """:func:`_body_reader` of ``tokens[low:high]``, a command and the pipeline
+    stages after it, read stage by stage from the right so each stage is read
+    once (``memo``, keyed by where a stage starts)."""
+    stages, k = [], low
+    while k < high and k not in memo:  # the stages not read yet
+        end = k
+        while end < high and not (tokens[end][0] == "sep" and tokens[end][1] in ("|", "|&")):
+            end += 1
+        stages.append((k, end))
+        k = end + 1
+    reader = memo.get(k, "data") if k < high else "data"
+    for start, end in reversed(stages):
+        own = _body_reader(tokens[start:end])
+        reader = "shell" if "shell" in (own, reader) else (
+            "data" if own == reader == "data" else "unknown")
+        memo[start] = reader
+    return memo.get(low, reader)
 
 
 def _body_reader(line: list[_Token]) -> str:
@@ -2054,6 +2085,7 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
     parens = 0
     joined = False  # after |, |&, && or ||: a newline does not end the command
     line_start = len(tokens)  # where this line's tokens begin (for its here-documents)
+    command_position = True  # the next word starts a command (or follows if, do, …)
     strings: list[tuple[str, int]] = []  # this line's here-strings (<<< word): word, <<< index
     string_next = False  # a <<< just read: the next word is a here-string
 
@@ -2062,12 +2094,10 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
         if not strings:
             return
         pipelines = _pipelines(tokens, line_start)
-        readers: dict[int, str] = {}  # one reading per pipeline, however many strings
+        readers: dict[int, str] = {}  # each stage read once, however many strings
         for value, at in strings:
             low, high = pipelines[at - line_start]
-            if low not in readers:
-                readers[low] = _body_reader(tokens[low:high])
-            state["strings"].append((value, readers[low], depth))
+            state["strings"].append((value, _tail_reader(tokens, low, high, readers), depth))
         strings.clear()
     while i < n:
         c = text[i]
@@ -2091,9 +2121,7 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
                 for body, at in zip(bodies[code:], pending_ops, strict=False):
                     # the reader is the pipeline the << is in, not the whole line
                     low, high = pipelines[at - line_start]
-                    if low not in readers:
-                        readers[low] = _body_reader(tokens[low:high])
-                    reader = readers[low]
+                    reader = _tail_reader(tokens, low, high, readers)
                     if reader == "shell":
                         state["glob_bodies"].append(body)  # bash <<EOF, cat <<EOF | sh
                     elif reader == "unknown" or depth > 0:
@@ -2107,6 +2135,7 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
             i += 1
             continue
         if c == ")" and nested and parens == 0:
+            flush_strings()  # its here-strings, before the substitution ends
             return i + 1
         if c == "(" and _ARITHMETIC_RE.match(text, i):  # (( … )), for (( … )): arithmetic
             j = _skip_expansion(text, i, "(", ")", bodies, state, depth)
@@ -2125,6 +2154,7 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
                 state["piped"] = True
             parens += 1 if c == "(" else -1 if c == ")" and parens else 0
             tokens.append(("sep", sep, i, i + len(sep)))
+            command_position = True
             joined = sep in _CONTINUING_SEPS
             i += len(sep)
             if sep == "\n":
@@ -2206,8 +2236,10 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
         tokens.append(("word", word, start, i))
         if word in ("function", "alias"):
             state["defines"] = True
-        if word in _COMPOUND_RESERVED and i - start == len(word):
+        if word in _COMPOUND_RESERVED and i - start == len(word) and command_position:
             state["grouped"] = True  # { }, if, while, do, …: a reader may be inside
+        else:
+            command_position = False
         if string_next:
             strings.append((word, len(tokens) - 2))  # the <<< just before
             string_next = False
@@ -2344,11 +2376,14 @@ def lex(text: str) -> Lexed:
     _scan(text, 0, tokens, bodies, state, 0, False)
     # here-strings (<<< word) are one-line bodies for the glob check
     anywhere = state["defines"] or (state["grouped"] and state["piped"])
+    data_strings = []
     for value, reader, depth in state["strings"]:
         if reader == "shell":
             state["glob_bodies"].append(value)
         elif reader == "unknown" or depth > 0 or anywhere:
             state["ask_bodies"].append(value)
+        else:
+            data_strings.append(value)
     shell_run = set(state["glob_bodies"])
     return Lexed(tuple(tokens), tuple(bodies), state["unclosed"],
                  substitutions=tuple(state["substitutions"]), deep=state["deep"],
@@ -2358,7 +2393,8 @@ def lex(text: str) -> Lexed:
                  # no body is data then
                  ask_bodies=tuple(dict.fromkeys(
                      [*(b for b in bodies if b not in shell_run), *state["ask_bodies"]]))
-                 if anywhere else tuple(state["ask_bodies"]))
+                 if anywhere else tuple(state["ask_bodies"]),
+                 data_strings=tuple(data_strings))
 
 
 def _shell_tokens(text: str) -> tuple[_Token, ...]:
