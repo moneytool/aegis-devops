@@ -2629,8 +2629,8 @@ def _simple_commands(tokens: tuple[_Token, ...], *, case_patterns: bool = False
         elif kind == "word" and value == "esac" and cases and not words:
             cases -= 1
         else:
-            if len(words) == lead and value in _CASE_LEADERS:
-                lead += 1  # do case …, then case …, { case …
+            if len(words) == lead and value in _CASE_LEADERS and _e - _s == len(value):
+                lead += 1  # do case …, then case …, { case … (spelt bare: "do" is a word)
             elif len(words) == lead:  # an unquoted `case` first (after those), with no
                 # redirect or other word before it, starts a case statement
                 plain_case = value == "case" and _e - _s == 4 and not redirects

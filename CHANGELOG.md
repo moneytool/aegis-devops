@@ -333,7 +333,8 @@ behaviour.
   with no `<(…)`/`>(…)` and no descriptor path (not checked: a Markdown `* item`), and otherwise
   unknown (`tee >(sh)`, a function or alias in the command, `sed`, `xargs`, an `eval`
   anywhere), where a globbed word asks. Only an unquoted `case` at the start of a command
-  (after `do`, `then`, `else`, `{`, `!` or `time` too), with no redirect, assignment or
+  (after `do`, `then`, `else`, `{`, `!` or `time` too, spelt bare in reserved-word position:
+  `"do" case …` and `echo do case …` are plain words), with no redirect, assignment or
   other word before it, starts a case statement, whose arm patterns (`*)`, `a|b*)`) are
   not program words for this check. A word whose quoting is not known counts as a glob. Each
   text's quoting is read once per decision, and `x+=1` and `a[1]=2` are assignments like
