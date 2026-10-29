@@ -204,6 +204,18 @@ behaviour.
   true'`), a `<` given to `eval` reaches a shell in its words (`eval 'true; sh' < x.sh`), and a
   pipe into a shell in such a command asks. A file redirected onto a group, loop, `exec` or `-c`
   string after a `cd` is no longer read from the hook's directory (asked).
+- Agent hook: a `<<` inside `(( … ))`, `for (( … ))`, `$(( … ))`, `$[ … ]` or `${ … }` is a
+  shift or a pattern, not a here-document, so the lines after it are read; a here-document whose
+  delimiter never comes leaves the command unclosed (asked when it names a shell, interpreter or
+  infrastructure tool). A command goes on past a newline after a trailing `|`, `|&`, `&&` or `||`
+  (also after comments and blank lines), in the parser and in the shell-word reader, so `curl … |`
+  / `sh` is a pipe into a shell and `kubectl get pods &&` / `kubectl delete …` is judged as the
+  delete. `$'…'` is decoded as bash does (`\xHH`, octal `\NNN`, `\uHHHH`, `\UHHHHHHHH`, `\cX`),
+  so `| $'\x73h'` is `| sh`; a pipe into a shell the parser does not recognise as one asks.
+  `bash -s ARGS` and `bash +x` read the pipe. A quoted here-document body that no shell or
+  interpreter on its line reads (`cat > notes.md <<'EOF'`) is data and is not searched for
+  commands; an unquoted one only for its `$(…)` and backticks. `python3 - <<'EOF'` and `node
+  <<'EOF'` still ask: the hook does not read code in other languages.
 - Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
   own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
   policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a

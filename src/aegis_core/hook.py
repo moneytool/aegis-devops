@@ -103,6 +103,7 @@ from aegis_core.shell import (
     string_reader,
     strip_comment,
     strip_exec_builtin,
+    without_data_bodies,
 )
 
 AGENTS = ("claude", "codex", "copilot", "cursor", "gemini", "opencode", "vscode")
@@ -520,7 +521,11 @@ def _precheck(command: str, config_dir: Path, extra_args: list[str] | None,
                 unchecked=True,
             )
     state = _SCANNED.get()
-    for n_piped, (reader, feeder) in enumerate(stdin_feeders(command)):
+    feeders = stdin_feeders(command)
+    if not feeders and _piped_into_reader(command):
+        # a reader the parser does not see as one (`| $'\\x73h'`, `| { bash -s x; }`)
+        asks.append(_PIPED_READER_ASK)
+    for n_piped, (reader, feeder) in enumerate(feeders):
         if state is not None:  # one budget per decision, nested piped code included
             n_piped = state["piped"]
             state["piped"] += 1
@@ -933,9 +938,9 @@ def _piped_code(command: str, reader: list[str], feeder: list[str] | None, confi
     return HookVerdict("ask", f"aegis: code piped into {interpreter}: {reason}")
 
 
-_PIPED_READER_ASK = ("aegis: a shell or interpreter reads code from a pipe in a command the "
-                     "hook cannot parse, so the code cannot be checked; save it to a file and "
-                     "run that")
+_PIPED_READER_ASK = ("aegis: a shell or interpreter reads code from a pipe in a form the hook "
+                     "cannot follow, so the code cannot be checked; save it to a file and run "
+                     "that")
 
 
 def _rejected(command: str, reason: str, config_dir: Path, extra_args: list[str] | None,
@@ -965,9 +970,10 @@ def _rejected(command: str, reason: str, config_dir: Path, extra_args: list[str]
             "cannot read; save it to a file and run that, so its commands are checked")
     if _piped_into_reader(command):
         return HookVerdict("ask", _PIPED_READER_ASK)
-    scripts = script_runs_loosely(command)
+    code = without_data_bodies(command)  # a quoted here-document cat writes is data
+    scripts = script_runs_loosely(code)
     if scan:
-        here = None if _changes_directory(command) else cwd
+        here = None if _changes_directory(code) else cwd
         for runs in scripts:
             verdict = _scan_script(runs, config_dir, extra_args, here, command=command)
             if verdict is not None:
@@ -1008,9 +1014,10 @@ def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
     opaque: tuple[str, str] | None = None
     # a script run anywhere in the command, also inside a part that drops out
     # (`OUT=$(bash x.sh)`) or cannot be split out (`for …; do ./x.sh "$i"; done`)
-    loose_scripts = script_runs_loosely(command)
+    code = without_data_bodies(command)  # a quoted here-document cat writes is data
+    loose_scripts = script_runs_loosely(code)
     if scan:
-        start = None if _changes_directory(command) else cwd
+        start = None if _changes_directory(code) else cwd
         for runs in loose_scripts:
             verdict = _scan_script(runs, config_dir, extra_args, start, command=command)
             if verdict is not None:
@@ -1240,11 +1247,14 @@ def _bare_at(tokens: tuple[_Token, ...], r: int) -> bool:
         if kind == "op":  # sh 2>/dev/null, sh > out
             k += 2
             continue
-        if not word.startswith("-") or word in ("-", "--"):
+        option = word.startswith("-") or (shell and word.startswith("+"))  # bash +x
+        if not option or word in ("-", "--"):
             return word in ("-", "--") or word in _STDIN_PATHS  # python3 /dev/stdin
         if word in ("-c", "-m", "--version", "--help") or (not shell and (
                 word[:2] in ("-e", "-E", "-r") or word in ("-V", "-v", "-h"))):
             return False  # code or a module on the command line, or a version/help check
+        if shell and re.fullmatch(r"-[a-zA-Z]*s[a-zA-Z]*", word) and "c" not in word:
+            return True  # bash -s ARGS: the words after it are arguments, the code is stdin
         k += 2 if word in ("-o", "+o", "-O", "+O") else 1
     return k >= len(tokens)
 

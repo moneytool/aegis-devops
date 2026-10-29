@@ -122,16 +122,21 @@ def _strip_reserved(argv: list[str]) -> list[str]:
 def _prescan(command: str) -> str:
     """Quote-aware pass over the raw string, before shlex sees it: rejects
     unquoted ``$`` and backticks (shlex would strip the quotes and lose the
-    distinction), turns unquoted newlines into ``;``, removes backslash-newline
-    line continuations (outside single quotes and comments, as the shell does),
+    distinction), turns unquoted newlines into ``;`` (not after a trailing
+    ``|``, ``|&``, ``&&`` or ``||``, which go on past them), removes
+    backslash-newline line continuations (outside single quotes and comments, as the shell does),
     drops ``#`` comments up to the newline, and marks a file
     descriptor glued to a redirection (``2>&1`` -> ``\\x012>&1``) so it is
     not mistaken for an argument."""
     out: list[str] = []
     i, n = 0, len(command)
     in_single = in_double = False
+    tail = ""  # the last two characters outside quotes and comments: `|`, `&&`, …
     while i < n:
         c = command[i]
+        if not (in_single or in_double or c in " \t\r\n" or (c == "#" and (
+                i == 0 or command[i - 1].isspace() or command[i - 1] in ";&|()"))):
+            tail = (tail + c)[-2:]
         if in_single:
             if c == "'":
                 in_single = False
@@ -170,7 +175,9 @@ def _prescan(command: str) -> str:
         elif c == "$":
             raise ShellRejected("shell expansion ($...)")
         elif c == "\n":
-            out.append(" ; ")
+            # after a trailing |, |&, && or || the command goes on past the newline
+            joined = tail.endswith("|") or tail.endswith(("&&", "|&"))
+            out.append(" " if joined else " ; ")
             i += 1
             continue
         elif c == "#" and (i == 0 or command[i - 1].isspace() or command[i - 1] in ";&|()"):
@@ -1540,26 +1547,34 @@ def code_run(simple: SimpleCommand) -> dict[str, str] | None:
 _Token = tuple[str, str, int, int]
 _LEX_REDIRECT_OPS = ("&>>", "<<<", "<<-", "&>", "<<", "<>", "<&", ">>", ">&", ">|", "<", ">")
 _ANSI_C_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "a": "\a", "b": "\b", "e": "\x1b",
-                   "f": "\f", "v": "\v"}
+                   "E": "\x1b", "f": "\f", "v": "\v", "\\": "\\", "'": "'", '"': '"', "?": "?"}
 # $(…) nested deeper than this is skipped by counting brackets, not read.
 _MAX_SUBSTITUTION_DEPTH = 32
+# The separators after which the shell reads on past a newline.
+_CONTINUING_SEPS = frozenset({"|", "|&", "&&", "||"})
 
 
 @dataclass(frozen=True)
 class Lexed:
     """The tokens of a command line, the here-document bodies it holds, and
-    whether a quote, ``$(…)`` or backtick is left open at its end."""
+    whether a quote, ``$(…)``, backtick or here-document is left open at its
+    end."""
 
     tokens: tuple[_Token, ...]
-    bodies: tuple[str, ...]
+    bodies: tuple[str, ...]  # bodies a shell or interpreter on their line may read as code
     unclosed: bool
-    # the command lines of the outermost $(…), <(…), >(…) and `…`
+    # the command lines of the outermost $(…), <(…), >(…) and `…` (also those
+    # an unquoted here-document body expands)
     substitutions: tuple[str, ...] = ()
+    # where the top-level quoted bodies that nothing reads as code are: data
+    data_spans: tuple[tuple[int, int], ...] = ()
 
 
-def _skip_balanced(text: str, i: int, n: int) -> tuple[int, bool]:
-    """The index after the `)` that closes the `(` at ``text[i]``, quotes and
-    backslashes heeded, and whether it was closed (else ``n``)."""
+def _skip_brackets(text: str, i: int, n: int, opening: str = "(",
+                   closing: str = ")") -> tuple[int, bool]:
+    """The index after the ``closing`` that matches the ``opening`` at
+    ``text[i]``, quotes and backslashes heeded, and whether it was closed (else
+    ``n``)."""
     depth = 0
     while i < n:
         c = text[i]
@@ -1578,9 +1593,9 @@ def _skip_balanced(text: str, i: int, n: int) -> tuple[int, bool]:
                 i += 2 if text[i] == "\\" else 1
             i += 1
             continue
-        if c == "(":
+        if c == opening:
             depth += 1
-        elif c == ")":
+        elif c == closing:
             depth -= 1
             if depth == 0:
                 return i + 1, True
@@ -1588,11 +1603,75 @@ def _skip_balanced(text: str, i: int, n: int) -> tuple[int, bool]:
     return n, False
 
 
-def _skip_bodies(text: str, i: int, pending: list[tuple[str, bool]], bodies: list[str]) -> int:
+def _ansi_c(text: str, i: int, n: int) -> tuple[str, int, bool]:
+    """The value of the ``$'…'`` whose text starts at ``i`` (after ``$'``), as
+    bash decodes it (``\\n``, ``\\xHH``, ``\\NNN`` octal, ``\\uHHHH``,
+    ``\\UHHHHHHHH``, ``\\cX``, …), the index after its closing quote, and
+    whether there was one."""
+    value: list[str] = []
+    while i < n and text[i] != "'":
+        if text[i] != "\\" or i + 1 >= n:
+            value.append(text[i])
+            i += 1
+            continue
+        e = text[i + 1]
+        i += 2
+        digits = {"x": (16, 2), "u": (16, 4), "U": (16, 8)}.get(e)
+        if digits is not None or e in "01234567":
+            base, width = digits or (8, 3)
+            start = i if digits else i - 1
+            j = start
+            while j < n and j - start < width and text[j] in "0123456789abcdefABCDEF"[:base + (
+                    6 if base == 16 else 0)]:
+                j += 1
+            if j == start:  # \x with no digits: kept as written
+                value.append("\\" + e)
+                continue
+            code = int(text[start:j], base)
+            value.append(chr(code & 0xFF) if base == 8 or e == "x" else
+                         chr(code) if code < 0x110000 else "")
+            i = j
+        elif e == "c" and i < n:
+            value.append(chr(ord(text[i]) & 0x1F))
+            i += 1
+        elif e in _ANSI_C_ESCAPES:
+            value.append(_ANSI_C_ESCAPES[e])
+        else:
+            value.append("\\" + e)  # an unknown escape stays as written
+    return "".join(value), i + 1, i < n
+
+
+def _body_substitutions(body: str) -> list[str]:
+    """The ``$(…)`` and ``` `…` ``` an unquoted here-document body expands."""
+    state: dict = {"unclosed": False, "substitutions": []}
+    i, n = 0, len(body)
+    while i < n:
+        c = body[i]
+        if c == "\\":
+            i += 2
+        elif body.startswith("$((", i):
+            i = _skip_brackets(body, i + 1, n)[0]
+        elif body.startswith("$(", i):
+            i = _substitution(body, i, [], state, 0)
+        elif c == "`":
+            j = body.find("`", i + 1)
+            if j > 0:
+                state["substitutions"].append(body[i + 1:j])
+            i = n if j < 0 else j + 1
+        else:
+            i += 1
+    return state["substitutions"]
+
+
+def _skip_bodies(text: str, i: int, pending: list[tuple[str, bool, bool]], bodies: list[str],
+                 state: dict, depth: int, code: bool) -> int:
     """Past the here-document bodies that start at ``i`` (one per ``<<`` on the
-    line before, in order), each up to its delimiter line; collects them."""
+    line before, in order), each up to its delimiter line. A body is kept as
+    code when a shell or interpreter is named on its line (``code``); else it
+    is data, and only an unquoted one's ``$(…)``/backticks run. A body whose
+    delimiter never comes leaves the command unclosed."""
     n = len(text)
-    for delimiter, strip_tabs in pending:
+    for delimiter, strip_tabs, quoted in pending:
         start = i
         while i < n:
             j = text.find("\n", i)
@@ -1600,7 +1679,15 @@ def _skip_bodies(text: str, i: int, pending: list[tuple[str, bool]], bodies: lis
             if (line.lstrip("\t") if strip_tabs else line) == delimiter:
                 break
             i = n if j < 0 else j + 1
-        bodies.append(text[start:i])  # never ended: the body runs to the end
+        else:
+            state["unclosed"] = True  # never ended: the body runs to the end
+        body = text[start:i]
+        if code:
+            bodies.append(body)
+        elif not quoted and depth == 0:
+            state["substitutions"].extend(_body_substitutions(body))
+        elif depth == 0:
+            state["data_spans"].append((start, i))
         if i < n:  # past the delimiter line
             j = text.find("\n", i)
             i = n if j < 0 else j + 1
@@ -1612,9 +1699,12 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
     """Tokens of ``text`` from ``i`` into ``tokens``; inside a ``$(…)``
     (``nested``) up to its closing ``)``, whose index + 1 is returned."""
     n = len(text)
-    pending: list[tuple[str, bool]] = []  # here-documents whose bodies start at the next line
+    # here-documents whose bodies start at the next line: (delimiter, <<-, quoted)
+    pending: list[tuple[str, bool, bool]] = []
     want: str | None = None  # a << just read: the next word is its delimiter
     parens = 0
+    joined = False  # after |, |&, && or ||: a newline does not end the command
+    line_start = len(tokens)
     while i < n:
         c = text[i]
         if c in " \t\r":
@@ -1624,18 +1714,39 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
             j = text.find("\n", i)
             i = n if j < 0 else j
             continue
+        if c == "\n" and (joined or pending):
+            if pending:
+                code = any(kind == "word" and (value in ("eval", "source", ".") or
+                                               _READER_NAME_RE.fullmatch(_basename(value)))
+                           for kind, value, _s, _e in tokens[line_start:])
+                i = _skip_bodies(text, i + 1, pending, bodies, state, depth, code)
+                pending = []
+                line_start = len(tokens)
+                if not joined:
+                    tokens.append(("sep", "\n", i - 1, i))
+                continue
+            i += 1
+            continue
         if c == ")" and nested and parens == 0:
             return i + 1
+        if c == "(" and text.startswith("((", i):  # (( … )), for (( … )): arithmetic
+            j, closed = _skip_brackets(text, i, n)
+            state["unclosed"] |= not closed
+            tokens.append(("word", text[i:j], i, j))
+            joined = False
+            i = j
+            continue
         if c in "\n;()" or (c in "|&" and not text.startswith("&>", i)):
             two = text[i:i + 2]
             sep = two if two in ("&&", "||", "|&", ";;") else c
             parens += 1 if c == "(" else -1 if c == ")" and parens else 0
             tokens.append(("sep", sep, i, i + len(sep)))
+            joined = sep in _CONTINUING_SEPS
             i += len(sep)
-            if c == "\n" and pending:
-                i = _skip_bodies(text, i, pending, bodies)
-                pending = []
+            if c == "\n":
+                line_start = len(tokens)
             continue
+        joined = False
         start = j = i
         while j < n and text[j].isdigit():
             j += 1
@@ -1656,16 +1767,9 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
                     value.append(text[i + 1:i + 2])
                 i += 2
             elif c == "$" and text.startswith("'", i + 1):  # $'…': backslash escapes
-                i += 2
-                while i < n and text[i] != "'":
-                    if text[i] == "\\" and i + 1 < n:
-                        value.append(_ANSI_C_ESCAPES.get(text[i + 1], text[i + 1]))
-                        i += 2
-                    else:
-                        value.append(text[i])
-                        i += 1
-                state["unclosed"] |= i >= n
-                i += 1
+                decoded, i, closed = _ansi_c(text, i + 2, n)
+                value.append(decoded)
+                state["unclosed"] |= not closed
             elif c == "'":
                 j = text.find("'", i + 1)
                 state["unclosed"] |= j < 0
@@ -1675,8 +1779,8 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
             elif c == '"':
                 i += 1
                 while i < n and text[i] != '"':
-                    if text.startswith("$(", i):
-                        j = _substitution(text, i, bodies, state, depth)
+                    if text[i] == "$" and text[i + 1:i + 2] in ("(", "{", "["):
+                        j = _expansion(text, i, bodies, state, depth)
                         value.append(text[i:j])
                         i = j
                         continue
@@ -1689,8 +1793,9 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
                     i += 1
                 state["unclosed"] |= i >= n
                 i += 1
-            elif c in "$<>" and text.startswith("(", i + 1):  # $(…), <(…), >(…): raw
-                j = _substitution(text, i, bodies, state, depth)
+            elif (c in "<>" and text.startswith("(", i + 1)) or (
+                    c == "$" and text[i + 1:i + 2] in ("(", "{", "[")):
+                j = _expansion(text, i, bodies, state, depth)  # raw in the word
                 value.append(text[i:j])
                 i = j
             elif c == "`":
@@ -1710,18 +1815,36 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
         word = "".join(value)
         tokens.append(("word", word, start, i))
         if want is not None:
-            pending.append((word, want == "<<-"))
+            quoted = any(q in text[start:i] for q in "'\"\\")
+            pending.append((word, want == "<<-", quoted))
             want = None
     if nested:
         state["unclosed"] = True  # a $( never closed
+    if pending:
+        state["unclosed"] = True  # a here-document whose body never starts
     return n
+
+
+def _expansion(text: str, i: int, bodies: list[str], state: dict, depth: int) -> int:
+    """The index after the ``$(…)``/``<(…)``/``>(…)`` at ``i``, read as a
+    command line of its own (its here-documents included), or after the
+    ``$((…))``, ``${…}`` or ``$[…]`` there, skipped (a ``<<`` in them is a
+    shift or a pattern, not a here-document)."""
+    n = len(text)
+    pair = {"{": ("{", "}"), "[": ("[", "]")}.get(text[i + 1:i + 2])
+    if pair is not None or text.startswith("$((", i):
+        opening, closing = pair or ("(", ")")
+        j, closed = _skip_brackets(text, i + 1, n, opening, closing)
+        state["unclosed"] |= not closed
+        return j
+    return _substitution(text, i, bodies, state, depth)
 
 
 def _substitution(text: str, i: int, bodies: list[str], state: dict, depth: int) -> int:
     """The index after the ``$(…)``/``<(…)``/``>(…)`` at ``i``, read as a
     command line of its own (its here-documents included)."""
     if depth >= _MAX_SUBSTITUTION_DEPTH:
-        j, closed = _skip_balanced(text, i + 1, len(text))
+        j, closed = _skip_brackets(text, i + 1, len(text))
         state["unclosed"] |= not closed
         return j
     j = _scan(text, i + 2, [], bodies, state, depth + 1, True)
@@ -1736,9 +1859,24 @@ def lex(text: str) -> Lexed:
     quote runs to the end and is reported in :attr:`Lexed.unclosed`."""
     tokens: list[_Token] = []
     bodies: list[str] = []
-    state: dict = {"unclosed": False, "substitutions": []}
+    state: dict = {"unclosed": False, "substitutions": [], "data_spans": []}
     _scan(text, 0, tokens, bodies, state, 0, False)
-    return Lexed(tuple(tokens), tuple(bodies), state["unclosed"], tuple(state["substitutions"]))
+    return Lexed(tuple(tokens), tuple(bodies), state["unclosed"], tuple(state["substitutions"]),
+                 tuple(state["data_spans"]))
+
+
+def without_data_bodies(text: str) -> str:
+    """``text`` without the lines of its quoted here-document bodies that no
+    shell or interpreter reads (``cat > notes.md <<'EOF'`` …): data, which the
+    loose checks for scripts and ``cd`` must not read as commands."""
+    spans = lex(text).data_spans
+    if not spans:
+        return text
+    kept, at = [], 0
+    for start, end in spans:
+        kept.append(text[at:start])
+        at = end
+    return "".join(kept) + text[at:]
 
 
 def _shell_tokens(text: str) -> tuple[_Token, ...]:
