@@ -210,13 +210,61 @@ _RESOURCE_ALIASES = {
     "ev": "event",
 }
 
-# kubectl flags that are booleans (no value token follows) when given
-# without "=value".
+# kubectl flags that take no value token when given without "=value": the
+# boolean flags of every verb the parser handles (from kubectl 1.36's
+# per-verb --help), plus the string flags pflag gives a default for a bare
+# use (--cascade, --validate). "containers" and "prefix" are strings only
+# under "set env" / "set resources", which the parser does not accept.
 _KNOWN_BOOL_FLAGS = {
-    "force", "cascade", "all", "wait", "now", "ignore-not-found",
-    # kubectl drain
-    "ignore-daemonsets", "delete-emptydir-data", "delete-local-data", "disable-eviction",
+    "all", "all-containers", "all-pods", "allow-missing-template-keys", "append-hash",
+    "append-server-path", "arguments-only", "as-current-user", "attach", "cached", "cascade",
+    "client", "command", "containers", "delete-emptydir-data", "delete-local-data",
+    "disable-eviction", "disable-filter", "edit", "enable-alpha-plugins", "enable-helm",
+    "expose", "flatten", "follow", "force", "force-conflicts", "helm-debug",
+    "ignore-daemonsets", "ignore-errors", "ignore-not-found",
+    "insecure-skip-tls-verify-backend", "interactive", "keep-annotations",
+    "keep-init-containers", "keep-labels", "keep-liveness", "keep-readiness", "keep-startup",
+    "leave-stdin-open", "list", "local", "merge", "minify", "namespaced", "network",
+    "no-headers", "no-preserve", "now", "openapi-patch", "output-patch",
+    "output-watch-events", "overwrite", "prefix", "previous", "privileged", "prune", "quiet",
+    "record", "recursive", "replace", "resolve", "rm", "same-node", "save-config",
+    "server-print", "server-side", "share-processes", "show-capacity", "show-events",
+    "show-kind", "show-labels", "show-managed-fields", "show-secrets", "show-swap", "stdin",
+    "sum", "timestamps", "tty", "use-protocol-buffers", "validate", "wait", "watch",
+    "watch-only", "windows-line-endings",
 }
+
+# kubectl flags that always take the next token as their value, even one
+# that starts with "-" (pflag does: "--field-manager -n x" sets the field
+# manager to "-n"). Recorded in params like any other flag value. Scope,
+# selector, manifest, impersonation and discarded global flags are handled
+# by name before this table is consulted.
+_KUBECTL_VALUE_FLAGS = {
+    "accept-hosts", "accept-paths", "address", "annotation", "annotations", "api-group",
+    "api-prefix", "api-version", "as-user-extra", "audience", "bound-object-kind",
+    "bound-object-name", "bound-object-uid", "categories", "chunk-size", "class",
+    "cluster-ip", "clusterip", "clusterrole", "concurrency", "container", "copy-to", "cpu",
+    "current-replicas", "custom", "default-backend", "detach-keys", "duration", "env",
+    "external-ip", "field-manager", "for", "from", "from-env-file", "from-file",
+    "from-literal", "grace-period", "group", "helm-api-versions", "helm-command",
+    "helm-kube-version", "image", "image-pull-policy", "keepalive", "keys", "kuberc",
+    "label-columns", "labels", "limit-bytes", "limits", "load-balancer-ip",
+    "load-restrictor", "max", "max-log-requests", "memory", "min", "mount", "name",
+    "network-name", "override-type", "overrides", "patch", "patch-file",
+    "pod-running-timeout", "pod-selector", "port", "protocol", "prune-allowlist", "raw",
+    "reject-methods", "reject-paths", "replicas", "requests", "resource-version", "restart",
+    "retries", "revision", "role", "rule", "schedule", "serviceaccount", "session-affinity",
+    "set-image", "since", "since-time", "skip-wait-for-delete-timeout", "sort-by",
+    "subresource", "tail", "target", "target-port", "tcp", "template", "timeout",
+    "to-revision", "type", "types", "unix-socket", "verbs", "vmodule", "www", "www-prefix",
+    # short forms: -c container, -L label-columns
+    "c", "L",
+}
+# Short value flags, recorded under their long name ("-p" only on patch).
+_KUBECTL_SHORT_VALUE_NAMES = {"c": "container", "L": "label-columns", "p": "patch"}
+
+# kubectl verbs whose short "-f" is the boolean --follow, not --filename.
+_KUBECTL_FOLLOW_VERBS = {"logs"}
 
 # Global boolean flags that are consumed but not recorded anywhere.
 _DISCARD_BOOL_FLAGS = {
@@ -265,7 +313,7 @@ _KUBECTL_GLOBAL_VALUE_FLAGS = _KUBECTL_IDENTITY_FLAGS | _DISCARD_VALUE_FLAGS | _
 _KUBECTL_GLOBAL_BOOL_FLAGS = {"A", "all-namespaces"} | _DISCARD_BOOL_FLAGS
 
 # Short flags that may be glued to their value: -nprod, -lapp=web, -fx.yaml.
-_KUBECTL_GLUED_SHORT_FLAGS = {"n", "l", "f", "o", "k", "s", "v"}
+_KUBECTL_GLUED_SHORT_FLAGS = {"n", "l", "f", "o", "k", "s", "v", "c", "L"}
 
 # Verbs whose "resource" is just the literal first positional token (a
 # path), not a kind/name pair to be normalised.
@@ -458,8 +506,14 @@ def _parse_resources(positional: list[str]) -> list[str]:
     return [f"{kind}/{name}" for name in positional[1:]]
 
 
+def _bare_flag(tokens: list[str], i: int) -> bool:
+    """Whether the flag at ``tokens[i]`` has no value token after it: it is
+    the last token, or the next token is another option (or ``--``)."""
+    return i + 1 >= len(tokens) or (tokens[i + 1].startswith("-") and tokens[i + 1] != "-")
+
+
 def _parse_flags(
-    tokens: list[str],
+    tokens: list[str], *, verb: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], list[str], str | None, list[str] | None]:
     """Walks kubectl tokens (after the verb/subverb), splitting them into
     metadata, params, positional args, an optional manifest file/dir value,
@@ -510,6 +564,9 @@ def _parse_flags(
                 # =false is a real run.
                 if _is_dry_run(val, truthy=_KUBECTL_DRY_RUN_WORDS):
                     params["dry_run"] = True
+            elif key == "f" and verb in _KUBECTL_FOLLOW_VERBS:
+                # kubectl logs -f is --follow, a boolean.
+                params["follow"] = _bool_param(val)
             elif key in _SELECTOR_FLAGS:
                 if val is None:
                     i += 1
@@ -538,15 +595,36 @@ def _parse_flags(
                     val = _value_at(tokens, i, tok)
             elif key in _DISCARD_BOOL_FLAGS:
                 pass
-            elif key in _KNOWN_BOOL_FLAGS:
+            elif key in _KNOWN_BOOL_FLAGS or (key == "raw" and verb == "config"):
                 params[key] = _bool_param(val)
+            elif key in _KUBECTL_VALUE_FLAGS or (key == "p" and verb == "patch"):
+                # Always the next token, even "-1" or "--context": that is
+                # what kubectl does with it.
+                if val is None:
+                    i += 1
+                    val = _value_at(tokens, i, tok)
+                params[_KUBECTL_SHORT_VALUE_NAMES.get(key, key)] = _coerce(val)
             elif val is not None:
                 params[key] = _coerce(val)
+            elif is_long and i + 1 >= len(tokens):
+                # Unknown long flag at the end of argv: a boolean, not a
+                # flag missing its value.
+                params[key] = True
+            elif is_long and _bare_flag(tokens, i):
+                # Unknown long flag followed by another option: if it takes a
+                # value, kubectl reads that option as the value, so the
+                # namespace, context or target it seems to set is not real.
+                # Neither reading is safe to guess, so the command is refused.
+                raise ValueError(
+                    f"kubectl: cannot tell whether {tok!r} takes a value "
+                    f"(next token {tokens[i + 1]!r}); write {tok}=<value> or "
+                    f"put {tok} last: {tokens!r}"
+                )
             elif is_long:
                 # Unknown long flag with no "=value": treat the next token
                 # as its value.
                 i += 1
-                params[key] = _coerce(_value_at(tokens, i, tok))
+                params[key] = _coerce(tokens[i])
             # else: unrecognised bare short flag -- ignored.
         else:
             positional.append(tok)
@@ -643,7 +721,7 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
     # so "-n prod delete x" and "delete x -n prod" produce identical intents.
     tokens = leading + after_verb
 
-    metadata, params, positional, manifest_value, command = _parse_flags(tokens)
+    metadata, params, positional, manifest_value, command = _parse_flags(tokens, verb=verb)
     if command is not None:
         params["command"] = command
 
@@ -2935,12 +3013,242 @@ def from_terraform_argv(argv: list[str]) -> list[InfrastructureIntent] | None:
     ]
 
 
+# --- help / version probes ------------------------------------------------------
+#
+# "What is this binary" probes (``helm --help``, ``argocd version --client``,
+# ``kubectl delete --help``) change nothing, so they become one read-only
+# ``cli/<tool>`` intent instead of a parse error. Only exact, per-tool forms
+# count: a ``--help`` that some option could swallow as its value
+# (``kubectl -n --help delete ns prod`` deletes), a plugin or alias that
+# would receive the flag itself (``kubectl foo --help`` runs kubectl-foo),
+# and tools that run several commands from one argv (``flyway version
+# clean``) are left to the provider parser.
+
+_INFO_PROVIDER = {
+    "kubectl": "kubernetes", "aws": "aws", "az": "azure", "gcloud": "gcp", "gsutil": "gcp",
+    "helm": "helm", "argocd": "argocd", "flux": "flux", "git": "git", "gh": "github",
+    "psql": "sql", "mysql": "sql", "sqlite3": "sql", "mongosh": "mongodb", "pulumi": "pulumi",
+    "alembic": "migration", "flyway": "migration", "rails": "migration", "prisma": "migration",
+}
+
+# The single token that alone prints help / the version, per tool. psql and
+# mysql have no "-h" here (it is --host there). aws has no help form at all:
+# a [toplevel] alias in ~/.aws/cli/alias can replace "help" and any service
+# name ("s3 = !cmd" makes "aws s3 help" run cmd); only --version is built in.
+_INFO_HELP_FLAGS = {
+    "kubectl": {"--help", "-h"}, "aws": set(), "az": {"--help", "-h"},
+    "gcloud": {"--help", "-h"}, "gsutil": {"--help"}, "helm": {"--help", "-h"},
+    "argocd": {"--help", "-h"}, "flux": {"--help", "-h"}, "git": {"--help", "-h"},
+    "gh": {"--help", "-h"}, "psql": {"--help", "-?"}, "mysql": {"--help", "-?"},
+    "sqlite3": {"--help", "-help"}, "mongosh": {"--help", "-h"},
+    "pulumi": {"--help", "-h"}, "alembic": {"--help", "-h"},
+    "flyway": {"--help", "-h", "-?"}, "rails": {"--help", "-h"},
+    "prisma": {"--help", "-h"},
+}
+_INFO_VERSION_FLAGS = {
+    "kubectl": {"--version"}, "aws": {"--version"}, "az": {"--version"},
+    "gcloud": {"--version"}, "gsutil": {"version"}, "helm": {"--version"},
+    "argocd": {"--version"}, "flux": {"--version"}, "git": {"--version"},
+    "gh": {"--version"}, "psql": {"--version", "-V"}, "mysql": {"--version", "-V"},
+    "sqlite3": {"--version", "-version"}, "mongosh": {"--version"},
+    "pulumi": {"--version"}, "alembic": {"--version"}, "flyway": {"-v", "--version"},
+    "rails": {"--version", "-v"}, "prisma": {"--version", "-v"},
+}
+
+# Tools with a "help [topic...]" subcommand that only prints help ...
+_INFO_HELP_VERB_TOOLS = {"kubectl", "helm", "argocd", "flux", "git", "gh", "gcloud", "pulumi"}
+# ... and with a "help" that must stand alone.
+_INFO_BARE_HELP_TOOLS = {"flyway", "rails"}
+# Tools whose "version" subcommand is a built-in leaf: options after it
+# (--client, --short, -o json) still only print versions ...
+_INFO_VERSION_VERB_TOOLS = {"kubectl", "helm", "argocd", "flux", "gh", "pulumi"}
+# ... and whose "version" must stand alone (flyway runs every command word
+# it is given: "flyway version clean" cleans).
+_INFO_BARE_VERSION_TOOLS = {"git", "az", "gcloud", "prisma", "flyway", "rails"}
+
+# "<tool> <words...> --help" is help when the first word is a built-in
+# command (plugins, extensions and aliases receive the flag themselves).
+# None: any first word, the tool handles --help before running anything.
+_INFO_VERB_HELP_BUILTINS: dict[str, frozenset[str] | None] = {
+    "kubectl": frozenset({
+        "create", "expose", "run", "set", "explain", "get", "edit", "delete", "rollout",
+        "scale", "autoscale", "certificate", "cluster-info", "top", "cordon", "uncordon",
+        "drain", "taint", "describe", "logs", "attach", "exec", "port-forward", "proxy",
+        "cp", "auth", "debug", "events", "diff", "apply", "patch", "replace", "wait",
+        "kustomize", "label", "annotate", "completion", "api-resources", "api-versions",
+        "config", "kuberc", "plugin", "version", "options",
+    }),
+    "helm": frozenset({
+        "completion", "create", "dependency", "env", "get", "history", "install", "lint",
+        "list", "package", "plugin", "pull", "push", "registry", "repo", "rollback",
+        "search", "show", "status", "template", "test", "uninstall", "upgrade", "verify",
+        "version",
+    }),
+    "argocd": frozenset({
+        "account", "admin", "app", "appset", "cert", "cluster", "completion", "context",
+        "gpg", "login", "logout", "proj", "relogin", "repo", "repocreds", "version",
+    }),
+    "flux": frozenset({
+        "bootstrap", "build", "check", "completion", "create", "delete", "diff", "events",
+        "export", "get", "install", "logs", "reconcile", "resume", "stats", "suspend",
+        "trace", "tree", "uninstall", "version", "push", "pull", "tag", "list", "artifact",
+        "debug", "envsubst", "migrate",
+    }),
+    "gh": frozenset({
+        "auth", "browse", "codespace", "gist", "issue", "org", "pr", "project", "release",
+        "repo", "cache", "run", "search", "secret", "ssh-key", "status", "variable",
+        "workflow", "api", "attestation", "completion", "config", "extension", "gpg-key",
+        "label", "ruleset", "alias",
+    }),
+    "pulumi": frozenset({
+        "about", "cancel", "config", "console", "convert", "destroy", "env", "gen-completion",
+        "import", "install", "login", "logout", "new", "org", "package", "plugin", "policy",
+        "preview", "refresh", "schema", "stack", "state", "up", "version", "watch", "whoami",
+    }),
+    "az": None,
+    "gcloud": None,
+    "prisma": None,
+}
+# kubectl command groups and their built-in subcommands (kubectl 1.36, with
+# aliases): "kubectl create <x> --help" runs a kubectl-create-<x> plugin
+# when <x> is not one of these, so only these are help.
+_KUBECTL_SUBCOMMANDS: dict[tuple[str, ...], frozenset[str]] = {
+    ("create",): frozenset({
+        "clusterrole", "clusterrolebinding", "configmap", "cm", "cronjob", "cj", "deployment",
+        "deploy", "ingress", "ing", "job", "namespace", "ns", "poddisruptionbudget", "pdb",
+        "priorityclass", "pc", "quota", "resourcequota", "role", "rolebinding", "secret",
+        "service", "svc", "serviceaccount", "sa", "token",
+    }),
+    ("create", "secret"): frozenset({"docker-registry", "generic", "tls"}),
+    ("create", "service"): frozenset({"clusterip", "externalname", "loadbalancer", "nodeport"}),
+    ("create", "svc"): frozenset({"clusterip", "externalname", "loadbalancer", "nodeport"}),
+    ("set",): frozenset({"env", "image", "resources", "selector", "serviceaccount", "sa",
+                         "subject"}),
+    ("rollout",): frozenset({"history", "pause", "restart", "resume", "status", "undo"}),
+    ("certificate",): frozenset({"approve", "deny"}),
+    ("cluster-info",): frozenset({"dump"}),
+    ("top",): frozenset({"node", "nodes", "no", "pod", "pods", "po"}),
+    ("auth",): frozenset({"can-i", "reconcile", "whoami"}),
+    ("apply",): frozenset({"edit-last-applied", "set-last-applied", "view-last-applied"}),
+    ("config",): frozenset({
+        "current-context", "delete-cluster", "delete-context", "delete-user", "get-clusters",
+        "get-contexts", "get-users", "rename-context", "set", "set-cluster", "set-context",
+        "set-credentials", "unset", "use-context", "use", "view",
+    }),
+    ("kuberc",): frozenset({"set", "view"}),
+    ("plugin",): frozenset({"list"}),
+}
+
+# One word, then the flag: the vcs tool rewrites "<cmd> --help" to
+# "help <cmd>" only with --help directly after the command; alembic
+# (argparse) exits on -h before running its command.
+_INFO_ONE_VERB_HELP_TOOLS = {"git", "alembic"}
+
+# Built-in command paths that pass every later argument, --help and -h
+# included, to code outside the tool: "gh extension exec NAME --help" runs
+# the extension (the command sets DisableFlagParsing).
+_INFO_FORWARDING_PATHS: dict[str, tuple[tuple[str, ...], ...]] = {
+    "gh": (("extension", "exec"),),
+}
+
+# The flags that make "<tool> <words...> <flag>" help, where narrower than
+# the tool's own help flags: "git <cmd> -h" is handed to an alias as is
+# (and is a real option of grep and ls-remote).
+_INFO_VERB_HELP_FLAGS = {"git": {"--help"}}
+
+
+def _kubectl_builtin_path(words: list[str]) -> bool:
+    """Whether every kubectl command-group word in ``words`` is followed by
+    one of that group's built-in subcommands (or by nothing)."""
+    path: tuple[str, ...] = ()
+    for word in words:
+        path = (*path, word)
+        parent = path[:-1]
+        if parent and parent in _KUBECTL_SUBCOMMANDS and word not in _KUBECTL_SUBCOMMANDS[parent]:
+            return False
+        if path not in _KUBECTL_SUBCOMMANDS:
+            return True  # a leaf command: what follows are its arguments
+    return True
+
+
+def _is_word(token: str) -> bool:
+    return bool(token) and not token.startswith("-")
+
+
+def _informational_kind(name: str, args: list[str]) -> str | None:
+    """``"help"`` / ``"version"`` when ``<name> <args>`` is one of the exact
+    informational forms described above, else ``None``."""
+    if not args or "--" in args:
+        return None
+    if len(args) == 1 and args[0] in _INFO_HELP_FLAGS.get(name, ()):
+        return "help"
+    if len(args) == 1 and args[0] in _INFO_VERSION_FLAGS.get(name, ()):
+        return "version"
+    first, rest = args[0], args[1:]
+    if first == "help":
+        if name in _INFO_HELP_VERB_TOOLS and all(_is_word(t) for t in rest):
+            return "help"
+        if name in _INFO_BARE_HELP_TOOLS and not rest:
+            return "help"
+    if first == "version":
+        if name in _INFO_VERSION_VERB_TOOLS:
+            return "version"
+        if name in _INFO_BARE_VERSION_TOOLS and (
+            not rest or (name == "git" and rest == ["--build-options"])
+        ):
+            return "version"
+    verb_help_flags = _INFO_VERB_HELP_FLAGS.get(name, _INFO_HELP_FLAGS.get(name, set()))
+    if args[-1] in ("--help", "-h") and args[-1] in verb_help_flags:
+        words = args[:-1]
+        if not words or not all(_is_word(t) for t in words):
+            return None
+        if any(tuple(words[:len(path)]) == path
+               for path in _INFO_FORWARDING_PATHS.get(name, ())):
+            return None
+        if name in _INFO_ONE_VERB_HELP_TOOLS:
+            return "help" if len(words) == 1 else None
+        if name in _INFO_VERB_HELP_BUILTINS:
+            builtins = _INFO_VERB_HELP_BUILTINS[name]
+            if name == "kubectl" and not _kubectl_builtin_path(words):
+                return None
+            if builtins is None or words[0] in builtins:
+                return "help"
+    return None
+
+
+def informational_intent(argv: list[str]) -> InfrastructureIntent | None:
+    """The read-only intent for a help / version probe (``helm --help``,
+    ``argocd version --client``, ``kubectl delete --help``,
+    ``aws s3 help``), or ``None`` when ``argv`` is not one: resource
+    ``cli/<tool>``, action ``read``, the tool's usual provider, and
+    ``params["informational"]`` set to ``"help"`` or ``"version"``."""
+    if not argv:
+        return None
+    name = _basename(argv[0])
+    if name not in _INFO_PROVIDER:
+        return None
+    kind = _informational_kind(name, list(argv[1:]))
+    if kind is None:
+        return None
+    return InfrastructureIntent(
+        resource=f"cli/{name}",
+        action="read",
+        provider=_INFO_PROVIDER[name],
+        params={"informational": kind, "argv": list(argv)},
+    )
+
+
 def from_argv(argv: list[str]) -> list[InfrastructureIntent]:
     """Dispatches a raw argv to the right parser based on ``basename(argv[0])``,
     always returning a list of InfrastructureIntents (even for the
-    single-intent parsers)."""
+    single-intent parsers). Help and version probes become one read-only
+    intent first (see :func:`informational_intent`)."""
     if not argv:
         raise ValueError("empty argv")
+
+    info = informational_intent(argv)
+    if info is not None:
+        return [info]
 
     name = _basename(argv[0])
     if name == "kubectl":
