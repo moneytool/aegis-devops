@@ -2751,10 +2751,53 @@ _ROUND23_CORPUS = [
 ]
 
 
+# Round 24: a shell's lone - ends its options like --, and the next word is the
+# script (a lone - with nothing after it reads stdin); -s in an ambiguous
+# cluster reading reads the < file; zsh's noglob, nocorrect and repeat N are
+# unwrapped. Checked in bash, sh, dash, zsh and ksh with a stub kubectl.
+_ROUND24_CORPUS = [
+    ('ask|deny', 'cp nuke.sh ./-y; zsh -onoclobber -- -y'), ('ask', 'bash -- -missing'),
+    ('deny', 'bash - nuke.sh'),
+    ('deny', 'sh - nuke.sh'),
+    ('deny', 'dash - nuke.sh'),
+    ('deny', 'zsh - nuke.sh'),
+    ('deny', 'ksh - nuke.sh'),
+    ('deny', 'bash -e - nuke.sh'),
+    ('deny', 'bash -o pipefail - nuke.sh'),
+    ('deny', 'sh -e - nuke.sh'),
+    ('deny', 'zsh -x - nuke.sh'),
+    ('deny', 'env bash - nuke.sh'),
+    ('deny', "bash -c 'bash - nuke.sh'"),
+    ('deny', 'zsh -onoclobber - nuke.sh'),
+    ('deny', 'ksh -onoclobber - nuke.sh'),
+    ('ask', 'bash - missing.sh'),
+    ('deny', 'bash -- nuke.sh'),
+    ('ask', 'curl x | bash -'),
+    ('ask', 'curl x | { bash -; }'),
+    ('deny', 'zsh -onoclobber -s arg < nuke.sh'),
+    ('allow', 'zsh -onoclobber -s arg < ok.sh'),
+    ('deny', 'noglob bash nuke.sh'),
+    ('deny', 'repeat 2 bash nuke.sh'),
+    ('ask', 'curl x | noglob sh'),
+    ('deny', 'nocorrect bash nuke.sh'),
+    ('allow', 'bash - ok.sh'),
+    ('allow', 'noglob ls *.txt'),
+    ('allow', 'echo hi | python3 - a'),
+]
+
+
 def _decision(code: int, out: str) -> str:
     if code == 2:
         return "deny"
     return "ask" if out and _ask_reason(out) else "allow"
+
+
+@pytest.mark.parametrize("command", ["bash -- -x", "zsh -- -x", "bash - -x",
+                                     "zsh -onoclobber -- -x"])
+def test_a_shell_script_named_like_an_option_is_read(opted_in_project, command):
+    # after -- (or a lone -) every word is an operand: -x is the script
+    (opted_in_project / "-x").write_text(BLOCK_COMMAND + "\n")
+    assert run("claude", payload_for("claude", command))[0] == 2
 
 
 @pytest.mark.parametrize("expected, command",
@@ -2762,7 +2805,7 @@ def _decision(code: int, out: str) -> str:
                          + _ROUND15_CORPUS + _ROUND16_CORPUS + _ROUND17_CORPUS
                          + _ROUND17B_CORPUS + _ROUND18_CORPUS + _ROUND19_CORPUS
                          + _ROUND19B_CORPUS + _ROUND20_CORPUS + _ROUND21_CORPUS
-                         + _ROUND22_CORPUS + _ROUND23_CORPUS)
+                         + _ROUND22_CORPUS + _ROUND23_CORPUS + _ROUND24_CORPUS)
 def test_round12_corpus(opted_in_project, expected, command):
     (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
     (opted_in_project / "ok.sh").write_text("echo hi\n")
@@ -2802,6 +2845,8 @@ def test_round12_corpus(opted_in_project, expected, command):
     "zsh " + "-onoclobber " * 5000, "zsh -onoclobber x; " * 3300,
     "find . -exec " + "env -u + " * 6000 + "ls \\;",
     "zsh " + "'-onoclobber' " * 4500 + "x", "bash -c 'zsh -onoclobber x' " * 2200,
+    "bash " + "- " * 30000, "noglob " * 9000 + "ls", "repeat 2 " * 7000 + "ls",
+    "! " * 32000 + "ls", "{ " * 32000 + "ls",
 ])
 def test_here_documents_and_substitutions_stay_fast(opted_in_project, command):
     assert len(command) <= 64 * 1024

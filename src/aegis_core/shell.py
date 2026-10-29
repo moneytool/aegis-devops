@@ -104,13 +104,15 @@ def _strip_reserved(argv: list[str]) -> list[str]:
     without ``coproc`` (and the NAME of ``coproc NAME { …; }``); ``[]`` for a
     closing word (``fi``, ``done``) or a ``for``/``select`` header. A
     ``function NAME`` definition is rejected, like ``f() { …; }``."""
-    while argv:
-        if argv[0] in _GROUPING_WORDS or argv[0] in _LEADING_RESERVED:
-            argv = argv[1:]
-        elif argv[0] == "coproc":
-            argv = argv[2:] if len(argv) > 2 and argv[2] == "{" else argv[1:]
+    i = 0  # one slice at the end: a long run of `!`/`{` stays linear
+    while i < len(argv):
+        if argv[i] in _GROUPING_WORDS or argv[i] in _LEADING_RESERVED:
+            i += 1
+        elif argv[i] == "coproc":
+            i += 2 if len(argv) > i + 2 and argv[i + 2] == "{" else 1
         else:
             break
+    argv = argv[i:]
     if argv and argv[0] == "function":
         raise ShellRejected("function definition")
     if argv and (argv[0] in _HEADER_RESERVED
@@ -1199,6 +1201,11 @@ def _unwrap_inner(
             wrappers.append(head)
             argv = rest
             continue
+        if head in ("noglob", "nocorrect") or (head == "repeat" and len(argv) > 2):
+            # zsh precommand modifiers: noglob CMD, repeat N CMD
+            wrappers.append(head)
+            argv = argv[2:] if head == "repeat" else argv[1:]
+            continue
         if head == "command":
             rest = argv[1:]
             if rest and rest[0] == "-p":
@@ -1542,6 +1549,9 @@ def code_run(simple: SimpleCommand) -> dict[str, str] | None:
             if tok == "-m" and interp == "python":
                 return {"kind": "script", "interpreter": name,
                         "path": f"-m {following}".strip()}
+            if interp in _SHELLS and tok in ("-", "--") and following:
+                # bash - x.sh: a lone - ends the options like --; x.sh is the script
+                return {"kind": "script", "interpreter": name, "path": following}
             if tok == "-" or (interp in _SHELLS and tok == "-s"):
                 break  # code from stdin
             if interp in _SHELLS and shell_option(tok, name)[0]:
@@ -2174,7 +2184,7 @@ def script_runs_loosely(command: str) -> list[dict[str, str]]:
                     extra = {"kind": "script", "interpreter": runs["interpreter"],
                              "path": f"< {source}"}
                     found.setdefault(tuple(sorted(extra.items())), extra)
-            for runs in [*_rcfile_runs(words), *_value_reading_runs(words)]:
+            for runs in [*_rcfile_runs(words), *_value_reading_runs(words, redirects)]:
                 found.setdefault(tuple(sorted(runs.items())), runs)
     return list(found.values())
 
@@ -2186,27 +2196,34 @@ def value_reading_scripts(command: str) -> list[dict[str, str]]:
     x.sh the command string and is checked as such), as ``runs_code`` script
     records."""
     return [runs for text in nested_commands(command)
-            for words, _redirects in _simple_commands(_shell_tokens(text))
-            for runs in _value_reading_runs(words)]
+            for words, redirects in _simple_commands(_shell_tokens(text))
+            for runs in _value_reading_runs(words, redirects)]
 
 
-def _value_reading_runs(words: list[str]) -> list[dict[str, str]]:
-    """:func:`value_reading_scripts` for one simple command's words."""
+def _value_reading_runs(words: list[str], redirects: list[str] | None = None
+                        ) -> list[dict[str, str]]:
+    """:func:`value_reading_scripts` for one simple command's words (and its
+    standard-input redirections, for ``-s``)."""
     argv = _shell_in_command_position(words)
     if not argv:
         return []
     shell, ambiguous, j = _basename(argv[0]), False, 1
     while j < len(argv):
         word = argv[j]
-        if word == "--":
+        if word in ("--", "-"):  # bash - x.sh: a lone - ends the options too
             j += 1
             break
-        if not word.startswith(("-", "+")) or word in ("-", "+"):
+        if not word.startswith(("-", "+")) or word == "+":
             break
         ambiguous = ambiguous or ambiguous_option(word, shell)
         values, letters = shell_option(word, shell, as_value=True)
-        if word.startswith("-") and not word.startswith("--") and "c" in letters:
+        short = word.startswith("-") and not word.startswith("--")
+        if short and "c" in letters:
             return []  # a real -c: its string is read as a command line
+        if short and "s" in letters:  # -s ARGS: the code is standard input
+            source = _stdin_file(SimpleCommand([], redirects or []))
+            return [{"kind": "script", "interpreter": shell, "path": f"< {source}"}] \
+                if ambiguous and source else []
         j += 1 + values
     if not ambiguous or j >= len(argv):
         return []

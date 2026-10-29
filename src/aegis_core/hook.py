@@ -1285,6 +1285,9 @@ def _bare_scan(tokens: tuple[_Token, ...], r: int, *, as_value: bool) -> bool:
             k += 2
             continue
         option = word.startswith("-") or (shell and word.startswith("+"))  # bash +x
+        if shell and word in ("-", "--"):
+            # bash - x.sh: the options end, x.sh is the script; a lone - reads stdin
+            return not (k + 1 < len(tokens) and tokens[k + 1][0] == "word")
         if not option or word in ("-", "--"):
             return word in ("-", "--") or word in _STDIN_PATHS  # python3 /dev/stdin
         if word in ("-c", "-m", "--version", "--help") or (not shell and (
@@ -1696,8 +1699,8 @@ def _scan_script_once(runs: dict, config_dir: Path, extra_args: list[str] | None
                                   "cannot check; run the script by its name")
     if interpreter and not shell_run:
         return None
-    if not path or path.startswith("-"):
-        return None
+    if not path or (path.startswith("-") and not shell_run):
+        return None  # a shell's script may start with - (bash -- -x)
     path = _known_variables(path, command)
     if any(ch in path for ch in "$`"):
         return HookVerdict("ask", f"aegis: {path} is a script whose name is only known when "

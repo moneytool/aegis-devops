@@ -285,6 +285,13 @@ behaviour.
   `cmd`). `find … -exec` ends at `;` or at a `+` right after `{}`; any other `+` is
   an argument (`find . -exec env -u + cmd \;` runs cmd). Versioned names are mapped only for
   shells that ship them (bash, zsh, ksh, mksh, dash, yash, also `mksh-R59`; not `sh2`).
+- Agent hook: a shell's lone `-` ends its options like `--`, and after either every word is an
+  operand, so the next word is the script, even one whose name starts with `-` (`bash - x.sh`,
+  `zsh -x - x.sh`, `bash -- -x`); a lone `-` with nothing after it still reads standard input
+  (`curl … | bash -` asks). An ambiguous zsh/ksh cluster read as a value that leaves `-s` reads
+  its `< FILE` as the script. zsh's `noglob`, `nocorrect` and `repeat N` are unwrapped like
+  `command` (`noglob bash x.sh`). A long run of `!` or `{` before a command is stripped in one
+  pass (65 KB of `! ` took over 2 s).
 - Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
   own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
   policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a
