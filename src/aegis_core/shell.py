@@ -2093,6 +2093,10 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
                 state["defines"] = True  # name() …: a function, maybe a reader
             two = text[i:i + 2]
             sep = two if two in ("&&", "||", "|&", ";;") else c
+            if c in "()":
+                state["grouped"] = True
+            elif sep in ("|", "|&"):
+                state["piped"] = True
             parens += 1 if c == "(" else -1 if c == ")" and parens else 0
             tokens.append(("sep", sep, i, i + len(sep)))
             joined = sep in _CONTINUING_SEPS
@@ -2174,6 +2178,8 @@ def _scan(text: str, i: int, tokens: list[_Token], bodies: list[str], state: dic
         tokens.append(("word", word, start, i))
         if word in ("function", "alias"):
             state["defines"] = True
+        if word in ("{", "}") and i - start == 1:
+            state["grouped"] = True
         if want is not None:
             quoted = any(q in text[start:i] for q in "'\"\\")
             pending.append((word, want == "<<-", quoted))
@@ -2301,15 +2307,18 @@ def lex(text: str) -> Lexed:
     tokens: list[_Token] = []
     bodies: list[str] = []
     state: dict = {"unclosed": False, "substitutions": [], "deep": False, "glob_bodies": [],
-                   "ask_bodies": [], "defines": False}
+                   "ask_bodies": [], "defines": False, "grouped": False, "piped": False}
     _scan(text, 0, tokens, bodies, state, 0, False)
     shell_run = set(state["glob_bodies"])
     return Lexed(tuple(tokens), tuple(bodies), state["unclosed"],
                  substitutions=tuple(state["substitutions"]), deep=state["deep"],
                  glob_bodies=tuple(state["glob_bodies"]),
-                 # a function or alias anywhere may be a reader: no body is data then
+                 # a function or alias anywhere may be a reader, and so may a
+                 # program a group or subshell is piped into ((cat <<E …) | x):
+                 # no body is data then
                  ask_bodies=tuple(b for b in bodies if b not in shell_run)
-                 if state["defines"] else tuple(state["ask_bodies"]))
+                 if state["defines"] or (state["grouped"] and state["piped"])
+                 else tuple(state["ask_bodies"]))
 
 
 def _shell_tokens(text: str) -> tuple[_Token, ...]:

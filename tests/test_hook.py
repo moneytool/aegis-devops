@@ -3182,6 +3182,23 @@ _ROUND33_CORPUS = [
 ] + [("allow", "for f in *; do case $f in a) :;; *) :;; esac; done")]
 
 
+# Round 33b: a here-document in a command where a group or subshell meets a
+# pipe ((cat <<E …) | x, cat <<E | (x)) has an unknown reader: a globbed word
+# asks; without a pipe ((cd x && cat > f <<EOF …)) the body stays data.
+_PY_OS = "python3 -c 'import os;os.system(input())'"
+_ROUND33B_CORPUS = [
+    ("ask|deny", f"cat <<'E' | ({_PY_OS})\n*\nE"),
+    ("ask|deny", f"cat <<'E' | (cat | {_PY_OS})\n*\nE"),
+    ("ask|deny", f"(cat <<'E'\n*\nE\n) | {_PY_OS}"),
+    ("ask|deny", f"{{ cat <<'E'\n*\nE\n}} | {_PY_OS}"),
+    ("ask|deny", "cat <<'E' | (xargs foo)\n*\nE"),
+    ("allow", "(cd sub && cat > f.md <<'EOF'\n* item\nEOF\n)"),
+    ("allow", "{ cat <<'EOF'\n* item\nEOF\n} > f.md"),
+    ("allow", "cat <<'EOF' | tee f.md\n* item\nEOF"),
+    ("allow", "(cd sub && cat > f.md <<'EOF'\n* item\nEOF\n) || true"),
+]
+
+
 def _decision(code: int, out: str) -> str:
     if code == 2:
         return "deny"
@@ -3237,7 +3254,8 @@ def test_a_shell_script_named_like_an_option_is_read(opted_in_project, command):
                          + _ROUND22_CORPUS + _ROUND23_CORPUS + _ROUND24_CORPUS
                          + _ROUND25_CORPUS + _ROUND26_CORPUS + _ROUND27_CORPUS
                          + _ROUND28_CORPUS + _ROUND29_CORPUS + _ROUND30_CORPUS
-                         + _ROUND31_CORPUS + _ROUND32_CORPUS + _ROUND33_CORPUS)
+                         + _ROUND31_CORPUS + _ROUND32_CORPUS + _ROUND33_CORPUS
+                         + _ROUND33B_CORPUS)
 def test_round12_corpus(opted_in_project, expected, command):
     (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
     (opted_in_project / "ok.sh").write_text("echo hi\n")

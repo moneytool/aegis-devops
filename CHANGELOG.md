@@ -332,7 +332,8 @@ behaviour.
   code or a script, which may hand the body to a shell: `python3 -c '…os.system(input())'`),
   with no `<(…)`/`>(…)` and no descriptor path (not checked: a Markdown `* item`), and otherwise
   unknown (`tee >(sh)`, a function or alias in the command, `sed`, `xargs`, an `eval`
-  anywhere), where a globbed word asks. Only an unquoted `case` at the start of a command
+  anywhere, a group or subshell in a command with a pipe: `(cat <<E …) | x`), where a
+  globbed word asks. Only an unquoted `case` at the start of a command
   (after `do`, `then`, `else`, `{`, `!` or `time` too, spelt bare in reserved-word position:
   `"do" case …` and `echo do case …` are plain words), with no redirect, assignment or
   other word before it, starts a case statement, whose arm patterns (`*)`, `a|b*)`) are
