@@ -58,7 +58,6 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
-import fnmatch
 import functools
 import importlib.resources
 import io
@@ -69,6 +68,7 @@ import shlex
 import sys
 import threading
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from aegis_core import config as config_module
@@ -613,17 +613,79 @@ def _glob_denied(command: str, word: str) -> HookVerdict:
     reason = (f"aegis: cannot check this command statically ({GLOB_REASON}): the shell may "
               "expand the program word into another program's name; spell the program out")
     pattern = word.rsplit("/", 1)[-1]
-    alternatives = _brace_alternatives(pattern)
-    # too many alternatives to try (`{a,b}{a,b}…`): it may become any name
+    alternatives = _brace_alternatives(pattern) if len(pattern) <= _MAX_GLOB_CHARS else None
+    # too many alternatives, or too much text, to try (`{a,b}{a,b}…`, a 64 KB
+    # pattern): it may become any name
+    if alternatives is not None and sum(map(len, alternatives)) > _MAX_GLOB_CHARS:
+        alternatives = None
     could_be_infra = alternatives is None or any(
-        fnmatch.fnmatchcase(name, alternative)
+        _glob_match(name, alternative)
         for alternative in alternatives for name in INFRA_BINARIES)
     if could_be_infra or "/" not in word or mentions_infra(command):
         return HookVerdict("deny", reason, unchecked=True)
     return HookVerdict("ask", reason)
 
 
+def _glob_match(name: str, pattern: str) -> bool:
+    """Whether the shell glob ``pattern`` (``*``, ``?``, ``[…]`` with ``!``/``^``
+    and ranges, ``\\`` escapes; an unclosed ``[`` is literal) matches ``name``.
+    The pattern comes from the command, so it is never compiled to a regex
+    (``fnmatch`` is quadratic on runs of ``[``): the set of positions reached in
+    the short ``name`` is carried along the pattern once, linear in it."""
+    n, size = len(pattern), len(name)
+    close, nearest = [-1] * (n + 2), -1  # the next ] at or after each index
+    for k in range(n - 1, -1, -1):
+        if pattern[k] == "]":
+            nearest = k
+        close[k] = nearest
+    states = {0}
+    p = 0
+    while p < n and states:
+        c = pattern[p]
+        if c == "*":
+            states = set(range(min(states), size + 1))
+            p += 1
+            continue
+        if c == "?":
+            states = {s + 1 for s in states if s < size}
+            p += 1
+            continue
+        if c == "[":
+            q = p + 1 + (p + 1 < n and pattern[p + 1] in "!^")
+            end = close[q + 1] if q + 1 <= n else -1  # a ] first in the class is a member
+            if end != -1:
+                members, negated = pattern[q:end], q > p + 1
+                states = {s + 1 for s in states
+                          if s < size and _in_class(name[s], members) != negated}
+                p = end + 1
+                continue
+        if c == "\\" and p + 1 < n:
+            p += 1
+            c = pattern[p]
+        states = {s + 1 for s in states if s < size and name[s] == c}
+        p += 1
+    return size in states
+
+
+def _in_class(ch: str, members: str) -> bool:
+    """Whether ``ch`` is in a glob bracket class's ``members`` (``a-z`` ranges)."""
+    k = 0
+    while k < len(members):
+        if k + 2 < len(members) and members[k + 1] == "-":
+            if members[k] <= ch <= members[k + 2]:
+                return True
+            k += 3
+            continue
+        if members[k] == ch:
+            return True
+        k += 1
+    return False
+
+
 _MAX_BRACE_ALTERNATIVES = 256
+# At most this much glob text (all brace alternatives together) is matched
+# against the tools' names; more counts as possibly a tool's name.
+_MAX_GLOB_CHARS = 16 * 1024
 
 
 def _brace_alternatives(pattern: str) -> list[str] | None:
@@ -1509,7 +1571,7 @@ def _script_lines(text: str) -> list[tuple[int, str, str | None]]:
             nxt = raw[k] if k < len(raw) else ""
             name = _heredoc_reader(nxt)
             if (name not in _SHELLS and not _interpreter(name)
-                    and re.match(r"\s*(?:[{(]|(?:if|while|until|for)\b)", nxt)
+                    and re.match(r"(?:[{(]|(?:if|while|until|for)\b)", nxt.lstrip())
                     and _bare_reader(nxt, 0, len(nxt))):
                 name = "sh"  # { sh; }, ( bash ), while …; do sh; done
         if name in _SHELLS or loose_code_reader(command) is not None:
@@ -1815,6 +1877,10 @@ def _policy(command: str, config_dir: Path, extra_args: list[str] | None) -> Hoo
     """``aegis check command`` on a command that parses."""
     from aegis_core import cli  # local: cli imports this module
 
+    abandoned = _ABANDONED.get()
+    if abandoned is not None and abandoned.is_set():
+        return HookVerdict("ask", "aegis: abandoned")  # no one waits: write nothing
+
     argv = [
         "check", "command", "--config-dir", str(config_dir), "--exit-style", "claude-hook",
         *(extra_args or []), "--", command,
@@ -1966,6 +2032,12 @@ TOO_SLOW_REASON = ("aegis: the command took too long to check (over {seconds:g} 
                    "cannot be checked; split it up or put it in a script")
 
 
+# Set in a decision's worker thread once the hook has stopped waiting for it:
+# the policy run (which writes --log-json and the ledger) is then skipped.
+_ABANDONED: contextvars.ContextVar[threading.Event | None] = contextvars.ContextVar(
+    "aegis_abandoned", default=None)
+
+
 def _decide_in_time(command: str, config_dir: Path, extra_args: list[str] | None,
                     cwd: str | None) -> HookVerdict:
     """:func:`decide` in a worker thread, within :data:`DECISION_BUDGET_SECONDS`
@@ -1973,8 +2045,10 @@ def _decide_in_time(command: str, config_dir: Path, extra_args: list[str] | None
     left behind (a daemon, so it ends with the hook's process) and its result
     is never used."""
     result: list = []
+    abandoned = threading.Event()
 
     def work() -> None:
+        _ABANDONED.set(abandoned)
         try:
             result.append(decide(command, config_dir, extra_args, cwd=cwd))
         except BaseException as exc:  # noqa: BLE001 - re-raised in the caller
@@ -1984,12 +2058,37 @@ def _decide_in_time(command: str, config_dir: Path, extra_args: list[str] | None
     worker.start()
     worker.join(DECISION_BUDGET_SECONDS)
     if not result:
+        abandoned.set()  # its late policy run, log line and ledger entry never happen
         reason = TOO_SLOW_REASON.format(seconds=DECISION_BUDGET_SECONDS)
-        return HookVerdict("deny" if mentions_infra(command) else "ask", reason,
-                           unchecked=True)
+        verdict = HookVerdict("deny" if mentions_infra(command) else "ask", reason,
+                              unchecked=True)
+        _log_timed_out(command, verdict, extra_args)
+        return verdict
     if isinstance(result[0], BaseException):
         raise result[0]
     return result[0]
+
+
+def _log_timed_out(command: str, verdict: HookVerdict, extra_args: list[str] | None) -> None:
+    """With ``--log-json PATH``, the record of a decision the time budget ended
+    (the policy never ran, so nothing else logs it). The ledger records only
+    executed ALLOWs, so it gets nothing."""
+    args = list(extra_args or [])
+    path = next((a.split("=", 1)[1] for a in args if a.startswith("--log-json=")), None)
+    if path is None and "--log-json" in args and args.index("--log-json") + 1 < len(args):
+        path = args[args.index("--log-json") + 1]
+    if not path:
+        return
+    record = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "intent": None,
+        "command": command,
+        "decision": {"verdict": "BLOCK" if verdict.decision == "deny" else "ESCALATE",
+                     "notes": [verdict.reason], "source": "hook time budget"},
+    }
+    with contextlib.suppress(OSError):
+        with open(path, "a") as handle:
+            handle.write(json.dumps(record) + "\n")
 
 
 def run_hook(agent: str, stdin_text: str, *, escalate_as: str = "ask",

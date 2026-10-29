@@ -497,6 +497,36 @@ def _globbed(program: str) -> bool:
     return program not in ("[", "[[") and any(ch in program for ch in "{}*?[")
 
 
+def _quoted_word(command: str, word: str) -> bool:
+    """Whether every place ``word`` is written in ``command`` quotes its glob
+    characters (``"[[["``, ``'k*'``, ``k\\*``), so the shell does not expand it.
+    ``False`` when it is not written there as a word of its own (it comes from
+    a ``-c`` string: read as a glob, to be safe)."""
+    spellings = [command[start:end] for kind, value, start, end in _shell_tokens(command)
+                 if kind == "word" and value == word]
+    return bool(spellings) and not any(_unquoted_glob(raw) for raw in spellings)
+
+
+def _unquoted_glob(raw: str) -> bool:
+    """Whether a word as written holds a glob character outside quotes."""
+    quote, i = "", 0
+    while i < len(raw):
+        c = raw[i]
+        if quote:
+            if c == quote:
+                quote = ""
+            elif c == "\\" and quote == '"':
+                i += 1
+        elif c == "\\":
+            i += 1
+        elif c in "'\"":
+            quote = c
+        elif c in "{}*?[":
+            return True
+        i += 1
+    return False
+
+
 def _infra_env(name: str) -> bool:
     return (name in _ENV_METADATA_KEYS or name in _INFRA_ENV_NAMES
             or name.startswith(_INFRA_ENV_PREFIXES))
@@ -1005,7 +1035,21 @@ def _skip_global_options(head: str, argv: list[str]) -> int:
 # Launchers whose program word is a package spec with a version or extras.
 _PACKAGE_SPEC_LAUNCHERS = frozenset({("uvx",), ("uv", "tool", "run"), ("pipx", "run"),
                                      ("gem", "exec")})
-_PACKAGE_SPEC_RE = re.compile(r"(\[[^\]]*\])?(?:[@=<>!~:].*)?$")
+def _package_name(spec: str) -> str:
+    """``pkg[extra]==1.0`` -> ``pkg``: the name before its extras and version
+    spec, in one pass (a regex was quadratic on runs of ``[``)."""
+    close = -1  # the first ] at or after the current [, carried along
+    for i, ch in enumerate(spec):
+        if ch == "[":
+            if close < i:
+                close = spec.find("]", i)
+                if close == -1:
+                    close = len(spec)  # none: no later [ closes either
+            if close < len(spec) and (close + 1 == len(spec) or spec[close + 1] in "@=<>!~:"):
+                return spec[:i]
+        elif ch in "@=<>!~:":
+            return spec[:i]
+    return spec
 
 
 def _subcommand_launcher(argv: list[str]) -> tuple[tuple[str, ...], int] | None:
@@ -1066,7 +1110,7 @@ def _strip_subcommand_launcher(
     rest = rest[i:]
     if rest and key in _PACKAGE_SPEC_LAUNCHERS:
         # uvx kubectl@latest, pipx run 'kubectl==1.0', gem exec kubectl:1.0: the program
-        rest = [_PACKAGE_SPEC_RE.sub("", rest[0]) or rest[0], *rest[1:]]
+        rest = [_package_name(rest[0]) or rest[0], *rest[1:]]
     if key == ("uv", "run") and rest and rest[0].endswith(".py"):
         return ["python", *rest], None  # uv run script.py runs it with Python
     return rest, None
@@ -2661,7 +2705,7 @@ def intents_from_command(command: str, *,
         if not simple.argv:
             continue
         feeder, previous = (previous if simple.stdin_pipe else None), simple
-        if _globbed(simple.argv[0]):
+        if _globbed(simple.argv[0]) and not _quoted_word(command, simple.argv[0]):
             raise ShellRejected(GLOB_REASON, simple.argv[0])  # .command: the program word
         name = _basename(simple.argv[0])
         destroy = (

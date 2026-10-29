@@ -99,7 +99,7 @@ a Python program, a Makefile, or calls a cloud SDK, gets past it. With the examp
 | `alias kk=kubectl`, `hash -p /usr/bin/kubectl kk` | asks: `kk` would run the tool under another name |
 | `fd -x kubectl …`, `rg --pre kubectl`, `vim -c '!kubectl …'`, `awk 'BEGIN{system("kubectl …")}'`, `sed '1e kubectl …'`, `tmux new 'kubectl …'` | asks: these run a command or code given as an argument |
 | a command over 64 KiB, or more than 32 pieces of code piped into a shell | asks (blocked when it names a tool): too much to check |
-| a command the hook takes more than 10 s to decide (a safety net: every check is meant to be linear) | asks (blocked when it names a tool): the hook answers before the agent's own 30 s hook timeout, past which the agent would run the command |
+| a command the hook takes more than 10 s to decide (a safety net: every check is meant to be linear) | asks (blocked when it names a tool): the hook answers before the agent's own 30 s hook timeout, past which the agent would run the command. A backstop, not a guarantee: the decision runs in a worker thread, and a single long call into C (one regex match) holds Python's lock until it returns, so the hook's regexes are kept linear in the command and none compiles text from it |
 | `find … -exec kubectl … \;` (also `-execdir`, `-ok`, `-okdir`, `… {} +`) | checked like the plain command; `{}` is an unknown file, so `kubectl delete -f {}` asks |
 | another program with `kubectl` among its arguments (`setpriv kubectl …`, `setpriv /usr/local/bin/kubectl …`, `proxychains -q kubectl …`, `chrt 0 kubectl …`, `tmux new -d 'kubectl …'`) | asks: it may run the tool where its arguments cannot be checked. Not for programs that only take a tool's name (`man`, `command -v`, `find`, `make`, `pkill`, `curl`, linters, `pip`/`apt-cache` and other package tools, …), unless an option of theirs runs a command that names a tool (`rsync -e`, `scp -o ProxyCommand=`, `nix-shell --run`); nor for URLs, file names such as `kubectl.yaml`, or `-d terraform` when `terraform/` is a directory |
 | `kube{,}ctl …`, `kubec? …`, `/usr/bin/k* …` | blocked: brace/glob in program name (a path pattern that cannot become a tool's name, such as `./scripts/*.sh`, asks) |
@@ -144,7 +144,9 @@ shell word (`<<'END DATA'`; one the hook cannot read, such as `<<$'EOF'`, asks a
 after it are checked as commands); a here-doc body counts as commands
 when a shell reads it, directly or through a pipe (`cat <<EOF | sh`), asks when another
 interpreter reads one that names a tool or when an unquoted body's `$(…)` names one, and is
-data otherwise. All checkable lines go to the policy in one run; only when that run is not an
+data otherwise (this is inside a script; in the command the agent runs, a here-document that a
+shell or any other interpreter reads asks, `python3 - <<'PY'` included, since the hook does not
+read code in other languages). All checkable lines go to the policy in one run; only when that run is not an
 allow are a few more runs made to find the line (bisection, on deny when the verdict is a
 deny), so a block that only the lines together reach (an aggregate rule) is still a block.
 `aegis check command` does not read files: this is the hook only.

@@ -326,6 +326,58 @@ def test_escalate_codex_denies(opted_in_project):
     assert err
 
 
+@pytest.mark.parametrize("command", [
+    "[" * 20000 + " ls", "[" * 60000, "uvx " + "[" * 30000 + "; kubectl delete nodes --all",
+    "[" * 30000 + "*", "[!" * 20000, "[a-" * 15000, "./" + "[" * 30000, "{a,b}" * 8 + "[" * 2000,
+    "{a,b}" * 8 + "*" * 2000, "{a,b}" * 8 + "*k" * 1000, "*" * 60000, "[a" * 30000, "*[" * 30000,
+    "?[" * 30000, "[*" * 30000,
+])
+def test_glob_program_words_stay_linear(opted_in_project, command):
+    # the program word was compiled as an fnmatch pattern: quadratic on runs of
+    # [ (36 s at 64 KB); it is matched in one pass now
+    started = time.monotonic()
+    code, _out, _err = run("claude", payload_for("claude", command))
+    assert time.monotonic() - started < 1
+    assert code == 2
+
+
+def test_glob_match_agrees_with_fnmatch_without_shell_only_syntax():
+    import fnmatch
+    import random
+
+    rng = random.Random(7)
+    names = ["kubectl", "terraform", "aws", "k", "a]b", "a-b", "-", "]"]
+    for _ in range(20000):
+        pattern = "".join(rng.choice("k*?[]!-aubectlrs") for _ in range(rng.randint(0, 9)))
+        for name in names:
+            assert hook._glob_match(name, pattern) == fnmatch.fnmatchcase(name, pattern), (
+                name, pattern)
+    # the shell's own: \ escapes, ^ negates
+    assert hook._glob_match("k", "\\k") and hook._glob_match("k", "[^s]")
+
+
+def test_a_timed_out_decision_logs_its_answer_and_nothing_else(opted_in_project,
+                                                                monkeypatch, tmp_path):
+    log = tmp_path / "decisions.jsonl"
+    monkeypatch.setattr(hook, "DECISION_BUDGET_SECONDS", 0.05)
+    done = threading.Event()
+    policy = hook._policy
+
+    def slow(command, config_dir, extra_args, cwd=None):
+        time.sleep(0.3)  # past the budget: the hook has answered by now
+        try:
+            return policy(command, config_dir, extra_args)
+        finally:
+            done.set()
+
+    monkeypatch.setattr(hook, "decide", slow)
+    reply = run("claude", payload_for("claude", "ls"), extra_args=["--log-json", str(log)])
+    assert "took too long" in _ask_reason(reply[1])
+    assert done.wait(5)
+    [record] = log.read_text().splitlines()  # the worker's policy run wrote nothing
+    assert json.loads(record)["decision"]["verdict"] == "ESCALATE"
+
+
 @pytest.mark.parametrize("agent", hook.AGENTS)
 @pytest.mark.parametrize("command, decision", [(BLOCK_COMMAND, "deny"), ("ls -la", "ask")])
 def test_a_decision_past_its_time_budget_asks_or_denies(opted_in_project, monkeypatch,
@@ -2899,6 +2951,23 @@ _ROUND26_CORPUS = [
 ]
 
 
+# Round 27: a quoted glob character in the program word is literal ("[[[[",
+# 'k*'); unquoted ones still count.
+_ROUND27_CORPUS = [
+    ('allow', '"[[[["'),
+    ('allow', "'k*' x"),
+    ('allow', "echo '[a]'"),
+    ('deny', 'kube{,}ctl delete nodes --all'),
+    ('deny', 'k* get pods'),
+    ('deny', "'kube'*ctl get pods"),
+    ('deny', 'kubec?l delete nodes --all'),
+    ('ask|deny', './scripts/*.sh'),
+    ('allow', '\\[x'),
+    ('deny', '[k]ubectl delete nodes --all'),
+    ('deny', 'kube[!x]tl delete nodes --all'),
+]
+
+
 def _decision(code: int, out: str) -> str:
     if code == 2:
         return "deny"
@@ -2952,7 +3021,7 @@ def test_a_shell_script_named_like_an_option_is_read(opted_in_project, command):
                          + _ROUND17B_CORPUS + _ROUND18_CORPUS + _ROUND19_CORPUS
                          + _ROUND19B_CORPUS + _ROUND20_CORPUS + _ROUND21_CORPUS
                          + _ROUND22_CORPUS + _ROUND23_CORPUS + _ROUND24_CORPUS
-                         + _ROUND25_CORPUS + _ROUND26_CORPUS)
+                         + _ROUND25_CORPUS + _ROUND26_CORPUS + _ROUND27_CORPUS)
 def test_round12_corpus(opted_in_project, expected, command):
     (opted_in_project / "nuke.sh").write_text(BLOCK_COMMAND + "\n")
     (opted_in_project / "ok.sh").write_text("echo hi\n")

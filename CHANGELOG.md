@@ -312,6 +312,16 @@ behaviour.
   run); the shell-word reader also never stays on a character. `command` takes repeated or
   clustered `-p` (`command -p -p`, `-pp`), and GNU time (`/usr/bin/time`, `gtime`) takes its
   options (`-f FMT`, `-o FILE`, `--format=`, `--output=`, `-v`, `-l`, `-a`, `-q`, `-p`).
+- Agent hook: a program word with glob characters (`kube{,}ctl`, `k*`) is matched against the
+  tools' names with a small glob matcher that runs once along the word, not with `fnmatch`,
+  which compiled the word to a regex and was quadratic on runs of `[` (64 KB of `[` took 36 s;
+  `{a,b}`×8 + 2 KB of `[` took 10 s). More than 16 KB of glob text across the brace
+  alternatives counts as possibly a tool's name (denied). Quoted glob characters are literal,
+  as in the shell (`"[[[["` and `'k*'` are program names, not globs). Two other regexes that
+  were quadratic on `[` runs (a package spec in `uv run`/`uvx`, a Terraform address index)
+  are plain string scans now. With `--log-json`, a decision ended by the time budget logs its
+  ask or deny, and the abandoned worker's policy run (with its log line and ledger entry) is
+  skipped.
 - Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
   own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
   policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a
