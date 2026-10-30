@@ -81,6 +81,7 @@ from aegis_core.shell import (
     ARGS_ONLY_PROGRAMS,
     GLOB_REASON,
     SHELL_OPTIONS_END,
+    UNKNOWN_ENV_NAME,
     ShellRejected,
     _basename,
     _c_string_at,
@@ -574,8 +575,15 @@ def _precheck(command: str, config_dir: Path, extra_args: list[str] | None,
         if verdict is not None:
             asks.append(verdict.reason)
     if scan:
-        for runs, here in _scripts_with_directory(command, cwd):
-            verdict = _scan_script(runs, config_dir, extra_args, here, command=command)
+        found = _scripts_with_directory(command, cwd)
+        starts: list[dict[str, str] | None] = [
+            _inherited_settings(i) for i in intents if i.provider == "shell"
+            and (i.params.get("runs_code") or {}).get("kind") == "script"]
+        if len(starts) != len(found):
+            starts = [None] * len(found)  # cannot pair them up: not known
+        for (runs, here), start in zip(found, starts, strict=True):
+            verdict = _scan_script(runs, config_dir, extra_args, here, command=command,
+                                   inherited=start, inherits=True)
             if verdict is not None:
                 if verdict.decision == "deny":
                     return verdict
@@ -953,7 +961,8 @@ def _cdpath_changed() -> bool:
     if state is None:
         return False
     if "cdpath" not in state:  # once per command: a cd per part would rescan it each time
-        state["cdpath"] = re.search(r"\bCDPATH\b", state["command"]) is not None
+        # also spelt with quotes (CDP"ATH"=…) or behind an option letter (printf -vCDPATH)
+        state["cdpath"] = "CDPATH" in state["command"] or "CDPATH" in dequoted(state["command"])
     return state["cdpath"]
 
 
@@ -1157,9 +1166,14 @@ def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
     # whether a part after each one names an infrastructure tool: one sweep, not one
     # scan of the rest per part (`source env.sh; ` a thousand times stays linear)
     infra_after = [False] * len(segments)
+    scripts_after = [False] * len(segments)  # a script run or file sourced later
     for k in range(len(segments) - 2, -1, -1):
-        infra_after[k] = infra_after[k + 1] or mentions_infra(segments[k + 1][0])
+        later = segments[k + 1][0]
+        infra_after[k] = infra_after[k + 1] or mentions_infra(later)
+        scripts_after[k] = scripts_after[k + 1] or bool(
+            script_runs_loosely(later) or _sourced_script(later))
     environments: dict[tuple[str, str], dict[str, str] | None | bool] = {}  # per file, dir
+    sourced_runs: list[tuple[dict, Path | None]] = []
     for index, (text, sep) in enumerate(segments):
         loose = loose_argv(text)
         if loose and _basename(loose[0]) in ("cd", "pushd", "popd"):
@@ -1207,8 +1221,11 @@ def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
             elif escalate_scripts:
                 asks.append("aegis: this runs a local script, which the hook cannot read "
                             "(--escalate-scripts)")
+            # what the file starts with is known once the whole command is parsed below
+            sourced_runs.append((sourced, here))
+            kept.append((f"{_SOURCE_MARK}{len(sourced_runs) - 1}", sep))
             # the sourced file runs in this shell: what it sets reaches the parts after it
-            if infra_after[index]:
+            if infra_after[index] or scripts_after[index]:
                 key = (sourced["path"], str(here))
                 if key not in environments:
                     # past the script limit an unread file leaves the environment unknown
@@ -1218,6 +1235,10 @@ def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
                 if values is False and verdict is not None:
                     # not read at all (not a regular file, missing, too big): as the scan says
                     return HookVerdict("ask", verdict.reason)
+                if not isinstance(values, dict) and not infra_after[index]:
+                    # only scripts follow: they start with an environment not known
+                    kept.append((f"unset {UNKNOWN_ENV_NAME}", sep))
+                    continue
                 if not isinstance(values, dict):
                     return HookVerdict(
                         "deny",
@@ -1240,6 +1261,17 @@ def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
         elif binary:
             kept.append((shlex.quote(binary), sep))
     if opaque is not None:
+        if scan and not mentions_infra(command):
+            # an assignment the hook cannot follow (`HELM_NAMESPACE=prod; source x.sh`):
+            # the scripts the command runs start with an environment not known
+            for runs, here_of in [*((r, None if _changes_directory(command) else cwd)
+                                    for r in loose_scripts), *sourced_runs]:
+                verdict = _scan_script(runs, config_dir, extra_args, here_of, command=command,
+                                       inherited=None, inherits=True)
+                if verdict is not None:
+                    if verdict.decision == "deny":
+                        return verdict
+                    asks.append(verdict.reason)
         if mentions_infra(command):
             return HookVerdict(
                 "deny",
@@ -1252,6 +1284,14 @@ def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
             _rejected(command, exc.reason, config_dir, extra_args, cwd,
                       scan=scan, escalate_scripts=escalate_scripts),
             asks)
+    if scan and sourced_runs:
+        verdict = _sourced_with_environment(kept, sourced_runs, config_dir, extra_args,
+                                            command)
+        if verdict is not None:
+            if verdict.decision == "deny":
+                return verdict
+            asks.append(verdict.reason)
+    kept = [(text, sep) for text, sep in kept if not text.startswith(_SOURCE_MARK)]
     # a dropped part takes its separator with it; the last kept part loses its own
     rebuilt = "".join(text + sep for text, sep in kept[:-1])
     if kept:
@@ -1357,6 +1397,41 @@ def _sourced_environment(runs: dict, cwd: Path | None,
                 return None
             values.update(found)
     return values
+
+
+# A stand-in for a sourced file in the command parsed to learn what it starts with.
+_SOURCE_MARK = ": aegis-sourced-"
+
+
+def _sourced_with_environment(kept: list[tuple[str, str]],
+                              sourced_runs: list[tuple[dict, Path | None]],
+                              config_dir: Path, extra_args: list[str] | None,
+                              command: str) -> HookVerdict | None:
+    """Reads each sourced file again with the settings of the watched variables
+    made before it (``export HELM_NAMESPACE=prod; source x.sh``), from one parse
+    of the command with a stand-in where each file is sourced; the first deny,
+    else the first ask."""
+    probe = "".join(text + sep for text, sep in kept)
+    try:
+        intents = intents_from_command(probe)
+    except ValueError:  # also ShellRejected: an earlier change cannot be followed
+        intents = None
+    starts: dict[int, dict[str, str]] = {}
+    for intent in intents or []:
+        argv = intent.params.get("argv") or [] if intent.provider == "shell" else []
+        if len(argv) == 2 and argv[0] == ":" and argv[1].startswith("aegis-sourced-"):
+            starts[int(argv[1].rsplit("-", 1)[1])] = _inherited_settings(intent)
+    first_ask: HookVerdict | None = None
+    for n, (runs, here) in enumerate(sourced_runs):
+        start = starts.get(n) if intents is not None else None
+        if start == {}:
+            continue  # already read without any
+        verdict = _scan_script(runs, config_dir, extra_args, here, command=command,
+                               inherited=start, inherits=True)
+        if verdict is not None and verdict.decision == "deny":
+            return verdict
+        first_ask = first_ask or verdict
+    return first_ask
 
 
 def _sourced_script(segment: str) -> dict[str, str] | None:
@@ -1864,7 +1939,9 @@ _FILE_READERS = frozenset({
 
 
 def _scan_script(runs: dict, config_dir: Path, extra_args: list[str] | None,
-                 cwd: Path | None, *, command: str = "") -> HookVerdict | None:
+                 cwd: Path | None, *, command: str = "",
+                 inherited: dict[str, str] | None = None,
+                 inherits: bool = False) -> HookVerdict | None:
     """Reads a local shell script that a command runs (``bash x.sh``, ``sh <
     x.sh``, ``./x``, ``source x.sh``; issue #56) and checks every line that
     names an infrastructure tool as a command against the policy. ``None``
@@ -1876,18 +1953,26 @@ def _scan_script(runs: dict, config_dir: Path, extra_args: list[str] | None,
     :data:`SCRIPT_SCAN_MAX_LINES` such lines, or whose directory is unknown (a
     ``cd`` to a computed place came first). What the script sources or runs in
     turn is not read. Within one decision a script is read once (its verdict
-    is reused), and past :data:`_MAX_SCRIPTS` distinct scripts the rest ask."""
+    is reused), and past :data:`_MAX_SCRIPTS` distinct scripts the rest ask.
+    With ``inherits``, ``inherited`` holds the settings of the watched
+    variables the script starts with (``export AWS_PROFILE=prod; bash x.sh``),
+    checked as if its first line; ``None`` there when they cannot be known."""
+    if not inherits:
+        inherited = {}
     state = _SCANNED.get()
     if state is None:
-        return _scan_script_once(runs, config_dir, extra_args, cwd, command=command)
-    key = (runs.get("interpreter"), runs.get("path"), str(cwd), command)
+        return _scan_script_once(runs, config_dir, extra_args, cwd, command=command,
+                                 inherited=inherited)
+    key = (runs.get("interpreter"), runs.get("path"), str(cwd), command,
+           None if inherited is None else tuple(sorted(inherited.items())))
     if key in state["seen"]:
         return state["seen"][key]
     if state["count"] >= _MAX_SCRIPTS:
         return HookVerdict("ask", f"aegis: this command runs more than {_MAX_SCRIPTS} scripts, "
                                   "too many to read; run them separately")
     state["count"] += 1
-    verdict = _scan_script_once(runs, config_dir, extra_args, cwd, command=command)
+    verdict = _scan_script_once(runs, config_dir, extra_args, cwd, command=command,
+                                inherited=inherited)
     state["seen"][key] = verdict
     return verdict
 
@@ -2069,7 +2154,8 @@ def _script_directories(every: list[tuple[int, str, str | None]],
     for number, line, ask in every:
         if moved:
             found[number] = here
-        cdpath = cdpath or "CDPATH" in line  # cd may search other directories after it
+        # cd may search other directories after it (also spelt CDP"ATH")
+        cdpath = cdpath or "CDPATH" in line or "CDPATH" in dequoted(line)
         if ask is not None or not _changes_directory(line):
             continue
         moved = True
@@ -2086,8 +2172,19 @@ def _script_directories(every: list[tuple[int, str, str | None]],
     return found
 
 
+def _inherited_settings(intent) -> dict[str, str] | None:
+    """The settings of the watched variables a program run by ``intent`` starts
+    with: exported earlier in the command or written in front of it."""
+    if intent.metadata.get("env_unknown"):
+        return None
+    env = intent.metadata.get("env_assignments") or {}
+    return {k: v for k, v in env.items()
+            if _infra_env(k) and k not in _COMMAND_ENV_VARS and k not in _SOURCED_ENV_VARS}
+
+
 def _scan_script_once(runs: dict, config_dir: Path, extra_args: list[str] | None,
-                      cwd: Path | None, *, command: str = "") -> HookVerdict | None:
+                      cwd: Path | None, *, command: str = "",
+                      inherited: dict[str, str] | None = None) -> HookVerdict | None:
     interpreter = _basename(runs.get("interpreter", "") or "")
     path = runs.get("path", "") or ""
     if path.startswith("< "):
@@ -2218,6 +2315,13 @@ def _scan_script_once(runs: dict, config_dir: Path, extra_args: list[str] | None
             first_ask = first_ask or f"aegis: {located}: {asks[0].removeprefix('aegis: ')}"
         if checked.strip(" \t\n;&|"):
             checkable.append((number, line, checked))
+    if checkable and inherited is None:
+        return HookVerdict("ask", f"aegis: {path} runs infrastructure commands after an "
+                                  "environment change the hook cannot follow, so they cannot "
+                                  "be checked; run them on their own")
+    if checkable and inherited:
+        checkable.insert(0, (0, "(the environment it starts with)", "export " + " ".join(
+            f"{k}={shlex.quote(v)}" for k, v in inherited.items())))
     verdict = _policy("\n".join(c for _n, _l, c in checkable), config_dir, extra_args) \
         if checkable else HookVerdict("allow")
     if verdict.decision == "allow":

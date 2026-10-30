@@ -4243,3 +4243,105 @@ def test_loop_variable_inside_a_shell_string_is_unsettled(prod_scope_project):
     verdict = _scoped(*prod_scope_project,
                       f"bash -c 'for AWS_PROFILE in prod-admin; do {_RM}; done'")
     assert verdict.decision == "deny"
+
+
+# --- PR #60 council: env -u / -i, scripts inherit scope, quoted CDPATH -------------
+
+_KUBECONFIG_STAGING_IN_PROD = (
+    "apiVersion: v1\nkind: Config\ncurrent-context: staging\ncontexts:\n- name: staging\n"
+    "  context: {cluster: c, namespace: prod}\nclusters:\n- name: c\n  cluster: {server: x}\n")
+
+
+@pytest.mark.parametrize("launcher", [
+    "env -u HELM_NAMESPACE", "env -uHELM_NAMESPACE", "env --unset=HELM_NAMESPACE",
+    "env --unset HELM_NAMESPACE", "env -i", "env -", "env --ignore-environment",
+    "env HELM_NAMESPACE=", "sudo",
+])
+def test_env_removal_launchers_drop_propagated_values(helm_prod_project, launcher):
+    (helm_prod_project / "cfg").write_text(_KUBECONFIG_STAGING_IN_PROD)
+    command = (f"export HELM_NAMESPACE=staging; {launcher} helm --kubeconfig cfg "
+               "--kube-context staging uninstall foo")
+    verdict = _helm_verdict(helm_prod_project, command)
+    assert verdict.decision == "deny", verdict.reason
+
+
+def test_env_keeping_launchers_and_other_names_still_follow(helm_prod_project):
+    for command in (f"export HELM_NAMESPACE=staging; nohup {_HELM_UNINSTALL}",
+                    f"export HELM_NAMESPACE=staging; setsid {_HELM_UNINSTALL}",
+                    f"export HELM_NAMESPACE=staging; env -u FOO {_HELM_UNINSTALL}"):
+        assert _helm_verdict(helm_prod_project, command).decision == "allow", command
+
+
+@pytest.fixture
+def helm_staging_project(opted_in_project, monkeypatch):
+    monkeypatch.setenv("HELM_NAMESPACE", "staging")
+    project = opted_in_project
+    (project / "x.sh").write_text(f"#!/bin/bash\n{_HELM_UNINSTALL}\n")
+    (project / "x.sh").chmod(0o755)
+    (project / "y.sh").write_text(f"{_HELM_UNINSTALL}\n")
+    (project / "env.sh").write_text("export HELM_NAMESPACE=prod\n")
+    return project
+
+
+def test_helm_uninstall_in_the_invoking_staging_namespace_allows(helm_staging_project):
+    for command in (_HELM_UNINSTALL, "bash x.sh", "source y.sh", "FOO=1; bash x.sh"):
+        assert _helm_verdict(helm_staging_project, command).decision == "allow", command
+
+
+@pytest.mark.parametrize("command", [
+    "export HELM_NAMESPACE=prod; bash x.sh",
+    "export HELM_NAMESPACE=prod; sh < x.sh",
+    "export HELM_NAMESPACE=prod; ./x.sh",
+    "HELM_NAMESPACE=prod bash x.sh",
+    "source env.sh; bash x.sh",
+    ". env.sh && ./x.sh",
+    "export HELM_NAMESPACE=prod; source y.sh",
+    "export HELM_NAMESPACE=prod; source env.sh; bash x.sh",
+])
+def test_scripts_start_with_the_scope_set_before_them(helm_staging_project, command):
+    verdict = _helm_verdict(helm_staging_project, command)
+    assert verdict.decision == "deny", verdict.reason
+    assert "helm-block-release-delete-prod" in verdict.reason
+
+
+@pytest.mark.parametrize("command", [
+    "HELM_NAMESPACE=prod; source y.sh",
+    "HELM_NAMESPACE=prod; bash x.sh",
+    "unset HELM_NAMESPACE; bash x.sh",
+    "source x.sh; source y.sh",
+])
+def test_scripts_after_an_unfollowable_change_ask(helm_staging_project, command):
+    verdict = _helm_verdict(helm_staging_project, command)
+    assert verdict.decision == "ask", verdict.reason
+    assert "cannot follow" in verdict.reason
+
+
+@pytest.mark.parametrize("prefix", ['export CDP"ATH"=/evil', 'printf -vCDP"ATH" %s /evil',
+                                    "export CDPATH=/evil", "CDPATH=/evil"])
+def test_quoted_cdpath_makes_cd_unknown(opted_in_project, prefix):
+    project = opted_in_project
+    (project / "repo").mkdir()
+    (project / "repo" / "v.sh").write_text("kubectl delete nodes --all\n")
+    config_dir = project / ".aegis"
+    assert hook.decide("cd repo; bash v.sh", config_dir, [], cwd=project).decision == "deny"
+    verdict = hook.decide(f"{prefix}; cd repo; bash v.sh", config_dir, [], cwd=project)
+    assert verdict.decision == "ask"
+    assert "directory" in verdict.reason
+    script = project / "s.sh"
+    script.write_text(f"#!/bin/bash\n{prefix}\ncd repo\nkubectl get pods\n")
+    from aegis_core.hook import _script_directories, _script_lines
+    assert list(_script_directories(_script_lines(script.read_text()), project).values())[-1] \
+        is None
+
+
+@pytest.mark.parametrize("command", [
+    "source env.sh; " * 4000 + "bash x.sh", "source x.sh; " * 4000 + "bash x.sh",
+    "export AWS_PROFILE=a; source x.sh; " * 1800,
+])
+def test_scripts_inheriting_scope_stay_linear(opted_in_project, command):
+    project = opted_in_project
+    (project / "env.sh").write_text("export AWS_PROFILE=x\n")
+    (project / "x.sh").write_text("kubectl get pods\n")
+    started = time.monotonic()
+    hook.decide(command, project / ".aegis", [], cwd=project)
+    assert time.monotonic() - started < 2 * TIMING_SLACK

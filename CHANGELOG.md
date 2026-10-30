@@ -448,6 +448,17 @@ behaviour.
   hook cannot follow, typed, in a `sh -c` string or in a script: the infrastructure commands in
   the loop and after it are refused. A script's control flow is now read with the shell lexer,
   so `$(…)`, `${…}` and quoted text no longer stop its literal settings from being followed.
+- Agent hook (PR #60 council): `env -u NAME` / `-uNAME` / `--unset=NAME`, `env -i` / `env -`,
+  `env NAME=` and `sudo` (which resets the environment) in front of an infrastructure command
+  are changes the hook cannot follow when they remove or empty a watched variable or drop
+  values set earlier in the command: the tool falls back to defaults, so it is refused rather
+  than judged with the value set before. A script the command runs (`bash x.sh`, `sh < x.sh`,
+  `./x.sh`, `source x.sh`) now starts with the watched settings made before it (`export
+  HELM_NAMESPACE=prod; bash x.sh`, `source env.sh; bash x.sh`, `HELM_NAMESPACE=prod bash
+  x.sh`), checked as if its first line; after a change the hook cannot follow (`unset`, a
+  bare assignment, a sourced file it cannot read) a script that names a tool asks. `CDPATH` is
+  watched like the other variables and found also when spelt with quotes (`CDP"ATH"=…`,
+  `printf -vCDP"ATH"`).
 
 ### Changed
 - Agent hook: code piped into a shell or interpreter, or fed to one by a here-string or here-doc

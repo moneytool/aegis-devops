@@ -514,8 +514,12 @@ _INFRA_ENV_PREFIXES = (
     "KUBE", "AWS_", "CLOUDSDK_", "GOOGLE_", "GCLOUD_", "AZURE_", "ARM_", "HELM_", "TF_",
     "PULUMI_", "ARGOCD_", "FLUX", "GIT_", "GH_", "PG", "MYSQL", "MONGO", "DATABASE_",
 )
-_INFRA_ENV_NAMES = frozenset({"PATH", "ENV", "BASH_ENV", "LD_PRELOAD", "LD_LIBRARY_PATH",
-                              "DYLD_INSERT_LIBRARIES", "HOME", "XDG_CONFIG_HOME"})
+# Stands for an environment change the hook cannot follow (``unset NAME`` of it
+# in a rebuilt command: the hook's stand-in for a sourced file it could not read).
+UNKNOWN_ENV_NAME = "AEGIS_ENVIRONMENT_UNKNOWN"
+_INFRA_ENV_NAMES = frozenset({UNKNOWN_ENV_NAME, "CDPATH", "PATH", "ENV", "BASH_ENV",
+                              "LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "HOME",
+                              "XDG_CONFIG_HOME"})
 
 
 GLOB_REASON = "brace/glob in program name"
@@ -905,8 +909,13 @@ def _strip_sudo(rest: list[str]) -> list[str]:
     return rest[i:]
 
 
-def _strip_env(rest: list[str]) -> tuple[list[str], dict[str, str]]:
+def _strip_env(rest: list[str],
+               cleared: list[str] | None = None) -> tuple[list[str], dict[str, str]]:
+    """``env``'s options and assignments stripped from ``rest``; the variables
+    it removes (``-u NAME``, ``--unset=NAME``; ``*`` for ``-i`` / ``-``) are
+    added to ``cleared``."""
     assignments: dict[str, str] = {}
+    cleared = [] if cleared is None else cleared
     i = 0
     while i < len(rest):
         tok = rest[i]
@@ -918,13 +927,19 @@ def _strip_env(rest: list[str]) -> tuple[list[str], dict[str, str]]:
                 rest[i + 1] if i + 1 < len(rest) else "")
             rest, i = _split_env_string(string) + rest[i + (1 if "=" in tok else 2):], 0
             continue
-        if tok in ("--ignore-environment", "--null", "--debug"):
+        if tok in ("--ignore-environment", "--null", "--debug", "-"):
+            if tok in ("--ignore-environment", "-"):
+                cleared.append("*")
             i += 1
             continue
         if tok in ("--unset", "--chdir"):
+            if tok == "--unset":
+                cleared.append(rest[i + 1] if i + 1 < len(rest) else "")
             i += 2
             continue
         if tok.startswith(("--unset=", "--chdir=")):
+            if tok.startswith("--unset="):
+                cleared.append(tok.partition("=")[2])
             i += 1
             continue
         if _ASSIGNMENT_RE.match(tok):
@@ -938,6 +953,8 @@ def _strip_env(rest: list[str]) -> tuple[list[str], dict[str, str]]:
             i += 1
             for k, letter in enumerate(tok[1:], start=1):
                 if letter in "i0v":
+                    if letter == "i":
+                        cleared.append("*")
                     continue
                 if letter not in "uCS":
                     raise ShellRejected(f"unrecognised env option {tok!r}")
@@ -945,6 +962,8 @@ def _strip_env(rest: list[str]) -> tuple[list[str], dict[str, str]]:
                 if not value:
                     value = rest[i] if i < len(rest) else ""
                     i += 1
+                if letter == "u":
+                    cleared.append(value)
                 if letter == "S":
                     rest, i = _split_env_string(value) + rest[i:], 0
                 break
@@ -1372,11 +1391,17 @@ def _unwrap_inner(
             argv = rest
             continue
         if head == "env":
-            rest, more = _strip_env(argv[1:])
+            cleared: list[str] = []
+            rest, more = _strip_env(argv[1:], cleared)
             if not rest:
                 break
+            if "*" in cleared:
+                env.clear()  # env -i: nothing set before it reaches the command
+            for name in cleared:
+                env.pop(name, None)
             env.update(more)
             wrappers.append("env")
+            wrappers.extend(f"env -u {name}" for name in cleared)
             argv = rest
             continue
         if head == "timeout":
@@ -3230,6 +3255,14 @@ def intents_from_command(command: str, *,
         name = _basename(simple.argv[0])
         if lost is not None and (name in _KNOWN_BINARIES or name in ("terraform", "tofu")):
             raise ShellRejected(ENV_CHANGE_REASON, lost)
+        removed = [w[len("env -u "):] for w in wrappers if w.startswith("env -u ")]
+        if (name in _KNOWN_BINARIES or name in ("terraform", "tofu")) and (
+                any(r == "*" or _may_name_scope_variable(r) for r in removed)
+                or any(v == "" for k, v in env.items() if k in _ENV_METADATA_KEYS)
+                or exported and "sudo" in wrappers):
+            # env -u / env -i / NAME= / sudo's reset: the tool falls back to defaults the
+            # hook does not model, and a value set earlier no longer reaches it
+            raise ShellRejected(ENV_CHANGE_REASON, shlex.join(simple.argv))
         if exported:
             env = {**exported, **env}
         destroy = (
@@ -3263,5 +3296,8 @@ def intents_from_command(command: str, *,
                     intent.metadata["runs_commands"] = commands
         for intent in produced:
             _annotate(intent, env, wrappers, simple)
+            if lost is not None:
+                # what a script it runs starts with is not known (hook: script scans)
+                intent.metadata["env_unknown"] = True
         intents.extend(produced)
     return intents
