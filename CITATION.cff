@@ -18,6 +18,9 @@ identifiers:
     value: "10.5281/zenodo.22950337"
     description: "Concept DOI: all versions, resolves to the latest."
   - type: doi
+    value: "10.5281/zenodo.23787201"
+    description: "v1.3.0 (agent hook: compound commands part by part; scripts and piped code read)"
+  - type: doi
     value: "10.5281/zenodo.23624426"
     description: "v1.2.1 (kubernetes compile: apply and update-verb rules reported over-enforced)"
   - type: doi
