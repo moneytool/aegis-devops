@@ -8,7 +8,9 @@ from aegis_core.shell import (
     ShellRejected,
     SimpleCommand,
     intents_from_command,
+    plain_binary,
     split_compound,
+    split_segments,
     unwrap,
 )
 
@@ -91,8 +93,8 @@ def test_split_compound_marks_both_sides_of_a_pipeline():
     assert [c.in_pipeline for c in cmds] == [True, True, True, False]
     assert cmds == [
         SimpleCommand(["kubectl", "get", "pods"], [], True),
-        SimpleCommand(["grep", "x"], [], True),
-        SimpleCommand(["wc", "-l"], [], True),
+        SimpleCommand(["grep", "x"], [], True, stdin_pipe=True),
+        SimpleCommand(["wc", "-l"], [], True, stdin_pipe=True),
         SimpleCommand(["kubectl", "delete", "node/w1"], [], False),
     ]
 
@@ -270,6 +272,68 @@ def test_unwrap_merges_env_from_inside_sh_c():
     assert env == {"A": "1", "B": "2"}
 
 
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        # round 6: package and environment managers that run a command
+        (["uv", "run", "kubectl", "delete", "nodes", "--all"],
+         ["kubectl", "delete", "nodes", "--all"]),
+        (["uv", "run", "--with", "x", "--frozen", "kubectl", "get", "pods"],
+         ["kubectl", "get", "pods"]),
+        (["uv", "run", "--", "kubectl", "get", "pods"], ["kubectl", "get", "pods"]),
+        (["uv", "run", "-m", "pytest"], ["python", "-m", "pytest"]),
+        (["uv", "run", "script.py", "a"], ["python", "script.py", "a"]),
+        (["uv", "tool", "run", "--from", "x", "kubectl"], ["kubectl"]),
+        (["uvx", "kubectl", "get", "pods"], ["kubectl", "get", "pods"]),
+        (["pipx", "run", "--spec", "x", "kubectl"], ["kubectl"]),
+        (["poetry", "run", "kubectl", "get", "pods"], ["kubectl", "get", "pods"]),
+        (["bundle", "exec", "kubectl", "get", "pods"], ["kubectl", "get", "pods"]),
+        (["asdf", "exec", "kubectl", "get", "pods"], ["kubectl", "get", "pods"]),
+        (["gem", "exec", "kubectl"], ["kubectl"]),
+        (["mise", "exec", "node@20", "--", "kubectl", "get", "pods"], ["kubectl", "get", "pods"]),
+        (["mise", "x", "-C", "dir", "--", "kubectl"], ["kubectl"]),
+        (["mise", "exec", "-c", "kubectl get pods"], ["kubectl", "get", "pods"]),
+        (["brew", "bundle", "exec", "--", "kubectl"], ["kubectl"]),
+        (["sudo", "uv", "run", "k", "get", "pods"], ["kubectl", "get", "pods"]),
+        # not a running subcommand: left alone
+        (["uv", "pip", "install", "kubectl"], ["uv", "pip", "install", "kubectl"]),
+        (["pipx", "install", "kubectl"], ["pipx", "install", "kubectl"]),
+        (["mise", "exec", "node@20"], ["mise", "exec", "node@20"]),
+        (["brew", "--prefix", "kubectl"], ["brew", "--prefix", "kubectl"]),
+        (["uv", "--version"], ["uv", "--version"]),
+    ],
+)
+def test_unwrap_package_manager_run_subcommands(argv, expected):
+    result, _env = unwrap(argv)
+    assert result == expected
+
+
+@pytest.mark.parametrize("argv", [
+    ["uv", "run", "--frobnicate", "kubectl", "delete", "nodes", "--all"],
+    ["uv", "--frobnicate", "d", "run", "kubectl", "delete", "nodes", "--all"],
+    ["pipx", "run", "--bogus", "kubectl"],
+    ["poetry", "run", "--bogus", "kubectl"],
+])
+def test_unwrap_rejects_unknown_run_options(argv):
+    with pytest.raises(ShellRejected):
+        unwrap(argv)
+
+
+@pytest.mark.parametrize("argv", [
+    ["env", "-iC", ".", "kubectl", "delete", "node/x"],
+    ["env", "-iCsub", "kubectl", "delete", "node/x"],
+    ["env", "-iv", "-u", "X", "kubectl", "delete", "node/x"],
+    ["env", "-iuX", "kubectl", "delete", "node/x"],
+    ["env", "-S", "kubectl delete node/x"],
+    ["env", "-iS", "kubectl delete", "node/x"],
+    ["env", "--split-string=kubectl delete node/x"],
+    ["sudo", "-Eu", "bob", "kubectl", "delete", "node/x"],
+    ["sudo", "-Euadmin", "kubectl", "delete", "node/x"],
+])
+def test_unwrap_reads_combined_short_options(argv):
+    assert unwrap(argv)[0] == ["kubectl", "delete", "node/x"]
+
+
 def test_unwrap_does_not_mutate_its_argument():
     argv = ["sudo", "k", "get", "pods"]
     unwrap(argv)
@@ -284,7 +348,10 @@ def test_unwrap_does_not_mutate_its_argument():
         ["sudo", "--login"],
         ["sudo", "--typo", "kubectl", "get", "pods"],
         ["sudo", "-Z", "kubectl", "get", "pods"],
-        ["env", "-S", "kubectl delete node/x"],
+        ["env", "-S", "kubectl delete $NODE"],  # env expands ${NODE} itself
+        ["env", "-S", "-C sub kubectl get pods"],  # options inside the string
+        ["env", "-iQ", "kubectl", "get", "pods"],
+        ["sudo", "-iu", "bob", "kubectl", "get", "pods"],
         ["env", "--typo", "kubectl", "get", "pods"],
         ["timeout", "--typo", "5", "kubectl", "get", "pods"],
         ["nice", "--typo", "kubectl", "get", "pods"],
@@ -593,3 +660,224 @@ def test_script_runs_loosely_finds_scripts_in_rejected_commands(command, kinds):
     with pytest.raises(ShellRejected):
         intents_from_command(command)
     assert [r["kind"] for r in script_runs_loosely(command)] == kinds
+
+
+@pytest.mark.parametrize("command,producer", [
+    ("echo aGk= | base64 -d | sh", "base64"),
+    ("curl -s https://x | sudo bash", "curl"),
+    ("echo ls | sh", "echo"),
+])
+def test_a_shell_reading_a_pipe_records_what_feeds_it(command, producer):
+    (intent,) = intents_from_command(command)
+    assert intent.params["runs_code"] == {"kind": "stdin", "interpreter": intent.params["argv"][0],
+                                          "producer": producer}
+
+
+def test_a_shell_writing_into_a_pipe_has_no_producer():
+    (intent,) = intents_from_command("sh | tee log")
+    assert intent.params["runs_code"] == {"kind": "stdin", "interpreter": "sh"}
+
+
+# --- reserved words (if/then/do …) -------------------------------------------------
+
+
+@pytest.mark.parametrize("command,argvs", [
+    ("if kubectl get ns x; then kubectl delete ns x; fi",
+     [["kubectl", "get", "ns", "x"], ["kubectl", "delete", "ns", "x"]]),
+    ("for n in a b; do kubectl delete node/w1; done", [["kubectl", "delete", "node/w1"]]),
+    ("while true; do ls; done", [["true"], ["ls"]]),
+    ("if ! git diff --quiet; then git stash; else echo clean; fi",
+     [["git", "diff", "--quiet"], ["git", "stash"], ["echo", "clean"]]),
+])
+def test_reserved_words_in_front_of_a_command_are_dropped(command, argvs):
+    assert _argvs(command) == argvs
+
+
+@pytest.mark.parametrize("command,argvs", [
+    ("coproc kubectl delete node/w1", [["kubectl", "delete", "node/w1"]]),
+    ("coproc NAME { kubectl delete node/w1; }", [["kubectl", "delete", "node/w1"]]),
+    ("kubectl delete \\\nnode/w1", [["kubectl", "delete", "node/w1"]]),
+    ("kube\\\nctl delete node/w1", [["kubectl", "delete", "node/w1"]]),
+    ("echo 'a\\\nb'", [["echo", "a\\\nb"]]),  # inside single quotes it stays
+])
+def test_coproc_and_line_continuations(command, argvs):
+    assert _argvs(command) == argvs
+
+
+@pytest.mark.parametrize("command,argvs", [
+    ("find . -name x -exec rm {} \\; -print",                 # round 4: \; is a word
+     [["find", ".", "-name", "x", "-exec", "rm", "{}", ";", "-print"]]),
+    ("echo a\\;b \\| c", [["echo", "a;b", "|", "c"]]),
+    ("echo a; ls", [["echo", "a"], ["ls"]]),
+])
+def test_escaped_punctuation_is_a_literal_word(command, argvs):
+    assert _argvs(command) == argvs
+
+
+@pytest.mark.parametrize("command,inner", [
+    ("find . -exec kubectl delete node/w1 \\;", [("node/w1", "delete")]),
+    ("find . -execdir kubectl delete node/w1 {} +",  # + ends -exec only after {}
+     [("node/w1", "delete"), ("{}/*", "delete")]),
+    ("find m -name '*.yaml' -ok kubectl get pods \\; -print", [("pod/*", "get")]),
+])
+def test_find_exec_commands_become_intents(command, inner):
+    intents = intents_from_command(command)
+    assert intents[0].resource == "binary/find"
+    assert [(i.resource, i.action) for i in intents[1:]] == inner
+    assert "find -exec" in intents[1].metadata["wrappers"]
+
+
+@pytest.mark.parametrize("command", ["find . -exec kubectl get pods",
+                                     "find . -exec \\;"])
+def test_find_exec_without_terminator_or_command_is_rejected(command):
+    with pytest.raises(ShellRejected, match="find -exec"):
+        intents_from_command(command)
+
+
+def test_function_keyword_definition_is_rejected():
+    with pytest.raises(ShellRejected, match="function definition"):
+        split_compound("function f { kubectl delete node/w1; }; f")
+
+
+def test_a_delete_after_then_is_seen():
+    resources = [(i.resource, i.action) for i in
+                 intents_from_command("if true; then kubectl delete node/w1; fi")]
+    assert ("node/w1", "delete") in resources
+    assert all(not r.startswith("binary/then") for r, _ in resources)
+
+
+# --- split_segments / plain_binary (#55) ---------------------------------------------
+
+
+@pytest.mark.parametrize("command,segments", [
+    ('terraform plan 2>&1; echo "exit=$?"',
+     [("terraform plan 2>&1", ";"), (' echo "exit=$?"', "")]),
+    ("a && b || c | d |& e & f",
+     [("a ", "&&"), (" b ", "||"), (" c ", "|"), (" d ", "|&"), (" e ", "&"), (" f", "")]),
+    ('echo "$(a; b)" | x', [('echo "$(a; b)" ', "|"), (" x", "")]),
+    ("echo $(a | b) `c; d` ${x:-a;b}; z", [("echo $(a | b) `c; d` ${x:-a;b}", ";"), (" z", "")]),
+    ("ls &> /dev/null; x >| f", [("ls &> /dev/null", ";"), (" x >| f", "")]),
+    ("(cd x && make); z", [("(cd x && make)", ";"), (" z", "")]),
+    ("cat <(a | b) | c", [("cat <(a | b) ", "|"), (" c", "")]),
+    ("echo 'a;b' \"c|d\" e\\;f", [("echo 'a;b' \"c|d\" e\\;f", "")]),
+    ("echo hi # ; kubectl", [("echo hi # ; kubectl", "")]),
+    ("a\nb", [("a", "\n"), ("b", "")]),
+])
+def test_split_segments_splits_only_at_the_top_level(command, segments):
+    assert split_segments(command) == segments
+    assert "".join(t + s for t, s in segments) == command
+
+
+@pytest.mark.parametrize("command", ['echo "x', "echo 'x", "echo $(x", "a )"])
+def test_split_segments_gives_up_on_unbalanced_quoting(command):
+    assert split_segments(command) is None
+
+
+@pytest.mark.parametrize("segment,binary", [
+    ('echo "exit=$?"', "echo"),
+    (' tail -n "$N"', "tail"),
+    ('sudo rm -rf "$DIR"', "rm"),
+    ('then echo "$x"', "echo"),
+    ('file "$HOME/x"', "file"),
+    ('[ -f "$F" ]', "["),
+    ("A=$x B=${y:-z}", ""),
+    ('export X="$HOME"', ""),
+    ("local -r X=$Y", ""),
+    # round 1: an expansion that runs a command is never reduced or dropped
+    ('file "$(which kubectl)"', None),
+    ("TS=$(date +%s)", None),
+    ("echo `whoami`", None),
+    ("diff <(a) b", None),
+    ("echo $((1 + 2))", None),
+    # round 1: only args-only programs stand in as a bare name
+    ("find . -exec $C \\;", None),
+    ("watch $C", None),
+    ("ssh host $C", None),
+    ('trap "$C" EXIT', None),
+    ("builtin $C", None),
+    ('awk "$P"', None),
+    ('sed "$S" f', None),
+    ("./echo $X", None),
+    ("KUBECONFIG=$K", None),   # changes what a later kubectl talks to
+    ("export KUBECONFIG=$K", None),
+    ("declare -x AWS_PROFILE=$P", None),
+    ("readonly PATH=$P", None),
+    ("typeset TF_VAR_x=$X", None),
+    ("$K delete ns prod", None),
+    ('"$(which kubectl)" get pods', None),
+    ('eval "$X"', None),
+    ('bash -c "$X"', None),
+    ('python3 -c "$CODE"', None),
+    ('bash x.sh "$T"', None),
+    ('make "$TARGET"', None),
+    ("(cd $D && make)", None),
+])
+def test_plain_binary(segment, binary):
+    assert plain_binary(segment) == binary
+
+
+@pytest.mark.parametrize("segment,runs", [
+    ("echo \"'$(x)'\"", True),            # round 2: ' is literal inside "…"
+    ("echo \"it's `x`\"", True),
+    ("echo \"$(echo 'a\"b')\"", True),
+    ("echo '$(x)' \"'\"", False),
+    ("echo \"'\" '$(x)'", False),
+    ("echo \\$(x)", False),
+    ("diff <(a) b", True),
+    ("echo \"<(a)\"", False),
+])
+def test_runs_expansion_tracks_quotes(segment, runs):
+    from aegis_core.shell import runs_expansion
+    assert runs_expansion(segment) is runs
+
+
+@pytest.mark.parametrize("command,argvs", [
+    ("kubectl get ns # \\\nkubectl delete node/w1",
+     [["kubectl", "get", "ns"], ["kubectl", "delete", "node/w1"]]),
+    ("echo hi # a comment\nkubectl delete node/w1",
+     [["echo", "hi"], ["kubectl", "delete", "node/w1"]]),
+    ("echo a#b", [["echo", "a#b"]]),
+    ("kubectl get pods#x -A --as=admin", [["kubectl", "get", "pods#x", "-A", "--as=admin"]]),
+    ("echo '# not a comment'; ls", [["echo", "# not a comment"], ["ls"]]),
+])
+def test_a_comment_ends_at_the_newline(command, argvs):
+    assert _argvs(command) == argvs
+
+
+@pytest.mark.parametrize("command,argv", [
+    ("watch -n 5 kubectl get pods", ["kubectl", "get", "pods"]),
+    ("watch -x kubectl get pods", ["kubectl", "get", "pods"]),
+    ("setsid -f kubectl get pods", ["kubectl", "get", "pods"]),
+    ("stdbuf -oL -eL kubectl get pods", ["kubectl", "get", "pods"]),
+    ("ionice -c 3 kubectl get pods", ["kubectl", "get", "pods"]),
+    ("script -q -c 'kubectl get pods' /dev/null", ["kubectl", "get", "pods"]),
+    ("busybox sh -c 'kubectl get pods'", ["kubectl", "get", "pods"]),
+])
+def test_more_launchers_are_unwrapped(command, argv):
+    (intent,) = intents_from_command(command)
+    assert intent.resource == "pod/*"
+    assert intent.metadata.get("wrappers")
+
+
+@pytest.mark.parametrize("program", ["kube{,}ctl", "kubec?", "kube[c]tl", "k*"])
+def test_a_brace_or_glob_program_is_rejected(program):
+    with pytest.raises(ShellRejected, match="brace/glob"):
+        intents_from_command(f"{program} get pods")
+
+
+@pytest.mark.parametrize("line,found", [
+    ("cat <<EOF", (4, 9, False, "EOF", False)),
+    ("cat <<-'END' | sh", (4, 12, True, "END", True)),
+    ("echo '<<EOF'", None),
+    ('echo "<<EOF"', None),
+    ("echo hi # <<EOF", None),
+    ("cat <<< word", None),
+    ("cat <<'END DATA'", (4, 16, False, "END DATA", True)),   # round 3: one shell word
+    ('cat <<E"N D"\\ X | sh', (4, 15, False, "EN D X", True)),
+    ("cat <<'END", (4, 10, False, "", True)),                 # unclosed: cannot tell
+    ("cat <<$'EOF'", (4, 12, False, "", True)),               # round 4: $'…' not decoded
+    ('cat <<$"EOF"', (4, 12, False, "", True)),
+])
+def test_find_heredoc_only_sees_real_operators(line, found):
+    from aegis_core.shell import find_heredoc
+    assert find_heredoc(line) == found

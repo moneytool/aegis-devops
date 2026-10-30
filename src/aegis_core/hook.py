@@ -25,7 +25,23 @@ signature, degraded store) or the command cannot be analysed statically
 (``$(...)``, ``$VAR``, ``eval`` ...), the hook blocks only commands that
 involve infrastructure tooling -- one of the binaries Aegis has a parser
 for, or terraform/tofu -- and allows the rest: ``ls`` has nothing to do
-with a broken policy. The block message says what is wrong.
+with a broken policy. The block message says what is wrong. A compound
+command is judged part by part: ``terraform plan 2>&1; echo "exit=$?"``
+checks ``terraform plan`` and lets ``echo`` through. A part with an unknown
+argument passes only when its program treats arguments as data
+(``ARGS_ONLY_PROGRAMS`` in shell.py) or it only assigns a harmless
+variable; any other unknown part (an expansion that runs a command, an
+unknown program, ``find -exec``, ``export KUBECONFIG=$X``, …) is refused, by
+name, when the command names an infrastructure tool anywhere.
+
+**Code the command does not show.** A shell or interpreter reading code from
+a pipe, a here-string or a here-doc asks, unless a literal ``echo``/``printf``
+writes it (that text is then checked). A local shell script (``bash x.sh``,
+``sh < x.sh``, ``./x``, ``source x.sh``) is read, up to 64 KiB and without
+following what it sources, and its lines that name an infrastructure tool
+are checked as commands: a blocked line (or a block the lines reach
+together) blocks; a line that cannot be checked, or a script that is
+missing or unreadable, asks.
 
 **Replies.** A block is exit code 2 with the reason on stderr, which
 Claude Code, Codex, Copilot and VS Code all treat as "deny". Cursor is the
@@ -41,22 +57,65 @@ is a deny.
 from __future__ import annotations
 
 import contextlib
+import contextvars
+import functools
 import importlib.resources
 import io
 import json
 import os
 import re
 import shlex
+import stat
 import sys
+import threading
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from aegis_core import config as config_module
 from aegis_core.shell import (
+    _ASSIGNMENT_RE,
     _KNOWN_BINARIES,
+    _READER_NAME_RE,
+    _SHELLS,
+    ARGS_ONLY_PROGRAMS,
+    GLOB_REASON,
+    SHELL_OPTIONS_END,
+    UNKNOWN_ENV_NAME,
     ShellRejected,
+    _basename,
+    _c_string_at,
+    _env_change,
+    _eval_words_end,
+    _infra_env,
+    _interpreter,
+    _may_name_scope_variable,
+    _readers,
+    _shell_tokens,
+    _Token,
+    _unwrap_inner,
+    dequoted,
+    find_heredoc,
+    globbed_program_word,
+    globbed_word_in_unknown_bodies,
     intents_from_command,
+    interactive_rcfiles,
+    lex,
+    loose_argv,
+    loose_code_reader,
+    nested_commands,
+    nested_too_deep,
+    opaque_launcher_code,
+    plain_binary,
+    runs_expansion,
     script_runs_loosely,
+    shell_option,
+    split_segments,
+    stdin_feeders,
+    string_reader,
+    strip_comment,
+    strip_exec_builtin,
+    value_reading_scripts,
 )
 
 AGENTS = ("claude", "codex", "copilot", "cursor", "gemini", "opencode", "vscode")
@@ -82,12 +141,13 @@ _INFRA_WORD_RE = re.compile(
     + r")(?![\w.-])"
 )
 
-# A shell, eval or source fed code made at run time: `bash -c "$(cat x)"`,
-# `eval "$(…)"`, `source <(…)`, `sh <(curl …)`. Asked about, not denied:
+# A shell, interpreter, eval or source fed code made at run time: `bash -c
+# "$(cat x)"`, `eval "$(…)"`, `source <(…)`, `sh <(curl …)`, `bash < <(curl …)`,
+# `python3 <(curl …)`. Asked about, not denied:
 # `eval "$(pyenv init -)"` is an everyday line.
 _GENERATED_CODE_RE = re.compile(
-    r"(?:^|[;&|(]\s*|\s)((?:sudo\s+)?(?:(?:ba|z|da|k|a)?sh|eval|source|\.))"
-    r"(?:\s+-[A-Za-z]+)*\s+[\"']?(?:\$\(|`|<\()"
+    r"(?:^|[;&|(]\s*|\s)((?:sudo\s+)?(?:(?:ba|z|da|k|a)?sh|eval|source|\.|python[\d.]*|perl|ruby"
+    r"|node))(?:\s+-[A-Za-z]+)*\s+(?:\d*<\s*)?[\"']?(?:\$\(|`|<\()"
 )
 
 
@@ -124,6 +184,8 @@ class HookRequest:
 class HookVerdict:
     decision: str  # "allow" | "deny" | "ask"
     reason: str = ""
+    # a deny because (part of) the command could not be checked, not a policy BLOCK
+    unchecked: bool = False
 
 
 # --- reading the payload ---------------------------------------------------------
@@ -211,10 +273,18 @@ def find_opt_in_config(start: Path) -> Path | None:
 # --- deciding --------------------------------------------------------------------
 
 
+def _infra_text(text: str) -> str:
+    """``text`` with what the shell removes before it runs a word: line
+    continuations, quotes and backslashes (``kube''ctl``, ``"kube"ctl``,
+    ``kube\\ctl`` all run ``kubectl``)."""
+    return text.replace("\\\n", "").replace("'", "").replace('"', "").replace("\\", "")
+
+
 def mentions_infra(command: str) -> bool:
     """True when an infrastructure binary appears as a word anywhere in the
-    command text (used only when the command could not be parsed)."""
-    return bool(_INFRA_WORD_RE.search(command))
+    command text, also once quotes, backslashes and line continuations are
+    removed (used for code the parser cannot read)."""
+    return bool(_INFRA_WORD_RE.search(command) or _INFRA_WORD_RE.search(_infra_text(command)))
 
 
 def _is_gated(command: str) -> bool:
@@ -233,47 +303,2057 @@ def _is_gated(command: str) -> bool:
     return False
 
 
-def decide(command: str, config_dir: Path, extra_args: list[str] | None = None) -> HookVerdict:
-    """Runs ``aegis check command`` against ``config_dir`` and maps the
-    result to allow / deny / ask. Tool errors deny only gated commands."""
-    from aegis_core import cli  # local: cli imports this module
+# A local shell script is read up to this size; a bigger one asks.
+SCRIPT_SCAN_LIMIT = 64 * 1024
+# At most this many of its lines may name an infrastructure tool; more asks.
+SCRIPT_SCAN_MAX_LINES = 64
+_SHELL_SUFFIXES = (".sh", ".bash", ".zsh", ".ksh")
+# A change of directory: cd/pushd/popd however spelt (`\cd`, `"cd"`, `'cd'`);
+# the working-directory options of env and sudo are :func:`_launcher_chdir`.
+_CD_RE = re.compile(r"(?:^|[;&|(\n\s'\"])\\?['\"]?(?:cd|pushd|popd)['\"]?(?![\w.-])")
+_SUDO_VALUE_LONG = frozenset({"--user", "--group", "--prompt", "--host", "--role", "--type",
+                              "--command-timeout", "--other-user"})
 
+
+def _launcher_chdir(command: str) -> bool:
+    """Whether an ``env`` or ``sudo`` in ``command`` changes the directory:
+    env's own ``-C``/``--chdir`` (also in a cluster, ``-iC DIR``, ``-iCDIR``,
+    after ``-u NAME``, quoted, or inside ``-S STRING``) or sudo's ``-D``, not
+    ``make -C``. On the dequoted words; a launcher word that is the value of an
+    earlier one's option is not read again, so this is linear."""
+    tokens = _shell_tokens(command)
+    k = 0
+    while k < len(tokens):
+        kind, value, _s, _e = tokens[k]
+        name = _basename(value) if kind == "word" else ""
+        k += 1
+        if name not in ("env", "sudo"):
+            continue
+        while k < len(tokens) and tokens[k][0] == "word":
+            word = tokens[k][1]
+            if word == "--" or not word.startswith("-") and not (
+                    name == "env" and _ASSIGNMENT_RE.match(word)):
+                break  # the command (`sudo env -C …`: read as a launcher in turn)
+            k += 1
+            if word.startswith("--"):
+                key = word.partition("=")[0]
+                if key == "--chdir":
+                    return True
+                if key == "--split-string" and re.search(r"(?:^|\s)-\w*C|--chdir", word):
+                    return True
+                if "=" not in word and key in (("--unset", "--split-string") if name == "env"
+                                               else _SUDO_VALUE_LONG):
+                    k += 1
+                continue
+            if not word.startswith("-"):
+                continue  # env NAME=value
+            flags, values = ("i0v", "uCS") if name == "env" else ("EHnkKbAlvS", "ugpCDrtTUh")
+            for at, letter in enumerate(word[1:], start=2):
+                if letter in flags:
+                    continue
+                if letter not in values:
+                    break
+                if letter == ("C" if name == "env" else "D"):
+                    return True
+                attached = word[at:]
+                value = attached or (tokens[k][1] if k < len(tokens) else "")
+                k += 0 if attached else 1
+                if letter == "S" and name == "env" and re.search(r"(?:^|\s)-\w*C|--chdir",
+                                                                  value):
+                    return True
+                break
+    return False
+
+
+def _changes_directory(command: str) -> bool:
+    """A ``cd`` (raw or dequoted) or an ``env -C``/``sudo -D`` in ``command``."""
+    return bool(_CD_RE.search(command) or _CD_RE.search(dequoted(command))
+                or _launcher_chdir(command))
+
+
+def decide(command: str, config_dir: Path, extra_args: list[str] | None = None, *,
+           cwd: str | Path | None = None) -> HookVerdict:
+    """Runs ``aegis check command`` against ``config_dir`` and maps the
+    result to allow / deny / ask. Tool errors deny only gated commands.
+    ``cwd`` is where the command will run (relative script paths are read
+    from there; default: the current directory)."""
+    where = Path(cwd) if cwd else Path.cwd()
+    return _decide(command, config_dir, extra_args, where, scan=True)
+
+
+def _with_asks(verdict: HookVerdict, asks: list[str]) -> HookVerdict:
+    """An allow becomes the first pending ask; a deny or ask stands."""
+    if verdict.decision == "allow" and asks:
+        return HookVerdict("ask", asks[0])
+    return verdict
+
+
+# Past this size a command is not parsed (the checks are not all linear in it).
+_MAX_COMMAND_CHARS = 64 * 1024
+# At most this many pieces of piped shell code get a policy run of their own.
+_MAX_PIPED_CHECKS = 32
+
+
+# At most this many distinct scripts are read for one command; a script named
+# again is not read again.
+_MAX_SCRIPTS = 32
+_SCANNED: contextvars.ContextVar[dict | None] = contextvars.ContextVar("aegis_scanned",
+                                                                         default=None)
+
+
+def _decide(command: str, config_dir: Path, extra_args: list[str] | None, cwd: Path | None,
+            *, scan: bool) -> HookVerdict:
+    token = _SCANNED.set({"seen": {}, "count": 0, "piped": 0, "command": command})
+    try:
+        return _decide_once(command, config_dir, extra_args, cwd, scan=scan)
+    finally:
+        _SCANNED.reset(token)
+
+
+def _decide_once(command: str, config_dir: Path, extra_args: list[str] | None,
+                 cwd: Path | None, *, scan: bool) -> HookVerdict:
+    if len(command) > _MAX_COMMAND_CHARS:
+        reason = (f"aegis: this command is over {_MAX_COMMAND_CHARS // 1024} KiB, too long to "
+                  "check; split it up or put it in a script")
+        if mentions_infra(command):
+            return HookVerdict("deny", reason, unchecked=True)
+        return HookVerdict("ask", reason)
+    early = _stdin_redirects(command, config_dir, extra_args, cwd, scan=scan)
+    if isinstance(early, HookVerdict):
+        return early
+    pre = _precheck(command, config_dir, extra_args, cwd, scan=scan)
+    if isinstance(pre, HookVerdict):
+        return _with_asks(pre, early)
+    checkable, asks = pre
+    asks = [*early, *asks]
+    if not checkable.strip(" \t\n;&|"):
+        return _with_asks(HookVerdict("allow"), asks)
+    return _with_asks(_policy(checkable, config_dir, extra_args), asks)
+
+
+def _stdin_redirects(command: str, config_dir: Path, extra_args: list[str] | None,
+                     cwd: Path | None, *, scan: bool) -> HookVerdict | list[str]:
+    """Shells that read their commands from a redirect the parser does not tie
+    to them: a file redirected onto a group, subshell, ``if`` or loop (read
+    like ``sh < FILE``), and a copied or read-write descriptor (asked). Runs
+    before parsing, so a command the parser rejects (``( sh ) < x.sh``) is
+    covered too."""
+    asks: list[str] = []
+    if lex(command).unclosed and (_NAMES_READER_RE.search(command) or mentions_infra(command)):
+        # the shell would refuse it, or it ends inside a $(…) the lexer reads
+        # differently: the checks below cannot be trusted with it
+        asks.append("aegis: a quote, $(…) or backtick in this command is never closed, so "
+                    "where its words end cannot be told; it names a shell, interpreter or "
+                    "infrastructure tool, so it cannot be checked")
+    if nested_too_deep(command):
+        asks.append("aegis: this command nests commands (sh -c, eval, $(…), here-documents) "
+                    "deeper than the hook reads, or gives a shell more options than it reads, "
+                    "so what runs there cannot be checked")
+    for text in nested_commands(command):  # bash -c 'exec < x.sh; bash' too
+        asks += [ask for ask in _stdin_asks(text) if ask not in asks]
+    if scan:
+        # after a cd the files are not where the hook would read them (asked)
+        here = None if _changes_directory(command) else cwd
+        for path in dict.fromkeys(p for text in nested_commands(command)
+                                  for p in _group_stdin_files(text)):
+            verdict = _scan_script({"kind": "script", "interpreter": "sh", "path": path},
+                                   config_dir, extra_args, here, command=command)
+            if verdict is not None:
+                if verdict.decision == "deny":
+                    return verdict
+                asks.append(verdict.reason)
+    return asks
+
+
+# A shell or interpreter named anywhere in the raw text (for the unclosed-quote net).
+_NAMES_READER_RE = re.compile(rf"(?<![\w.-]){_READER_NAME_RE.pattern}(?![\w.-])")
+
+
+def _stdin_asks(command: str) -> list[str]:
+    """The asks of :func:`_stdin_redirects` for one command line."""
+    asks: list[str] = []
+    tokens = _shell_tokens(command)
+    readers = [tokens[k][2] for k in _readers(tokens)]
+    if readers and _FD_STDIN_RE.search(command):
+        asks.append("aegis: a shell or interpreter here may read its commands through a "
+                    "copied or read-write file descriptor (<&N, <>), which the hook cannot "
+                    "follow; use `bash FILE` or `sh < FILE`")
+    if any(kind == "generated" and string_reader(string)
+           for string, kind, _value in _c_strings_with_stdin(command)):
+        asks.append("aegis: a shell's -c string reads code from a process substitution or "
+                    "here-string, which the hook cannot check")
+    if readers and any(  # exec: a reader after it; a group or loop: a reader inside it
+            end <= readers[-1] if anchor < 0 else readers[0] < anchor
+            for kind, _value, end, anchor in _compound_stdins(command) if kind == "generated"):
+        asks.append("aegis: a shell or interpreter here may read its commands from a process "
+                    "substitution or here-string given to exec or to a group, loop or if, "
+                    "which the hook cannot check")
+    # a bare shell anywhere after the first piped compound (where the compound
+    # ends is not worked out: quotes, $(…) and nesting make it unreliable)
+    stage = _piped_compound(command)
+    if stage is not None and _bare_reader(command, stage, len(command)):
+        asks.append("aegis: a pipe feeds a group, loop or if that runs a shell or interpreter, "
+                    "which may read its commands from the pipe; the hook cannot check them")
+    return asks
+
+
+def _precheck(command: str, config_dir: Path, extra_args: list[str] | None,
+              cwd: Path | None, *, scan: bool,
+              rebuilt: bool = False) -> HookVerdict | tuple[str, list[str]]:
+    """Everything before the policy: a verdict when the command is decided
+    without it (an allow here means the policy has nothing to say), else the
+    command to check against the policy plus asks that stand if it allows."""
     escalate_scripts = "--escalate-scripts" in (extra_args or [])
     try:
-        intents = intents_from_command(command)
+        # pipeline stages too: `ssh h kubectl … | tail` asks like `ssh h kubectl …`
+        intents = intents_from_command(command, keep_pipeline_stages=True)
     except ShellRejected as exc:
+        if exc.reason == GLOB_REASON:
+            return _glob_denied(command, exc.command or "")
+        if rebuilt:  # cannot happen: every part of a rebuilt command parsed on its own
+            return _rejected(command, exc.reason, config_dir, extra_args, cwd,
+                             scan=scan, escalate_scripts=escalate_scripts)
+        part = _checkable_part(command, exc, config_dir, extra_args, cwd,
+                               scan=scan, escalate_scripts=escalate_scripts)
+        if isinstance(part, HookVerdict):
+            return part
+        checkable, asks = part
+        # the rebuilt command keeps every literal `cd DIR`, so it starts from cwd too
+        inner = _precheck(checkable, config_dir, extra_args, cwd, scan=scan, rebuilt=True)
+        if isinstance(inner, HookVerdict):
+            return _with_asks(inner, asks)
+        return inner[0], [*asks, *inner[1]]
+    except ValueError as exc:  # a known binary with an argv its parser rejects
+        return HookVerdict("deny", f"aegis: cannot parse this command: {exc}", unchecked=True)
+    word = globbed_program_word(command)  # in a nested line the parser did not split out
+    if word is not None:
+        return _glob_denied(command, word)
+    asks: list[str] = []
+    unknown = globbed_word_in_unknown_bodies(command)
+    if unknown is not None:
+        asks.append(_UNKNOWN_BODY_GLOB_ASK.format(word=unknown))
+    for intent in intents:
+        runs = intent.params.get("runs_code") if intent.provider == "shell" else None
+        if runs is not None and runs["kind"] == "inline" and mentions_infra(runs.get("code", "")):
+            return HookVerdict(
+                "deny",
+                f"aegis: cannot check code passed to {runs['interpreter']} on the command "
+                "line, and it names an infrastructure tool; run the infrastructure command on "
+                "its own",
+                unchecked=True,
+            )
+    state = _SCANNED.get()
+    feeders = stdin_feeders(command)
+    if not feeders and _piped_into_reader(command):
+        # a reader the parser does not see as one (`| $'\\x73h'`, `| { bash -s x; }`)
+        asks.append(_PIPED_READER_ASK)
+    for n_piped, (reader, feeder) in enumerate(feeders):
+        if state is not None:  # one budget per decision, nested piped code included
+            n_piped = state["piped"]
+            state["piped"] += 1
+        if n_piped >= _MAX_PIPED_CHECKS:
+            asks.append(f"aegis: more than {_MAX_PIPED_CHECKS} pieces of code are piped into a "
+                        "shell or interpreter, too many to check; run them as a script")
+            break
+        verdict = _piped_code(command, reader, feeder, config_dir, extra_args, cwd,
+                              rebuilt=rebuilt)
+        if verdict is not None:
+            if verdict.decision == "deny":
+                return verdict
+            asks.append(verdict.reason)
+    for intent in intents:
+        verdict = _hidden_infra_program(intent, cwd)
+        if verdict is not None:
+            asks.append(verdict.reason)
+    exported: dict[str, str] = {}  # export NAME=VALUE: seen by every later command
+    for intent in intents:
+        argv = (intent.params.get("argv") or []) if intent.provider == "shell" else []
+        if argv and _basename(argv[0]) in _EXPORTING_BUILTINS:
+            exported.update(tok.split("=", 1) for tok in argv[1:] if "=" in tok)
+            continue
+        verdict = _hidden_command(intent, exported)
+        if verdict is not None:
+            asks.append(verdict.reason)
+    if scan:
+        found = _scripts_with_directory(command, cwd)
+        starts: list[dict[str, str] | None] = [
+            _inherited_settings(i) for i in intents if i.provider == "shell"
+            and (i.params.get("runs_code") or {}).get("kind") == "script"]
+        if len(starts) != len(found):
+            starts = [None] * len(found)  # cannot pair them up: not known
+        for (runs, here), start in zip(found, starts, strict=True):
+            verdict = _scan_script(runs, config_dir, extra_args, here, command=command,
+                                   inherited=start, inherits=True)
+            if verdict is not None:
+                if verdict.decision == "deny":
+                    return verdict
+                asks.append(verdict.reason)
+        # bash --rcfile x.sh -i: an interactive shell sources its startup file;
+        # zsh -onoclobber x.sh: read as a value, the cluster leaves x.sh the script
+        here = None if _changes_directory(command) else cwd
+        for runs in [*interactive_rcfiles(command), *value_reading_scripts(command)]:
+            verdict = _scan_script(runs, config_dir, extra_args, here, command=command)
+            if verdict is not None:
+                if verdict.decision == "deny":
+                    return verdict
+                asks.append(verdict.reason)
+    return command, asks
+
+
+# Programs that take an infrastructure tool's *name* as an argument without
+# running it: documentation and name lookups, package managers and downloaders,
+# search, editors, process tools, linters, build tools, and file tools.
+#
+# This list answers a different question from shell.ARGS_ONLY_PROGRAMS, so do
+# not merge the two. ARGS_ONLY_PROGRAMS is "an unknown ($X) argument cannot
+# make this program run code or change what a later infra tool sees", which is
+# why sort (--compress-program), tee/cp/mv/ln (can overwrite ~/.kube/config)
+# and read (assigns KUBECONFIG) are left off it. Here the arguments are
+# literal and the only question is "does `prog kubectl` run kubectl?" -- for
+# sort, tee, cp, mv, ln and read it does not, so they belong here.
+_NAMES_WITHOUT_RUNNING = frozenset({
+    "man", "info", "which", "whereis", "whatis", "type", "hash", "command", "tldr", "help",
+    "apropos", "brew", "apt", "apt-get", "yum", "dnf", "apk", "pacman", "port", "snap",
+    "choco", "winget", "scoop", "asdf", "mise", "nix-shell", "nix-env", "rg", "ag", "ack",
+    "fd", "find", "locate", "tree", "less", "more", "vim", "vi", "nano", "code", "open",
+    "bat", "touch", "mkdir", "cd", "pushd", "popd", "ls", "rm", "cp", "mv", "ln", "tee",
+    "sort", "read", "install", "uninstall", "make", "pgrep", "pkill", "killall", "kill",
+    "lsof", "strings", "tflint", "checkov", "tfsec", "trivy", "curl", "wget", "aria2c",
+    "scp", "rsync", "git", "apt-cache", "dpkg", "rpm", "pip", "pip3", "pipx", "uv", "cargo",
+    "go", "gem", "complete", "compdef", "compgen",
+})
+
+
+def _glob_denied(command: str, word: str) -> HookVerdict:
+    """A program word the shell may expand (``kube{,}ctl``, ``k*``,
+    ``./scripts/*.sh``). Denied when it could expand to an infrastructure
+    tool's name, when it is a bare word (expanded against whatever files the
+    directory holds), or when the command names a tool; otherwise (a path
+    pattern such as ``./scripts/*.sh``) asked."""
+    reason = (f"aegis: cannot check this command statically ({GLOB_REASON}): the shell may "
+              "expand the program word into another program's name; spell the program out")
+    pattern = word.rsplit("/", 1)[-1]
+    alternatives = _brace_alternatives(pattern) if len(pattern) <= _MAX_GLOB_CHARS else None
+    # too many alternatives, or too much text, to try (`{a,b}{a,b}…`, a 64 KB
+    # pattern): it may become any name
+    if alternatives is not None and sum(map(len, alternatives)) > _MAX_GLOB_CHARS:
+        alternatives = None
+    could_be_infra = alternatives is None or any(
+        _glob_match(name, alternative)
+        for alternative in alternatives for name in INFRA_BINARIES)
+    if could_be_infra or "/" not in word or mentions_infra(command):
+        return HookVerdict("deny", reason, unchecked=True)
+    return HookVerdict("ask", reason)
+
+
+def _glob_match(name: str, pattern: str) -> bool:
+    """Whether the shell glob ``pattern`` (``*``, ``?``, ``[…]`` with ``!``/``^``
+    and ranges, ``\\`` escapes; an unclosed ``[`` is literal) matches ``name``.
+    The pattern comes from the command, so it is never compiled to a regex
+    (``fnmatch`` is quadratic on runs of ``[``): the set of positions reached in
+    the short ``name`` is carried along the pattern once, linear in it."""
+    n, size = len(pattern), len(name)
+    close, nearest = [-1] * (n + 2), -1  # the next ] at or after each index
+    for k in range(n - 1, -1, -1):
+        if pattern[k] == "]":
+            nearest = k
+        close[k] = nearest
+    states = {0}
+    p = 0
+    while p < n and states:
+        c = pattern[p]
+        if c == "*":
+            states = set(range(min(states), size + 1))
+            p += 1
+            continue
+        if c == "?":
+            states = {s + 1 for s in states if s < size}
+            p += 1
+            continue
+        if c == "[":
+            q = p + 1 + (p + 1 < n and pattern[p + 1] in "!^")
+            if pattern.startswith(("[:", "[.", "[="), q):
+                return True  # a POSIX class ([[:alpha:]]): taken as matching, to be safe
+            end = close[q + 1] if q + 1 <= n else -1  # a ] first in the class is a member
+            if end != -1:
+                members, negated = pattern[q:end], q > p + 1
+                states = {s + 1 for s in states
+                          if s < size and _in_class(name[s], members) != negated}
+                p = end + 1
+                continue
+        if c == "\\" and p + 1 < n:
+            p += 1
+            c = pattern[p]
+        states = {s + 1 for s in states if s < size and name[s] == c}
+        p += 1
+    return size in states
+
+
+def _in_class(ch: str, members: str) -> bool:
+    """Whether ``ch`` is in a glob bracket class's ``members`` (``a-z`` ranges)."""
+    k = 0
+    while k < len(members):
+        if k + 2 < len(members) and members[k + 1] == "-":
+            if members[k] <= ch <= members[k + 2]:
+                return True
+            k += 3
+            continue
+        if members[k] == ch:
+            return True
+        k += 1
+    return False
+
+
+_MAX_BRACE_ALTERNATIVES = 256
+# At most this much glob text (all brace alternatives together) is matched
+# against the tools' names; more counts as possibly a tool's name.
+_MAX_GLOB_CHARS = 16 * 1024
+
+
+def _brace_alternatives(pattern: str) -> list[str] | None:
+    """``a{b,c}d`` -> ``["abd", "acd"]`` (one level per brace pair, enough to
+    tell whether a program word could become a tool's name); ``None`` when
+    there would be more than :data:`_MAX_BRACE_ALTERNATIVES` (the expansion
+    grows exponentially with the number of brace pairs)."""
+    done: list[str] = []
+    todo = [pattern]
+    while todo:
+        current = todo.pop()
+        match = re.search(r"\{([^{}]*)\}", current)
+        if match is None:
+            done.append(current)
+        else:
+            head, tail = current[: match.start()], current[match.end():]
+            todo.extend(head + part + tail for part in match.group(1).split(","))
+        if len(done) + len(todo) > _MAX_BRACE_ALTERNATIVES:
+            return None
+    return done
+
+
+def _hidden_infra_program(intent, cwd: Path | None) -> HookVerdict | None:
+    """An unknown program with an infrastructure tool's name among its
+    arguments (``setpriv kubectl …``, ``chrt 0 kubectl …``, ``tmux new -d
+    'kubectl …'``: a launcher the parser does not unwrap) may run that tool
+    where its argv cannot be checked: asked. Not for programs that only take
+    a tool's name (:data:`_NAMES_WITHOUT_RUNNING`, ``command -v``) -- except
+    for the options with which they run a command (``rsync -e``, ``scp -o
+    ProxyCommand=``, ``nix-shell --run``) -- nor for URLs or a ``-d dir``
+    option value naming an existing directory. A path to a tool
+    (``/usr/local/bin/kubectl``, ``./kubectl``) counts as the tool."""
+    if intent.provider != "shell":
+        return None
+    argv = intent.params.get("argv") or []
+    if not argv:
+        return None
+    name = _basename(argv[0])
+    if name == "alias":  # alias kk=kubectl: a later `kk delete …` runs kubectl unchecked
+        for tok in argv[1:]:
+            alias, eq, value = tok.partition("=")
+            if eq and mentions_infra(value):
+                return HookVerdict(
+                    "ask", f"aegis: the alias {alias} runs an infrastructure tool under another "
+                    "name, which cannot be checked; run the tool by its own name")
+        return None
+    if name in ARGS_ONLY_PROGRAMS or name in INFRA_BINARIES:
+        return None
+    if name in _NAMES_WITHOUT_RUNNING and not _runs_a_program(name, argv[1:]):
+        # only the options that hand it a command to run are read
+        for option, value in _exec_option_values(name, argv[1:]):
+            if mentions_infra(value):
+                return HookVerdict(
+                    "ask", f"aegis: {name} {option} runs a command that names an "
+                    "infrastructure tool, which cannot be checked through it; run it on its own")
+        return None
+    after_option = False
+    for tok in argv[1:]:
+        if tok.startswith("-"):
+            if name in _CODE_ARG_PROGRAMS and mentions_infra(tok.partition("=")[2]):
+                return HookVerdict(  # sed --expression='…e', awk --source='…'
+                    "ask", f"aegis: {name} is given text that names an infrastructure tool, "
+                    f"which it may run where its arguments cannot be checked; run the tool "
+                    "on its own")
+            # a short option or a long one without "=" may take the next word
+            after_option = "=" not in tok
+            continue
+        value, after_option = after_option, False
+        words = tok.split()
+        if not words or "://" in tok:
+            continue
+        # /usr/local/bin/kubectl, ./kubectl, nix run nixpkgs#kubectl: still kubectl
+        tool = _basename(words[0]).rsplit("#", 1)[-1]
+        if tool not in INFRA_BINARIES:
+            if name in _CODE_ARG_PROGRAMS and len(words) > 1 and mentions_infra(tok):
+                # code or a command line in one argument (awk 'BEGIN{system("kubectl …")}',
+                # sed '1e kubectl …', tmux new 'cd x && kubectl …')
+                return HookVerdict(
+                    "ask", f"aegis: {name} is given text that names an infrastructure tool, "
+                    f"which it may run where its arguments cannot be checked; run the tool "
+                    "on its own")
+            continue
+        if len(words) == 1 and value and "/" not in tok and cwd is not None and (
+                cwd / tok).is_dir():
+            continue  # `-d terraform` with a terraform/ directory: an option value
+        return HookVerdict(
+            "ask", f"aegis: {name} may run {tool}, whose arguments cannot be checked "
+            f"through {name}; run {tool} on its own")
+    return None
+
+
+# Programs that run an argument as code or as a command line, so a tool named
+# inside that argument may run (`awk 'BEGIN{system("kubectl …")}'`, `sed '1e …'`).
+_CODE_ARG_PROGRAMS = frozenset({
+    "awk", "gawk", "mawk", "nawk", "busybox", "sed", "gsed", "tmux", "screen", "expect",
+    "parallel", "watchexec", "entr", "nodemon", "dtach", "abduco", "xterm", "flock",
+    "unshare", "chroot", "su", "runuser", "nsenter", "firejail", "bwrap", "systemd-run",
+    "emacs",
+})
+
+# Options of exempt programs whose value is a command they run.
+_EXEC_OPTIONS = {
+    "rsync": ("-e", "--rsh"),
+    "scp": ("-o", "-S"),
+    "nix-shell": ("--run", "--command"),
+    "fd": ("-x", "-X", "--exec", "--exec-batch"),
+    "hash": ("-p",),  # hash -p /usr/bin/kubectl kk: kk now runs kubectl
+    "rg": ("--pre",),
+    "vim": ("-c", "--cmd"),
+    "vi": ("-c", "--cmd"),
+}
+
+# Subcommands of exempt programs that build and run a program with the
+# remaining words as its arguments (``cargo run -- kubectl delete …``): there
+# the words are read like any unknown program's. The subcommands that run a
+# command directly (``uv run``, ``pipx run``, ``mise exec`` …) are unwrapped
+# by the shell parser instead, so the command itself is checked.
+_PROGRAM_RUNNING_SUBCOMMANDS = {
+    "cargo": frozenset({"run", "r"}),
+    "go": frozenset({"run"}),
+    "uv": frozenset({"run", "tool"}),
+    "pipx": frozenset({"run"}),
+    "mise": frozenset({"exec", "x"}),
+    "asdf": frozenset({"exec"}),
+    "gem": frozenset({"exec"}),
+    "brew": frozenset({"bundle"}),
+}
+
+
+# Options of those programs that take a value before the subcommand.
+_GLOBAL_VALUED_OPTIONS = {
+    "cargo": frozenset({"--color", "--config", "-Z", "-C", "--manifest-path"}),
+    "go": frozenset({"-C"}),
+    "uv": frozenset({"--directory", "--project", "--config-file", "--cache-dir", "--color"}),
+    "mise": frozenset({"-C", "--cd", "-E", "--env", "-j", "--jobs"}),
+}
+
+
+def _runs_a_program(name: str, args: list[str]) -> bool:
+    """Whether ``name args…`` is a subcommand of an exempt program that runs a
+    program (:data:`_PROGRAM_RUNNING_SUBCOMMANDS`); its first non-option word
+    decides."""
+    subcommands = _PROGRAM_RUNNING_SUBCOMMANDS.get(name)
+    if not subcommands:
+        return False
+    valued = _GLOBAL_VALUED_OPTIONS.get(name, frozenset())
+    i = 0
+    while i < len(args) and (args[i].startswith(("-", "+"))):  # cargo +nightly, go -C dir
+        i += 2 if args[i] in valued else 1
+    return i < len(args) and args[i] in subcommands
+
+
+# Environment variables whose value is a command (or a script) that the program
+# run, or a shell it starts, runs: git's ssh, pager and editors, and the file
+# bash/sh source before a non-interactive command.
+_COMMAND_ENV_VARS = frozenset({
+    "GIT_SSH_COMMAND", "GIT_SSH", "GIT_PAGER", "PAGER", "GIT_EDITOR", "EDITOR", "VISUAL",
+    "GIT_SEQUENCE_EDITOR", "GIT_EXTERNAL_DIFF", "GIT_ASKPASS", "SSH_ASKPASS", "MANPAGER",
+    "LESSOPEN", "LESSCLOSE", "GIT_PROXY_COMMAND", "PROMPT_COMMAND",
+})
+_SOURCED_ENV_VARS = frozenset({"BASH_ENV", "ENV"})
+
+
+_EXPORTING_BUILTINS = frozenset({"export", "declare", "typeset", "local", "readonly"})
+
+
+def _hidden_command(intent, exported: dict[str, str] | None = None) -> HookVerdict | None:
+    """A command a program runs from its configuration rather than its argv:
+    git's command-valued settings and subcommands (``git -c alias.x='!cmd'``,
+    ``git bisect run cmd``, see :func:`aegis_core.shell.git_runs`) and an
+    environment variable that names a command (``GIT_SSH_COMMAND=cmd``,
+    ``EDITOR=cmd``). Asked when that command names an infrastructure tool or
+    cannot be read; ``exported`` holds the ``export NAME=VALUE`` settings made
+    earlier in the command. ``BASH_ENV``/``ENV`` (a file bash or sh sources first)
+    always asks: the hook does not read that file."""
+    env = {**(exported or {}), **(intent.metadata.get("env_assignments") or {})}
+    for var in sorted(_SOURCED_ENV_VARS & env.keys()):
+        if env[var]:
+            return HookVerdict(
+                "ask", f"aegis: {var}={env[var]} makes the shell source a file first, which "
+                "the hook does not read; run the command without it")
+    commands = list(intent.metadata.get("runs_commands") or [])
+    commands += [env[var] for var in sorted(_COMMAND_ENV_VARS & env.keys())]
+    for text in commands:
+        if text is None or mentions_infra(text):
+            return HookVerdict(
+                "ask", "aegis: a command this one runs from its configuration (a git "
+                "alias, hook-like setting or subcommand such as bisect run, or an "
+                "editor/pager/ssh variable) names an infrastructure tool or cannot be read, "
+                "so it cannot be checked; run the infrastructure command on its own")
+    return None
+
+
+def _exec_option_values(name: str, args: list[str]) -> list[tuple[str, str]]:
+    """``(option, value)`` for the options of ``name`` that take a command:
+    ``rsync -e CMD`` / ``--rsh=CMD``, ``scp -o ProxyCommand=CMD`` / ``-S CMD``,
+    ``nix-shell --run CMD`` / ``--command CMD``."""
+    options = _EXEC_OPTIONS.get(name, ())
+    found: list[tuple[str, str]] = []
+    if name in ("vim", "vi"):
+        found += [("+", tok[1:]) for tok in args if tok.startswith("+")]  # vim +'!cmd'
+    for i, tok in enumerate(args):
+        key, eq, glued = tok.partition("=")
+        if key in options and key.startswith("--") and eq:
+            found.append((key, glued))
+        elif tok in options and i + 1 < len(args):
+            found.append((tok, args[i + 1]))
+        elif len(tok) > 2 and tok[:2] in options and not tok.startswith("--"):
+            found.append((tok[:2], tok[2:]))  # -oProxyCommand=…
+    return found
+
+
+def _scripts_with_directory(command: str, cwd: Path | None) -> list[tuple[dict, Path | None]]:
+    """Every script a parsable command runs, with the directory it is run from:
+    ``cwd``, moved by each literal ``cd DIR`` in front of it. A ``cd`` that runs
+    in the background or in a pipeline (a subshell), one to a computed place,
+    ``env -C``/``sudo -D`` and a ``cd`` inside ``sh -c`` make it unknown."""
+    found: list[tuple[dict, Path | None]] = []
+    here = cwd
+    segments = split_segments(command) or [(command, "")]
+    previous_sep = ""
+    for text, sep in segments:
+        subshell = sep in ("&", "|", "|&") or previous_sep in ("|", "|&")
+        previous_sep = sep
+        loose = loose_argv(text) or []
+        if loose and _basename(loose[0]) in ("cd", "pushd", "popd"):
+            here = None if subshell else _cd(here, loose)
+            continue
+        try:
+            intents = intents_from_command(text)
+        except ValueError:
+            continue
+        words = set(dequoted(text).split())
+        chdir = bool(words & {"-C", "--chdir", "-D"}) or _launcher_chdir(text)
+        for intent in intents:
+            if intent.provider != "shell":
+                continue
+            argv = intent.params.get("argv") or []
+            if argv and _basename(argv[0]) in ("cd", "pushd", "popd"):
+                here = None  # a cd inside sh -c "…"
+            runs = intent.params.get("runs_code")
+            if runs is not None and runs["kind"] == "script":
+                found.append((runs, None if chdir else here))
+    return found
+
+
+def _cdpath_changed() -> bool:
+    """Whether the whole command the hook was given names CDPATH (``CDPATH=…``,
+    ``export CDPATH``), so a ``cd`` may search other directories."""
+    state = _SCANNED.get()
+    if state is None:
+        return False
+    if "cdpath" not in state:  # once per command: a cd per part would rescan it each time
+        # also spelt with quotes (CDP"ATH"=…) or behind an option letter (printf -vCDPATH)
+        state["cdpath"] = "CDPATH" in state["command"] or "CDPATH" in dequoted(state["command"])
+    return state["cdpath"]
+
+
+def _cd(here: Path | None, argv: list[str]) -> Path | None:
+    """The directory after ``cd DIR``; ``None`` when it cannot be known."""
+    args = [a for a in argv[1:] if a not in ("-P", "-L", "-e", "--")]
+    if here is None or _basename(argv[0]) == "popd" or len(args) > 1:
+        return None
+    if not args:  # cd: to HOME, unknown when the command changes it
+        return Path.home() if _basename(argv[0]) == "cd" and not _home_changed("") else None
+    target = args[0]
+    if target.startswith("-") or any(ch in target for ch in "$`") or (
+            target.startswith("~") and _home_changed("")):
+        return None
+    if not target.startswith(("/", "./", "../", "~")) and target not in (".", "..") and (
+            os.environ.get("CDPATH") or _cdpath_changed()):
+        return None  # cd searches CDPATH first
+    try:
+        path = Path(target).expanduser()
+    except RuntimeError:  # ~user / ~+ the hook cannot resolve
+        return None
+    return path if path.is_absolute() else here / path
+
+
+def _literal_code(argv: list[str]) -> str | None:
+    """The text a literal ``echo``/``printf`` writes, when that is certain:
+    no ``echo -e``, no backslash escapes other than ``printf``'s ``\\n``/``\\t``,
+    no ``printf`` format directives or extra arguments. ``None`` otherwise."""
+    name, args = _basename(argv[0]), list(argv[1:])
+    if name == "echo":
+        while args and re.fullmatch(r"-[neE]+", args[0]):
+            if "e" in args[0]:
+                return None
+            args = args[1:]
+        text = " ".join(args)
+        return None if "\\" in text else text
+    if name == "printf":
+        if len(args) != 1 or args[0].startswith("-") or "%" in args[0]:
+            return None
+        text = args[0].replace("\\n", "\n").replace("\\t", "\t")
+        return None if "\\" in text else text
+    return None
+
+
+def _piped_code(command: str, reader: list[str], feeder: list[str] | None, config_dir: Path,
+                extra_args: list[str] | None, cwd: Path | None, *,
+                rebuilt: bool) -> HookVerdict | None:
+    """A shell or interpreter reading its code from a pipe (issue #56). Deny
+    when the command names an infrastructure tool; else read the code when a
+    literal ``echo``/``printf`` writes it (code for a shell is checked like a
+    command); ask when the code comes from anything else."""
+    interpreter = _basename(reader[0])
+    if mentions_infra(command):
+        return HookVerdict(
+            "deny",
+            f"aegis: cannot check code passed to {interpreter} through a pipe, and it names an "
+            "infrastructure tool; run the infrastructure command on its own",
+            unchecked=True,
+        )
+    if feeder is None:
+        return None  # the reader only writes into a pipe
+    producer = _basename(feeder[0])
+    # In a rebuilt command an echo may stand for `echo "$X"`, so it is not literal.
+    code = None if rebuilt else _literal_code(feeder)
+    if code is None:
+        return HookVerdict(
+            "ask", f"aegis: {interpreter} runs code piped from {producer}, which the hook "
+            "cannot read; save it to a file and run that, so its commands are checked")
+    if mentions_infra(code):
+        return HookVerdict(
+            "deny",
+            f"aegis: cannot check code passed to {interpreter} through a pipe, and it names an "
+            "infrastructure tool; run the infrastructure command on its own",
+            unchecked=True,
+        )
+    if interpreter not in _SHELLS:
+        return None
+    # scripts the code runs are read too, under the same per-command cap; after
+    # a cd in the outer command their directory is not known here
+    decide = _decide_once if _SCANNED.get() is not None else _decide
+    state = _SCANNED.get()
+    outer = state["command"] if state is not None else ""
+    here = None if _changes_directory(command) or _changes_directory(outer) else cwd
+    verdict = decide(code, config_dir, extra_args, here, scan=True)
+    if verdict.decision == "allow":
+        return None
+    reason = verdict.reason.removeprefix("aegis: ")
+    if verdict.decision == "deny" and not verdict.unchecked:
+        return HookVerdict("deny", f"aegis: code piped into {interpreter}: {reason}")
+    return HookVerdict("ask", f"aegis: code piped into {interpreter}: {reason}")
+
+
+_PIPED_READER_ASK = ("aegis: a shell or interpreter reads code from a pipe in a form the hook "
+                     "cannot follow, so the code cannot be checked; save it to a file and run "
+                     "that")
+
+
+_UNKNOWN_BODY_GLOB_ASK = ("aegis: a here-document whose reader the hook cannot tell may run "
+                          "{word!r}, which the shell may expand into another program's name; "
+                          "spell the program out")
+
+
+def _rejected(command: str, reason: str, config_dir: Path, extra_args: list[str] | None,
+              cwd: Path | None, *, scan: bool, escalate_scripts: bool) -> HookVerdict:
+    """A command (or a part of it) that cannot be parsed, judged as a whole:
+    deny when it names an infrastructure tool, ask for code generated at run
+    time or piped from a here-document or another program, check the local
+    shell scripts it names, else allow."""
+    word = globbed_program_word(command)
+    if word is not None:
+        return _glob_denied(command, word)
+    if mentions_infra(command):
+        return HookVerdict(
+            "deny",
+            f"aegis: cannot check this command statically ({reason}); "
+            "run the infrastructure command on its own, without shell expansion",
+            unchecked=True,
+        )
+    word = globbed_word_in_unknown_bodies(command)
+    if word is not None:
+        return HookVerdict("ask", _UNKNOWN_BODY_GLOB_ASK.format(word=word))
+    generated = _GENERATED_CODE_RE.search(command)
+    if generated:
+        return HookVerdict(
+            "ask",
+            f"aegis: {generated.group(1)} runs code that is only produced when the command "
+            "runs, so it cannot be checked; run the commands directly instead",
+        )
+    producer = loose_code_reader(command)
+    if producer is not None:
+        return HookVerdict(
+            "ask", f"aegis: a shell or interpreter runs code from {producer}, which the hook "
+            "cannot read; save it to a file and run that, so its commands are checked")
+    if _piped_into_reader(command):
+        return HookVerdict("ask", _PIPED_READER_ASK)
+    scripts = script_runs_loosely(command)
+    if scan:
+        here = None if _changes_directory(command) else cwd
+        for runs in scripts:
+            verdict = _scan_script(runs, config_dir, extra_args, here, command=command)
+            if verdict is not None:
+                return verdict
+    hidden = opaque_launcher_code(command)
+    if hidden is not None:
+        return HookVerdict(
+            "ask", f"aegis: {hidden} runs under a launcher whose options the hook cannot read "
+            "(env, sudo, …), so what it runs cannot be checked; drop the unknown options")
+    if escalate_scripts and scripts:
+        return HookVerdict(
+            "ask", "aegis: this runs a local script, which the hook cannot read "
+            "(--escalate-scripts)")
+    return HookVerdict("allow")
+
+
+def _checkable_part(command: str, exc: ShellRejected, config_dir: Path,
+                    extra_args: list[str] | None, cwd: Path | None, *, scan: bool,
+                    escalate_scripts: bool) -> HookVerdict | tuple[str, list[str]]:
+    """For a command that cannot be parsed as a whole (issue #55): judges it
+    part by part (``;``, ``&&``, ``||``, ``|``, newline). A part that cannot be
+    checked and names an infrastructure tool is a deny that names it. A part
+    whose program only reads its arguments as data (``echo "exit=$?"``,
+    ``tail -n "$N"``; :func:`plain_binary`) stands in as that bare program; one
+    that only assigns, or sources a local script (read like ``bash x.sh``),
+    drops out. Returns the command rebuilt from the parts that can be checked,
+    plus pending asks -- or a verdict, when a part is unknown (it runs an
+    expansion, ``$K …``, ``eval …``, ``find -exec``, ``ssh``, …): deny when the
+    command names an infrastructure tool anywhere, else the whole-command rules
+    of :func:`_rejected`."""
+    word = globbed_program_word(command)  # also in eval words, -c strings, bodies
+    if word is not None:
+        return _glob_denied(command, word)
+    # a here-doc's body lines are data, not commands: judged as a whole, as before
+    segments = None if "<<" in command else split_segments(command)
+    if not segments:
+        return _rejected(command, exc.reason, config_dir, extra_args, cwd,
+                         scan=scan, escalate_scripts=escalate_scripts)
+    kept: list[tuple[str, str]] = []
+    asks: list[str] = []
+    unknown = globbed_word_in_unknown_bodies(command)
+    if unknown is not None:
+        asks.append(_UNKNOWN_BODY_GLOB_ASK.format(word=unknown))
+    opaque: tuple[str, str] | None = None
+    # a script run anywhere in the command, also inside a part that drops out
+    # (`OUT=$(bash x.sh)`) or cannot be split out (`for …; do ./x.sh "$i"; done`)
+    loose_scripts = script_runs_loosely(command)
+    if scan:
+        start = None if _changes_directory(command) else cwd
+        for runs in loose_scripts:
+            verdict = _scan_script(runs, config_dir, extra_args, start, command=command)
+            if verdict is not None:
+                if verdict.decision == "deny":
+                    return verdict
+                asks.append(verdict.reason)
+    if escalate_scripts and loose_scripts:
+        asks.append("aegis: this runs a local script, which the hook cannot read "
+                    "(--escalate-scripts)")
+    if _piped_into_reader(command):  # the split below may not see it (`$'a\\'b'`)
+        asks.append(_PIPED_READER_ASK)
+    here = cwd
+    previous_sep = ""
+    # whether a part after each one names an infrastructure tool: one sweep, not one
+    # scan of the rest per part (`source env.sh; ` a thousand times stays linear)
+    infra_after = [False] * len(segments)
+    scripts_after = [False] * len(segments)  # a script run or file sourced later
+    for k in range(len(segments) - 2, -1, -1):
+        later = segments[k + 1][0]
+        infra_after[k] = infra_after[k + 1] or mentions_infra(later)
+        scripts_after[k] = scripts_after[k + 1] or bool(
+            script_runs_loosely(later) or _sourced_script(later))
+    environments: dict[tuple[str, str], dict[str, str] | None | bool] = {}  # per file, dir
+    sourced_runs: list[tuple[dict, Path | None]] = []
+    for index, (text, sep) in enumerate(segments):
+        loose = loose_argv(text)
+        if loose and _basename(loose[0]) in ("cd", "pushd", "popd"):
+            subshell = sep in ("&", "|", "|&") or previous_sep in ("|", "|&")
+            here = None if subshell else _cd(here, loose)
+        previous_sep = sep
+        try:
+            intents_from_command(text)
+        except ShellRejected as seg_exc:
+            reason = seg_exc.reason
+            if reason == GLOB_REASON:
+                return _glob_denied(command, seg_exc.command or "")
+        except ValueError:  # a parser error: kept, so the full check reports it
+            kept.append((text, sep))
+            continue
+        else:
+            kept.append((text, sep))
+            continue
+        shown = text.strip()
+        if mentions_infra(text):
+            return HookVerdict(
+                "deny",
+                f"aegis: cannot check this command statically ({reason}) in {shown!r}; "
+                "run the infrastructure command on its own, without shell expansion",
+                unchecked=True,
+            )
+        sourced = None if runs_expansion(text) else _sourced_script(text)
+        if sourced is not None and sourced["path"] in _STDIN_PATHS:
+            # source /dev/stdin: code from the pipe or here-document before it
+            if mentions_infra(command):
+                return HookVerdict(
+                    "deny", f"aegis: cannot check the code {shown!r} reads from standard "
+                    "input, and the command names an infrastructure tool; run the "
+                    "infrastructure command on its own", unchecked=True)
+            asks.append(f"aegis: {shown!r} runs code from standard input, which the hook "
+                        "cannot check")
+            continue
+        if sourced is not None:
+            verdict = _scan_script(sourced, config_dir, extra_args, here,
+                                   command=command) if scan else None
+            if verdict is not None and verdict.decision == "deny":
+                return verdict
+            if verdict is not None:
+                asks.append(verdict.reason)
+            elif escalate_scripts:
+                asks.append("aegis: this runs a local script, which the hook cannot read "
+                            "(--escalate-scripts)")
+            # what the file starts with is known once the whole command is parsed below
+            sourced_runs.append((sourced, here))
+            kept.append((f"{_SOURCE_MARK}{len(sourced_runs) - 1}", sep))
+            # the sourced file runs in this shell: what it sets reaches the parts after it
+            if infra_after[index] or scripts_after[index]:
+                key = (sourced["path"], str(here))
+                if key not in environments:
+                    # past the script limit an unread file leaves the environment unknown
+                    environments[key] = _sourced_environment(sourced, here, command) if (
+                        scan and len(environments) < _MAX_SCRIPTS) else None
+                values = environments[key]
+                if values is False and verdict is not None:
+                    # not read at all (not a regular file, missing, too big): as the scan says
+                    return HookVerdict("ask", verdict.reason)
+                if not isinstance(values, dict) and not infra_after[index]:
+                    # only scripts follow: they start with an environment not known
+                    kept.append((f"unset {UNKNOWN_ENV_NAME}", sep))
+                    continue
+                if not isinstance(values, dict):
+                    return HookVerdict(
+                        "deny",
+                        f"aegis: cannot check this command statically ({shown!r} may change "
+                        "the environment, such as the account, cluster or directory, of the "
+                        "infrastructure command after it); run the infrastructure command on "
+                        "its own",
+                        unchecked=True,
+                    )
+                if values:
+                    kept.append(("export " + " ".join(
+                        f"{k}={shlex.quote(v)}" for k, v in values.items()), sep))
+            continue
+        binary = plain_binary(text)
+        if binary is None:
+            opaque = opaque or (shown, reason)
+            continue
+        if binary in ("cd", "pushd"):
+            kept.append(("cd -", sep))  # a cd to a place only known at run time
+        elif binary:
+            kept.append((shlex.quote(binary), sep))
+    if opaque is not None:
+        if scan and not mentions_infra(command):
+            # an assignment the hook cannot follow (`HELM_NAMESPACE=prod; source x.sh`):
+            # the scripts the command runs start with an environment not known
+            for runs, here_of in [*((r, None if _changes_directory(command) else cwd)
+                                    for r in loose_scripts), *sourced_runs]:
+                verdict = _scan_script(runs, config_dir, extra_args, here_of, command=command,
+                                       inherited=None, inherits=True)
+                if verdict is not None:
+                    if verdict.decision == "deny":
+                        return verdict
+                    asks.append(verdict.reason)
         if mentions_infra(command):
             return HookVerdict(
                 "deny",
-                f"aegis: cannot check this command statically ({exc.reason}); "
-                "run the infrastructure command on its own, without shell expansion",
+                f"aegis: cannot check this command statically ({opaque[1]}) in {opaque[0]!r}, "
+                "and the command names an infrastructure tool; run the infrastructure command "
+                "on its own, without shell expansion",
+                unchecked=True,
             )
-        generated = _GENERATED_CODE_RE.search(command)
-        if generated:
-            return HookVerdict(
-                "ask",
-                f"aegis: {generated.group(1)} runs code that is only produced when the command "
-                "runs, so it cannot be checked; run the commands directly instead",
-            )
-        if escalate_scripts and script_runs_loosely(command):
-            return HookVerdict(
-                "ask", "aegis: this runs a local script, which the hook cannot read "
-                "(--escalate-scripts)")
-        return HookVerdict("allow")
-    except ValueError as exc:  # a known binary with an argv its parser rejects
-        return HookVerdict("deny", f"aegis: cannot parse this command: {exc}")
-    for intent in intents:
-        runs = intent.params.get("runs_code") if intent.provider == "shell" else None
-        if runs is None:
+        return _with_asks(
+            _rejected(command, exc.reason, config_dir, extra_args, cwd,
+                      scan=scan, escalate_scripts=escalate_scripts),
+            asks)
+    if scan and sourced_runs:
+        verdict = _sourced_with_environment(kept, sourced_runs, config_dir, extra_args,
+                                            command)
+        if verdict is not None:
+            if verdict.decision == "deny":
+                return verdict
+            asks.append(verdict.reason)
+    kept = [(text, sep) for text, sep in kept if not text.startswith(_SOURCE_MARK)]
+    # a dropped part takes its separator with it; the last kept part loses its own
+    rebuilt = "".join(text + sep for text, sep in kept[:-1])
+    if kept:
+        last, last_sep = kept[-1]
+        rebuilt += last + (last_sep if last_sep == "&" else "")
+    return rebuilt, asks
+
+
+# Lines a sourced file may hold and still leave the environment known.
+_SOURCED_HARMLESS = frozenset({"echo", ":", "true", "printf"})
+
+
+def _read_regular(file: Path, limit: int) -> bytes | None:
+    """Up to ``limit`` bytes of ``file`` when it is a regular file; ``None``
+    for anything else (a pipe, ``/dev/fd/N``, ``/dev/stdin``, a device, a
+    socket or a directory), which is never opened in a way that can block:
+    checked before it is opened, opened without blocking, and checked again on
+    the open descriptor in case it was swapped in between. Raises
+    :class:`OSError` when it cannot be read."""
+    if not stat.S_ISREG(os.stat(file).st_mode):
+        return None
+    fd = os.open(file, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0))
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        chunks: list[bytes] = []
+        size = 0
+        while size < limit:
+            chunk = os.read(fd, limit - size)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
+def _sourced_environment(runs: dict, cwd: Path | None,
+                         command: str) -> dict[str, str] | None | bool:
+    """The literal settings a sourced file (``source env.sh``) makes to the
+    variables that pick an infrastructure tool's account, cluster or program
+    (``export AWS_PROFILE=prod``, ``KUBECONFIG=…``), in order; ``None`` when
+    it may change the environment in any other way (``cd``, ``unset``, a
+    function or alias, ``set -a``, a computed value, another program or
+    sourced file, control flow, a line the hook cannot read); ``False`` when
+    it was not read at all (its name is computed, it is missing, not a regular
+    file, unreadable, too big or written by the command). Only comments, blank
+    lines, ``echo``/``printf``/``:``/``true`` and such assignments are
+    understood."""
+    path = _known_variables(runs.get("path", "") or "", command)
+    if not path or any(ch in path for ch in "$`") or (path.startswith("~")
+                                                     and _home_changed(command)):
+        return False
+    try:
+        file = Path(path).expanduser()
+    except RuntimeError:
+        return False
+    if not file.is_absolute():
+        if cwd is None:
+            return False
+        file = cwd / file
+    if _written_by_command(file, command, cwd):
+        return False
+    try:
+        data = _read_regular(file, SCRIPT_SCAN_LIMIT + 1)
+    except OSError:
+        return False
+    if data is None or len(data) > SCRIPT_SCAN_LIMIT or b"\0" in data:
+        return False
+    values: dict[str, str] = {}
+    for line in data.decode("utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
             continue
-        hidden = runs.get("code", "") if runs["kind"] == "inline" else command
-        if runs["kind"] in ("inline", "stdin") and mentions_infra(hidden):
-            how = "on the command line" if runs["kind"] == "inline" else "through a pipe"
+        if any(ch in line for ch in "$`\\<>(){}|&!*?[]~"):
+            return None  # an expansion, redirection, group, glob or continuation
+        segments = split_segments(line)
+        if not segments:
+            return None
+        for text, sep in segments:
+            if sep not in ("", ";") or _quoted_name(text):
+                return None
+            try:
+                words = shlex.split(text, comments=True)
+            except ValueError:
+                return None
+            if not words:
+                continue
+            if words[0] in _SOURCED_HARMLESS:
+                if words[0] == "printf" and _env_change(words, {}) is not None:
+                    return None  # printf -v NAME / -vNAME assigns
+                continue
+            assigns = all(_ASSIGNMENT_RE.match(w) for w in words)
+            env = dict(w.partition("=")[::2] for w in words) if assigns else {}
+            if not assigns and words[0] not in ("export", "declare", "typeset", "readonly"):
+                return None
+            change = _env_change([] if assigns else words, env)
+            if change is None:
+                continue
+            found, unsure = change
+            if unsure:
+                return None
+            values.update(found)
+    return values
+
+
+# A stand-in for a sourced file in the command parsed to learn what it starts with.
+_SOURCE_MARK = ": aegis-sourced-"
+
+
+def _sourced_with_environment(kept: list[tuple[str, str]],
+                              sourced_runs: list[tuple[dict, Path | None]],
+                              config_dir: Path, extra_args: list[str] | None,
+                              command: str) -> HookVerdict | None:
+    """Reads each sourced file again with the settings of the watched variables
+    made before it (``export HELM_NAMESPACE=prod; source x.sh``), from one parse
+    of the command with a stand-in where each file is sourced; the first deny,
+    else the first ask."""
+    probe = "".join(text + sep for text, sep in kept)
+    try:
+        intents = intents_from_command(probe)
+    except ValueError:  # also ShellRejected: an earlier change cannot be followed
+        intents = None
+    starts: dict[int, dict[str, str]] = {}
+    for intent in intents or []:
+        argv = intent.params.get("argv") or [] if intent.provider == "shell" else []
+        if len(argv) == 2 and argv[0] == ":" and argv[1].startswith("aegis-sourced-"):
+            starts[int(argv[1].rsplit("-", 1)[1])] = _inherited_settings(intent)
+    first_ask: HookVerdict | None = None
+    for n, (runs, here) in enumerate(sourced_runs):
+        start = starts.get(n) if intents is not None else None
+        if start == {}:
+            continue  # already read without any
+        verdict = _scan_script(runs, config_dir, extra_args, here, command=command,
+                               inherited=start, inherits=True)
+        if verdict is not None and verdict.decision == "deny":
+            return verdict
+        first_ask = first_ask or verdict
+    return first_ask
+
+
+def _sourced_script(segment: str) -> dict[str, str] | None:
+    """``source x.sh`` / ``. x.sh`` as a ``runs_code`` record; else ``None``."""
+    try:
+        words = shlex.split(segment, comments=True)
+    except ValueError:
+        return None
+    words = strip_exec_builtin(words)
+    if len(words) >= 2 and words[0] in ("source", "."):
+        return {"kind": "script", "interpreter": words[0], "path": words[1]}
+    return None
+
+
+def _stdin_op(tokens: tuple[_Token, ...], k: int) -> tuple[str, str, int] | None:
+    """What the operator at ``k`` makes standard input, with its target word:
+    ``("file", NAME, end)``, ``("generated", OP, end)`` for a here-document or
+    here-string or ``< <(…)``, ``("fd", OP, end)`` for ``<&N``/``<>``; ``None``
+    for any other descriptor."""
+    _kind, value, _start, end = tokens[k]
+    fd = value.rstrip("<>&|-")
+    op = value[len(fd):]
+    if fd not in ("", "0") or not op.startswith("<"):
+        return None  # standard output or another descriptor
+    target = tokens[k + 1] if k + 1 < len(tokens) and tokens[k + 1][0] == "word" else None
+    if op.startswith("<<"):
+        return ("generated", op, end)
+    if op in ("<&", "<>"):
+        return ("fd", op, target[3] if target else end)
+    if target is None:
+        return None
+    return ("generated" if target[1].startswith("<(") else "file", target[1], target[3])
+
+
+def _stdin_after(tokens: tuple[_Token, ...], k: int) -> tuple[str, str, int] | None:
+    """Standard input of the group, subshell, loop or ``exec`` whose remaining
+    tokens start at ``k``: the last ``<`` (:func:`_stdin_op`) among the
+    redirections that follow it; ``None`` when there is none."""
+    stdin = None
+    while k < len(tokens) and tokens[k][0] == "op":
+        stdin = _stdin_op(tokens, k) or stdin
+        k += 2 if k + 1 < len(tokens) and tokens[k + 1][0] == "word" else 1
+    return stdin
+
+
+def _last_stdin(tokens: tuple[_Token, ...]) -> list[tuple[str, str, int] | None]:
+    """For each token, the last ``<`` (:func:`_stdin_op`) from it to the end of
+    its command (the next separator): one pass from the right."""
+    found: list[tuple[str, str, int] | None] = [None] * len(tokens)
+    current = None
+    for k in range(len(tokens) - 1, -1, -1):
+        kind = tokens[k][0]
+        if kind == "sep":
+            current = None
+        elif kind == "op" and current is None:
+            current = _stdin_op(tokens, k)
+        found[k] = current
+    return found
+
+
+# Words after which a redirection is the standard input of a whole group,
+# subshell, `if` or loop: a bare shell inside reads its commands from it.
+_COMPOUND_ENDS = frozenset({"}", "fi", "done", "esac"})
+
+
+def _compound_stdins(command: str) -> list[tuple[str, str, int, int]]:
+    """``(kind, value, end, anchor)`` for each standard input given to a group,
+    subshell, ``if`` or loop (``anchor``: where it ends) and to ``exec``
+    (``anchor``: -1), from :func:`_stdin_after`; only redirections may stand
+    between (``{ sh; } 2>/dev/null < x.sh``, ``exec 2>&1 < x.sh``)."""
+    tokens = _shell_tokens(command)
+    found = []
+    for k, (kind, value, start, _end) in enumerate(tokens):
+        compound = (kind == "sep" and value == ")") or (kind == "word" and value in _COMPOUND_ENDS)
+        if compound or (kind == "word" and value == "exec"):
+            stdin = _stdin_after(tokens, k + 1)
+            if stdin is not None:
+                found.append((*stdin, start if compound else -1))
+    return found
+
+
+def _c_strings_with_stdin(command: str) -> list[tuple[str, str, str]]:
+    """``(string, kind, value)`` for each ``sh -c STRING [ARGS…]`` and each
+    ``eval WORDS`` (``string``: the words joined) whose standard input is
+    redirected (the last ``<`` wins): ``kind`` is ``"file"``, ``"generated"``
+    or ``"fd"`` as in :func:`_stdin_after`."""
+    tokens = _shell_tokens(command)
+    found = []
+    last = None
+    k = 0
+    while k < len(tokens):
+        kind, value, _s, _e = tokens[k]
+        k += 1
+        if kind != "word":
+            continue
+        first, after = None, None
+        if value == "eval":  # its words, a later eval among them included: read once
+            first, after = k, _eval_words_end(tokens, k - 1)
+        elif _READER_NAME_RE.fullmatch(_basename(value)):
+            j = _c_string_at(tokens, k - 1)
+            if j is not None:
+                first, after = j, j + 1
+        if first is None:
+            continue
+        k = after
+        if after < len(tokens):
+            last = last or _last_stdin(tokens)
+            stdin = last[after]  # after the arguments and other redirections
+            if stdin is not None:
+                found.append((" ".join(t[1] for t in tokens[first:after]), stdin[0], stdin[1]))
+    return found
+
+
+_COMPOUND_OPENERS = frozenset({"{", "if", "while", "until", "for", "select", "case"})
+
+
+def _piped_compound(command: str) -> int | None:
+    """Where the first pipe into a group, subshell, loop or if ends (every
+    command in it shares the pipe), read from the tokens, so a newline,
+    comment or blank line after the ``|`` is passed over as the shell does;
+    ``None`` when there is none."""
+    tokens = _shell_tokens(command)
+    for k, (kind, value, _start, end) in enumerate(tokens):
+        if kind != "sep" or value not in ("|", "|&"):
+            continue
+        j = k + 1
+        while j < len(tokens) and tokens[j][0] == "word" and tokens[j][1] in ("time", "-p", "!"):
+            j += 1
+        if j < len(tokens) and (tokens[j][:2] == ("sep", "(") or (
+                tokens[j][0] == "word" and tokens[j][1] in _COMPOUND_OPENERS)):
+            return end
+    return None
+
+
+def _bare_reader(command: str, start: int, end: int) -> bool:
+    """Whether ``command[start:end]`` runs a shell or interpreter that reads its
+    code from standard input (:func:`_bare_at`)."""
+    tokens = _shell_tokens(command[start:end])
+    return any(_bare_at(tokens, r) for r in _readers(tokens))
+
+
+def _bare_at(tokens: tuple[_Token, ...], r: int) -> bool:
+    """Whether the shell or interpreter word at ``r`` reads its code from
+    standard input: after its options (``-e``, ``-o pipefail``) comes no
+    script, module or code argument (``sh``, ``bash -e``, ``bash -s``; not
+    ``python3 -m mod``, ``bash -c '…'`` or ``bash x.sh``). Words are dequoted
+    (``'sh'``, ``\\sh``); the command ends at a separator, with or without a
+    space before it (``sh;echo``), and at a ``}``. At most 64 words are read.
+    A zsh/ksh cluster that reads two ways (``-onoclobber``) is read both ways:
+    either one reading stdin counts."""
+    return _bare_scan(tokens, r, as_value=False) or _bare_scan(tokens, r, as_value=True)
+
+
+def _bare_scan(tokens: tuple[_Token, ...], r: int, *, as_value: bool) -> bool:
+    """:func:`_bare_at` with one reading of ambiguous option clusters."""
+    shell = _basename(tokens[r][1]) in _SHELLS
+    k, limit = r + 1, min(len(tokens), r + 64)
+    while k < limit:
+        kind, word, _s, _e = tokens[k]
+        if kind == "sep" or word == "}":
+            return True
+        if kind == "op":  # sh 2>/dev/null, sh > out
+            k += 2
+            continue
+        option = word.startswith("-") or (shell and word.startswith("+"))  # bash +x
+        if shell and word in SHELL_OPTIONS_END:
+            # bash - x.sh: the options end, x.sh is the script; a lone - reads stdin
+            return not (k + 1 < len(tokens) and tokens[k + 1][0] == "word")
+        if not option or word in ("-", "--"):
+            return word in ("-", "--") or word in _STDIN_PATHS  # python3 /dev/stdin
+        if word in ("-c", "-m", "--version", "--help") or (not shell and (
+                word[:2] in ("-e", "-E", "-r") or word in ("-V", "-v", "-h"))):
+            return False  # code or a module on the command line, or a version/help check
+        values, letters = shell_option(word, tokens[r][1], as_value=as_value) if shell \
+            else (0, "")
+        if shell and word.startswith("-") and "s" in letters and "c" not in letters:
+            return True  # bash -s ARGS: the words after it are arguments, the code is stdin
+        k += 1 + values  # an interpreter's -O/-o is a flag (python3 -OO)
+    return True  # the end, or more words than are read: taken as reading stdin (asked)
+
+
+# Words that may stand before the program a pipe feeds (`| exec sh`, `| env X=1 sh`).
+_BEFORE_PROGRAM = frozenset({"exec", "command", "builtin", "time", "nohup", "!", "{", "env",
+                             "sudo", "then", "do", "else"})
+
+
+def _piped_into_reader(command: str) -> bool:
+    """Whether a pipe, here or in a ``sh -c`` string, ``eval`` words or a
+    here-document body inside, feeds a shell or interpreter that reads its
+    code from it (:func:`_bare_at`), read from the dequoted words. For a
+    command the parser cannot read (``echo $'a\\'b'; curl x | sh``); only for
+    asking."""
+    for text in nested_commands(command):
+        tokens = _shell_tokens(text)
+        for k, (kind, value, _s, _e) in enumerate(tokens):
+            if kind != "sep" or value not in ("|", "|&"):
+                continue
+            j = k + 1
+            while j < len(tokens) and tokens[j][0] == "word" and (
+                    tokens[j][1] in _BEFORE_PROGRAM or tokens[j][1].startswith("-")
+                    or _ASSIGNMENT_RE.match(tokens[j][1])):
+                j += 1
+            if (j < len(tokens) and tokens[j][0] == "word"
+                    and _READER_NAME_RE.fullmatch(_basename(tokens[j][1]))
+                    and _bare_at(tokens, j)):
+                return True
+    return False
+
+
+# Standard input copied from another descriptor or opened read-write.
+_FD_STDIN_RE = re.compile(r"(?:^|[\s;&|])0?(?:<&\s*(?!-)\S|<>)")  # <&3, <&$fd, <>
+
+
+def _group_stdin_files(command: str) -> list[str]:
+    """The files redirected onto a group, subshell, ``if`` or loop that runs a
+    shell or interpreter (``{ bash; } < c.sh``), read like ``sh < c.sh``."""
+    # bash -c 'eval sh' < FILE, eval 'true; sh' < FILE: a reader inside the
+    # string reads FILE
+    files = [value for string, kind, value in _c_strings_with_stdin(command)
+             if kind == "file" and string_reader(string)]
+    tokens = _shell_tokens(command)
+    readers = [tokens[k][2] for k in _readers(tokens)]
+    if not readers:
+        return files
+    for kind, value, end, anchor in _compound_stdins(command):
+        if kind != "file":
+            continue
+        # a group or loop: a reader inside it; exec < FILE: the rest of the
+        # shell reads FILE as its standard input
+        if (anchor >= 0 and readers[0] < anchor) or (anchor < 0 and end <= readers[-1]):
+            files.append(value)
+    return files
+
+
+# Where the command that reads a here-document starts: after a separator or
+# the opening of a `$(…)`, subshell or group (`x=$(bash <<EOF`, `( sh <<EOF`).
+_READER_START_RE = re.compile(r"\$\(|(?<![<>])\(|[;&|`]|\{(?=\s)")
+
+
+_STDIN_PATHS = frozenset({"/dev/stdin", "/dev/fd/0", "/proc/self/fd/0", "-"})
+
+
+def _heredoc_reader(prefix: str, suffix: str = "") -> str:
+    """The program that reads a here-document whose ``<<`` follows ``prefix``
+    and is followed by ``suffix`` (``<<EOF sh``), with ``exec``/``builtin``,
+    launchers and ``sh -c STRING`` unwrapped (``exec -a x bash <<EOF`` ->
+    ``bash``, ``bash -c sh <<EOF`` -> ``sh``); ``source /dev/stdin`` reads it
+    as a shell does."""
+    tail = re.split(r"[;&|)]", suffix, maxsplit=1)[0]
+    head = re.sub(r"(?:^|(?<=\s))\d+$", "", _READER_START_RE.split(prefix)[-1])  # 0<<EOF sh
+    try:
+        words = shlex.split(head + " " + tail, comments=True)
+    except ValueError:
+        return ""
+    words = strip_exec_builtin(
+        [w for w in words if not w.startswith(("<", ">", "0<", "1>", "2>", "&>"))])
+    if len(words) > 1 and _basename(words[0]) in ("source", ".") and words[1] in _STDIN_PATHS:
+        return "sh"
+    try:
+        argv, _env, _wrappers, string = _unwrap_inner(words, 0)
+    except ShellRejected:
+        return ""
+    if string is not None:
+        argv = loose_argv(string) or []
+    return _basename(argv[0]) if argv else ""
+
+
+def _open_quote(line: str, quote: str | None) -> str | None:
+    """The quote (``'``, ``"`` or ``$'``) still open at the end of ``line`` when
+    it starts inside ``quote``; ``None`` when none is. An unquoted ``#`` at the
+    start of a word ends the line."""
+    i, n = 0, len(line)
+    while i < n:
+        ch = line[i]
+        if quote == "'":
+            quote = None if ch == "'" else quote
+        elif quote is not None:  # " and $' both take backslash escapes
+            if ch == "\\":
+                i += 1
+            elif ch == quote[-1]:
+                quote = None
+        elif ch == "\\":
+            i += 1
+        elif ch == "$" and line[i + 1:i + 2] == "'":
+            quote, i = "$'", i + 1
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "#" and (i == 0 or line[i - 1] in " \t;|&("):
+            break
+        i += 1
+    return quote
+
+
+def _script_lines(text: str) -> list[tuple[int, str, str | None]]:
+    """``(line_number, command_text, ask_reason)`` for a script: continuations
+    joined (backslash-newline removed, as the shell does, but not at the end of
+    a comment, which ends at the newline), comments dropped, and here-document
+    bodies treated as what reads them: as commands when a shell reads them,
+    directly or through a pipe (``cat <<EOF | sh``); as unreadable code
+    (``ask_reason``) when another interpreter reads one that names an
+    infrastructure tool, or when an unquoted tag lets a ``$(…)`` in the body
+    that names one run; otherwise as data, skipped."""
+    raw = text.splitlines()
+
+    def logical(at: int) -> tuple[str, int]:
+        """The line starting at raw index ``at`` with its continuations joined
+        (a backslash-newline, a quote still open, a pipeline or list operator at
+        the end), and the raw index after it. Only the raw line just added is
+        examined, and the pieces are joined once, so this is linear."""
+        parts: list[str] = []
+        quote: str | None = None
+        while at < len(raw):
+            added = raw[at]
+            quote = _open_quote(added, quote)
+            at += 1
+            if quote is not None and at < len(raw):
+                parts += (added, "\n")  # a string that goes on to the next line
+                continue
+            code = strip_comment(added)
+            trailing = len(code) - len(code.rstrip("\\"))
+            if code == added and trailing % 2 == 1:
+                parts.append(added[:-1])
+                if at < len(raw):
+                    continue
+                return "".join(parts), at
+            if (at < len(raw) and code.rstrip().endswith(("|", "&&", "|&"))
+                    and find_heredoc(added) is None):
+                parts += (added, " ")  # `cmd |` / `cmd &&` goes on to the next line
+                continue
+            parts.append(added)
+            return "".join(parts), at
+        return "".join(parts), at
+
+    out: list[tuple[int, str, str | None]] = []
+    i = 0
+    while i < len(raw):
+        number = i + 1
+        line, i = logical(i)
+        if line.lstrip().startswith("#"):
+            continue
+        heredoc = find_heredoc(line)
+        if heredoc is None:
+            out.append((number, strip_comment(line), None))
+            continue
+        begin, end, dash, tag, quoted = heredoc
+        if not tag:  # the delimiter word cannot be read: ask, and check what follows
+            out.append((number, line, "cannot tell where the here-document ends, so the "
+                                      "lines after it were not checked as data or commands"))
+            continue
+        # the body is read raw: a quoted tag's body keeps its backslashes, an
+        # unquoted one joins backslash-newline as the shell does
+        body: list[tuple[int, str]] = []
+        found = False
+        while i < len(raw):
+            n = i + 1
+            if quoted:
+                body_line, i = raw[i], i + 1
+            else:
+                body_line, pending = raw[i], ""
+                i += 1
+                while (len(body_line) - len(body_line.rstrip("\\"))) % 2 == 1 and i < len(raw):
+                    pending, body_line = pending + body_line[:-1], raw[i]
+                    i += 1
+                body_line = pending + body_line
+            if (body_line.lstrip("\t") if dash else body_line) == tag:
+                found = True
+                break
+            body.append((n, body_line))
+        command = strip_comment(line[:begin] + line[end:])
+        out.append((number, command, None))
+        if not found:
+            # the shell reads to the end of the script as the body; the hook does not
+            # know that is meant, so it checks those lines as commands too and asks
+            out.append((number, line, f"the here-document's end ({tag}) is never reached, so "
+                                      "the lines after it were checked as commands"))
+            out.extend((n, strip_comment(b), None) for n, b in body)
+            continue
+        name = _heredoc_reader(line[:begin], line[end:])
+        if command.rstrip().endswith(("|", "|&")):
+            # cat <<EOF | on one line, the reader after the body (blank and comment
+            # lines between are skipped, as the shell skips them)
+            k = i
+            while k < len(raw) and (not raw[k].strip() or raw[k].lstrip().startswith("#")):
+                k += 1
+            nxt = raw[k] if k < len(raw) else ""
+            name = _heredoc_reader(nxt)
+            if (name not in _SHELLS and not _interpreter(name)
+                    and re.match(r"(?:[{(]|(?:if|while|until|for)\b)", nxt.lstrip())
+                    and _bare_reader(nxt, 0, len(nxt))):
+                name = "sh"  # { sh; }, ( bash ), while …; do sh; done
+        if name in _SHELLS or loose_code_reader(command) is not None:
+            out.extend((n, strip_comment(b), None) for n, b in body)
+        elif _interpreter(name) and any(mentions_infra(b) for _n, b in body):
+            out.append((number, line, f"{name} reads a here-document that names an "
+                                      "infrastructure tool, which the hook cannot check"))
+        elif not quoted:
+            for n, b in body:
+                if runs_expansion(b) and mentions_infra(b):
+                    out.append((n, b, "the here-document runs a command substitution that "
+                                      "names an infrastructure tool, which the hook cannot "
+                                      "check"))
+    return out
+
+
+# curl options that name the output file after the URL (-O, -J, --remote-name).
+_REMOTE_NAME_RE = re.compile(
+    r"(?<![\w-])(?:-[a-zA-Z]*[OJ][a-zA-Z]*|--remote-name(?:-all)?)(?![\w-])")
+
+
+def _written_by_command(file: Path, command: str, cwd: Path | None) -> bool:
+    """True when ``file`` is named more than once in ``command``: besides the
+    run itself, as a redirection target or an argument of another command
+    (``printf … > x.sh; bash x.sh``, ``cp a x.sh; bash x.sh``, ``chmod +x
+    nuke; ./nuke``), so what runs may not be what is on disk now. A spelling
+    the hook cannot resolve (``"$PWD/x.sh"``, ``"$(pwd)/x.sh"``) counts when
+    its last component is the file's name. Arguments of programs that only
+    read files (``cat x.sh``, ``grep … x.sh``) do not count; redirection
+    targets always do."""
+    tokens = _command_tokens(command)
+    target = os.path.normpath(file)
+    try:
+        resolved = file.resolve() if file.exists() else None
+    except OSError:
+        resolved = None
+    computed = any(ch in command for ch in "$`")
+    count = 0
+    ran = False  # a run of the file counts once, however often it is run
+    program: str | None = None  # the current simple command's program
+    args = 0  # words after the program in the current simple command
+    redirect = False
+    after_bracket = False  # the word follows `(`/`)` ($(pwd)/x.sh), not a separator
+    for token in tokens:
+        if not token:
+            continue
+        if set(token) <= set("();|&"):
+            program, redirect = None, False
+            after_bracket = bool(set(token) & set("()"))
+            continue
+        if set(token) <= set("<>&|"):
+            redirect = ">" in token
+            continue
+        was_redirect, redirect = redirect, False
+        run_position = False
+        if program is None and not _ASSIGNMENT_WORD.match(token):
+            program, args, run_position = _basename(token), 0, not after_bracket
+        elif not was_redirect and program in _FILE_READERS:
+            continue
+        elif not was_redirect and not token.startswith("-"):
+            args += 1
+            run_position = args == 1 and (program in _SHELLS or program in ("source", "."))
+        if file.name not in token:
+            continue  # cannot name the file (the checks below are per word, per script)
+        downloaded = "://" in token and program != "git" and (
+            program != "curl" or _REMOTE_NAME_RE.search(command))  # aws s3 cp, wget, curl -O
+        if any(ch in token for ch in "$`") or downloaded:
+            # computed, or a URL a download names the file after (curl -O, wget)
+            count += token.rstrip("\"')/").rsplit("/", 1)[-1] == file.name
+            continue
+        if token.rsplit("/", 1)[-1] != file.name and re.search(
+                r"(?<![\w.-])" + re.escape(file.name) + r"(?![\w.-])", token):
+            # inside code or a command line (python3 -c '…Path("x.sh").write_text(…)'):
+            # it may write the file
+            count += 1
+            continue
+        try:
+            path = Path(token).expanduser()
+        except RuntimeError:  # ~user or ~+ the hook cannot resolve: an unknown path
+            continue
+        if not path.is_absolute():
+            if cwd is None:
+                continue
+            path = cwd / path
+        same = os.path.normpath(path) == target
+        if not same and resolved is not None:
+            try:
+                same = path.exists() and path.resolve() == resolved
+            except OSError:
+                same = False
+        if not same and computed and token.startswith("/"):
+            same = token.rsplit("/", 1)[-1] == file.name  # the tail of an unquoted $(pwd)/x
+        if same and run_position:
+            same, ran = not ran, True  # bash x.sh; bash x.sh runs it twice, writes nothing
+        count += same
+    return count > 1
+
+
+@functools.lru_cache(maxsize=8)
+def _command_tokens(command: str) -> tuple[str, ...]:
+    """The shell words and operators of ``command`` (read once per command)."""
+    lexer = shlex.shlex(command.replace("\n", " ; "), posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        return tuple(lexer)
+    except ValueError:
+        return tuple(command.split())
+
+
+_ASSIGNMENT_WORD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+# Programs whose file arguments are only read: naming the script there is not a write.
+_FILE_READERS = frozenset({
+    "cat", "head", "tail", "grep", "egrep", "fgrep", "rg", "less", "more", "wc", "diff",
+    "cmp", "file", "stat", "ls", "bat", "md5sum", "sha1sum", "sha256sum", "shasum",
+    "shellcheck", "test", "[", "[[",
+})
+
+
+def _scan_script(runs: dict, config_dir: Path, extra_args: list[str] | None,
+                 cwd: Path | None, *, command: str = "",
+                 inherited: dict[str, str] | None = None,
+                 inherits: bool = False) -> HookVerdict | None:
+    """Reads a local shell script that a command runs (``bash x.sh``, ``sh <
+    x.sh``, ``./x``, ``source x.sh``; issue #56) and checks every line that
+    names an infrastructure tool as a command against the policy. ``None``
+    when there is nothing to say: not a shell script, no such line, or every
+    such line allowed. A blocked line (or a block only the lines together
+    reach) denies; a line that cannot be checked asks; so does a script that is
+    missing, written by the same ``command``, unreadable, not a regular file,
+    holding a NUL byte, larger than :data:`SCRIPT_SCAN_LIMIT`, with more than
+    :data:`SCRIPT_SCAN_MAX_LINES` such lines, or whose directory is unknown (a
+    ``cd`` to a computed place came first). What the script sources or runs in
+    turn is not read. Within one decision a script is read once (its verdict
+    is reused), and past :data:`_MAX_SCRIPTS` distinct scripts the rest ask.
+    With ``inherits``, ``inherited`` holds the settings of the watched
+    variables the script starts with (``export AWS_PROFILE=prod; bash x.sh``),
+    checked as if its first line; ``None`` there when they cannot be known."""
+    if not inherits:
+        inherited = {}
+    state = _SCANNED.get()
+    if state is None:
+        return _scan_script_once(runs, config_dir, extra_args, cwd, command=command,
+                                 inherited=inherited)
+    key = (runs.get("interpreter"), runs.get("path"), str(cwd), command,
+           None if inherited is None else tuple(sorted(inherited.items())))
+    if key in state["seen"]:
+        return state["seen"][key]
+    if state["count"] >= _MAX_SCRIPTS:
+        return HookVerdict("ask", f"aegis: this command runs more than {_MAX_SCRIPTS} scripts, "
+                                  "too many to read; run them separately")
+    state["count"] += 1
+    verdict = _scan_script_once(runs, config_dir, extra_args, cwd, command=command,
+                                inherited=inherited)
+    state["seen"][key] = verdict
+    return verdict
+
+
+_PATH_VARIABLE_RE = re.compile(r"\$(?:\{(\w+)\}|(\w+))")
+
+
+# Variables a script path may use that only the user's set-up changes. Not
+# PWD, OLDPWD or _, which the shell itself changes as the command runs.
+_STABLE_VARIABLES = frozenset({"HOME"})
+
+
+def _home_changed(command: str) -> bool:
+    """Whether ``command`` (or the whole command the hook was given) names HOME
+    other than as ``$HOME``, so it may change it (``HOME=…``, ``for HOME in``,
+    ``read HOME``, ``unset HOME``) before ``~`` or ``$HOME`` is expanded."""
+    state = _SCANNED.get()
+    outer = state["command"] if state is not None else ""
+    return re.search(r"(?<![\w${])HOME\b", command + "\n" + outer) is not None
+
+
+def _known_variables(path: str, command: str) -> str:
+    """``path`` with ``$HOME`` / ``${HOME}`` replaced by the hook's own value
+    (``source "$HOME/.cargo/env"``) when the command names HOME nowhere else,
+    so nothing in it (``HOME=…``, ``for HOME in``, ``read HOME``, ``unset HOME``)
+    can change it; anything else (``$PWD``, ``$(pwd)``, an unset name) is left."""
+    def value(match: re.Match[str]) -> str:
+        name = match.group(1) or match.group(2)
+        known = os.environ.get(name)
+        if name not in _STABLE_VARIABLES or known is None or _home_changed(command):
+            return match.group(0)
+        return known
+    return _PATH_VARIABLE_RE.sub(value, path) if "$" in path else path
+
+
+# A script line that may change which account, cluster, program or directory a
+# later line's infrastructure tool uses (also when spelt oddly or quoted: only
+# ever too eager, which costs a refusal when a later line names a tool).
+_SCOPE_CHANGE_RE = re.compile(
+    r"(?:^|[\s;&|(`'\"\\])(?:alias|eval|source|function)"
+    r"(?=$|[\s;&|)'\"])"
+    r"|(?:^|[\s;&|(])\.(?=\s)"
+    r"|(?<![\w-])[\w-]+\s*\(\s*\)")  # f() { …; } (a word start only: linear)
+# set's option words (`set -a`, `set -o allexport`): read once each, so linear
+_SET_OPTIONS_RE = re.compile(r"\bset((?:[ \t]+(?:[-+]\w+|allexport))+)")
+_SCOPE_ASSIGN_RE = re.compile(r"(?:^|[\s;&|(`'\"])([A-Za-z_]\w*)(?:\[[^\]]*\])?\+?=")
+_DECLARED_RE = re.compile(r"\b(export|declare|typeset|readonly|local|unset|read|mapfile|"
+                          r"readarray|getopts|printf)\b([^;&|\n]*)")
+_CONTROL_WORDS = frozenset({"if", "then", "elif", "else", "fi", "while", "until", "for",
+                            "select", "do", "done", "case", "esac", "{", "}", "function"})
+_CONTROL_SEPS = frozenset({"&&", "||", "&", "(", ")", ";;", ";&", ";;&"})
+_LOOP_NAME_RE = re.compile(r"(?:^|[\s;&|(])(?:for|select)\s+(\S+)")
+
+
+def _control_flow(line: str) -> bool:
+    """Whether a script line holds control flow the line-by-line reading loses:
+    a reserved word or brace in command position, a subshell, a function, a
+    case arm, ``&&`` / ``||`` or a background ``&`` -- read with the lexer, so
+    ``$(…)``, ``${…}`` and quoted text do not count."""
+    command_position = True
+    for kind, value, _start, _end in _shell_tokens(line):
+        if kind == "sep":
+            if value in _CONTROL_SEPS:
+                return True
+            command_position = True
+            continue
+        if kind == "word":
+            if command_position and value in _CONTROL_WORDS:
+                return True
+            command_position = command_position and _ASSIGNMENT_RE.match(value) is not None
+    return False
+
+
+# A variable whose value the hook checks only in a typed command (:func:`_hidden_command`).
+_HIDDEN_COMMAND_VAR_RE = re.compile(
+    r"(?<![\w$])(?:" + "|".join(sorted(_COMMAND_ENV_VARS | _SOURCED_ENV_VARS)) + r")\b")
+
+
+def _quoted_name(text: str) -> bool:
+    """Whether a command word, or the name a declaration or assignment sets, is
+    spelt with quotes or a backslash (``sour""ce``, ``export H"ELM_NAMESPACE"=x``,
+    ``H"ELM_NAMESPACE"=x``, which is a command, not an assignment): a spelling
+    the literal readers do not resolve, so they treat it as unknown."""
+    if not any(ch in text for ch in "'\"\\"):
+        return False
+    words = [(value, text[start:end]) for kind, value, start, end in _shell_tokens(text)
+             if kind == "word"]
+    if not words:
+        return False
+    first_value, first_raw = words[0]
+    if any(ch in first_raw.partition("=")[0] for ch in "'\"\\"):
+        return True
+    if first_value in _EXPORTING_BUILTINS or "=" in first_raw:
+        return any(any(ch in raw.partition("=")[0] for ch in "'\"\\") for _v, raw in words)
+    return False
+
+
+def _changes_scope(line: str) -> bool:
+    """Whether a script line may change the environment or directory a later
+    line's infrastructure tool sees: an assignment, ``export`` / ``declare`` /
+    ``unset`` / ``read`` / ``printf -v`` of a variable in the hook's list (see
+    :func:`aegis_core.shell.plain_binary`), a nameref, a variable naming a
+    command, ``set -a``, ``alias``, a function, ``eval``, or a nested ``source`` /
+    ``.`` -- as written or after quote removal (``export H"ELM_NAMESPACE"=x``,
+    ``sour""ce x``)."""
+    if _changes_scope_spelt(line):
+        return True
+    if not any(ch in line for ch in "'\"\\"):
+        return False
+    plain = dequoted(line)
+    return plain != line and _changes_scope_spelt(plain)
+
+
+def _changes_scope_spelt(line: str) -> bool:
+    if _SCOPE_CHANGE_RE.search(line):
+        return True
+    if any(_may_name_scope_variable(m.group(1)) for m in _LOOP_NAME_RE.finditer(line)):
+        return True  # for AWS_PROFILE in …: the loop sets it
+    for m in _SET_OPTIONS_RE.finditer(line):
+        if any(w == "allexport" or w[0] in "-+" and "a" in w[1:] for w in m.group(1).split()):
+            return True
+    if any(_infra_env(m.group(1)) for m in _SCOPE_ASSIGN_RE.finditer(line)):
+        return True
+    if _HIDDEN_COMMAND_VAR_RE.search(line):
+        return True  # BASH_ENV=…, GIT_SSH_COMMAND=…, EDITOR=…: checked only when typed
+    for m in _DECLARED_RE.finditer(line):
+        words = [word.strip("\"'") for word in m.group(2).split()]
+        if m.group(1) in ("declare", "typeset", "local") and any(
+                w.startswith("-") and "n" in w[1:] for w in words):
+            return True  # a nameref: a later NAME=… may set any variable
+        if m.group(1) == "printf":  # assigns only with -v NAME / -vNAME before its format
+            if _env_change(["printf", *words], {}) is not None:
+                return True
+        # also behind an option letter (read -aNAME) or computed ($N)
+        elif any(_may_name_scope_variable(word) for word in words):
+            return True
+    return False
+
+
+def _literal_scope_setting(line: str) -> str | None:
+    """``export AWS_PROFILE=x`` / ``AWS_PROFILE=x`` / ``declare -x …`` with
+    nothing else on the line: its literal settings of the hook's variables as
+    one ``export`` command; ``None`` for any other line."""
+    if any(ch in line for ch in "$`\\;&|<>(){}*?[]~") or _SCOPE_CHANGE_RE.search(line) or \
+            _quoted_name(line):
+        return None
+    try:
+        words = shlex.split(line)
+    except ValueError:
+        return None
+    if words and words[0] in ("export", "declare", "typeset", "readonly"):
+        words = [w for w in words[1:] if w != "-x"]
+        if not words or words[0] == "--":
+            return None
+    if not words or not all(_ASSIGNMENT_RE.match(w) for w in words):
+        return None
+    change = _env_change([], dict(w.partition("=")[::2] for w in words))
+    if change is None or change[1] or any(
+            k.endswith("+") or "[" in k or k in _COMMAND_ENV_VARS or k in _SOURCED_ENV_VARS
+            for k in change[0]):
+        return None
+    return "export " + " ".join(f"{k}={shlex.quote(v)}" for k, v in change[0].items())
+
+
+def _script_directories(every: list[tuple[int, str, str | None]],
+                        cwd: Path | None) -> dict[int, Path | None]:
+    """The directory each script line starts in, following its ``cd`` lines as
+    the hook follows a typed command's (:func:`_cd`): a literal ``cd DIR`` moves
+    it, a computed one (``cd "$(dirname "$0")"``), one in the background or a
+    pipeline, or any ``cd`` in a script with control flow makes it unknown
+    (``None``), as does a ``cd`` after a line naming ``CDPATH``. Only lines after a
+    ``cd`` are listed."""
+    if not _changes_directory("\n".join(line for _n, line, _a in every)):
+        return {}
+    control = any(ask is None and _control_flow(line) for _n, line, ask in every)
+    here = cwd
+    found: dict[int, Path | None] = {}
+    moved = cdpath = False
+    for number, line, ask in every:
+        if moved:
+            found[number] = here
+        # cd may search other directories after it (also spelt CDP"ATH")
+        cdpath = cdpath or "CDPATH" in line or "CDPATH" in dequoted(line)
+        if ask is not None or not _changes_directory(line):
+            continue
+        moved = True
+        if control or cdpath or _launcher_chdir(line):
+            here = None
+            continue
+        previous_sep = ""
+        for text, sep in split_segments(line) or [(line, "")]:
+            loose = loose_argv(text)
+            if loose and _basename(loose[0]) in ("cd", "pushd", "popd"):
+                subshell = sep in ("&", "|", "|&") or previous_sep in ("|", "|&")
+                here = None if subshell else _cd(here, loose)
+            previous_sep = sep
+    return found
+
+
+def _inherited_settings(intent) -> dict[str, str] | None:
+    """The settings of the watched variables a program run by ``intent`` starts
+    with: exported earlier in the command or written in front of it."""
+    if intent.metadata.get("env_unknown"):
+        return None
+    env = intent.metadata.get("env_assignments") or {}
+    return {k: v for k, v in env.items()
+            if _infra_env(k) and k not in _COMMAND_ENV_VARS and k not in _SOURCED_ENV_VARS}
+
+
+def _scan_script_once(runs: dict, config_dir: Path, extra_args: list[str] | None,
+                      cwd: Path | None, *, command: str = "",
+                      inherited: dict[str, str] | None = None) -> HookVerdict | None:
+    interpreter = _basename(runs.get("interpreter", "") or "")
+    path = runs.get("path", "") or ""
+    if path.startswith("< "):
+        path = path[2:]
+    shell_run = interpreter in _SHELLS or interpreter in ("source", ".")
+    if path in _STDIN_PATHS and path != "-":  # python3 /dev/stdin reads a pipe like bash's
+        return HookVerdict("ask", f"aegis: {runs.get('interpreter') or 'this'} reads its "
+                                  f"commands from standard input ({path}), which the hook "
+                                  "cannot check; run the script by its name")
+    if interpreter and not shell_run:
+        return None
+    if not path or (path.startswith("-") and not shell_run):
+        return None  # a shell's script may start with - (bash -- -x)
+    path = _known_variables(path, command)
+    if any(ch in path for ch in "$`"):
+        return HookVerdict("ask", f"aegis: {path} is a script whose name is only known when "
+                                  "the command runs, so its commands cannot be checked")
+    if path.startswith("~") and _home_changed(command):
+        return HookVerdict("ask", f"aegis: {path} depends on HOME, which this command changes, "
+                                  "so its commands cannot be checked")
+    try:
+        file = Path(path).expanduser()
+    except RuntimeError:  # ~user / ~+ the hook cannot resolve
+        return HookVerdict("ask", f"aegis: cannot tell which file {path} is, so its commands "
+                                  "were not checked")
+    if not file.is_absolute():
+        if cwd is None:
+            return HookVerdict("ask", f"aegis: cannot tell which directory {path} is run "
+                                      "from (a cd to a computed place comes first), so its "
+                                      "commands were not checked")
+        file = cwd / file
+    if command and _written_by_command(file, command, cwd):
+        return HookVerdict("ask", f"aegis: {path} is written by this command, so its commands "
+                                  "cannot be checked; run it separately")
+    try:
+        if not file.exists():
+            if shell_run or path.endswith(_SHELL_SUFFIXES):
+                return HookVerdict("ask", f"aegis: {path} does not exist yet, so the commands "
+                                          "in it cannot be checked; write it first, then run it")
+            return None
+        data = _read_regular(file, SCRIPT_SCAN_LIMIT + 1)
+        if data is None:
+            return HookVerdict("ask", f"aegis: {path} is not a regular file, so the commands "
+                                      "in it cannot be checked")
+    except OSError as exc:
+        return HookVerdict("ask", f"aegis: cannot read {path} to check the commands in it "
+                                  f"({exc.strerror or exc})")
+    if len(data) > SCRIPT_SCAN_LIMIT:
+        return HookVerdict("ask", f"aegis: {path} is larger than {SCRIPT_SCAN_LIMIT // 1024} "
+                                  "KiB, so the commands in it were not checked")
+    text = data.decode("utf-8", errors="replace")
+    first = text.split("\n", 1)[0]
+    shebang_shell: bool | None = None  # None: no #! line
+    if first.startswith("#!"):
+        words = first[2:].replace("\0", " ").split()
+        program = _basename(words[0]) if words else ""
+        if program == "env":
+            rest = [w for w in words[1:] if not w.startswith("-") and "=" not in w]
+            program = _basename(rest[0]) if rest else ""
+        shebang_shell = program in _SHELLS
+    if not interpreter and shebang_shell is False:
+        return None  # ./x with another interpreter's #! line
+    if "\0" in text:
+        if shell_run or shebang_shell:
+            return HookVerdict("ask", f"aegis: {path} contains a NUL byte, so its commands "
+                                      "were not checked")
+        return None  # ./x without #!: a binary, not a shell script
+    # a line whose program word is a glob or brace (`kube{ctl,x} …`, `/usr/bin/kubec?l …`)
+    # may run an infrastructure tool it does not name: kept, so the glob check sees it
+    every = _script_lines(text)
+    lines = [(n, line, ask) for n, line, ask in every
+             if ask is not None or mentions_infra(line)
+             or globbed_program_word(line) is not None]
+    if not lines:
+        return None
+    settings: dict[int, str] = {}  # line number -> the literal settings, as an export
+    changes = [(n, line) for n, line, ask in every if ask is None and _changes_scope(line)]
+    if changes and any(n > changes[0][0] for n, _l, _a in lines):
+        # a line that may change the account, cluster or directory of the infrastructure
+        # lines after it: only literal settings in a script without control flow are
+        # followed (kept, so the lines run through the policy together carry them)
+        if all(_literal_scope_setting(line) for _n, line in changes) and not any(
+                ask is None and _control_flow(line) for _n, line, ask in every):
+            settings = {n: _literal_scope_setting(line) or "" for n, line in changes}
+            numbers = {n for n, _line, _ask in lines} | settings.keys()
+            lines = [(n, line, ask) for n, line, ask in every if n in numbers]
+        else:
+            number, line = changes[0]
+            hidden = _HIDDEN_COMMAND_VAR_RE.search(line)
+            if hidden:  # as typed: BASH_ENV=…, GIT_SSH_COMMAND=…, EDITOR=… ask
+                return HookVerdict(
+                    "ask", f"aegis: {path} line {number}: {line.strip()!r} sets "
+                    f"{hidden.group(0)}, a file or command the programs after it run, which "
+                    "the hook does not check inside a script; run the commands on their own")
             return HookVerdict(
                 "deny",
-                f"aegis: cannot check code passed to {runs['interpreter']} {how}, and it "
-                "names an infrastructure tool; run the infrastructure command on its own",
+                f"aegis: cannot check this command statically ({path} line {number}: "
+                f"{line.strip()!r} may change the environment, such as the account, cluster "
+                "or directory, of the infrastructure commands after it); run the "
+                "infrastructure command on its own",
+                unchecked=True,
             )
+    if len(lines) - len(settings) > SCRIPT_SCAN_MAX_LINES:  # the settings kept do not count
+        return HookVerdict("ask", f"aegis: {path} names an infrastructure tool on more than "
+                                  f"{SCRIPT_SCAN_MAX_LINES} lines, so they were not checked")
+    first_ask: str | None = None
+    checkable: list[tuple[int, str, str]] = []
+    directories = _script_directories(every, cwd)
+    for number, line, ask in lines:
+        located = f"{path} line {number}: {line.strip()!r}"
+        if ask is not None:
+            first_ask = first_ask or f"aegis: {located}: {ask}"
+            continue
+        if number in settings:
+            checkable.append((number, line, settings[number]))
+            continue
+        pre = _precheck(line, config_dir, extra_args, directories.get(number, cwd), scan=False)
+        if isinstance(pre, HookVerdict):
+            if pre.decision == "allow":
+                continue
+            reason = pre.reason.removeprefix("aegis: ")
+            if pre.decision == "deny" and not pre.unchecked:
+                return HookVerdict("deny", f"aegis: {reason} ({located})")
+            first_ask = first_ask or f"aegis: {located}: {reason}"
+            continue
+        checked, asks = pre
+        if asks:
+            first_ask = first_ask or f"aegis: {located}: {asks[0].removeprefix('aegis: ')}"
+        if checked.strip(" \t\n;&|"):
+            checkable.append((number, line, checked))
+    if checkable and inherited is None:
+        return HookVerdict("ask", f"aegis: {path} runs infrastructure commands after an "
+                                  "environment change the hook cannot follow, so they cannot "
+                                  "be checked; run them on their own")
+    if checkable and inherited:
+        checkable.insert(0, (0, "(the environment it starts with)", "export " + " ".join(
+            f"{k}={shlex.quote(v)}" for k, v in inherited.items())))
+    verdict = _policy("\n".join(c for _n, _l, c in checkable), config_dir, extra_args) \
+        if checkable else HookVerdict("allow")
+    if verdict.decision == "allow":
+        return HookVerdict("ask", first_ask) if first_ask else None
+    # the first line at which the lines so far reach the verdict -- a deny for a
+    # deny, so an earlier ESCALATE line is not blamed for a BLOCK (bisection: a
+    # handful of policy runs, not one per line)
+    def reached(prefix: str) -> bool:
+        decision = _policy(prefix, config_dir, extra_args).decision
+        return decision == "deny" if verdict.decision == "deny" else decision != "allow"
+
+    low, high = 1, len(checkable)
+    while low < high:
+        middle = (low + high) // 2
+        if reached("\n".join(c for _n, _l, c in checkable[:middle])):
+            high = middle
+        else:
+            low = middle + 1
+    number, line, _checked = checkable[low - 1]
+    located = f"{path} line {number}: {line.strip()!r}"
+    if verdict.decision == "deny":
+        return HookVerdict("deny", f"{verdict.reason} ({located})")
+    return HookVerdict("ask", first_ask or f"{verdict.reason} ({located})")
+
+
+def _policy(command: str, config_dir: Path, extra_args: list[str] | None) -> HookVerdict:
+    """``aegis check command`` on a command that parses."""
+    from aegis_core import cli  # local: cli imports this module
+
+    abandoned = _ABANDONED.get()
+    if abandoned is not None and abandoned.is_set():
+        return HookVerdict("ask", "aegis: abandoned")  # no one waits: write nothing
 
     argv = [
         "check", "command", "--config-dir", str(config_dir), "--exit-style", "claude-hook",
@@ -417,6 +2497,81 @@ def _budget_outcome(agent: str, payload: dict, request: HookRequest, config_dir:
     return check(agent, payload, request.cwd, policy, key=key, insecure=insecure)
 
 
+# The hook decides within this many seconds, well inside the agents' own hook
+# timeouts (30 s), past which an agent runs the command anyway. A decision that
+# takes longer is abandoned: the command asks, or is denied when it names an
+# infrastructure tool.
+DECISION_BUDGET_SECONDS = 10.0
+TOO_SLOW_REASON = ("aegis: the command took too long to check (over {seconds:g} s), so it "
+                   "cannot be checked; split it up or put it in a script")
+
+
+# Set in a decision's worker thread once the hook has stopped waiting for it:
+# the policy run (which writes --log-json and the ledger) is then skipped.
+_ABANDONED: contextvars.ContextVar[threading.Event | None] = contextvars.ContextVar(
+    "aegis_abandoned", default=None)
+
+
+def decision_abandoned() -> bool:
+    """Whether the hook has stopped waiting for the decision this thread runs:
+    ``aegis check`` then writes no log line or ledger entry."""
+    abandoned = _ABANDONED.get()
+    return abandoned is not None and abandoned.is_set()
+
+
+def _decide_in_time(command: str, config_dir: Path, extra_args: list[str] | None,
+                    cwd: str | None) -> HookVerdict:
+    """:func:`decide` in a worker thread, within :data:`DECISION_BUDGET_SECONDS`
+    (portable: no signals). The worker of a decision that runs out of time is
+    left behind (a daemon, so it ends with the hook's process) and its result
+    is never used."""
+    result: list = []
+    abandoned = threading.Event()
+
+    def work() -> None:
+        _ABANDONED.set(abandoned)
+        try:
+            result.append(decide(command, config_dir, extra_args, cwd=cwd))
+        except BaseException as exc:  # noqa: BLE001 - re-raised in the caller
+            result.append(exc)
+
+    worker = threading.Thread(target=work, name="aegis-decide", daemon=True)
+    worker.start()
+    worker.join(DECISION_BUDGET_SECONDS)
+    if not result:
+        abandoned.set()  # its late policy run, log line and ledger entry never happen
+        reason = TOO_SLOW_REASON.format(seconds=DECISION_BUDGET_SECONDS)
+        verdict = HookVerdict("deny" if mentions_infra(command) else "ask", reason,
+                              unchecked=True)
+        _log_timed_out(command, verdict, extra_args)
+        return verdict
+    if isinstance(result[0], BaseException):
+        raise result[0]
+    return result[0]
+
+
+def _log_timed_out(command: str, verdict: HookVerdict, extra_args: list[str] | None) -> None:
+    """With ``--log-json PATH``, the record of a decision the time budget ended
+    (the policy never ran, so nothing else logs it). The ledger records only
+    executed ALLOWs, so it gets nothing."""
+    args = list(extra_args or [])
+    path = next((a.split("=", 1)[1] for a in args if a.startswith("--log-json=")), None)
+    if path is None and "--log-json" in args and args.index("--log-json") + 1 < len(args):
+        path = args[args.index("--log-json") + 1]
+    if not path:
+        return
+    record = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "intent": None,
+        "command": command,
+        "decision": {"verdict": "BLOCK" if verdict.decision == "deny" else "ESCALATE",
+                     "notes": [verdict.reason], "source": "hook time budget"},
+    }
+    with contextlib.suppress(OSError):
+        with open(path, "a") as handle:
+            handle.write(json.dumps(record) + "\n")
+
+
 def run_hook(agent: str, stdin_text: str, *, escalate_as: str = "ask",
              extra_args: list[str] | None = None) -> tuple[int, str, str]:
     """The whole hook: payload text in, ``(exit, stdout, stderr)`` out.
@@ -451,7 +2606,8 @@ def run_hook(agent: str, stdin_text: str, *, escalate_as: str = "ask",
         if not has_command and not has_budget:
             return _allow(agent)
 
-        verdict = decide(request.command, config_dir, extra_args) if has_command \
+        verdict = _decide_in_time(request.command, config_dir, extra_args, request.cwd) \
+            if has_command \
             else HookVerdict("allow")
         if verdict.decision == "deny":
             return render(agent, verdict, escalate_as=escalate_as)
@@ -481,13 +2637,16 @@ def run_hook(agent: str, stdin_text: str, *, escalate_as: str = "ask",
 
 
 def main_hook(agent: str, *, escalate_as: str, extra_args: list[str]) -> int:
+    # the streams as they are now: a decision still running past its time
+    # budget (in its own thread) may swap sys.stdout while it checks a policy
+    stdout, stderr = sys.stdout, sys.stderr
     code, out, err = run_hook(
         agent, sys.stdin.read(), escalate_as=escalate_as, extra_args=extra_args
     )
     if out:
-        print(out)
+        print(out, file=stdout, flush=True)
     if err:
-        print(err, file=sys.stderr)
+        print(err, file=stderr, flush=True)
     return code
 
 

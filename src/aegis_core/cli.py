@@ -137,7 +137,7 @@ from aegis_core.parsers.sql import (
 )
 from aegis_core.plan import PlanConstraintStore, evaluate_plan
 from aegis_core.provenance import FileSourceFetcher
-from aegis_core.shell import ShellRejected, intents_from_command
+from aegis_core.shell import ShellRejected, intents_from_command, split_segments
 from aegis_core.signing import SignatureError
 from aegis_core.store import ConstraintStore, StoreHealth
 
@@ -777,7 +777,24 @@ def _intents_from_shell_string(command: str) -> list[InfrastructureIntent]:
     try:
         return intents_from_command(command)
     except ShellRejected as exc:
-        raise UsageError(f"command rejected: {exc.reason}") from None
+        raise UsageError(f"command rejected: {exc.reason}{_rejected_part(command)}") from None
+
+
+def _rejected_part(command: str) -> str:
+    """`` in 'echo "exit=$?"'`` for the first part of a compound command that
+    cannot be checked, so the caller knows which one to change; ``""`` for a
+    simple command."""
+    segments = split_segments(command) or []
+    if len([text for text, _sep in segments if text.strip()]) < 2:
+        return ""
+    for text, _sep in segments:
+        try:
+            intents_from_command(text)
+        except ShellRejected:
+            return f" in {text.strip()!r}"
+        except ValueError:
+            continue
+    return ""
 
 
 # --- signing key resolution ------------------------------------------------------
@@ -1157,7 +1174,9 @@ def _evaluate(intents: list[InfrastructureIntent], args: argparse.Namespace) -> 
             f"--max-quarantine-ratio {args.max_quarantine_ratio}); refusing to decide"
         )
 
-    ledger = _open_ledger(args.ledger, store, now) if args.ledger else None
+    # a hook decision past its time budget writes nothing (the hook logged its answer)
+    ledger = _open_ledger(args.ledger, store, now) \
+        if args.ledger and not hook_module.decision_abandoned() else None
     interceptor = AegisInterceptor(
         store,
         ledger=ledger,
@@ -1206,7 +1225,7 @@ def _evaluate(intents: list[InfrastructureIntent], args: argparse.Namespace) -> 
         output.plan(plan_decision, plan_health=plan_store.health)
         if structured_log is not None:
             structured_log.record(intent=None, decision=plan_decision)
-            if args.log_json:
+            if args.log_json and not hook_module.decision_abandoned():
                 structured_log.write_log(args.log_json)
             if args.metrics_textfile:
                 structured_log.write_metrics(args.metrics_textfile)
@@ -1233,7 +1252,7 @@ def _evaluate(intents: list[InfrastructureIntent], args: argparse.Namespace) -> 
         citations.extend(c for c in decision.citations if c not in citations)
         fail_closed_notes.extend(n for n in decision.notes if _is_fail_closed_note(n))
     if structured_log is not None:
-        if args.log_json:
+        if args.log_json and not hook_module.decision_abandoned():
             structured_log.write_log(args.log_json)
         if args.metrics_textfile:
             structured_log.write_metrics(args.metrics_textfile)

@@ -877,12 +877,22 @@ def _config_module_for(plan_json: dict[str, Any], module_path: str | None) -> di
     return module
 
 
+def _without_index(address: str) -> str:
+    """``aws_instance.web[0]`` -> ``aws_instance.web``: a trailing ``[…]`` with
+    no ``]`` inside, dropped in one pass (a regex was quadratic on ``[`` runs)."""
+    if not address.endswith("]"):
+        return address
+    start = address.rfind("]", 0, len(address) - 1) + 1
+    bracket = address.find("[", start, len(address) - 1)
+    return address[:bracket] if bracket != -1 else address
+
+
 def _provider_config_key(
     plan_json: dict[str, Any], type_name: str, module_path: str | None
 ) -> str | None:
     """The resource's ``provider_config_key`` (``aws``, ``aws.west``,
     ``module.app:aws``) from the configuration block, if declared."""
-    base = re.sub(r"\[[^\]]*\]$", "", type_name)
+    base = _without_index(type_name)
     for resource in _config_module_for(plan_json, module_path).get("resources") or []:
         if resource.get("address") in (type_name, base):
             return resource.get("provider_config_key")

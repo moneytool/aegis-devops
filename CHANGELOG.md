@@ -14,6 +14,463 @@ behaviour.
   enforces "reads only" on generated SQL; the guide is explicit that a read's tables, columns and
   cost are the database role's job (the SQL classifier sees only a SELECT's first table, and
   treats `SELECT … INTO` and `SET ROLE` as reads). Every Aegis result in its table is a test.
+- Agent hook: a time budget for each decision (`DECISION_BUDGET_SECONDS`, 10 s). The decision
+  runs in a worker thread; when it takes longer, the hook answers on its own (asks, or denies
+  when the command names an infrastructure tool, in each agent's usual format) instead of
+  running into the agent's 30 s hook timeout, past which the agent would run the command. The
+  abandoned worker's result is never used, and the reply is written to the streams the hook
+  started with. A safety net: the checks are meant to be linear.
+
+### Fixed
+- Agent hook: a shell expansion in one part of a compound command no longer refuses the whole
+  command (#55). The hook judges a command it cannot parse part by part (`;`, `&&`, `||`, `|`,
+  newline): `terraform plan 2>&1; echo "exit=$?"` checks `terraform plan` against the policy
+  and lets the `echo` through. A part with an unknown argument stands in for its program only
+  when that program treats arguments as data (`echo`, `cat`, `tail`, `grep`, `ls`, `test`, …;
+  not `sort`, `cp`, `mv`, `ln`, `tee`, `read` or `printf -v`) and does not redirect output to a
+  computed path or a configuration directory (`~/.kube`, `~/.aws`, …); a part that only assigns
+  a variable drops out, unless the variable steers an infrastructure tool (`KUBECONFIG`,
+  `AWS_*`, `PATH`, …, also after `export`/`declare`/`local`). Any other unknown part (one that
+  runs `$(…)`, backticks or `<(…)`, also inside double quotes, an unknown program, `find
+  -exec`, `watch`, `ssh`, `trap`, `eval`, …) is refused when the command names an
+  infrastructure tool anywhere; the message quotes the part. This refuses `TS=$(date +%s);
+  kubectl …` on purpose: any command substitution next to an infrastructure command is.
+  Here-docs are judged as a whole, as before.
+- Shell parser: the reserved words `if`, `then`, `else`, `elif`, `do`, `while` and `until`, and
+  `coproc`, in front of a command are stripped like `{` and `!`, so `if true; then kubectl
+  delete namespace prod; fi` and `coproc kubectl …` are checked as the `kubectl` command they
+  run (they were unknown binaries, and allowed). A lone `fi`/`done`/`esac` and a `for`/`select`
+  header give no command; `function f { …; }` is rejected like `f() { …; }`. A backslash-newline
+  outside single quotes and comments is removed as the shell removes it (`kubectl delete \` +
+  newline + `namespace prod` was checked with a stray newline argument).
+- Shell parser: a `#` comment ends at the newline. Before, the comment ran on past it, so
+  `echo hi # note` + newline + `kubectl delete …` hid the `kubectl` line; and a `#` inside a
+  word (`pods#x --as=admin`) cut off the rest of the command.
+- Shell parser: the launchers `watch` (its arguments run through `sh -c` unless `-x`),
+  `setsid`, `stdbuf`, `doas`, `ionice`, `caffeinate`, `unbuffer`, `chronic`, `busybox` and
+  `script -c` are unwrapped like `sudo` and `nohup`. A program word the shell could expand into
+  another name (`kube{,}ctl`, `kubec?`, `kube[c]tl`) is rejected ("brace/glob in program name");
+  the hook refuses it when it is a bare word or could become a tool's name, and asks for a path
+  pattern such as `./scripts/*.sh`. The hook asks (it does not refuse) when an unknown program
+  has an infrastructure tool among its arguments, also as a path or after an option
+  (`setpriv kubectl …`, `setpriv /usr/local/bin/kubectl …`, `proxychains -q kubectl …`, `chrt
+  0 kubectl …`, `tmux new -d 'kubectl …'`), except programs that only take a tool's name
+  (`man`, `command -v`, `hash`, `find`, `tree`, `make`, `pkill`, `lsof`, `curl`, `wget`,
+  `tflint`, `checkov`, `pip`, `apt-cache` and other package tools, …), whose command-running
+  options are still read (`rsync -e`/`--rsh`, `scp -o ProxyCommand=`/`-S`, `nix-shell
+  --run`/`--command`), and arguments that are URLs, file names or a `-d dir` value naming an
+  existing directory.
+- Shell parser: package and environment managers that run a command are unwrapped, so the
+  command meets the policy: `uv run`, `uv tool run`, `uvx`, `pipx run`, `poetry run`, `bundle
+  exec`, `asdf exec`, `gem exec`, `mise exec`/`mise x` (`… -- CMD`, `-c STRING`) and `brew bundle
+  exec -- CMD`. `uv run kubectl delete nodes --all` gave only a `uv` intent and was allowed,
+  since `uv` and `pipx` take a tool's name in their other subcommands (`uv pip install kubectl`,
+  `pipx install kubectl`, which are still allowed). An option these parsers do not know is
+  rejected. `uv run -m mod` and `uv
+  run script.py` are read as `python -m mod` and `python script.py`. `cargo run` and `go run`,
+  which build a program and hand it the remaining words, now ask when those words name an
+  infrastructure tool, like any unknown program. The hook also asks when a git configuration
+  value names one (`git -c alias.x='!kubectl …' x`, `git -c core.sshCommand=… fetch`, `git config
+  alias.x '!kubectl …'`): git runs such values where their argv cannot be checked.
+- Agent hook: a local script run inside `$(…)`, backticks, `<(…)`, a subshell,
+  a `{ …; }` group, a loop, a `case` branch, `sh -c '…'` (also `source`/`.` there), after `exec` or
+  `builtin`, or by `fish`/`csh`/`tcsh`/`mksh`/`yash`/`rbash` is read like `bash x.sh`, and one that
+  inline code may rewrite (`python3 -c '…"x.sh"…'; bash x.sh`) asks. `BASH_ENV`/`ENV` before a
+  command asks. Commands git runs from its arguments or environment ask when they name an
+  infrastructure tool or cannot be read: command-valued configuration only (`alias.*` starting with
+  `!`, `core.sshCommand`, `core.pager`, `core.editor`, `*.helper` with `!`, `diff.*.textconv`,
+  `filter.*`, …; `user.email=git@…` and `safe.directory=/work/terraform` no longer ask), `bisect
+  run`, `submodule foreach`, `rebase -x`, `difftool`/`mergetool -x`, `filter-branch --*-filter`, and
+  `GIT_SSH_COMMAND`, `GIT_PAGER`, `PAGER`, `EDITOR`, `VISUAL` and similar variables; this also
+  holds inside `bash -c`. `fd -x`, `rg --pre`, `vim -c`/`+cmd`, `hash -p`, `alias NAME=…`, `nix run
+  …#tool` and code arguments of `awk`, `sed`, `tmux`, `screen`, `parallel`, `flock`, `su`, … that
+  name a tool ask. `cargo +nightly run`, `cargo --color X run` and `go -C dir run` are read as
+  `run`. Package launchers accept common options before the subcommand (`uv --directory backend run
+  …`, `poetry -C dir run`, `bundle --verbose exec`, `mise -E env exec`) and more `uv run` options,
+  and `uvx`/`uv tool run`/`pipx run`/`gem exec` drop a version from the program (`kubectl@latest`,
+  `kubectl==1.0`, `kubectl:1.0`). Development tasks of migration tools run instead of being refused
+  as unknown migrations: `rails test`/`g`/`routes`/`db:migrate:status`/…, `alembic
+  current`/`history`/`revision`/…, `prisma generate`/`migrate status`/…; other unknown tasks
+  (`rails db:schema:load`, `rails console`) are still refused. A brace word with many groups is
+  denied at once (its expansion was exponential), a `~+` path asks instead of failing, a command
+  over 64 KiB is not parsed (asks, or blocks when it names a tool), and more than 32 pieces of
+  piped code ask.
+- Agent hook: script reading. A `<<` inside `$((…))`, `((…))`, `$[…]` or `${…}` is no longer taken
+  for a here-document (`SIZE=$((1<<30))` hid every later line of the script), nor is one inside a
+  string that spans lines; a quoted tag's body keeps its trailing backslashes, so `EOF` still ends
+  it; a here-document whose end is never found asks, and its lines are checked as commands. A line
+  ending in `|`, `|&`, `&&` or `||` is joined with the next (`echo … |` + newline + `sh`). Each
+  script is read once per command, and more than 32 scripts in one command ask (a long run of
+  `./x.sh;` took longer than the hook timeout). Scripts behind `builtin source`, `exec -a NAME`,
+  `exec -c`, `source --`/`. --`, `bash -r` and `posh` are read in a command that parses too.
+  More command-valued git settings and options ask when they name a tool: `git config -f FILE`/
+  `--file`/`set …`, `diff.external`, `core.gitProxy`, `core.alternateRefsCommand`,
+  `remote.*.uploadpack`/`receivepack`, `sendemail.*cmd`, an absolute `credential.helper` path,
+  `--upload-pack`, `clone -u`, `push --receive-pack`/`--exec`, `GIT_PROXY_COMMAND`, and `emacs`
+  code arguments. `git submodule foreach git pull` (and `fetch`, `status`, …) no longer asks, nor
+  does `complete -C …` in a sourced rc file.
+- Agent hook: a pipeline stage gets the same asks as the command on its own (`ssh h kubectl … |
+  tail -5`, `awk 'BEGIN{system("kubectl …")}' | cat` were allowed), and so does a code argument
+  given as `--expression=…`. A here-document read by a shell behind `exec`, `builtin`, `( `, `$(` or
+  `sh -c sh` is checked as commands. A file redirected onto a group, subshell, `if` or loop that
+  runs a shell (`{ bash; } < x.sh`) is read like `sh < x.sh`, and a shell reading a copied or
+  read-write descriptor (`<&3`, `<>`) asks. `export`/`declare` of a command-valued or sourced
+  variable (`export GIT_SSH_COMMAND=…; git fetch`, `export BASH_ENV=x; bash -c …`) asks like the
+  prefix form. `perl`/`ruby -I DIR -e …` reads the inline code. Joining a script's lines that end
+  in `|` or `&&` is linear in the script's size.
+- Agent hook: `command source x.sh` / `command . x.sh` read the script; `bash < <(curl …)`, `bash -s
+  < <(…)` and `python3 <(curl …)` ask like `bash <(curl …)`. Running a script twice (`bash x.sh;
+  bash x.sh`, `./run.sh build && ./run.sh test`) or testing it (`test -f .env && source .env`) no
+  longer counts as writing it. Checking which words name a script is linear in the command (32
+  scripts next to a long argument list took seconds).
+- Agent hook: `eval ./x.sh` / `eval 'bash x.sh'` read the script. In a script, a here-document
+  piped into a shell on the line after its body (`cat <<EOF |` … `EOF` / `sh`), one with the reader
+  after the redirection (`<<EOF sh`, `0<<EOF sh`) and `source /dev/stdin <<EOF` are checked as
+  commands; `… | source /dev/stdin` is refused when the command names a tool, like `… | sh`.
+  `PROMPT_COMMAND` counts as a command variable. A script path with `$HOME` or another variable
+  the hook's environment sets (and the command does not) is read instead of asking. Finding files
+  redirected onto groups is linear (63 KB of `)<a` took 36 s).
+- Agent hook: scripts named in literal code piped into a shell are read (`echo 'bash x.sh' | sh`);
+  `exec < x.sh` before a shell or interpreter reads x.sh like `sh < x.sh`; a pipe into a group,
+  loop or `if` that runs a shell or interpreter asks (`… | while true; do sh; done`). A
+  redirection target written as a separate word (`cd sub 2> /dev/null`) is no longer taken for an
+  argument.
+- Agent hook: only `$HOME` in a script path is filled in from the hook's environment, and only when
+  the command names HOME nowhere else; `$PWD`, `$OLDPWD`, `$_` and a variable set by `for`, `read`
+  or `unset` ask (`cd sub && source "$PWD/x.sh"` read the wrong file). A process substitution or
+  here-string given to `exec` or to a group, loop or `if` that runs a shell asks (`exec < <(curl …);
+  sh`, `{ sh; } < <(…)`). In a script, the reader of `cat <<EOF |` may follow blank or comment lines
+  or be a group (`{ sh; }`). The pipe-into-a-loop ask only looks inside the loop and only at shells
+  and interpreters that read standard input (`… | while read f; do python3 -m mod "$f"; done` runs).
+  Many `exec < FILE` words are read in linear time.
+- Agent hook: piped code nested inside piped code shares one budget of 32 checks per command (32
+  levels of 32 took minutes). A pipe into `exec sh`, `eval sh`, `builtin exec sh` or `bash -c "exec
+  sh"` is a shell reading the pipe. Scripts named in piped code are not read from the hook's
+  directory after a `cd` in the command (asked), and `HOME=` anywhere in the command keeps `$HOME`
+  from being filled in. `bash /dev/stdin` asks; a download named after a script (`wget …/x.sh`,
+  `curl -O …/x.sh`) counts as rewriting it.
+- Agent hook: a pipe into a group, loop, `if` or subshell asks when any shell or interpreter after it
+  reads standard input: after its options (`bash -e`, `sh -l`, `bash -s`) no script, `-c` code or
+  `-m` module follows (where the compound ends is no longer worked out, which `$(…)`, `${…}`,
+  quotes and nesting got wrong, and which was quadratic). `eval`, `exec`, `builtin` and `sh -c`
+  strings are unwrapped up to four levels, and any part of such a string may be the reader (`|
+  bash -c 'eval sh'`, `| eval 'true; sh'`), also with `< FILE` (`bash -c 'eval sh' < x.sh` reads
+  x.sh). Other redirections before a group's or `exec`'s standard input (`{ sh; } 2>/dev/null <
+  x.sh`), a named descriptor (`sh <&$fd`), `~` when the command changes HOME, and a `cd` inside a
+  subshell or `-c` string before piped code are no longer missed.
+- Agent hook: a directory change is also seen spelt `\cd`, `"cd"` or as `env -C`/`sudo -D` (scripts
+  after it ask instead of being read from the hook's directory); a quoted `sh -c` string is read on
+  its own before the command is split (`bash -c 'set -e; bash x.sh "$@"'`); a chain of `eval`s is
+  joined once (it was quadratic) and followed to four levels; a redirection after a shell reading a
+  pipe (`sh 2>/dev/null`) no longer counts as its script. A URL counts as naming a script only for
+  `wget` and `curl -O`/`-J`.
+- Agent hook: a shell or interpreter given by path (`/bin/sh`, `/usr/bin/python3`) counts as a reader
+  in the pipe, group-redirect, `exec <` and descriptor checks; `bash -ec '…' < x.sh` and a `-c` string
+  followed by its arguments are read; `--version`/`--help` (and `-V`/`-v`/`-h` of an interpreter) are
+  not stdin readers; only env's own `-C`/`--chdir` counts as a directory change (`env FOO=1 make -C
+  build` does not).
+- Agent hook: the regexes that find shells by path only start at a word, so long runs of `/` stay
+  linear (they took over 30 s); an unquoted `<<< $(…)` or `` <<< `…` `` is a here-string, not a
+  script argument; `bash -lc`, `--norc`, `-o pipefail` and trailing arguments before `< FILE` are
+  read, and a `-c` string reading a process substitution or here-string asks; `| time (sh)` is a
+  piped compound; a URL download other than `git clone` and `curl` without `-O` counts as naming a
+  script.
+- Agent hook: a shell that ends its line inside a piped loop or `if` (the usual multi-line form)
+  reads the pipe; `bash -ec`, `-o pipefail`, `--norc` and `$'…'` `-c` strings are read on their own;
+  a bare `cd` or `cd ~` after the command changes HOME makes the directory unknown; `python3
+  /dev/stdin` reads the pipe; `env -iC` counts as a directory change; many `env`/`sudo` words stay
+  linear.
+- Agent hook: the regexes that find a shell's `-c` string and a shell or interpreter word are
+  linear: runs of backticks, `{` inside quotes and `-o ` (with or without a `-c`) took 6-60 s, past
+  the hook's timeout. A shell reading a piped group's input is found before a separator with no
+  space (`sh;echo`, `sh&&x`, `sh -s;x`). Any interpreter given `/dev/stdin` or `/dev/fd/0` as its
+  script asks, as `bash /dev/stdin` does (`| python3 /dev/stdin`, `| node /dev/stdin`). `env`
+  and `sudo` read clusters of short options (`env -iv`, `env -iC DIR`, `env -iCDIR`, `env -u X
+  -iC DIR`, `sudo -Eu USER`), and `env -S STRING` / `--split-string` is split into words unless
+  it holds `$`, a backslash or options of its own; a cluster with `C` or `D` makes the directory
+  unknown. A shell, interpreter or script run under `env`/`sudo` options the hook does not know
+  (`env -P DIR bash x.sh`, `sudo -iu USER bash x.sh`, `cat x.sh | env -Q sh`) asks instead of
+  being allowed.
+- Agent hook: the checks for shells reading standard input match on the words the shell sees,
+  not the raw text: `'sh'`, `"sh"` and `\sh` are `sh`, a quoted `';'` is an argument, not a
+  separator, and an `env "-iC" DIR` or `sudo "-D" DIR` makes the directory unknown. Redirections
+  are read in order, so the last `<` is standard input (`bash -c 'eval sh' < ok.sh < x.sh` and `{
+  sh; } < ok.sh < x.sh` read x.sh). The words are read in one pass, also inside `sh -c` strings and
+  `eval` words, to four levels. At most 32 launchers (`env`, `sudo`, `nice`, …) are unwrapped in
+  front of one command, so a chain of `env -S`/`env -u` words stays linear (it took 5-7 s); a
+  longer chain cannot be checked and is judged like any command the parser rejects.
+- Agent hook: the shell-word reader follows bash's quoting more closely: here-document bodies
+  (`<<`, `<<-`, quoted delimiters, several on one line) are set aside instead of read as commands
+  (an apostrophe in one no longer hides the rest of the command), `$'…'` keeps its backslash
+  escapes (`$'\''`), and `$(…)` is read as a command line of its own. A quote, `$(…)` or backtick
+  never closed asks when the command names a shell, interpreter or infrastructure tool.
+  Here-document bodies and command substitutions are checked like `sh -c` strings and `eval`
+  words (`x=$(curl … | sh)` asks); `sh -c` strings and `eval` words in a command the parser
+  rejects are dequoted the same way (`bash -c 'bash -c '\''sh < x.sh'\'''`, `eval 'bash x.sh;
+  true'`), a `<` given to `eval` reaches a shell in its words (`eval 'true; sh' < x.sh`), and a
+  pipe into a shell in such a command asks. A file redirected onto a group, loop, `exec` or `-c`
+  string after a `cd` is no longer read from the hook's directory (asked).
+- Agent hook: a `<<` inside `(( … ))`, `for (( … ))`, `$(( … ))`, `$[ … ]` or `${ … }` is a
+  shift or a pattern, not a here-document, so the lines after it are read; a here-document whose
+  delimiter never comes leaves the command unclosed (asked when it names a shell, interpreter or
+  infrastructure tool). A command goes on past a newline after a trailing `|`, `|&`, `&&` or `||`
+  (also after comments and blank lines), in the parser and in the shell-word reader, so `curl … |`
+  / `sh` is a pipe into a shell and `kubectl get pods &&` / `kubectl delete …` is judged as the
+  delete. `$'…'` is decoded as bash does (`\xHH`, octal `\NNN`, `\uHHHH`, `\UHHHHHHHH`, `\cX`),
+  so `| $'\x73h'` is `| sh`; a pipe into a shell the parser does not recognise as one asks.
+  `bash -s ARGS` and `bash +x` read the pipe. `python3 - <<'EOF'` and `node <<'EOF'` still
+  ask: the hook does not read code in other languages.
+- Agent hook: every here-document body, quoted or not, is checked as commands, whatever program
+  reads it: which one runs it as code cannot be told reliably (functions, aliases, `PATH`,
+  `hash -p`, `>(…)`, `exec 3> >(sh)`, `sort --compress-program`, `ssh`, `sudo -s`, …). The lexer
+  still sets bodies aside when it reads the command around them, so an apostrophe in one cannot
+  hide what follows. Accepted over-ask: a body that reads like a command asks (`cat > README.md
+  <<'EOF'` with `curl … | sh` or `cd sub; bash x.sh` in it); it is denied only when it runs a
+  blocked command. `$(…)`, `<(…)`, `>(…)` and backticks inside `$((…))`, `${…}` and `$[…]` are
+  read (only a `<<` there loses its here-document meaning); single quotes hide them only in an
+  unquoted `${…}`, not in arithmetic, `$[…]` or a double-quoted `"${…}"`. `((…))` and `$((…))`
+  count as arithmetic only when they close with an adjacent `))` (`((cmd) )` is a subshell,
+  `$((cmd) )` a command substitution). A comment, blank line or backslash-newline between a pipe
+  and the command after it no longer hides that command.
+- Agent hook: quoting inside `${…}` is followed level by level: double quotes make single quotes
+  literal (`${x:-"'$(…)'"}` runs the substitution), and a nested `${…}`, `$[…]` or `$((…))` is
+  read with its own rule (single quotes quote only in an unquoted `${…}`). In an unquoted
+  here-document body quotes are literal, so its `$(…)` and backticks are read whatever quotes
+  surround them (`cat <<E` / `'$(curl … | sh)'` asks); a quoted delimiter (`<<'E'`, `<<"E"`,
+  `<<\E`) has no expansions. Command lines nested deeper than the hook reads (more than four
+  levels of `sh -c`, `eval`, `$(…)` and here-documents, or more than 128 brackets of `$(…)`,
+  `${…}`, `$[…]` and `$((…))`) ask instead of going unread.
+- Agent hook: backticks are read the same way everywhere (at the top level, inside double
+  quotes, inside `${…}`/`$((…))` and in unquoted here-document bodies): a substitution ends at
+  the first backtick no backslash escapes, and its text is unescaped as bash does (`` \` ``,
+  `\\`, `\$`), so an escaped backtick inside is a nested substitution that is read in turn
+  (`` echo "`echo \`bash x.sh\``" `` reads x.sh). `` "`curl … | sh`" `` asks. Scripts named in
+  nested command lines are read like those at the top.
+- Agent hook: in a command the parser rejects, scripts (and launchers with unknown options) are
+  found from the shell-word reader's simple commands rather than a split of the raw text, for
+  the command and every command line nested in it (`sh -c`, `eval`, `$(…)`, backticks,
+  subshells, here-document bodies), so a quoted `;`, `|`, `&`, `(`, `)` or backtick is part of
+  a word (`echo $(bash x.sh 'a;b')` and `bash x.sh '('` read x.sh). Backticks directly inside
+  double quotes also unescape `\"`, as bash does there (`` "`eval \"bash x.sh\"`" ``). A
+  shell's options that take a value (`-o`, `+o`, `-O`, `+O`, `--rcfile`, `--init-file`) are
+  skipped with it, so `bash --rcfile FILE -c '…'` and `bash -O extglob -c '…'` read the `-c`
+  string instead of taking FILE or the option name for the script.
+- Agent hook: a launcher's command string (`watch 'cmd'`, `script -c 'cmd'`, `mise exec -c
+  'cmd'`, also behind `sudo`/`nohup`) is a nested command line like a `sh -c` string, so every
+  check reads it, also in a command the parser rejects (`watch 'bash x.sh' "$HOME"`). A shell
+  given a script whose name is only known at run time and a `< FILE` (`sh < x.sh $X`) also has
+  FILE read, since with `$X` empty it runs FILE. An interactive shell (`-i`, `-ic`, …) sources
+  its `--rcfile`/`--init-file`, which is read as a script (`bash --rcfile x.sh -i`); with `-c`
+  alone the file is not read, as bash does.
+- Agent hook: a shell's short-option cluster takes one value per `o`/`O` in it, in order, and
+  then the `-c` string if it holds a `c` (`bash -co pipefail 'cmd'`, `bash -Oc extglob 'cmd'`,
+  `bash -eo pipefail x.sh` runs x.sh), the same in the parser, the script reader and the
+  checks for shells reading standard input. `function NAME { …; }` is read like `NAME() { …;
+  }`, so the scripts in its body are read.
+- Agent hook: in zsh, ksh, mksh and yash an `o`/`O` with letters after it takes them as its value
+  and ends the cluster (`zsh -opipefail -c 'cmd'`, `zsh -eopipefail x.sh`); a trailing one, and
+  every `o`/`O` in bash, dash and sh, takes the next word. An `i` in a cluster with option values
+  (`bash --rcfile x.sh -io pipefail -c …`) still makes the shell interactive, so it sources the
+  file. Only the shell in command position sources its `--rcfile` (`echo bash -i --rcfile x`
+  runs no shell), and an interpreter's `-O`/`-o` takes no value (`python3 -OO x.py`).
+- Agent hook: any `c` in a shell's short-option cluster means `-c`, also after an attached
+  value (ksh93 reads `-oc` as `-c`), and the same holds for `i` and `s`. Shells started by
+  `find … -exec|-execdir|-ok|-okdir` are nested command lines like `watch`'s, so their
+  `--rcfile` and scripts are read. Only bash has `--rcfile`/`--init-file`, and only before its
+  short options (`bash -i --rcfile x` is an error and runs nothing). A shell with more option
+  words than the hook reads (64), before its `-c` string or script or as a reader in a piped
+  group, asks instead of being passed over. Versioned shell names (`zsh5`, `ksh93`, `bash5.2`)
+  are read as their shell.
+- Agent hook: an `o`/`O` with letters after it that hold `c`, `i` or `s` in zsh, ksh, mksh or
+  yash (`-onoclobber`, `-oxtrace`, `-ointeractive`) is read both ways wherever a shell's
+  options are read, on the dequoted words of every nested command line (`zsh "-onoclobber"
+  x.sh`, `zsh -o noclobber -oxtrace x.sh`, `bash -c 'zsh -onoclobber x.sh'`): as the option's
+  value (as zsh and ksh do: x.sh is the script, or the shell reads standard input) and as set
+  letters (as ksh93 reads `-oc` as `-c`: x.sh is the command string). Both are checked, so
+  `ksh -oc 'cmd'` also asks when `cmd` is harmless (its other reading runs a script named
+  `cmd`). `find … -exec` ends at `;` or at a `+` right after `{}`; any other `+` is
+  an argument (`find . -exec env -u + cmd \;` runs cmd). Versioned names are mapped only for
+  shells that ship them (bash, zsh, ksh, mksh, dash, yash, also `mksh-R59`; not `sh2`).
+- Agent hook: a shell's lone `-` ends its options like `--`, and after either every word is an
+  operand, so the next word is the script, even one whose name starts with `-` (`bash - x.sh`,
+  `zsh -x - x.sh`, `bash -- -x`); a lone `-` with nothing after it still reads standard input
+  (`curl … | bash -` asks). An ambiguous zsh/ksh cluster read as a value that leaves `-s` reads
+  its `< FILE` as the script. zsh's `noglob`, `nocorrect` and `repeat N` are unwrapped like
+  `command` (`noglob bash x.sh`). A long run of `!` or `{` before a command is stripped in one
+  pass (65 KB of `! ` took over 2 s).
+- Agent hook: `!`, `time [-p]` and grouping words in front of a command are stripped in any
+  order (`time ! sh x.sh`, `! time ! sh x.sh`), as are zsh's `repeat N do … done`; `command --`
+  (also `command -p --`), `nice --` and `timeout -- N` are unwrapped. A `-` or `--` ends a
+  shell's options the same way in every place that reads them, so after `-c` the next word is
+  the command string (`bash -c - 'cmd'` runs cmd). `noglob source x.sh` and `noglob . x.sh` read
+  x.sh like `source x.sh`.
+- Agent hook: assignments, `--`, `!`, `{`, reserved words and `coproc` in front of a command are
+  passed over in one pass in any mix (`-- ! A=1 do …` took 3-4 s at 64 KB; `time coproc sh x.sh`
+  reads x.sh), as are runs of `exec`/`builtin`; each pass over the launchers counts toward the
+  limit of 32, and a pass that changes nothing ends the unwrapping. A program whose path ends in
+  such a word (`./-- ; …`) no longer makes the unwrapping loop forever (a hang lets the command
+  run); the shell-word reader also never stays on a character. `command` takes repeated or
+  clustered `-p` (`command -p -p`, `-pp`), and GNU time (`/usr/bin/time`, `gtime`) takes its
+  options (`-f FMT`, `-o FILE`, `--format=`, `--output=`, `-v`, `-l`, `-a`, `-q`, `-p`).
+- Agent hook: a program word with glob characters (`kube{,}ctl`, `k*`) is matched against the
+  tools' names with a small glob matcher that runs once along the word, not with `fnmatch`,
+  which compiled the word to a regex and was quadratic on runs of `[` (64 KB of `[` took 36 s;
+  `{a,b}`×8 + 2 KB of `[` took 10 s). More than 16 KB of glob text across the brace
+  alternatives counts as possibly a tool's name (denied), as does a POSIX class (`[[:alpha:]]`).
+  Quoted glob characters are literal, as in the shell (`"[[[["` and `'k*'` are program names,
+  not globs): whether they are quoted is read where the word is read, in the command or in its
+  `-c` string, in one pass (`bash -c 'k* …' 'k*'` is still a glob); a program word a launcher
+  produces (`uvx 'kube[a]x'`) counts as a glob when it holds one. A `find … -exec` program
+  word is a glob as the outer shell spells it (it expands find's words before find runs:
+  `find . -exec k* …`, also inside `eval` or `$(…)`), and program words in nested lines the
+  parser rejects (`eval` words, a `-c` string in a `-c` string, substitutions, here-document
+  bodies) are checked too. For this check a here-document body is shell-run when a shell,
+  `eval`, `source`, `.` or `exec` is a program of the pipeline its `<<` is in (`bash <<EOF`,
+  `cat <<EOF | sh`: as for a command), data when every program there is a data sink (`cat`,
+  `tee`, `jq`, `sort`, …; not `git` or `gh`, which run programs in too many ways; for `sort`
+  and `diff`, none of `--compress-program` or `--diff-program`, also abbreviated, nor an
+  expansion among the arguments: `sort "$O"`) or an interpreter of another language reading
+  the body as its program (`python3`, `python3 -`, `node`; also `python3 -m json.tool`; not
+  one given inline code or a script, which may hand the body to a shell: `python3 -c
+  '…os.system(input())'`),
+  with no `<(…)`/`>(…)` and no descriptor path (not checked: a Markdown `* item`), and otherwise
+  unknown (`tee >(sh)`, a function or alias in the command, `sed`, `xargs`, an `eval`
+  anywhere, a group or subshell in a command with a pipe: `(cat <<E …) | x`, a
+  here-document inside `$(…)`, backticks, `<(…)` or `>(…)`, whose output goes on, and a
+  pipe into or out of a compound command: `cat <<E | if …; then …; fi`, a here-document
+  attached to a group, subshell, loop or if: `{ …; } <<E`, `done <<E`), where a globbed
+  word asks (an `eval` anywhere adds every body to these). A here-string (`<<< word`) is
+  read like a one-line body, also inside a substitution. A body whose pipeline goes on past
+  its line (`cat <<E |`, the next stage after the body) has an unknown reader too (accepted
+  over-ask: `… | tee f` on the next line asks when the body has a globbed word); each body
+  and here-string is classified once, from its own command on (`:<<<x|` on 8000 lines took
+  11 s). The reader
+  of a body is its own
+  command and the pipeline stages after it (`echo x | cat <<E`: echo never sees it), and a
+  reserved word counts for the compound rule only where a command starts (`echo done`
+  does not). Only an unquoted `case` at the start of a command
+  (after `do`, `then`, `else`, `{`, `!` or `time` too, spelt bare in reserved-word position:
+  `"do" case …` and `echo do case …` are plain words), with no redirect, assignment or
+  other word before it, starts a case statement, whose arm patterns (`*)`, `a|b*)`) are
+  not program words for this check. A word whose quoting is not known counts as a glob. Each
+  text's quoting is read once per decision, and `x+=1` and `a[1]=2` are assignments like
+  `x=1`. Two other regexes that
+  were quadratic on `[` runs (a package spec in `uv run`/`uvx`, a Terraform address index)
+  are plain string scans now. With `--log-json`, a decision ended by the time budget logs its
+  ask or deny, and the abandoned worker writes no log line or ledger entry (checked when its
+  policy run starts and again before it writes).
+- Shell parser: `find … -exec|-execdir|-ok|-okdir CMD … \;|+` yields CMD as a command of its
+  own (`{}` stays a literal, unknown file), so `find . -exec kubectl delete … \;` meets the
+  policy. A backslash-escaped `;`, `|`, `&`, `<`, `>`, `(` or `)` is a literal word, not a
+  separator (`find … -exec rm {} \; -print` was split into a command `-print`).
+- Agent hook: "names an infrastructure tool" also matches once quotes, backslashes and line
+  continuations are removed (`kube''ctl`, `"kube"ctl`).
+- Agent hook: a local shell script is read before it runs (#56). For `bash x.sh`, `sh < x.sh`,
+  `./x` (a `#!` shell, `#!/usr/bin/env -S bash`, or no `#!` line), `source x.sh` and `. x.sh`,
+  each line that names an infrastructure tool is checked as a command against the policy, in
+  one policy run (a few more find the line when it does not allow): a blocked line, or a block
+  the lines only reach together, blocks and the message names the line; a line that cannot be
+  checked asks (the line is found by bisection on the verdict, so a BLOCK is not blamed on an
+  earlier ESCALATE line). A backslash at the end of a line joins the next as the shell does,
+  except at the end of a comment; comments are skipped; `<<` is a here-doc only outside quotes
+  and comments, its delimiter is read as one shell word (`<<'END DATA'`; an unreadable one,
+  such as `<<$'EOF'`, asks and the lines after it are checked as commands), and its body is checked when a shell reads it (also through `cat <<EOF | sh`), asks
+  when another interpreter reads one that names a tool or an unquoted body's `$(…)` names one,
+  and is data otherwise. A script that does not exist yet, is written, copied, moved, linked,
+  edited or otherwise named by the same command (`printf … > x.sh; bash x.sh`, also spelled
+  `"$PWD/x.sh"` or `"$(pwd)/x.sh"`; reading it with `cat`, `grep`, `wc`, … does not count), cannot
+  be read, is not a regular file, holds a NUL byte (when a shell is named; a `./x` without `#!`
+  and with a NUL is a binary and not read), is over 64 KiB, names a tool on more than 64 lines,
+  or follows a `cd` the hook cannot follow (computed, in the background or a pipeline, `env
+  -C`) asks; a relative path follows a literal `cd DIR` earlier in the command. What a script
+  sources or runs in turn is not read, nor are other interpreters' scripts (`python3 x.py`).
+- Agent hook (PR #60 review): a file sourced before an infrastructure command (`source env.sh;
+  aws s3 rm …`, `. env.sh; …`) is read for what it sets, and its literal `export
+  AWS_PROFILE=prod` / `AWS_PROFILE=prod` / `declare -x …` settings of the variables that pick an
+  account, cluster or program reach the commands after it, as do the same settings written in
+  the command itself (`export AWS_PROFILE=prod; aws …`), so a policy scoped to that profile
+  applies with `--resolve-current-context`; before, the later command was judged with the
+  invoking environment and allowed. A sourced file that may change the environment in any
+  other way (`cd`, `unset`, `alias`, a function, `set -a`, a computed value, control flow,
+  another sourced file or program; also a file that is missing or cannot be read), and a
+  setting that may not reach the later commands (in the background, a pipeline, after `&&` /
+  `||`, inside an if or loop body, in a `sh -c` string) or cannot be followed (`unset`,
+  `export -n`), deny the infrastructure commands after it as a computed scope does. A script
+  line whose program word is a glob or brace (`/usr/local/bin/kubec?l delete nodes --all`,
+  `kube{ctl,x} delete …`) is now kept when a script is read (`bash x.sh`, `./x.sh`, `source
+  x.sh`, `sh < x.sh`) and asks like the same command typed directly; a glob in an argument
+  (`rm -f *.tmp`) still allows.
+- Agent hook: inside a script the hook reads (`bash x.sh`, `./x.sh`, `sh < x.sh`, `source
+  x.sh`), a line that may change the account, cluster, program or directory of a later line
+  that names an infrastructure tool now refuses the script as a computed scope does ("cannot
+  check this command statically"): an assignment, `export`, `declare`, `unset`, `read` or
+  `printf -v` of the variables the hook watches, `cd` / `pushd` / `popd`, `set -a`, `alias`, a
+  function, `eval`, or a nested `source` / `.`. Literal settings (`export AWS_PROFILE=prod`,
+  `AWS_PROFILE=prod`, `declare -x …`) in a script without control flow are followed instead,
+  so `export AWS_PROFILE=prod-admin` then `aws s3 rm …` is judged in prod. Before, each line
+  was judged with the invoking environment and directory. Scripts that change none of these
+  before an infrastructure line (`set -euo pipefail` then `kubectl get pods`, `cd build &&
+  make`) are still judged line by line.
+- Agent hook (PR #60 council): `local NAME=value` (an error outside a function, so it sets
+  nothing) and a declaration with an option other than `-x` (`declare -g`, `-n`, `-a`, `-l`,
+  …) are no longer followed as settings of a watched variable; with `unset`, `read` (also
+  `read -aNAME`), `mapfile` / `readarray`, `getopts` and `printf -v NAME` / `printf -vNAME`,
+  they now count as changes the hook cannot follow whenever a word may name a watched variable
+  (also a computed `$N`), typed in the command, in a sourced file or in a script the hook
+  reads: the infrastructure commands after them are refused. Before, `local
+  HELM_NAMESPACE=staging; helm … uninstall …` was judged in staging, and a sourced or scripted
+  `printf -vHELM_NAMESPACE …` was not seen.
+- Agent hook (PR #60 council): a command that sources many files stays linear (whether an
+  infrastructure tool comes later is worked out in one sweep, and each sourced file is read
+  once per directory; past 32 distinct files the rest leave the environment unknown): a
+  thousand `source env.sh; ` before `aws …` took 18.8 s. In a script the hook reads, a
+  nameref (`declare -n` / `typeset -n` / `local -n`, also when typed) and `printf -vNAME` count
+  as changes the hook cannot follow, and a variable whose value names a file or command a
+  later program runs (`BASH_ENV`, `ENV`, `GIT_SSH_COMMAND`, `EDITOR`, …) asks as it does when
+  typed. A `cd` in a script no longer refuses it: like a typed `cd`, a literal one moves the
+  directory later lines are checked from, and a computed one (`cd "$(dirname "$0")"`), one in
+  a script with control flow or one after a line naming `CDPATH` makes it unknown, which only
+  matters to the checks that depend on it. A typed `cd DIR` to a relative name is unknown when
+  `CDPATH` is set or the command names it, since `cd` searches it first.
+- Agent hook (PR #60 council): a setting inside a `{ …; }` group (also one an `&&` / `||`
+  may skip, `false && { …; export HELM_NAMESPACE=staging; }`) no longer reaches the commands
+  after the group: like one in an if or loop body it is a change the hook cannot follow. A
+  sourced file, a script, a `KUBECONFIG` file and a `psql -f` file are only read when they are
+  regular files: a pipe (`/dev/fd/N`, a FIFO), a device or a directory is never opened, so
+  `source /dev/fd/3; kubectl …` asks at once instead of waiting on the pipe. In scripts and
+  sourced files, names and command words are matched after quote removal, and a quoted name or
+  command word (`export H"ELM_NAMESPACE"=prod`, `sour""ce x.sh`) is never followed as a
+  setting. Whether the command names `CDPATH` is worked out once, not once per `cd`
+  (`"cd a;"` 12800 times took 5.25 s), and the literal settings kept from a script do not
+  count toward its 64-line limit. A `for` / `select` loop whose variable is one the hook
+  watches (`for AWS_PROFILE in prod; do …; done`), and a watched variable assigned in front
+  of a POSIX special builtin (`AWS_PROFILE=prod :`, which sh and dash keep), are changes the
+  hook cannot follow, typed, in a `sh -c` string or in a script: the infrastructure commands in
+  the loop and after it are refused. A script's control flow is now read with the shell lexer,
+  so `$(…)`, `${…}` and quoted text no longer stop its literal settings from being followed.
+- Agent hook (PR #60 council): `env -u NAME` / `-uNAME` / `--unset=NAME`, `env -i` / `env -`,
+  `env NAME=` and `sudo` (which resets the environment) in front of an infrastructure command
+  are changes the hook cannot follow when they remove or empty a watched variable or drop
+  values set earlier in the command: the tool falls back to defaults, so it is refused rather
+  than judged with the value set before. A script the command runs (`bash x.sh`, `sh < x.sh`,
+  `./x.sh`, `source x.sh`) now starts with the watched settings made before it (`export
+  HELM_NAMESPACE=prod; bash x.sh`, `source env.sh; bash x.sh`, `HELM_NAMESPACE=prod bash
+  x.sh`), checked as if its first line; after a change the hook cannot follow (`unset`, a
+  bare assignment, a sourced file it cannot read) a script that names a tool asks. `CDPATH` is
+  watched like the other variables and found also when spelt with quotes (`CDP"ATH"=…`,
+  `printf -vCDP"ATH"`).
+
+### Changed
+- Agent hook: code piped into a shell or interpreter, or fed to one by a here-string or here-doc
+  in a command that cannot be parsed, asks instead of running (#56): `curl … | sh`, `echo … |
+  base64 -d | sh`, `base64 -d <<< … | sh`, `cat x.py | python3`. Codex, Gemini CLI and OpenCode,
+  which cannot ask, block it. Only a literal `echo` (no `-e`, no backslashes) or `printf` (one
+  argument, no `%`) is read: its text blocks when it names an infrastructure tool, and code for
+  a shell is checked like a command. Piped code in a command that names an infrastructure tool
+  is still blocked. Shell intents' `params.runs_code` for a pipe now carries `producer`, the
+  program feeding it.
+- `aegis check command` still exits 64 for a command it cannot parse; for a compound command the
+  message now ends with the part that caused it (`… inside double quotes in 'echo "exit=$?"'`).
 
 ### Fixed
 - **kubectl boolean flags were "missing its value"** (#53). `kubectl get pods -n prod

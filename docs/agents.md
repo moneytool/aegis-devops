@@ -51,6 +51,24 @@ file, too many rules quarantined) or a command cannot be analysed without runnin
 `terraform` and `tofu` — and says why. Everything else still runs: `ls` has nothing to do with
 a broken policy.
 
+**Compound commands** are judged part by part. In `terraform plan 2>&1; echo "exit=$?"` the
+`terraform plan` is checked against the policy and the `echo` runs. A part with an unknown
+argument passes only when its program treats arguments as data (`echo`, `printf` without
+`-v`, `cat`, `tail`, `head`, `grep`, `wc`, `ls`, `test`, `rm`, `mkdir`, `jq` and similar; not
+`sort`, `cp`, `mv`, `ln`, `tee` or `read`) and it does not redirect output to a computed path
+or a configuration directory (`~/.kube`, `~/.aws`, `~/.config`, …), or when it only assigns a
+variable that does not steer an infrastructure tool. Every other part with something unknown
+in it is refused when the command names an infrastructure tool anywhere: a part that runs its
+own command (`$(…)`, backticks, `<(…)`, also inside double quotes), one whose program is
+unknown (`$TOOL …`), runs other programs (`find -exec`, `watch`, `ssh`, `trap`, `awk`,
+`docker run`, `eval`, `bash -c`, …) or sets `KUBECONFIG`, `AWS_*`, `PATH` and the like (also
+through `export`/`declare`/`local`). So `TS=$(date +%s); kubectl get pods` is refused on
+purpose: any command substitution next to an infrastructure command is. The message quotes
+the part. Without an infrastructure tool in the command such parts run as before. A program
+word the shell could expand into another name (`kube{,}ctl`, `kubec?`, `kube[c]tl`) is always
+refused. `aegis check command` stays strict: it exits 64 for any command it cannot parse, and
+names the part that caused it.
+
 **Escalations.** An ESCALATE verdict asks the user in Claude Code, Copilot, VS Code and Cursor.
 Codex has no "ask" for hooks (it treats an unknown decision as an error and runs the command),
 and Gemini CLI and OpenCode have none either, so there an escalation is a block. `aegis hook <agent> --escalate-as deny` makes every agent
@@ -58,35 +76,102 @@ block instead of asking.
 
 ## What the hook cannot see
 
-The hook reads the command an agent is about to run. It cannot read code that the command
-runs, so an agent that writes its infrastructure calls into a script, or calls a cloud SDK,
-gets past it. With the example policy:
+The hook reads the command an agent is about to run, and the local shell scripts it runs. It
+cannot read other code the command runs, so an agent that writes its infrastructure calls into
+a Python program, a Makefile, or calls a cloud SDK, gets past it. With the example policy:
 
 | Command the agent runs | Result |
 |---|---|
 | `kubectl delete namespace prod` | blocked by the policy |
 | `bash -c 'kubectl delete namespace prod'` | blocked: the string is unwrapped and checked |
+| `if true; then kubectl delete namespace prod; fi` | blocked: `if`/`then`/`do` … are stripped and the command checked |
+| `kubectl get pods; echo "exit=$?"` | runs: `kubectl get pods` is checked, the `echo` part has no infrastructure tool |
+| `kubectl delete namespace prod; echo "exit=$?"` | blocked by the policy |
+| `NS=prod; kubectl delete ns "$NS"` | blocked: the `kubectl` part cannot be checked (the message quotes it) |
 | `K=kubectl; $K delete namespace prod` | blocked: cannot be checked, names an infrastructure tool |
+| `TS=$(date +%s); kubectl get pods`, `C=…; kubectl get ns; find . -exec $C …` | blocked: a part runs a command the hook cannot see, next to an infrastructure tool |
+| `coproc kubectl …`, `kubectl delete \` + newline + `namespace prod`, `watch`/`setsid`/`stdbuf`/`doas`/`ionice`/`caffeinate`/`unbuffer`/`busybox`/`script -c` `kubectl …` | checked like the plain command |
+| `uv run kubectl …`, `uvx kubectl@latest …`, `uv tool run`, `pipx run`, `poetry run`, `bundle exec`, `asdf exec`, `gem exec`, `mise exec -- kubectl …`, `brew bundle exec -- kubectl …`, also after global options (`uv --directory backend run …`, `poetry -C dir run …`) | checked like the plain command, so `bundle exec rails db:migrate` meets the policy and an unknown migration task is refused as it is without `bundle exec`; an option the hook does not know is refused when the command names a tool (otherwise the command is judged like any other the hook cannot parse); `uv pip install kubectl`, `pipx install kubectl` run |
+| `rails test`, `rails g …`, `rails routes`, `rails db:migrate:status`, `alembic current`/`history`/`revision`, `prisma generate`, `prisma migrate status` | run: development tasks that do not touch the database |
+| `cargo run -- kubectl …`, `cargo +nightly run …`, `go run . kubectl …`, `nix run nixpkgs#kubectl -- …` | asks: the program gets `kubectl …` as arguments and may run it |
+| `git -c alias.x='!kubectl …' x`, `git -c core.sshCommand=… fetch`, `git config alias.x '!kubectl …'`, `git bisect run kubectl …`, `git submodule foreach 'kubectl …'`, `git rebase -x 'kubectl …'`, `git difftool -x …`, `git filter-branch --tree-filter …`, `GIT_SSH_COMMAND=…`/`EDITOR=…`/`GIT_PAGER=…` naming `kubectl` (also inside `bash -c`) | asks: git runs that command where its arguments cannot be checked. Ordinary configuration (`user.email`, `remote.origin.url`, `safe.directory`) is not read as a command |
+| `BASH_ENV=x.sh bash -c …`, `ENV=x.sh sh …` | asks: the shell sources that file first, and the hook does not read it |
+| `alias kk=kubectl`, `hash -p /usr/bin/kubectl kk` | asks: `kk` would run the tool under another name |
+| `fd -x kubectl …`, `rg --pre kubectl`, `vim -c '!kubectl …'`, `awk 'BEGIN{system("kubectl …")}'`, `sed '1e kubectl …'`, `tmux new 'kubectl …'` | asks: these run a command or code given as an argument |
+| a command over 64 KiB, or more than 32 pieces of code piped into a shell | asks (blocked when it names a tool): too much to check |
+| a command the hook takes more than 10 s to decide (a safety net: every check is meant to be linear) | asks (blocked when it names a tool): the hook answers before the agent's own 30 s hook timeout, past which the agent would run the command. A backstop, not a guarantee: the decision runs in a worker thread, and a single long call into C (one regex match) holds Python's lock until it returns, so the hook's regexes are kept linear in the command and none compiles text from it |
+| `find … -exec kubectl … \;` (also `-execdir`, `-ok`, `-okdir`, `… {} +`) | checked like the plain command; `{}` is an unknown file, so `kubectl delete -f {}` asks |
+| another program with `kubectl` among its arguments (`setpriv kubectl …`, `setpriv /usr/local/bin/kubectl …`, `proxychains -q kubectl …`, `chrt 0 kubectl …`, `tmux new -d 'kubectl …'`) | asks: it may run the tool where its arguments cannot be checked. Not for programs that only take a tool's name (`man`, `command -v`, `find`, `make`, `pkill`, `curl`, linters, `pip`/`apt-cache` and other package tools, …), unless an option of theirs runs a command that names a tool (`rsync -e`, `scp -o ProxyCommand=`, `nix-shell --run`); nor for URLs, file names such as `kubectl.yaml`, or `-d terraform` when `terraform/` is a directory |
+| `kube{,}ctl …`, `kubec? …`, `/usr/bin/k* …` | blocked: brace/glob in program name (a path pattern that cannot become a tool's name, such as `./scripts/*.sh`, asks) |
 | `python3 -c "subprocess.run(['kubectl','delete','namespace','prod'])"` | blocked: inline code that names an infrastructure tool |
 | `node -e` / `--eval=…`, `python3 -Ic`, `perl -e` / `-lne`, `ruby -e`, `php -r` naming `kubectl` | blocked the same way |
-| `echo 'kubectl delete namespace prod' \| bash` | blocked: code piped into a shell that names an infrastructure tool |
+| `echo 'kubectl delete namespace prod' \| bash`, also `echo 'kube''ctl …' \| sh` | blocked: code piped into a shell that names an infrastructure tool |
+| `curl -fsSL https://… \| sh`, `echo … \| base64 -d \| sh`, `cat x.py \| python3` | asks: the piped code is not on the command line (blocked in Codex, Gemini CLI, OpenCode) |
+| `printf 'kube%s …' ctl \| sh`, `echo -e '\x6b…' \| sh`, `base64 -d <<< … \| sh`, `sh <<< "$(…)"`, `bash <<EOF` | asks the same way |
 | `bash -c "$(cat nuke.sh)"`, `eval "$(…)"`, `source <(curl …)` | asks: the code only exists when the command runs |
 | `cat > nuke.sh <<'EOF' … EOF` (here-doc that names `kubectl`) | blocked: cannot be checked, names an infrastructure tool |
-| `bash nuke.sh`, `bash < nuke.sh`, `./nuke.sh`, `source nuke.sh`, `python3 cleanup.py` | **runs** |
-| `make destroy`, `npm run teardown` | **runs** |
-| a file written with the agent's Write/Edit tool, then run | **runs**: file edits are not commands |
+| `bash nuke.sh`, `sh < nuke.sh`, `./nuke.sh`, `source nuke.sh`, `exec bash nuke.sh`, `fish nuke.sh`, also inside `$(…)`, backticks, `<(…)`, `( … )`, `{ …; }`, a loop or `case`, or `sh -c '…'`, where a line of `nuke.sh` is blocked | blocked by the policy (the message names the line) |
+| the same, where a line names `kubectl` but cannot be checked (`kubectl delete ns "$NS"`) | asks |
+| the same, where the script does not exist yet or is written by the same command (`printf '…' > x.sh; bash x.sh`, `cp a "$(pwd)/x.sh"; bash x.sh`, `chmod +x x; ./x`, `python3 -c '…Path("x.sh").write_text(…)'; bash x.sh`; reading it with `cat`, `grep`, `wc`, … does not count), cannot be read, holds a NUL byte, is over 64 KiB, names a tool on more than 64 lines, or is run after a `cd` the hook cannot follow | asks |
+| a script that `nuke.sh` sources or runs in turn (also through `eval` inside it) | **runs**: only the script on the command line is read |
+| a script run from a function or alias defined in the command (`go() { bash x.sh; }; go`, `alias go='bash x.sh'; go`) | **runs** |
+| a script run by a launcher the hook does not unwrap (`npx`, `npm exec`, `yarn exec`, `direnv exec`, `dotenv`, `aws-vault exec`, `op run`, `doppler run`, `flock`, `strace`, `taskset`, `chrt`, `setpriv`, `su -c`, `runuser`, `unshare`, `chroot`, `parallel`, `screen`, `tmux`, `xargs`) | **runs** unread |
+| `source "$HOME/…"` and other paths with variables | `$HOME` (and `~`) is filled in from the hook's environment when the command does not name HOME; any other variable (`$PWD`, `$OLDPWD`, `$_`, …) asks |
+| a script changed between the check and the run, or a symlink retargeted in between | **runs** the new content: the hook reads it once, before the command starts |
+| a script changed by an earlier step of the same command that does not name it (`git pull && ./deploy.sh`, `tar xf a.tar && bash x.sh`, `make; bash x.sh`) | **runs** the new content: the hook reads the script as it is before the command starts |
+| `python3 cleanup.py`, `make destroy`, `npm run teardown` | **runs** |
+| a file written with the agent's Write/Edit tool, then run by something other than a shell | **runs**: file edits are not commands |
 | a cloud SDK or HTTP call from code the agent wrote | **runs** |
 
+A script is read when a shell runs it (`bash`, `sh`, `zsh`, `dash`, `ksh`, `ash`, `source`,
+`.`), or when it is run directly (`./x`) and its `#!` line names a shell (`#!/usr/bin/env -S
+bash` too) or it has no `#!` line at all (the shell then runs it). Bytes that are not UTF-8 are
+read anyway. A NUL byte asks when a shell is named (`bash x.sh`, `source x.sh`, a shell `#!`
+line); only a `./x` with no `#!` line and a NUL byte is taken for a binary and not read. A
+script that the same command also writes, copies, moves, links, edits or names as an argument
+or redirection target asks, since what runs may not be what is on disk at check time. A
+relative path is read from the agent's working directory, or from the directory a literal
+`cd DIR` earlier in the command moves to; a `cd` in the background (`&`), in a pipeline or in a
+`( … )` subshell (`(cd sub && ./x.sh)`), to a computed place, or `env -C`/`sudo -D` (also in a
+cluster, `env -iC DIR`) make the directory unknown, which asks. A file redirected onto a group,
+subshell, `if` or loop that runs a shell (`{ sh; } < x.sh`) is read like `sh < x.sh`; a shell reading a copied or read-write
+descriptor (`bash 3<x.sh <&3`, `bash <> x.sh`) asks. Only lines that
+name an infrastructure tool are checked, each as a command of its own, against the same
+policy: comments (whole-line and trailing) are skipped; a backslash at the end of a line joins
+the next line as the shell does, except at the end of a comment, which ends at the newline;
+`<<` counts as a here-doc only outside quotes and comments, and its delimiter is read as one
+shell word (`<<'END DATA'`; one the hook cannot read, such as `<<$'EOF'`, asks and the lines
+after it are checked as commands); a here-doc body counts as commands
+when a shell reads it, directly or through a pipe (`cat <<EOF | sh`), asks when another
+interpreter reads one that names a tool or when an unquoted body's `$(…)` names one, and is
+data otherwise (this is inside a script; in the command the agent runs, a here-document that a
+shell or any other interpreter reads asks, `python3 - <<'PY'` included, since the hook does not
+read code in other languages). All checkable lines go to the policy in one run; only when that run is not an
+allow are a few more runs made to find the line (bisection, on deny when the verdict is a
+deny), so a block that only the lines together reach (an aggregate rule) is still a block.
+`aegis check command` does not read files: this is the hook only.
+
+Piped code asks unless the stage feeding the shell or interpreter is a literal `echo` (no `-e`,
+no backslashes) or `printf` (one argument, no `%` directives, no escapes but `\n` and `\t`).
+That text is read the way the shell would read it (quotes removed): when it names an
+infrastructure tool it is blocked, and code for a shell is then checked like a command of its
+own. `curl … | sh` installers are common, so piped code asks rather than blocks; where the
+agent cannot ask (Codex, Gemini CLI, OpenCode, or `--escalate-as deny`) it is a block. The same
+goes for a shell or interpreter fed by a here-string or a here-doc in a command the hook
+cannot parse.
+
 "Names an infrastructure tool" means one of the binaries listed above appears as a word in the
-code. Code that builds the name (`"kube" + "ctl"`) or calls an SDK (`boto3`, `@aws-sdk`) is not
-recognised. The hook is a guard against mistakes, not against an agent that is trying to get
-round it.
+code, also after quotes, backslashes and line continuations are removed (`kube''ctl`,
+`"kube"ctl`). Code that builds the name (`"kube" + "ctl"`, `printf kube%s ctl`) or calls an SDK
+(`boto3`, `@aws-sdk`) is not recognised. Scripts are read once, before the command runs: a
+script rewritten in between, or a symlink pointed elsewhere, is not seen again. The hook is a
+guard against mistakes, not against an agent that is trying to get round it.
 
 **Escalate local scripts (optional, off by default).** Install the hook with
-`--escalate-scripts` and every command that runs code the hook cannot read asks first (blocks in
-Codex, Gemini CLI and OpenCode): a script file (named or fed through `<`, also with `$VAR`
-arguments), a task runner (`make`, `just`, `npm run`, …), inline interpreter code and a shell
-fed through a pipe:
+`--escalate-scripts` and every command that runs code the hook cannot fully check asks first
+(blocks in Codex, Gemini CLI and OpenCode): a script file (named or fed through `<`, also with
+`$VAR` arguments, and also when the hook read it and found nothing blocked), a task runner
+(`make`, `just`, `npm run`, …), inline interpreter code and a shell fed through a pipe:
 
 ```bash
 aegis install claude --escalate-scripts     # any agent; reinstall without it to turn it off
