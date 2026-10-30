@@ -8,6 +8,12 @@ behaviour.
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-10-29
+
+The agent hook checks a compound command part by part (#55) and reads scripts and code piped
+into a shell (#56); kubectl boolean flags and help/version probes are no longer refused (#53,
+#54).
+
 ### Added
 - Guide (experimental): [check the SQL an LLM writes before your app runs it](docs/guides/app-sql.md),
   with `examples/app_sql_gate.py` and a signed-rule template in `examples/app-sql/`. Aegis
@@ -1062,6 +1068,7 @@ See "Project status" in the README and [`docs/dev/PLAN.md`](docs/dev/PLAN.md) §
 rather than real connectors, signing uses a shared secret, and a principal is a signed name
 rather than a bound identity.
 
+[1.3.0]: https://github.com/moneytool/aegis-devops/releases/tag/v1.3.0
 [1.2.1]: https://github.com/moneytool/aegis-devops/releases/tag/v1.2.1
 [1.2.0]: https://github.com/moneytool/aegis-devops/releases/tag/v1.2.0
 [1.1.0]: https://github.com/moneytool/aegis-devops/releases/tag/v1.1.0
