@@ -46,8 +46,9 @@ not verified`, `ledger: chain-broken`, rate-limit key typos). Quarantines also g
 `aegis: WARNING …` lines.
 
 An untrustworthy constraint gets **no vote**. A constraint that was quarantined at load
-(`tampered`, `forged`, `principal-mismatch`, `invalid`) or discarded at decision time
-(`tampered`, `unauthorized`) contributes nothing to the verdict — but it is never silently
+(`tampered`, `forged`, `principal-mismatch`, `unauthorized` for one of several
+[entries sharing an id](constraints.md#duplicate-ids), `invalid`) or discarded at decision time
+(`tampered`, `forged`, `unauthorized`) contributes nothing to the verdict — but it is never silently
 dropped. It is named in `discarded`, counted in `STORE: … quarantined=N`, and logged to stderr:
 
 ```bash

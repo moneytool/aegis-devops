@@ -6,6 +6,11 @@ Decision pipeline, per matching constraint, in order:
      (Forged constraints never reach this point at all: they're quarantined
      at ``ConstraintStore.load`` time — see store.py — when a
      ``source_fetcher`` was supplied.)
+  1b. Source binding -- when a source check verified it (at load or by
+     ``verify_sources``), its hash is still the hash that check verified. The
+     hash is unkeyed, so a live constraint changed *and* rehashed passes step
+     1; it fails here, reason ``forged``. A constraint no source check ever
+     verified has nothing to compare and is not affected.
   2. Authority  — its principal is still authorized for its constraint_class
      (a principal's authority may have been revoked after the constraint
      was added).
@@ -16,7 +21,7 @@ Decision pipeline, per matching constraint, in order:
   4. Effect     — BLOCK outranks ESCALATE outranks ALLOW among whatever
      constraints survived steps 1-3.
 
-Constraints that fail step 1 or 2 get **no vote** — but they are never
+Constraints that fail step 1, 1b or 2 get **no vote** — but they are never
 silently dropped. Every one is listed in ``discarded[]`` with its reason,
 counted in ``StoreHealth.quarantined``, logged to stderr at load, and (if
 too many fail at once) enough to make the store refuse to decide at all
@@ -35,7 +40,7 @@ verdict:
   with no trust model at all; with ``"discard"`` both are 0.000.
 * ``"escalate"`` — a match that was quarantined at load (``tampered`` /
   ``forged``, kept in ``store.quarantined_constraints``) or discarded at
-  decision time (``tampered`` / ``unauthorized``) whose ``effect`` was
+  decision time (``tampered`` / ``forged`` / ``unauthorized``) whose ``effect`` was
   BLOCK or ESCALATE contributes ESCALATE, with a note
   ``"fail-closed: <id> (<reason>)"``. Such a constraint can never
   contribute BLOCK. Choose this when an edited rule should stop the line
@@ -145,11 +150,14 @@ class AegisInterceptor:
         return f"runs-code: {kind} {' '.join(p for p in parts if p)}".rstrip()
 
     def _untrusted_reason(self, c: Constraint) -> str | None:
-        """``"tampered"`` / ``"unauthorized"`` if this constraint may not
-        vote, else ``None`` (re-checked per decision; see REVIEW-4 L4
+        """``"tampered"`` / ``"forged"`` / ``"unauthorized"`` if this constraint
+        may not vote, else ``None`` (re-checked per decision; see REVIEW-4 L4
         below)."""
         if not c.verify_integrity():
             return "tampered"
+        source_hash_changed = getattr(self.store, "source_hash_changed", None)
+        if source_hash_changed is not None and source_hash_changed(c):
+            return "forged"
         if not self.store.is_authorized(c.principal, c.constraint_class):
             return "unauthorized"
         return None

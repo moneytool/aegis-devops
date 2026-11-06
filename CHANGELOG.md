@@ -8,6 +8,35 @@ behaviour.
 
 ## [Unreleased]
 
+## [1.3.1] (not released yet)
+
+Three fixes found while preparing the formal model for a conference submission.
+
+### Fixed
+- A constraint changed and rehashed after its source check no longer votes. The provenance hash is
+  unkeyed, so a library caller holding a loaded store could edit a live constraint, recompute its
+  hash and pass the integrity check. The store now records the hash each source check verified,
+  and a decision discards a constraint whose hash has changed since, with the reason `forged`
+  (ESCALATE under `on_untrusted_match: escalate`, never BLOCK). A verified snapshot excludes it
+  too. `verify_sources` records the hash again when the source now backs the change, and
+  `add_constraint` with different content drops that id's source evidence. Stores never
+  source-verified behave as before.
+- A rejected entry can no longer displace a trusted constraint with the same id, in constraints
+  and plan-constraints files. The first entry used to win, so an unauthorized or forged entry
+  written ahead of a trusted BLOCK turned it into ALLOW. Each entry is now judged on its own, in
+  any order, and keeps its own quarantine reason. Identical survivors keep one (`invalid:
+  duplicate id` for the rest), and an unauthorized one beside a differing entry is quarantined as
+  `unauthorized`. **Authorized entries that differ now fail the load**, where the first one used
+  to win: the check exits with a data error and the hook denies infrastructure commands. A
+  file with such duplicates must keep one of them.
+
+### Added
+- `aegis compile kubernetes`: every rule in `coverage.json` has a `client_parity` record, and
+  `coverage.md` shows it. A policy decides on the request, not the kubectl verb, so a `set-image`
+  rule reported `exact` also denies `patch`, `edit`, `replace`, `apply` and `rollout undo` when they
+  change the image, while the client hook lets those verbs through. Coverage values and existing
+  keys are unchanged.
+
 ## [1.3.0] — 2026-10-29
 
 The agent hook checks a compound command part by part (#55) and reads scripts and code piped

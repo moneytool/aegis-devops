@@ -662,12 +662,19 @@ def test_non_mapping_entry_is_quarantined(tmp_path):
     assert list(store.constraints) == ["ok"]
 
 
-def test_duplicate_id_quarantines_the_later_entry_only(tmp_path):
+def test_duplicate_id_with_differing_trusted_entries_refuses_the_file(tmp_path):
+    """No position in the file may settle which one the policy means; the
+    order-independence tests are in test_store_source_binding.py."""
     first = _valid_entry()
     second = make_constraint(id="ok", resource_pattern="pod/*")
     later = _valid_entry(resource_pattern="pod/*", provenance_hash=second.provenance_hash)
-    store = _load_entries(tmp_path, first, later)
-    assert store.constraints["ok"].resource_pattern == "node/*"  # first wins
+    with pytest.raises(ValueError, match="id 'ok' has 2 entries"):
+        _load_entries(tmp_path, first, later)
+
+
+def test_duplicate_id_with_identical_entries_quarantines_the_extra_only(tmp_path):
+    store = _load_entries(tmp_path, _valid_entry(), _valid_entry())
+    assert list(store.constraints) == ["ok"]
     assert store.quarantined == [{"id": "ok", "reason": "invalid: duplicate id"}]
 
 

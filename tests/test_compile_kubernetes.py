@@ -19,8 +19,16 @@ from aegis_core.compile.kubernetes import (
     match_condition,
 )
 from aegis_core.identity import load_identity_model
+from aegis_core.interceptor import AegisInterceptor
+from aegis_core.parser import from_kubectl_multi
 from aegis_core.signing import load_key, sign_file
-from aegis_core.store import Constraint, VerifiedSnapshot, _canonical, _constraint_to_dict
+from aegis_core.store import (
+    Constraint,
+    ConstraintStore,
+    VerifiedSnapshot,
+    _canonical,
+    _constraint_to_dict,
+)
 
 
 def _rule(id, pattern, actions, effect="BLOCK", **kw):
@@ -352,3 +360,134 @@ def test_namespace_scope_never_matches_cluster_scoped_requests(tmp_path, namespa
     n = _cov(r, "n")
     assert n["status"] == "not-enforced" and "cluster-scoped" in n["not_enforced"][0]
     assert "variables.ns != ''" in _expr(r, "all")
+
+
+# --- client parity: a separate field from the coverage status ---------------------------------
+
+_WRITERS = ["apply", "edit", "patch", "replace"]
+# one kubectl spelling of each verb a parity record can name
+_SPELLINGS = {
+    "apply": "apply -f web.yaml",
+    "annotate": "annotate deployment/web a=b",
+    "attach": "attach web",
+    "autoscale": "autoscale deployment/web",
+    "cordon": "cordon web",
+    "cp": "cp web:/a b",
+    "create": "create deployment web",
+    "delete": "delete deployment/web",
+    "drain": "drain web",
+    "edit": "edit deployment/web",
+    "exec": "exec web -- ls",
+    "expose": "expose deployment/web",
+    "label": "label deployment/web a=b",
+    "patch": "patch deployment/web -p {}",
+    "port-forward": "port-forward web 80",
+    "proxy": "proxy",
+    "replace": "replace -f web.yaml",
+    "rollout-restart": "rollout restart deployment/web",
+    "rollout-undo": "rollout undo deployment/web",
+    "run": "run web --image=x",
+    "scale": "scale deployment/web --replicas=1",
+    "set-image": "set image deployment/web web=x",
+    "taint": "taint node web a=b:NoSchedule",
+    "uncordon": "uncordon web",
+}
+
+
+@pytest.mark.parametrize("pattern,verb,status,widened", [
+    ("deployment/*", "set-image", "exact", [*_WRITERS, "rollout-undo"]),
+    ("deployment/*", "rollout-restart", "exact", [*_WRITERS, "rollout-undo"]),
+    ("deployment/*", "scale", "exact", _WRITERS),
+    ("deployment/*", "label", "exact", _WRITERS),
+    ("deployment/*", "annotate", "exact", _WRITERS),
+    ("node/*", "cordon", "exact", ["apply", "drain", "edit", "patch", "replace"]),
+    ("node/*", "uncordon", "exact", _WRITERS),
+    ("node/*", "taint", "exact", _WRITERS),
+    ("deployment/*", "delete", "exact", []),
+    ("pod/*", "delete", "exact", ["drain"]),
+    ("pod/*", "create", "exact", ["apply", "run"]),
+    ("service/*", "create", "exact", ["apply", "expose"]),
+    ("pod/*", "exec", "exact", ["cp"]),
+    ("pod/*", "attach", "exact", []),
+])
+def test_client_parity_lists_the_verbs_the_policy_also_denies(tmp_path, pattern, verb, status,
+                                                              widened):
+    """The status stays what it was: the record adds what the client allows."""
+    cov = _cov(_compile(tmp_path, _rule("r", pattern, [verb])), "r")
+    assert cov["status"] == status
+    assert cov["client_parity"]["widened_verbs"] == widened
+    assert cov["client_parity"]["status"] == ("wider-than-client" if widened else "same")
+
+
+def test_client_parity_of_a_field_rule_matches_the_compiled_expression(tmp_path):
+    """What the record claims is what the policy is: an UPDATE of the object
+    with the images changed, and nothing in it that could name a client verb."""
+    r = _compile(tmp_path, _rule("r", "deployment/*", ["set-image"]))
+    expr = _expr(r, "r")
+    assert 'request.operation == "UPDATE"' in expr and 'variables.sub == ""' in expr
+    assert "containers.map(c, c.image)" in expr
+    assert "fieldManager" not in expr and "userAgent" not in expr
+
+
+@pytest.mark.parametrize("pattern,verb", [
+    ("deployment/*", "set-image"), ("deployment/*", "rollout-restart"), ("deployment/*", "scale"),
+    ("deployment/*", "label"), ("node/*", "cordon"), ("pod/*", "delete"), ("pod/*", "exec"),
+    ("service/*", "create"), ("deployment/*", "patch"),
+])
+def test_the_client_hook_really_allows_every_widened_verb(tmp_path, pattern, verb):
+    """The other half of the claim, from the real parser and interceptor; the
+    rule's own verb is the control."""
+    rule = _rule("r", pattern, [verb])
+    cov = _cov(_compile(tmp_path, rule), "r")
+    store = ConstraintStore(authority_map={"admin": {"deletion"}})
+    store.add_constraint(rule)
+    gate = AegisInterceptor(store)
+
+    def verdicts(spelled):
+        intents = from_kubectl_multi(["kubectl", *spelled.split()])
+        return {gate.intercept(i).verdict for i in intents}
+
+    assert cov["client_parity"]["widened_verbs"]
+    for widened in cov["client_parity"]["widened_verbs"]:
+        assert verdicts(_SPELLINGS[widened]) == {"ALLOW"}, widened
+
+
+def test_client_parity_for_a_rule_on_any_action_and_with_listed_verbs(tmp_path):
+    every = _cov(_compile(tmp_path, _rule("r", "deployment/*", ["*"])), "r")
+    assert every["client_parity"] == {"status": "same", "widened_verbs": []}
+    both = _cov(_compile(tmp_path, _rule("r", "deployment/*", ["set-image", "patch"])), "r")
+    assert "patch" not in both["client_parity"]["widened_verbs"]
+    assert "edit" in both["client_parity"]["widened_verbs"]
+
+
+@pytest.mark.parametrize("pattern,verb,expected", [
+    ("deployment/*", "patch", {"annotate", "apply", "edit", "label", "replace", "rollout-restart",
+                               "rollout-undo", "scale", "set-image"}),
+    ("deployment/*", "apply", {"annotate", "create", "edit", "label", "patch", "replace",
+                               "rollout-restart", "rollout-undo", "set-image"}),
+])
+def test_client_parity_agrees_with_the_over_enforced_note(tmp_path, pattern, verb, expected):
+    """An update rule was already over-enforced; apply's note says `scale`
+    goes to a subresource it does not match, so it is not listed."""
+    cov = _cov(_compile(tmp_path, _rule("r", pattern, [verb])), "r")
+    assert cov["status"] == "over-enforced"
+    assert set(cov["client_parity"]["widened_verbs"]) == expected
+
+
+def test_client_parity_where_nothing_compiled(tmp_path):
+    r = _compile(tmp_path, _rule("gone", "deployment/*", ["get"]),
+                 _rule("other", "x/*", ["delete"], provider="terraform"))
+    for rid in ("gone", "other"):
+        assert _cov(r, rid)["client_parity"] == {"status": "not-compiled", "widened_verbs": []}
+
+
+def test_client_parity_is_in_the_report_for_review(tmp_path):
+    r = _compile(tmp_path, _rule("wide", "deployment/*", ["set-image"]),
+                 _rule("same", "deployment/*", ["delete"]))
+    report = r.files["coverage.md"]
+    assert "### `wide`: exact" in report
+    assert ("- client parity: this policy also denies apply, edit, patch, replace, rollout-undo "
+            "when they send a request it covers") in report
+    assert report.count("client parity") == 1
+    cov = json.loads(r.files["coverage.json"])
+    assert {x["id"]: x["status"] for x in cov["rules"]} == {"same": "exact", "wide": "exact"}

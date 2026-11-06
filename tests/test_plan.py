@@ -662,6 +662,72 @@ def test_plan_missing_key_and_duplicate_id_and_non_mapping(tmp_path):
     assert list(store.constraints) == ["pc-1"]
 
 
+def _entry_of(pc):
+    return {k: getattr(pc, k) for k in (
+        "id", "provider", "effect", "constraint_class", "principal", "source_ref",
+        "source_timestamp", "rule_text", "provenance_hash", "max_intents")}
+
+
+def _fires(store):
+    """The plan decision for a batch over the legitimate rule's limit of one."""
+    interceptor = AegisInterceptor(ConstraintStore(authority_map=AUTHORITY))
+    return evaluate_plan(interceptor, store,
+                         [tf_intent("delete", "a"), tf_intent("delete", "b")], now=NOW)
+
+
+LEGIT_PC = {"max_intents": 1}
+
+
+@pytest.mark.parametrize("rejected_first", [True, False], ids=["rejected-first", "trusted-first"])
+@pytest.mark.parametrize("rejected,reason", [
+    (dict(principal="developer", max_intents=99), "unauthorized"),
+    (dict(max_intents=99, tamper=True), "tampered"),
+], ids=["unauthorized", "tampered"])
+def test_plan_rejected_entry_never_displaces_a_trusted_one(tmp_path, rejected, reason,
+                                                           rejected_first):
+    legit = _entry_of(make_pc(**LEGIT_PC))
+    overrides = dict(rejected)
+    tamper = overrides.pop("tamper", False)
+    evil = _entry_of(make_pc(**overrides))
+    if tamper:
+        evil["rule_text"] = "edited"
+    entries = [evil, legit] if rejected_first else [legit, evil]
+    store = _load_entries(tmp_path, *entries)
+    assert store.constraints["pc-1"].max_intents == 1
+    assert store.quarantined == [{"id": "pc-1", "reason": reason}]
+    assert [pc.id for pc in store.quarantined_constraints] == ["pc-1"]
+    assert any("Duplicate plan constraint id pc-1: 2 entries" in w for w in store.warnings)
+    assert _fires(store).verdict == "BLOCK"
+
+
+def test_plan_bad_shape_entry_never_displaces_a_trusted_one(tmp_path):
+    for entries in ([{"id": "pc-1"}, _entry_of(make_pc(**LEGIT_PC))],
+                    [_entry_of(make_pc(**LEGIT_PC)), {"id": "pc-1"}]):
+        store = _load_entries(tmp_path, *entries)
+        assert _fires(store).verdict == "BLOCK"
+
+
+def test_plan_differing_trusted_entries_refuse_the_file(tmp_path):
+    one, two = _entry_of(make_pc(max_intents=1)), _entry_of(make_pc(max_intents=99))
+    for entries in ([one, two], [two, one]):
+        with pytest.raises(ValueError, match="id 'pc-1' has 2 entries"):
+            _load_entries(tmp_path, *entries)
+
+
+def test_plan_differing_unauthorized_entries_load_neither_and_keep_their_reasons(tmp_path):
+    one = _entry_of(make_pc(principal="developer", max_intents=1))
+    two = _entry_of(make_pc(principal="developer", max_intents=2))
+    broken = {**_entry_of(make_pc(max_intents=1, rule_text="third")), "rule_text": "edited"}
+    store = _load_entries(tmp_path, broken, one, two)
+    assert store.constraints == {}
+    assert sorted(q["reason"] for q in store.quarantined) == [
+        "tampered", "unauthorized", "unauthorized"]
+    decision = _fires(store)
+    assert decision.verdict == "ESCALATE"  # fail closed, never BLOCK
+    assert sorted(d["reason"] for d in decision.discarded) == [
+        "tampered", "unauthorized", "unauthorized"]
+
+
 def test_plan_selector_scope_uses_metadata_first_and_coercion():
     """Same T1.5 semantics as the per-intent store: metadata.env beats
     params.env, ints match strings, lists are ORs, globs and dotted paths."""

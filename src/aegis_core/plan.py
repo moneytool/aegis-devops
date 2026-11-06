@@ -23,6 +23,7 @@ import hashlib
 import json
 import logging
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,8 +37,10 @@ from aegis_core.signing import check_signature
 from aegis_core.store import (
     VALID_EFFECTS,
     StoreHealth,
+    _canonical,
     _sha256_file,
     env_unresolved,
+    resolve_duplicate_id,
     resource_matches,
     scope_matches,
 )
@@ -327,6 +330,9 @@ class PlanConstraintStore:
         # Quarantined PlanConstraint objects, still evaluated by
         # evaluate_plan so a tampered rule fails closed (ESCALATE).
         self.quarantined_constraints: list[PlanConstraint] = []
+        # id(plan constraint) -> its quarantine reason: one id may appear in
+        # `quarantined` several times, with different reasons
+        self._quarantine_reasons: dict[int, str] = {}
         self.constraints_sha256: str = ""
         self.warnings: list[str] = []
 
@@ -361,6 +367,22 @@ class PlanConstraintStore:
     def verify_integrity(self, pc: PlanConstraint) -> bool:
         return pc.verify_integrity()
 
+    def _quarantine(self, pc: PlanConstraint, reason: str, message: str) -> None:
+        self.quarantined.append({"id": pc.id, "reason": reason})
+        self.quarantined_constraints.append(pc)
+        self._quarantine_reasons[id(pc)] = reason
+        warning = f"Quarantined plan constraint {pc.id}: {message}"
+        self.warnings.append(warning)
+        logger.warning(warning)
+
+    def _quarantine_invalid(self, entry: Any, reason: str) -> None:
+        cid = entry.get("id") if isinstance(entry, dict) else None
+        cid = cid if isinstance(cid, str) and cid else "<no id>"
+        self.quarantined.append({"id": cid, "reason": f"invalid: {reason}"})
+        warning = f"Quarantined plan constraint {cid}: invalid: {reason}"
+        self.warnings.append(warning)
+        logger.warning(warning)
+
     def save(self, path: str | Path) -> None:
         payload = {
             "plan_constraints": [_plan_constraint_to_dict(pc) for pc in self.constraints.values()]
@@ -381,7 +403,13 @@ class PlanConstraintStore:
         shape (quarantine reason ``"invalid: ..."``, never a traceback) and
         verifying each one's provenance hash (``"tampered"``). Invalid
         entries have no object and are not evaluated; tampered ones are
-        kept for fail-closed evaluation.
+        kept for fail-closed evaluation. A duplicated id resolves as in
+        ``ConstraintStore.load``, whatever the order of the entries: an entry
+        rejected for its own reason never displaces another, identical
+        survivors keep one (``"invalid: duplicate id"`` for the others), an
+        unauthorized survivor beside a differing one is quarantined
+        (``"unauthorized"``), and authorized survivors that differ raise
+        ``ValueError``.
 
         ``key`` enforces the file's ``.sig`` (``SignatureError`` when
         missing or wrong); with no key, ``"unsigned: <path>"`` is recorded
@@ -401,27 +429,37 @@ class PlanConstraintStore:
         entries = payload.get("plan_constraints") or []
         if not isinstance(entries, list):
             raise ValueError(f"{path}: 'plan_constraints' must be a list")
-        seen: set[str] = set()
+        id_counts: Counter[str] = Counter()
+        passed: dict[str, list[PlanConstraint]] = {}
         for entry in entries:
             reason = validate_plan_constraint_dict(entry)
-            if reason is None and entry["id"] in seen:
-                reason = "duplicate id"
             if reason is not None:
-                cid = entry.get("id") if isinstance(entry, dict) else None
-                cid = cid if isinstance(cid, str) and cid else "<no id>"
-                store.quarantined.append({"id": cid, "reason": f"invalid: {reason}"})
-                warning = f"Quarantined plan constraint {cid}: invalid: {reason}"
-                store.warnings.append(warning)
-                logger.warning(warning)
+                store._quarantine_invalid(entry, reason)
                 continue
-            seen.add(entry["id"])
+            id_counts[entry["id"]] += 1
             pc = _plan_constraint_from_dict(entry)
             if pc.verify_integrity():
-                store.constraints[pc.id] = pc
+                passed.setdefault(pc.id, []).append(pc)
             else:
-                store.quarantined.append({"id": pc.id, "reason": "tampered"})
-                store.quarantined_constraints.append(pc)
-                warning = f"Quarantined plan constraint {pc.id}: provenance hash mismatch"
+                store._quarantine(pc, "tampered", "provenance hash mismatch")
+        for group in passed.values():
+            kept, unauthorized, extras = resolve_duplicate_id(
+                group,
+                is_authorized=lambda pc: store.is_authorized(pc.principal, pc.constraint_class),
+                content=lambda pc: _canonical(_plan_constraint_to_dict(pc)),
+                source=path,
+            )
+            for pc in unauthorized:
+                store._quarantine(pc, "unauthorized", "shares its id with another entry and its "
+                                                      "principal is not authorized for its class")
+            for pc in extras:
+                store._quarantine_invalid({"id": pc.id}, "duplicate id")
+            if kept is not None:
+                store.constraints[kept.id] = kept
+        for cid, count in id_counts.items():
+            if count > 1:
+                warning = (f"Duplicate plan constraint id {cid}: {count} entries; each was "
+                           "judged on its own and only one can load")
                 store.warnings.append(warning)
                 logger.warning(warning)
         if not entries:
@@ -627,7 +665,8 @@ def evaluate_plan(
     notes: list[str] = []
 
     quarantine_reasons = {q["id"]: q["reason"] for q in plan_store.quarantined}
-    candidates = [(pc, quarantine_reasons.get(pc.id, "quarantined"), True)
+    candidates = [(pc, plan_store._quarantine_reasons.get(id(pc))
+                   or quarantine_reasons.get(pc.id, "quarantined"), True)
                   for pc in plan_store.quarantined_constraints]
     candidates += [(pc, None, False) for pc in plan_store.constraints.values()]
 

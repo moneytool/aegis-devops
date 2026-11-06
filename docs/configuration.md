@@ -108,6 +108,13 @@ whose transport principal differs from the principal it claims is quarantined as
 `principal-mismatch`. Either way it gets no vote, like any other quarantine (see
 [Store health](cli.md#store-health)).
 
+The check also records the hash it verified. For a library caller that keeps a store between
+decisions, a constraint changed and rehashed after that gets no vote: the hash is unkeyed, so it
+still looks intact, and the decision discards it as `forged` because the hash is not the verified
+one. `ConstraintStore.verify_sources` records the hash again if the source now backs the change,
+and `add_constraint` with different content starts that id over as unverified. A store that was
+never source-verified has no recorded hash and behaves as before.
+
 `FileSourceFetcher` is a v1 stand-in for real Git/Slack/Jira connectors — it re-reads a flat
 JSON file rather than calling out to a commit, a permalink, or a ticket API (see "Open gaps" in
 `dev/PLAN.md`).

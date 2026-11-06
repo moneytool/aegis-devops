@@ -324,6 +324,65 @@ def clauses_for(verb: str, kind: str, flags: frozenset[str]) -> tuple[list[Claus
     return [], f"action {verb!r} has no admission equivalent in this compiler"
 
 
+# --- client parity ----------------------------------------------------------------------------
+
+# A coverage status says whether a rule's meaning reaches the cluster. It does
+# not say the two layers refuse the same commands: the client hook decides on
+# the kubectl verb (the parser's action names below; only `set image` and
+# `rollout X` are normalised), a compiled policy on the request, and nothing in
+# a request names the verb that sent it. These are the client verbs that can
+# send a request a clause denies.
+# Each sends whatever object the caller wrote, so it can make any change.
+_OBJECT_WRITE_VERBS = frozenset({"apply", "edit", "patch", "replace"})
+# Each sends one fixed kind of change to the object itself.
+_FIELD_VERBS = ("annotate", "cordon", "drain", "label", "rollout-restart", "rollout-undo",
+                "set-image", "taint", "uncordon")
+# Other verbs that can make the change a field verb's condition looks for: a
+# rollback restores the template, images and restart annotation included, and
+# a drain cordons first.
+_SAME_CHANGE = {
+    "set-image": ("rollout-undo",),
+    "rollout-restart": ("rollout-undo",),
+    "rollout-undo": ("rollout-restart", "set-image"),
+    "cordon": ("drain",),
+    "drain": ("cordon",),
+}
+_CONNECT_VERBS = {"exec": ("exec", "cp"), "attach": ("attach",),
+                  "portforward": ("port-forward",), "proxy": ("proxy",)}
+
+
+def _applies_to(verb: str, kind: str, flags: frozenset[str]) -> bool:
+    return kind == "*" or bool(clauses_for(verb, kind, flags)[0])
+
+
+def _client_verbs(cl: Clause, owner: str, kind: str, flags: frozenset[str]) -> set[str]:
+    """The client verbs that can send a request clause ``cl`` (compiled for the
+    action ``owner`` on ``kind``) denies."""
+    if cl.operation == "DELETE":
+        return {"delete"}
+    if cl.operation == "CONNECT":
+        return set(_CONNECT_VERBS.get(cl.subresource, ()))
+    if cl.operation == "CREATE":
+        if cl.subresource == "eviction":
+            return {"drain"}
+        verbs = {"apply", "create"}
+        for verb, created in (("run", "pod"), ("expose", "service"),
+                              ("autoscale", "horizontalpodautoscaler")):
+            if kind in (created, "*"):
+                verbs.add(verb)
+        return verbs
+    verbs = set(_OBJECT_WRITE_VERBS)
+    if cl.condition:  # a field diff: only what can make that change
+        verbs.update(v for v in _SAME_CHANGE.get(owner, ()) if _applies_to(v, kind, flags))
+        return verbs
+    if cl.subresource == "scale":
+        return {"scale"}  # its other clause, on the object, brings the whole-object verbs
+    verbs.update(v for v in _FIELD_VERBS if _applies_to(v, kind, flags))
+    if cl.subresource == "*" and _applies_to("scale", kind, flags):
+        verbs.add("scale")
+    return verbs
+
+
 @dataclass
 class _Rule:
     c: Constraint
@@ -338,6 +397,17 @@ class _Rule:
     policy: str | None = None
     expression: str | None = None
     resource_rules: list[dict[str, Any]] = field(default_factory=list)
+    client_verbs: set[str] = field(default_factory=set)
+
+    def client_parity(self) -> dict[str, Any]:
+        """How the commands this policy refuses compare with the rule's own
+        verbs, separately from ``status``: ``same``, ``wider-than-client`` (the
+        verbs the client hook lets through on this rule alone, that the policy
+        denies when they make the same change) or ``not-compiled``."""
+        if self.expression is None:
+            return {"status": "not-compiled", "widened_verbs": []}
+        widened = [] if ANY_ACTION in self.c.actions else sorted(self.client_verbs - self.c.actions)
+        return {"status": "wider-than-client" if widened else "same", "widened_verbs": widened}
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"id": self.c.id, "effect": self.c.effect, "status": self.status}
@@ -350,6 +420,7 @@ class _Rule:
                            ("notes", self.notes)):
             if value:
                 d[key] = value
+        d["client_parity"] = self.client_parity()
         return d
 
 
@@ -473,6 +544,7 @@ def _compile_rule(c: Constraint, target: KubernetesTarget) -> _Rule:
                 if cr == "*":
                     rules_by_group.setdefault((cg, "*"), set()).add(cl.operation)
                 requests.append(f"{cl.operation} {res}")
+                rule.client_verbs |= _client_verbs(cl, verb, kind, flags)
             disjuncts.append("(" + " || ".join(parts) + ")")
             rule.enforced.append({"kind": kind, "action": verb, "requests": requests})
             if verb == "rollout-undo":
@@ -697,6 +769,12 @@ def _coverage_md(cov: dict[str, Any]) -> str:
         for key, label in (("not_enforced", "not enforced"), ("over_enforced", "over-enforced"),
                            ("notes", "note")):
             lines += [f"- {label}: {item}" for item in r.get(key, [])]
+        widened = r["client_parity"]["widened_verbs"]
+        if widened:
+            lines.append(f"- client parity: this policy also denies {', '.join(widened)} when "
+                         "they send a request it covers; admission does not see the kubectl "
+                         "verb, and the client hook lets them through unless another rule "
+                         "covers them")
         lines.append("")
     skipped = [r for r in cov["rules"] if r["status"] == "not-applicable"]
     if skipped:

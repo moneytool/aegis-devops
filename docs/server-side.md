@@ -223,6 +223,27 @@ CD, Flux) in `trusted`.
 | `ESCALATE` | Deny (admission cannot ask) | over-enforced; `--escalate omit` leaves it client-only |
 | reads, `logs`, impersonation, time windows, rate limits | never admitted, or no clock at admission | not enforced |
 
+**Client parity is reported separately.** The coverage status says whether a rule's meaning reaches
+the cluster, not whether both layers refuse the same commands. The client hook decides on the
+kubectl verb, and a policy decides on the request, which does not name the verb. So a `set-image`
+rule is `exact` and the policy also denies `kubectl patch`, `edit`, `replace`, `apply` or `rollout
+undo` when they change the image, while the client hook lets those verbs through unless another
+rule covers them. Each rule in `coverage.json` has a `client_parity` record, and `coverage.md`
+shows the same list:
+
+```json
+"status": "exact",
+"client_parity": {"status": "wider-than-client",
+                  "widened_verbs": ["apply", "edit", "patch", "replace", "rollout-undo"]}
+```
+
+`client_parity.status` is `same`, `wider-than-client` or `not-compiled` (no policy for this rule).
+The list names verbs, not flags: `replace --force` also deletes, for one, and a `delete` rule does
+not list it. Other widened lists: `scale`,
+`label`, `annotate`, `taint` and `uncordon` have the four whole-object verbs; `cordon` also has
+`drain`; a pod `delete` has `drain` (its evictions); a pod `exec` has `cp`; a `create` has `apply`,
+plus `run` on pods and `expose` on services.
+
 ### Guardrails
 
 A policy named `aegis-guardrails` stops the identity escapes admission can see: agents cannot
