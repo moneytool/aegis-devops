@@ -218,6 +218,367 @@ def test_a_snapshot_excludes_a_rehashed_constraint(tmp_path):
     assert snapshot.excluded == ({"id": "r", "reason": "forged"},)
 
 
+# --- the evidence belongs to the store key, not to the mutable Constraint.id -------------------
+
+
+def _verified(tmp_path, *rules):
+    return _load(tmp_path, list(rules), sources=list(rules))
+
+
+def _assert_no_vote(store, key):
+    """ALLOW under discard; ESCALATE and never BLOCK under escalate."""
+    d = _decide(store)
+    assert (d.verdict, d.citations, d.discarded) == (
+        "ALLOW", [], [{"id": key, "reason": "forged"}])
+    d = _decide(store, "escalate")
+    assert (d.verdict, d.citations, d.notes) == ("ESCALATE", [], [f"fail-closed: {key} (forged)"])
+
+
+def test_the_hash_does_not_cover_the_id():
+    c = _rule("a")
+    before = c.provenance_hash
+    c.id = "renamed"
+    assert c.verify_integrity() and c.provenance_hash == before
+
+
+def test_rehashed_and_renamed_in_place_gets_no_vote(tmp_path):
+    """The repro: the evidence lookup used the rewritten id, found nothing and
+    took the constraint for one never verified."""
+    c = _rule(effect="ESCALATE")
+    store = _verified(tmp_path, c)
+    live = store.constraints["r"]
+    _rehash(live, effect="BLOCK")
+    live.id = "renamed"
+    _assert_no_vote(store, "r")
+
+
+def test_renamed_only_gets_no_vote(tmp_path):
+    store = _verified(tmp_path, _rule())
+    store.constraints["r"].id = "renamed"
+    _assert_no_vote(store, "r")
+
+
+def test_renamed_to_another_verified_id_gets_no_vote_and_leaves_that_one_alone(tmp_path):
+    victim = _rule("victim", effect="ESCALATE")
+    store = _verified(tmp_path, _rule("r", pattern="deployment/web-*"), victim)
+    live = store.constraints["r"]
+    _rehash(live, effect="BLOCK", resource_pattern=victim.resource_pattern)
+    live.id = "victim"
+    d = _decide(store)
+    assert d.discarded == [{"id": "r", "reason": "forged"}]
+    assert d.verdict == "ESCALATE" and d.citations == ["victim"]  # the real one still votes
+    assert store.constraints["victim"].effect == "ESCALATE"
+
+
+def test_swapped_ids_get_no_vote(tmp_path):
+    store = _verified(tmp_path, _rule("a"), _rule("b", effect="ESCALATE"))
+    a, b = store.constraints["a"], store.constraints["b"]
+    a.id, b.id = "b", "a"
+    d = _decide(store)
+    assert (d.verdict, d.citations) == ("ALLOW", [])
+    assert sorted(x["id"] for x in d.discarded) == ["a", "b"]
+    assert {x["reason"] for x in d.discarded} == {"forged"}
+    assert _decide(store, "escalate").verdict == "ESCALATE"
+
+
+def test_direct_replacement_with_a_mutated_constraint_gets_no_vote(tmp_path):
+    store = _verified(tmp_path, _rule(effect="ESCALATE"))
+    store.constraints["r"] = _rule(effect="BLOCK")
+    _assert_no_vote(store, "r")
+
+
+def test_direct_replacement_under_another_id_gets_no_vote(tmp_path):
+    store = _verified(tmp_path, _rule(effect="ESCALATE"))
+    store.constraints["r"] = _rule("other", effect="BLOCK")
+    _assert_no_vote(store, "r")
+
+
+def test_direct_replacement_with_the_same_content_keeps_its_vote(tmp_path):
+    store = _verified(tmp_path, _rule())
+    store.constraints["r"] = _rule()
+    d = _decide(store)
+    assert (d.verdict, d.citations, d.discarded) == ("BLOCK", ["r"], [])
+
+
+def test_a_new_key_naming_a_verified_id_gets_no_vote(tmp_path):
+    store = _verified(tmp_path, _rule(effect="ESCALATE"))
+    store.constraints["new"] = _rule(effect="BLOCK")  # its own id is "r"
+    d = _decide(store)
+    assert (d.verdict, d.citations) == ("ESCALATE", ["r"])
+    assert d.discarded == [{"id": "new", "reason": "forged"}]
+
+
+def test_a_new_key_written_straight_in_gets_no_vote(tmp_path):
+    """No record, and not by a way that may vote without one."""
+    store = _verified(tmp_path, _rule(effect="ESCALATE"))
+    store.constraints["new"] = _rule("new", effect="BLOCK")
+    d = _decide(store)
+    assert (d.verdict, d.citations) == ("ESCALATE", ["r"])
+    assert d.discarded == [{"id": "new", "reason": "forged"}]
+    assert {"id": "new", "reason": "forged"} in store.verified_snapshot().excluded
+
+
+def test_a_rename_and_write_under_the_new_id_gets_no_vote(tmp_path):
+    store = _verified(tmp_path, _rule())
+    live = store.constraints.pop("r")
+    live.id = "renamed"
+    store.constraints["renamed"] = live
+    assert _decide(store).discarded == [{"id": "renamed", "reason": "forged"}]
+
+
+def test_an_audit_gives_a_directly_written_id_a_record(tmp_path):
+    new = _rule("new", effect="BLOCK")
+    store = _verified(tmp_path, _rule("r", pattern="deployment/web-*"))
+    store.constraints["new"] = new
+    assert _decide(store).verdict == "ALLOW"
+    _, fetcher = _write(tmp_path, [new], sources=[new])
+    assert store.verify_sources(fetcher) == []
+    assert _decide(store).citations == ["new"]
+
+
+class _ChecksOnly:
+    """A fetcher that can check one source_ref and no other."""
+
+    def __init__(self, fetcher, ref):
+        self.fetcher, self.ref = fetcher, ref
+
+    def fetch(self, source_ref):
+        if source_ref != self.ref:
+            raise SourceNotChecked(source_ref)
+        return self.fetcher.fetch(source_ref)
+
+
+def test_a_source_no_fetcher_can_check_still_votes_beside_verified_ones(tmp_path):
+    checked, unchecked = _rule("a", pattern="deployment/web-*"), _rule("b")
+    path, fetcher = _write(tmp_path, [checked, unchecked], sources=[checked])
+    store = ConstraintStore.load(path, _authority(), insecure=True,
+                                 source_fetcher=_ChecksOnly(fetcher, checked.source_ref))
+    assert store.source_verified == {"a"}
+    d = _decide(store)
+    assert (d.verdict, d.citations, d.discarded) == ("BLOCK", ["b"], [])
+
+
+def test_the_same_at_an_audit_of_a_store_built_directly(tmp_path):
+    checked, unchecked = _rule("a", pattern="deployment/web-*"), _rule("b")
+    _, fetcher = _write(tmp_path, [checked], sources=[checked])
+    store = ConstraintStore(authority_map=_authority())
+    store.constraints["a"], store.constraints["b"] = checked, unchecked
+    assert store.verify_sources(_ChecksOnly(fetcher, checked.source_ref)) == []
+    d = _decide(store)
+    assert (d.verdict, d.citations, d.discarded) == ("BLOCK", ["b"], [])
+
+
+def test_a_new_key_under_a_different_id_gets_no_vote(tmp_path):
+    store = _verified(tmp_path, _rule(effect="ESCALATE"))
+    store.constraints["new"] = _rule("other", effect="BLOCK")
+    d = _decide(store)
+    assert (d.verdict, d.citations) == ("ESCALATE", ["r"])
+    assert d.discarded == [{"id": "new", "reason": "forged"}]
+
+
+def test_renamed_constraint_cannot_force_an_unresolved_escalate(tmp_path):
+    store = _verified(tmp_path, _rule(scope={"env": "prod"}))
+    store.constraints["r"].id = "renamed"
+    d = _decide(store)
+    assert d.verdict == "ALLOW" and d.discarded == [{"id": "r", "reason": "forged"}]
+    d = _decide(store, "escalate")
+    assert d.verdict == "ESCALATE" and d.notes == ["fail-closed: r (forged)"]
+
+
+def test_a_snapshot_excludes_a_renamed_constraint_under_its_key(tmp_path):
+    store = _verified(tmp_path, _rule())
+    store.constraints["r"].id = "renamed"
+    snapshot = store.verified_snapshot()
+    assert snapshot.constraints == ()
+    assert snapshot.excluded == ({"id": "r", "reason": "forged"},)
+
+
+def test_an_audit_quarantines_a_renamed_constraint_and_attaches_no_evidence(tmp_path):
+    c = _rule()
+    store = _verified(tmp_path, c)
+    _, fetcher = _write(tmp_path, [c])
+    store.constraints["r"].id = "renamed"
+    assert store.verify_sources(fetcher) == [{"id": "r", "reason": "forged"}]
+    assert store.constraints == {}
+    assert store.source_verified == set() and store.source_verified_hashes == {}
+    assert store.quarantined == [{"id": "r", "reason": "forged"}]
+    d = _decide(store, "escalate")
+    assert d.verdict == "ESCALATE" and d.discarded == [{"id": "r", "reason": "forged"}]
+
+
+def test_renaming_a_quarantined_constraint_changes_neither_its_reason_nor_its_report(tmp_path):
+    good, forged = _rule("good", pattern="deployment/web-*"), _rule("bad")
+    path, fetcher = _write(tmp_path, [good, forged], sources=[good])
+    store = ConstraintStore.load(path, _authority(), insecure=True, source_fetcher=fetcher)
+    store.quarantined_constraints[0].id = "good"
+    d = _decide(store, "escalate")
+    assert d.discarded == [{"id": "bad", "reason": "forged"}]
+    assert d.notes == ["fail-closed: bad (forged)"]
+
+
+def test_a_rename_in_a_store_with_no_evidence_behaves_as_before(tmp_path):
+    direct = ConstraintStore(authority_map=_authority())
+    direct.constraints["r"] = _rule()
+    added = ConstraintStore(authority_map=_authority())
+    added.add_constraint(_rule())
+    for store in (_load(tmp_path, [_rule()]), direct, added):
+        store.constraints["r"].id = "renamed"
+        d = _decide(store)
+        assert (d.verdict, d.citations, d.discarded) == ("BLOCK", ["renamed"], [])
+
+
+def test_a_key_mismatch_with_no_evidence_behaves_as_before():
+    store = ConstraintStore(authority_map=_authority())
+    store.constraints["key"] = _rule("other")
+    d = _decide(store)
+    assert (d.verdict, d.citations, d.discarded) == ("BLOCK", ["other"], [])
+
+
+def test_plan_evaluation_gets_the_same_verdict_for_its_intents(tmp_path):
+    """evaluate_plan decides each intent through the interceptor."""
+    from aegis_core.plan import PlanConstraintStore, evaluate_plan
+
+    store = _verified(tmp_path, _rule())
+    store.constraints["r"].id = "renamed"
+    gate = AegisInterceptor(store)
+    d = evaluate_plan(gate, PlanConstraintStore(authority_map=_authority()), [_intent()], now=NOW)
+    assert d.verdict == "ALLOW"
+    gate = AegisInterceptor(store, on_untrusted_match="escalate")
+    d = evaluate_plan(gate, PlanConstraintStore(authority_map=_authority()), [_intent()], now=NOW)
+    assert d.verdict == "ESCALATE"
+
+
+# --- removing evidence never switches source binding off ---------------------------------------
+
+
+def _evil_insert(store):
+    store.constraints["evil"] = _rule("evil", effect="BLOCK")
+
+
+def _assert_only_evil_discarded(store):
+    d = _decide(store)
+    assert (d.verdict, d.citations, d.discarded) == (
+        "ALLOW", [], [{"id": "evil", "reason": "forged"}])
+    d = _decide(store, "escalate")
+    assert (d.verdict, d.citations) == ("ESCALATE", [])
+
+
+def test_replacing_the_last_record_does_not_authorize_a_direct_insert(tmp_path):
+    """The repro: add_constraint removed the last record, which used to disable
+    the check for the whole store."""
+    store = _verified(tmp_path, _rule(effect="ESCALATE"))
+    live = store.constraints["r"]
+    _rehash(live, effect="BLOCK")
+    live.id = "renamed"
+    _evil_insert(store)
+    store.add_constraint(_rule(pattern="deployment/web-*"))
+    assert store.source_verified_hashes == {}
+    _assert_only_evil_discarded(store)
+
+
+def test_a_failed_audit_of_the_last_record_does_not_authorize_a_direct_insert(tmp_path):
+    c = _rule(pattern="deployment/web-*")
+    store = _verified(tmp_path, c)
+    _, fetcher = _write(tmp_path, [c])
+    _rehash(store.constraints["r"], rule_text="edited")
+    assert store.verify_sources(fetcher) == [{"id": "r", "reason": "forged"}]
+    assert store.source_verified_hashes == {}
+    _evil_insert(store)
+    _assert_only_evil_discarded(store)
+    # the id itself cannot come back by a direct write either
+    store.constraints["r"] = _rule(effect="BLOCK")
+    assert {"id": "r", "reason": "forged"} in _decide(store).discarded
+    assert _decide(store).verdict == "ALLOW"
+
+
+def test_an_audit_quarantining_a_rename_does_not_authorize_a_direct_insert(tmp_path):
+    c = _rule(pattern="deployment/web-*")
+    store = _verified(tmp_path, c)
+    _, fetcher = _write(tmp_path, [c])
+    store.constraints["r"].id = "renamed"
+    store.verify_sources(fetcher)
+    assert store.source_verified_hashes == {}
+    _evil_insert(store)
+    _assert_only_evil_discarded(store)
+
+
+def test_an_audit_where_nothing_passed_still_binds(tmp_path):
+    forged = _rule("a", pattern="deployment/web-*")
+    _, fetcher = _write(tmp_path, [forged])  # no source file for it
+    store = ConstraintStore(authority_map=_authority())
+    store.constraints["a"] = forged
+    assert store.verify_sources(fetcher) == [{"id": "a", "reason": "forged"}]
+    _evil_insert(store)
+    _assert_only_evil_discarded(store)
+
+
+def test_a_load_with_a_fetcher_where_nothing_passed_still_binds(tmp_path):
+    store = _load(tmp_path, [_rule("a", pattern="deployment/web-*")], sources=[])
+    assert store.source_verified_hashes == {}
+    assert store.quarantined == [{"id": "a", "reason": "forged"}]
+    _evil_insert(store)
+    _assert_only_evil_discarded(store)
+
+
+def test_a_failed_audit_removes_an_admission_too(tmp_path):
+    """An added id that fails an audit does not stay admitted."""
+    good = _rule("good", pattern="deployment/web-*")
+    store = _verified(tmp_path, good)
+    added = _rule("added")
+    store.add_constraint(added)
+    _, fetcher = _write(tmp_path, [good])
+    assert store.verify_sources(fetcher) == [{"id": "added", "reason": "forged"}]
+    store.constraints["added"] = _rule("added", effect="ESCALATE")
+    d = _decide(store)
+    assert {"id": "added", "reason": "forged"} in d.discarded and d.verdict == "ALLOW"
+
+
+def test_an_admitted_id_is_bound_to_the_hash_it_came_in_with(tmp_path):
+    store = _verified(tmp_path, _rule(pattern="deployment/web-*"))
+    store.add_constraint(_rule(pattern="deployment/api-*", text="replaced", effect="ESCALATE"))
+    assert _decide(store).verdict == "ESCALATE"
+    store.constraints["r"] = _rule(effect="BLOCK")  # a direct write over the added one
+    _assert_no_vote(store, "r")
+
+
+def test_a_rehash_of_an_added_constraint_gets_no_vote_in_a_checked_store(tmp_path):
+    store = _verified(tmp_path, _rule("r", pattern="deployment/web-*"))
+    store.add_constraint(_rule("added", effect="ESCALATE"))
+    _rehash(store.constraints["added"], effect="BLOCK")
+    _assert_no_vote(store, "added")
+
+
+def test_add_constraint_of_the_quarantined_id_is_a_fresh_admission(tmp_path):
+    c = _rule()
+    store = _verified(tmp_path, c)
+    _, fetcher = _write(tmp_path, [c])
+    _rehash(store.constraints["r"], rule_text="edited")
+    store.verify_sources(fetcher)
+    store.add_constraint(_rule(text="reinstated", effect="ESCALATE"))
+    d = _decide(store)
+    assert d.verdict == "ESCALATE" and d.citations == ["r"]
+
+
+def test_a_direct_insert_is_not_admitted_by_a_later_audit_that_cannot_check_it(tmp_path):
+    class NotChecked:
+        def fetch(self, source_ref):
+            raise SourceNotChecked(source_ref)
+
+    store = _verified(tmp_path, _rule(pattern="deployment/web-*"))
+    _evil_insert(store)
+    assert store.verify_sources(NotChecked()) == []
+    assert _decide(store).discarded == [{"id": "evil", "reason": "forged"}]
+
+
+def test_a_store_never_checked_keeps_voting_through_add_and_direct_writes():
+    store = ConstraintStore(authority_map=_authority())
+    store.add_constraint(_rule("a", effect="ESCALATE"))
+    store.add_constraint(_rule("a", effect="ESCALATE", text="replaced"))
+    _evil_insert(store)
+    d = _decide(store)
+    assert (d.verdict, sorted(d.citations), d.discarded) == ("BLOCK", ["evil"], [])
+
+
 # --- duplicate ids: every entry on its own merits, in any order -------------------------------
 
 

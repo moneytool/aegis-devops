@@ -14,13 +14,16 @@ Three fixes found while preparing the formal model for a conference submission.
 
 ### Fixed
 - A constraint changed and rehashed after its source check no longer votes. The provenance hash is
-  unkeyed, so a library caller holding a loaded store could edit a live constraint, recompute its
-  hash and pass the integrity check. The store now records the hash each source check verified,
-  and a decision discards a constraint whose hash has changed since, with the reason `forged`
-  (ESCALATE under `on_untrusted_match: escalate`, never BLOCK). A verified snapshot excludes it
-  too. `verify_sources` records the hash again when the source now backs the change, and
-  `add_constraint` with different content drops that id's source evidence. Stores never
-  source-verified behave as before.
+  unkeyed and does not cover the id, so a library caller holding a loaded store could edit a live
+  constraint, recompute its hash, rename it, and still pass the integrity check. The store now
+  records the hash each source check verified under the store key. A decision discards a
+  constraint whose hash differs from that record, that is not the object held under its own id,
+  or that was written straight into the store beside verified constraints, with the reason
+  `forged` (ESCALATE under `on_untrusted_match: escalate`, never BLOCK). A verified snapshot
+  excludes it too. `verify_sources` records the hash again when the source now backs the change
+  and quarantines a constraint whose id is not its key. `add_constraint` with different content
+  drops that id's source evidence. No removal switches this off for the rest of the store.
+  Stores never loaded with a source fetcher or audited behave as before.
 - A rejected entry can no longer displace a trusted constraint with the same id, in constraints
   and plan-constraints files. The first entry used to win, so an unauthorized or forged entry
   written ahead of a trusted BLOCK turned it into ALLOW. Each entry is now judged on its own, in

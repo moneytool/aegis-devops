@@ -328,59 +328,125 @@ def clauses_for(verb: str, kind: str, flags: frozenset[str]) -> tuple[list[Claus
 
 # A coverage status says whether a rule's meaning reaches the cluster. It does
 # not say the two layers refuse the same commands: the client hook decides on
-# the kubectl verb (the parser's action names below; only `set image` and
-# `rollout X` are normalised), a compiled policy on the request, and nothing in
-# a request names the verb that sent it. These are the client verbs that can
-# send a request a clause denies.
-# Each sends whatever object the caller wrote, so it can make any change.
-_OBJECT_WRITE_VERBS = frozenset({"apply", "edit", "patch", "replace"})
-# Each sends one fixed kind of change to the object itself.
-_FIELD_VERBS = ("annotate", "cordon", "drain", "label", "rollout-restart", "rollout-undo",
-                "set-image", "taint", "uncordon")
-# Other verbs that can make the change a field verb's condition looks for: a
-# rollback restores the template, images and restart annotation included, and
-# a drain cordons first.
-_SAME_CHANGE = {
-    "set-image": ("rollout-undo",),
-    "rollout-restart": ("rollout-undo",),
-    "rollout-undo": ("rollout-restart", "set-image"),
-    "cordon": ("drain",),
-    "drain": ("cordon",),
+# the kubectl verb (the parser's action name; only `set image` and `rollout X`
+# are normalised), a compiled policy on the request, and nothing in a request
+# names the verb that sent it. KUBECTL_REQUESTS says which requests each kubectl
+# write the hook can parse may send, with any of its flags, since the hook sees
+# only the verb. Checked on kind against compiled policies. Each clause then
+# lists the verbs that can send what it denies. This is about the kubectl verbs
+# the hook knows, not every client of the API.
+
+
+@dataclass(frozen=True)
+class _Request:
+    """A request a verb can send: ``changes`` names what an UPDATE can change
+    (``None``: anything the caller wrote), ``kinds`` where it can land, and a
+    ``subresource`` of ``*`` any subresource (``--raw``)."""
+
+    operation: str
+    subresource: str = ""
+    kinds: Any = None  # (kind, flags) -> bool; None: every kind
+    changes: frozenset[str] | None = None
+
+
+def _on(*kinds: str):
+    return lambda kind, flags: kind in kinds
+
+
+def _has_containers(kind: str, flags: frozenset[str]) -> bool:
+    return _template(flags, "object") is not None
+
+
+def _has_scale(kind: str, flags: frozenset[str]) -> bool:
+    return "scale" in flags or kind not in REGISTRY  # a custom resource may have one
+
+
+_ROLLOUTS = _on("deployment", "daemonset", "statefulset")  # what kubectl rolls out
+_RBAC = _on("role", "rolebinding", "clusterrole", "clusterrolebinding")
+_POD = _on("pod")
+_POD_OR_SERVICE = _on("pod", "service")
+_NODE = _on("node")
+
+
+def _update(changes: str, kinds=None) -> _Request:
+    return _Request("UPDATE", "", kinds, frozenset(changes.split()))
+
+
+# Whole-object writes also reach the scale subresource (`--subresource=scale`).
+_OBJECT_WRITE = (_Request("UPDATE"), _Request("UPDATE", "scale"))
+KUBECTL_REQUESTS: dict[str, tuple[_Request, ...]] = {
+    # `apply --prune` and `--force` (an immutable field) delete
+    "apply": (*_OBJECT_WRITE, _Request("CREATE"), _Request("DELETE")),
+    "edit": _OBJECT_WRITE,
+    "patch": _OBJECT_WRITE,
+    # `replace --force` deletes and creates; `--raw` PUTs to any URI, which
+    # proxy accepts too
+    "replace": (_Request("UPDATE", "*"), _Request("CREATE"), _Request("DELETE"),
+                _Request("CONNECT", "proxy")),
+    # `create --raw` POSTs to any URI: evictions, exec, attach, ...
+    "create": (_Request("CREATE", "*"), _Request("CONNECT", "*")),
+    "delete": (_Request("DELETE"),),
+    "expose": (_Request("CREATE", kinds=_on("service")),),
+    "autoscale": (_Request("CREATE", kinds=_on("horizontalpodautoscaler")),),
+    # `--expose` also creates a Service, `--rm` deletes what it created, `-i` attaches
+    "run": (_Request("CREATE", kinds=_POD_OR_SERVICE), _Request("DELETE", kinds=_POD_OR_SERVICE),
+            _Request("CONNECT", "attach", _POD)),
+    # `--copy-to` creates, `--replace` deletes, plain `debug` adds an ephemeral
+    # container, `-i` attaches
+    "debug": (_Request("CREATE", kinds=_POD), _Request("DELETE", kinds=_POD),
+              _Request("UPDATE", "ephemeralcontainers", _POD),
+              _Request("CONNECT", "attach", _POD)),
+    "annotate": (_update("annotations"),),
+    "label": (_update("labels"),),
+    "scale": (_Request("UPDATE", "scale", _has_scale),),
+    "set-image": (_update("images template", _has_containers),),
+    "rollout-restart": (_update("restart template", _ROLLOUTS),),
+    "rollout-undo": (_update("images restart template", _ROLLOUTS),),
+    "rollout-pause": (_update("paused", _on("deployment")),),
+    "rollout-resume": (_update("paused", _on("deployment")),),
+    "cordon": (_update("cordon", _NODE),),
+    "uncordon": (_update("uncordon", _NODE),),
+    # cordons, then evicts (`--disable-eviction`: deletes) the node's pods
+    "drain": (_update("cordon", _NODE), _Request("CREATE", "eviction", _POD),
+              _Request("DELETE", kinds=_POD)),
+    "taint": (_update("taints", _NODE),),
+    "exec": (_Request("CONNECT", "exec", _POD),),
+    "cp": (_Request("CONNECT", "exec", _POD),),
+    "attach": (_Request("CONNECT", "attach", _POD),),
+    "port-forward": (_Request("CONNECT", "portforward", _POD),),
+    "certificate": (_Request("UPDATE", "approval", _on("certificatesigningrequest")),),
+    # reconcile; can-i and whoami create a review
+    "auth": (_Request("CREATE", kinds=_RBAC), _Request("UPDATE", kinds=_RBAC),
+             _Request("CREATE", kinds=_on("selfsubjectaccessreview", "selfsubjectreview"))),
 }
-_CONNECT_VERBS = {"exec": ("exec", "cp"), "attach": ("attach",),
-                  "portforward": ("port-forward",), "proxy": ("proxy",)}
+# What the condition of a field-derived clause looks for, by the action it was
+# compiled for.
+_CLAUSE_LOOKS_FOR = {
+    "set-image": "images", "rollout-restart": "restart", "rollout-undo": "template",
+    "scale": "replicas", "cordon": "cordon", "drain": "cordon", "uncordon": "uncordon",
+    "label": "labels", "annotate": "annotations", "taint": "taints",
+}
 
 
-def _applies_to(verb: str, kind: str, flags: frozenset[str]) -> bool:
-    return kind == "*" or bool(clauses_for(verb, kind, flags)[0])
+def _sends_into(request: _Request, cl: Clause, owner: str, kind: str,
+                flags: frozenset[str]) -> bool:
+    if request.operation != cl.operation:
+        return False
+    if "*" not in (cl.subresource, request.subresource) and (
+            cl.subresource != request.subresource):
+        return False
+    if kind != "*" and request.kinds is not None and not request.kinds(kind, flags):
+        return False
+    if cl.condition and request.changes is not None:
+        return _CLAUSE_LOOKS_FOR.get(owner) in request.changes
+    return True
 
 
 def _client_verbs(cl: Clause, owner: str, kind: str, flags: frozenset[str]) -> set[str]:
-    """The client verbs that can send a request clause ``cl`` (compiled for the
+    """The kubectl verbs that can send a request clause ``cl`` (compiled for the
     action ``owner`` on ``kind``) denies."""
-    if cl.operation == "DELETE":
-        return {"delete"}
-    if cl.operation == "CONNECT":
-        return set(_CONNECT_VERBS.get(cl.subresource, ()))
-    if cl.operation == "CREATE":
-        if cl.subresource == "eviction":
-            return {"drain"}
-        verbs = {"apply", "create"}
-        for verb, created in (("run", "pod"), ("expose", "service"),
-                              ("autoscale", "horizontalpodautoscaler")):
-            if kind in (created, "*"):
-                verbs.add(verb)
-        return verbs
-    verbs = set(_OBJECT_WRITE_VERBS)
-    if cl.condition:  # a field diff: only what can make that change
-        verbs.update(v for v in _SAME_CHANGE.get(owner, ()) if _applies_to(v, kind, flags))
-        return verbs
-    if cl.subresource == "scale":
-        return {"scale"}  # its other clause, on the object, brings the whole-object verbs
-    verbs.update(v for v in _FIELD_VERBS if _applies_to(v, kind, flags))
-    if cl.subresource == "*" and _applies_to("scale", kind, flags):
-        verbs.add("scale")
-    return verbs
+    return {verb for verb, requests in KUBECTL_REQUESTS.items()
+            if any(_sends_into(r, cl, owner, kind, flags) for r in requests)}
 
 
 @dataclass
@@ -772,9 +838,9 @@ def _coverage_md(cov: dict[str, Any]) -> str:
         widened = r["client_parity"]["widened_verbs"]
         if widened:
             lines.append(f"- client parity: this policy also denies {', '.join(widened)} when "
-                         "they send a request it covers; admission does not see the kubectl "
-                         "verb, and the client hook lets them through unless another rule "
-                         "covers them")
+                         "they send a request it covers (some only with a flag, such as "
+                         "`replace --force`); admission does not see the kubectl verb, and the "
+                         "client hook lets them through unless another rule covers them")
         lines.append("")
     skipped = [r for r in cov["rules"] if r["status"] == "not-applicable"]
     if skipped:

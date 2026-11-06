@@ -6,11 +6,12 @@ Decision pipeline, per matching constraint, in order:
      (Forged constraints never reach this point at all: they're quarantined
      at ``ConstraintStore.load`` time — see store.py — when a
      ``source_fetcher`` was supplied.)
-  1b. Source binding -- when a source check verified it (at load or by
-     ``verify_sources``), its hash is still the hash that check verified. The
-     hash is unkeyed, so a live constraint changed *and* rehashed passes step
-     1; it fails here, reason ``forged``. A constraint no source check ever
-     verified has nothing to compare and is not affected.
+  1b. Source binding -- in a store loaded with a source fetcher or audited by
+     ``verify_sources``, it is the object held under its own ``id``,
+     and its hash is the hash verified for that id. The hash is unkeyed and
+     does not cover the id, so a live constraint changed *and* rehashed, or
+     renamed, passes step 1; it fails here, reason ``forged``. A store never
+     checked that way has nothing to compare, and nothing changes.
   2. Authority  — its principal is still authorized for its constraint_class
      (a principal's authority may have been revoked after the constraint
      was added).
@@ -155,12 +156,18 @@ class AegisInterceptor:
         below)."""
         if not c.verify_integrity():
             return "tampered"
-        source_hash_changed = getattr(self.store, "source_hash_changed", None)
-        if source_hash_changed is not None and source_hash_changed(c):
+        source_evidence_broken = getattr(self.store, "source_evidence_broken", None)
+        if source_evidence_broken is not None and source_evidence_broken(c):
             return "forged"
         if not self.store.is_authorized(c.principal, c.constraint_class):
             return "unauthorized"
         return None
+
+    def _reported_id(self, c: Constraint) -> str:
+        """A rejected constraint's id for ``discarded`` and notes: its own may
+        be what was forged (see ``ConstraintStore.reported_id``)."""
+        reported_id = getattr(self.store, "reported_id", None)
+        return reported_id(c) if reported_id is not None else c.id
 
     def intercept(self, intent: InfrastructureIntent, now: datetime | None = None) -> Decision:
         """Evaluates an intent and returns a Decision.
@@ -235,10 +242,10 @@ class AegisInterceptor:
         for c, label in unresolved:
             reason = self._untrusted_reason(c)
             if reason is not None:
-                discarded.append({"id": c.id, "reason": reason})
+                discarded.append({"id": self._reported_id(c), "reason": reason})
                 if c.effect in _ENFORCING_EFFECTS and self.on_untrusted_match == "escalate":
                     fail_closed = True
-                    notes.append(f"fail-closed: {c.id} ({reason})")
+                    notes.append(f"fail-closed: {self._reported_id(c)} ({reason})")
                 continue
             fail_closed = True
             for part in label.split(", "):
@@ -252,10 +259,10 @@ class AegisInterceptor:
             fail_closed = True
             notes.append(runs_code)
         for c, reason in quarantined_matches:
-            discarded.append({"id": c.id, "reason": reason})
+            discarded.append({"id": self._reported_id(c), "reason": reason})
             if c.effect in _ENFORCING_EFFECTS and self.on_untrusted_match == "escalate":
                 fail_closed = True
-                notes.append(f"fail-closed: {c.id} ({reason})")
+                notes.append(f"fail-closed: {self._reported_id(c)} ({reason})")
         for c in matches:
             # REVIEW-4 L4: re-verify integrity here even though
             # ConstraintStore.load already did it for every constraint that
@@ -270,10 +277,10 @@ class AegisInterceptor:
             # verification result that may be stale by the time it matters.
             reason = self._untrusted_reason(c)
             if reason is not None:
-                discarded.append({"id": c.id, "reason": reason})
+                discarded.append({"id": self._reported_id(c), "reason": reason})
                 if c.effect in _ENFORCING_EFFECTS and self.on_untrusted_match == "escalate":
                     fail_closed = True
-                    notes.append(f"fail-closed: {c.id} ({reason})")
+                    notes.append(f"fail-closed: {self._reported_id(c)} ({reason})")
                 continue
             verified.append(c)
 

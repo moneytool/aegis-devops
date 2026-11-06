@@ -238,11 +238,19 @@ shows the same list:
 ```
 
 `client_parity.status` is `same`, `wider-than-client` or `not-compiled` (no policy for this rule).
-The list names verbs, not flags: `replace --force` also deletes, for one, and a `delete` rule does
-not list it. Other widened lists: `scale`,
-`label`, `annotate`, `taint` and `uncordon` have the four whole-object verbs; `cordon` also has
-`drain`; a pod `delete` has `drain` (its evictions); a pod `exec` has `cp`; a `create` has `apply`,
-plus `run` on pods and `expose` on services.
+The list covers the kubectl verbs the hook knows, not every client of the API: a controller, an SDK
+or `curl` sends the same requests under no verb at all. It names verbs, and a verb is listed when any
+of its flags makes it send a request the policy covers, since the client hook sees only the verb. A
+`delete` rule lists `replace` (`--force`) and `apply` (`--prune`, `--force` on an immutable field),
+and on pods also `drain` (evictions, `--disable-eviction`), `run` (`--rm`) and `debug` (`--copy-to
+--replace`). A rule on `patch` or `update` lists everything that updates the kind, `rollout pause`
+and `rollout resume` included. A `create` rule on services lists `run` (`--expose`), a `delete` rule
+on them lists `run` too (`--rm --expose`), and `create` appears on subresource rules such as `exec`
+or a pod `delete` because `create --raw` can POST to any URI. A rule's own verb is never listed, even
+when the two layers differ on it: for a `pod/*` `exec` rule the policy denies `kubectl exec
+deploy/web` and the client allows it, because the client matches the name as written, and `kubectl
+delete all --all` does the same for a `deployment/*` `delete` rule. Commands the hook cannot parse are refused on the client, so they are
+not listed: `set env` and the other `set` subcommands except `set image`, `diff -f`, `proxy`.
 
 ### Guardrails
 

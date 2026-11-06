@@ -35,10 +35,18 @@ from ``constraints`` into ``quarantined``.
 ``provenance_hash`` they verified (``source_verified_hashes``). The hash is
 unkeyed, so a live constraint changed and rehashed after that still passes
 ``verify_integrity``; the interceptor compares against the recorded hash at
-decision time and discards the constraint as ``"forged"``. A constraint that
-was never source-verified (no fetcher, a store built directly,
-``add_constraint``) has no recorded hash and nothing to compare. A later
-audit records the hash again when the source now backs the change;
+decision time and discards the constraint as ``"forged"``. The record belongs
+to the store key, because ``Constraint.id`` is outside the hash and can be
+rewritten too. Once a store has been loaded with a fetcher or audited, which
+nothing undoes, a constraint that is not the object held under its own ``id``
+is also ``"forged"`` (renamed, swapped, or inserted under another key), and so
+is an id written straight into ``constraints`` with no record at all. A store
+never loaded with a fetcher or audited (a store built directly,
+``add_constraint``) has nothing to compare and behaves as before. In a checked
+store, the ways in without source evidence are ``add_constraint`` and a source
+the load's or first audit's fetcher cannot check; those vote unverified, bound
+to the hash they came in with. A later audit records the hash again when the source now backs the
+change, and quarantines a constraint whose ``id`` is not its key;
 ``add_constraint`` with different content drops the record and the
 ``source_verified`` evidence, so a replacement starts unverified.
 
@@ -983,13 +991,22 @@ class ConstraintStore:
         # requires; a constraint loaded with no applicable fetcher is not in
         # here (docs/dev/DESIGN-v0.3-server-side.md §3.1)
         self.source_verified: set[str] = set()
-        # id -> the provenance_hash that source check verified: the decision
-        # path discards a constraint whose hash has since changed (module
-        # docstring).
+        # store key -> the provenance_hash that source check verified: the
+        # decision path discards a constraint that no longer agrees with it
+        # (source_evidence_broken, module docstring).
         self.source_verified_hashes: dict[str, str] = {}
+        # id -> hash of what may vote with no source evidence: added through
+        # add_constraint, or citing a source the fetcher could not check.
+        self._admitted_unverified: dict[str, str] = {}
+        # Set once by a load with a fetcher or by an audit, and never cleared:
+        # removing the last record must not switch source binding off.
+        self._source_checked: bool = False
         # id(constraint) -> its quarantine reason. `quarantined` is a log that
         # may hold one id several times, with different reasons.
         self._quarantine_reasons: dict[int, str] = {}
+        # id(constraint) -> the id it was quarantined under: Constraint.id is
+        # outside the hash and may have been rewritten since.
+        self._quarantine_ids: dict[int, str] = {}
 
     @property
     def health(self) -> StoreHealth:
@@ -1009,12 +1026,39 @@ class ConstraintStore:
     def _record_source_verified(self, constraint: Constraint) -> None:
         self.source_verified.add(constraint.id)
         self.source_verified_hashes[constraint.id] = constraint.provenance_hash
+        self._admitted_unverified.pop(constraint.id, None)
 
-    def source_hash_changed(self, constraint: Constraint) -> bool:
-        """Whether ``constraint`` differs from what its source check verified.
-        ``False`` for a constraint that was never source-verified."""
-        verified = self.source_verified_hashes.get(constraint.id)
-        return verified is not None and verified != constraint.provenance_hash
+    def _drop_source_evidence(self, key: str) -> None:
+        self.source_verified.discard(key)
+        self.source_verified_hashes.pop(key, None)
+        self._admitted_unverified.pop(key, None)
+
+    def source_evidence_broken(self, constraint: Constraint) -> bool:
+        """Whether ``constraint`` contradicts this store's source evidence: it
+        is not the object held under its own ``id``, or its hash is not the one
+        recorded for that id, or there is no record. ``False`` for a store never
+        loaded with a fetcher or audited."""
+        if not self._source_checked:
+            return False
+        if self.constraints.get(constraint.id) is not constraint:
+            return True
+        expected = self.source_verified_hashes.get(constraint.id)
+        if expected is None:
+            expected = self._admitted_unverified.get(constraint.id)
+        return expected != constraint.provenance_hash
+
+    def reported_id(self, constraint: Constraint) -> str:
+        """The id to report a rejected constraint under: the one it was
+        quarantined under, or the key it is held under when its own ``id`` has
+        been rewritten. Its ``id`` otherwise."""
+        quarantined_as = self._quarantine_ids.get(id(constraint))
+        if quarantined_as is not None:
+            return quarantined_as
+        if self._source_checked and self.constraints.get(constraint.id) is not constraint:
+            for key, held in self.constraints.items():
+                if held is constraint:
+                    return key
+        return constraint.id
 
     def verified_snapshot(
         self,
@@ -1043,9 +1087,9 @@ class ConstraintStore:
         excluded = [(q["id"], q["reason"]) for q in self.quarantined]
         for c in sorted(self.constraints.values(), key=lambda c: c.id):
             if not c.verify_integrity():
-                excluded.append((c.id, "tampered"))
-            elif self.source_hash_changed(c):
-                excluded.append((c.id, "forged"))
+                excluded.append((self.reported_id(c), "tampered"))
+            elif self.source_evidence_broken(c):
+                excluded.append((self.reported_id(c), "forged"))
             elif not self.is_authorized(c.principal, c.constraint_class):
                 excluded.append((c.id, "unauthorized"))
             elif require_source_evidence and c.id not in self.source_verified:
@@ -1067,11 +1111,16 @@ class ConstraintStore:
             aegis_version=__version__,
         )
 
-    def _quarantine(self, constraint: Constraint, reason: str, message: str) -> None:
-        self.quarantined.append({"id": constraint.id, "reason": reason})
+    def _quarantine(
+        self, constraint: Constraint, reason: str, message: str, key: str | None = None
+    ) -> None:
+        """``key``: the store key, when it is not ``constraint.id``."""
+        key = constraint.id if key is None else key
+        self.quarantined.append({"id": key, "reason": reason})
         self.quarantined_constraints.append(constraint)
         self._quarantine_reasons[id(constraint)] = reason
-        warning = f"Quarantined constraint {constraint.id}: {message}"
+        self._quarantine_ids[id(constraint)] = key
+        warning = f"Quarantined constraint {key}: {message}"
         self.warnings.append(warning)
         logger.warning(warning)
 
@@ -1091,9 +1140,10 @@ class ConstraintStore:
                 f"Principal '{constraint.principal}' is not authorized to assert "
                 f"'{constraint.constraint_class}' constraints."
             )
-        if self.source_hash_changed(constraint):
-            self.source_verified.discard(constraint.id)
-            del self.source_verified_hashes[constraint.id]
+        verified = self.source_verified_hashes.get(constraint.id)
+        if verified != constraint.provenance_hash:
+            self._drop_source_evidence(constraint.id)
+            self._admitted_unverified[constraint.id] = constraint.provenance_hash
         self.constraints[constraint.id] = constraint
         return constraint
 
@@ -1297,6 +1347,7 @@ class ConstraintStore:
         if not isinstance(entries, list):
             raise ValueError(f"{path}: 'constraints' must be a list")
         caching_fetcher = CachingSourceFetcher(source_fetcher) if source_fetcher else None
+        store._source_checked = caching_fetcher is not None
         id_counts: Counter[str] = Counter()
         passed: dict[str, list[tuple[Constraint, bool]]] = {}  # (entry, source-verified)
         for entry in entries:
@@ -1353,6 +1404,8 @@ class ConstraintStore:
         if kept is not None:
             if source_ok[id(kept)]:
                 self._record_source_verified(kept)
+            else:
+                self._admitted_unverified[kept.id] = kept.provenance_hash
             self.constraints[kept.id] = kept
 
     @classmethod
@@ -1394,22 +1447,38 @@ class ConstraintStore:
         that fail into ``quarantined`` (reason ``"forged"`` or
         ``"principal-mismatch"``) and removing them from ``constraints``.
         A constraint that passes has its current hash recorded as the verified
-        one. One this fetcher cannot check keeps the record it had.
+        one. One this fetcher cannot check keeps the record it had. One whose
+        ``id`` is not its store key is ``"forged"`` whatever its source says:
+        the source does not cover the id, and evidence must not attach to it.
 
         Returns the list of newly-quarantined ``{"id", "reason"}`` entries.
         """
         caching_fetcher = CachingSourceFetcher(fetcher)
         newly_quarantined: list[dict[str, str]] = []
+        first_check = not self._source_checked
+        self._source_checked = True
         for constraint_id in list(self.constraints.keys()):
             constraint = self.constraints[constraint_id]
+            if constraint.id != constraint_id:
+                self._drop_source_evidence(constraint_id)
+                newly_quarantined.append({"id": constraint_id, "reason": "forged"})
+                self._quarantine(constraint, "forged",
+                                 f"held under this id but names {constraint.id!r}",
+                                 key=constraint_id)
+                del self.constraints[constraint_id]
+                continue
             failure = _source_failure_reason(constraint, caching_fetcher, self.warnings)
             if failure is None:
                 self._record_source_verified(constraint)
             elif failure == _SOURCE_UNCHECKED:
+                # a first audit classifies what the store already held; later,
+                # an id written straight in stays unadmitted
+                if first_check and constraint_id not in self.source_verified_hashes:
+                    self._admitted_unverified.setdefault(
+                        constraint_id, constraint.provenance_hash)
                 continue
             else:
-                self.source_verified.discard(constraint_id)
-                self.source_verified_hashes.pop(constraint_id, None)
+                self._drop_source_evidence(constraint_id)
                 newly_quarantined.append({"id": constraint_id, "reason": failure})
                 self._quarantine(constraint, failure, _SOURCE_FAILURE_MESSAGES[failure])
                 del self.constraints[constraint_id]
