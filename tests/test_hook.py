@@ -515,6 +515,34 @@ def test_broken_policy_gates_only_infra_commands(broken_policy_project, command,
         assert str(config_dir) in err
 
 
+def test_a_policy_with_conflicting_duplicate_ids_is_denied(opted_in_project):
+    """Two authorized entries, same id, differing content: the load fails, so
+    infrastructure commands are refused rather than decided by file order."""
+    import shutil
+
+    import yaml
+
+    from aegis_core.signing import load_key, sign_file
+    from aegis_core.store import Constraint, _constraint_to_dict
+
+    shutil.rmtree(opted_in_project / ".aegis" / "sources")  # or a source decides between them
+    path = opted_in_project / ".aegis" / "constraints.example.yaml"
+    doc = yaml.safe_load(path.read_text())
+    first = doc["constraints"][0]
+    second = Constraint.create(
+        id=first["id"], provider=first["provider"], resource_pattern="zzz/*",
+        actions=set(first["actions"]), effect=first["effect"], scope=first.get("scope") or {},
+        constraint_class=first["constraint_class"], principal=first["principal"],
+        source_ref=first["source_ref"], source_timestamp=first["source_timestamp"],
+        rule_text=first["rule_text"])
+    doc["constraints"].insert(0, _constraint_to_dict(second))
+    path.write_text(yaml.safe_dump(doc, sort_keys=False))
+    sign_file(path, load_key(f"file:{EXAMPLE_SIGNING_KEY_PATH}"))
+    code, _out, err = run("claude", payload_for("claude", "kubectl get pods"))
+    assert code == 2
+    assert "differ" in err
+
+
 # --- 7. non-shell tool calls -------------------------------------------------------
 
 

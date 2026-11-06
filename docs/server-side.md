@@ -223,6 +223,35 @@ CD, Flux) in `trusted`.
 | `ESCALATE` | Deny (admission cannot ask) | over-enforced; `--escalate omit` leaves it client-only |
 | reads, `logs`, impersonation, time windows, rate limits | never admitted, or no clock at admission | not enforced |
 
+**Client parity is reported separately.** The coverage status says whether a rule's meaning reaches
+the cluster, not whether both layers refuse the same commands. The client hook decides on the
+kubectl verb, and a policy decides on the request, which does not name the verb. So a `set-image`
+rule is `exact` and the policy also denies `kubectl patch`, `edit`, `replace`, `apply` or `rollout
+undo` when they change the image, while the client hook lets those verbs through unless another
+rule covers them. Each rule in `coverage.json` has a `client_parity` record, and `coverage.md`
+shows the same list:
+
+```json
+"status": "exact",
+"client_parity": {"status": "wider-than-client",
+                  "widened_verbs": ["apply", "edit", "patch", "replace", "rollout-undo"]}
+```
+
+`client_parity.status` is `same`, `wider-than-client` or `not-compiled` (no policy for this rule).
+The list covers the kubectl verbs the hook knows, not every client of the API: a controller, an SDK
+or `curl` sends the same requests under no verb at all. It names verbs, and a verb is listed when any
+of its flags makes it send a request the policy covers, since the client hook sees only the verb. A
+`delete` rule lists `replace` (`--force`) and `apply` (`--prune`, `--force` on an immutable field),
+and on pods also `drain` (evictions, `--disable-eviction`), `run` (`--rm`) and `debug` (`--copy-to
+--replace`). A rule on `patch` or `update` lists everything that updates the kind, `rollout pause`
+and `rollout resume` included. A `create` rule on services lists `run` (`--expose`), a `delete` rule
+on them lists `run` too (`--rm --expose`), and `create` appears on subresource rules such as `exec`
+or a pod `delete` because `create --raw` can POST to any URI. A rule's own verb is never listed, even
+when the two layers differ on it: for a `pod/*` `exec` rule the policy denies `kubectl exec
+deploy/web` and the client allows it, because the client matches the name as written, and `kubectl
+delete all --all` does the same for a `deployment/*` `delete` rule. Commands the hook cannot parse are refused on the client, so they are
+not listed: `set env` and the other `set` subcommands except `set image`, `diff -f`, `proxy`.
+
 ### Guardrails
 
 A policy named `aegis-guardrails` stops the identity escapes admission can see: agents cannot

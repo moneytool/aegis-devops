@@ -324,6 +324,131 @@ def clauses_for(verb: str, kind: str, flags: frozenset[str]) -> tuple[list[Claus
     return [], f"action {verb!r} has no admission equivalent in this compiler"
 
 
+# --- client parity ----------------------------------------------------------------------------
+
+# A coverage status says whether a rule's meaning reaches the cluster. It does
+# not say the two layers refuse the same commands: the client hook decides on
+# the kubectl verb (the parser's action name; only `set image` and `rollout X`
+# are normalised), a compiled policy on the request, and nothing in a request
+# names the verb that sent it. KUBECTL_REQUESTS says which requests each kubectl
+# write the hook can parse may send, with any of its flags, since the hook sees
+# only the verb. Checked on kind against compiled policies. Each clause then
+# lists the verbs that can send what it denies. This is about the kubectl verbs
+# the hook knows, not every client of the API.
+
+
+@dataclass(frozen=True)
+class _Request:
+    """A request a verb can send: ``changes`` names what an UPDATE can change
+    (``None``: anything the caller wrote), ``kinds`` where it can land, and a
+    ``subresource`` of ``*`` any subresource (``--raw``)."""
+
+    operation: str
+    subresource: str = ""
+    kinds: Any = None  # (kind, flags) -> bool; None: every kind
+    changes: frozenset[str] | None = None
+
+
+def _on(*kinds: str):
+    return lambda kind, flags: kind in kinds
+
+
+def _has_containers(kind: str, flags: frozenset[str]) -> bool:
+    return _template(flags, "object") is not None
+
+
+def _has_scale(kind: str, flags: frozenset[str]) -> bool:
+    return "scale" in flags or kind not in REGISTRY  # a custom resource may have one
+
+
+_ROLLOUTS = _on("deployment", "daemonset", "statefulset")  # what kubectl rolls out
+_RBAC = _on("role", "rolebinding", "clusterrole", "clusterrolebinding")
+_POD = _on("pod")
+_POD_OR_SERVICE = _on("pod", "service")
+_NODE = _on("node")
+
+
+def _update(changes: str, kinds=None) -> _Request:
+    return _Request("UPDATE", "", kinds, frozenset(changes.split()))
+
+
+# Whole-object writes also reach the scale subresource (`--subresource=scale`).
+_OBJECT_WRITE = (_Request("UPDATE"), _Request("UPDATE", "scale"))
+KUBECTL_REQUESTS: dict[str, tuple[_Request, ...]] = {
+    # `apply --prune` and `--force` (an immutable field) delete
+    "apply": (*_OBJECT_WRITE, _Request("CREATE"), _Request("DELETE")),
+    "edit": _OBJECT_WRITE,
+    "patch": _OBJECT_WRITE,
+    # `replace --force` deletes and creates; `--raw` PUTs to any URI, which
+    # proxy accepts too
+    "replace": (_Request("UPDATE", "*"), _Request("CREATE"), _Request("DELETE"),
+                _Request("CONNECT", "proxy")),
+    # `create --raw` POSTs to any URI: evictions, exec, attach, ...
+    "create": (_Request("CREATE", "*"), _Request("CONNECT", "*")),
+    "delete": (_Request("DELETE"),),
+    "expose": (_Request("CREATE", kinds=_on("service")),),
+    "autoscale": (_Request("CREATE", kinds=_on("horizontalpodautoscaler")),),
+    # `--expose` also creates a Service, `--rm` deletes what it created, `-i` attaches
+    "run": (_Request("CREATE", kinds=_POD_OR_SERVICE), _Request("DELETE", kinds=_POD_OR_SERVICE),
+            _Request("CONNECT", "attach", _POD)),
+    # `--copy-to` creates, `--replace` deletes, plain `debug` adds an ephemeral
+    # container, `-i` attaches
+    "debug": (_Request("CREATE", kinds=_POD), _Request("DELETE", kinds=_POD),
+              _Request("UPDATE", "ephemeralcontainers", _POD),
+              _Request("CONNECT", "attach", _POD)),
+    "annotate": (_update("annotations"),),
+    "label": (_update("labels"),),
+    "scale": (_Request("UPDATE", "scale", _has_scale),),
+    "set-image": (_update("images template", _has_containers),),
+    "rollout-restart": (_update("restart template", _ROLLOUTS),),
+    "rollout-undo": (_update("images restart template", _ROLLOUTS),),
+    "rollout-pause": (_update("paused", _on("deployment")),),
+    "rollout-resume": (_update("paused", _on("deployment")),),
+    "cordon": (_update("cordon", _NODE),),
+    "uncordon": (_update("uncordon", _NODE),),
+    # cordons, then evicts (`--disable-eviction`: deletes) the node's pods
+    "drain": (_update("cordon", _NODE), _Request("CREATE", "eviction", _POD),
+              _Request("DELETE", kinds=_POD)),
+    "taint": (_update("taints", _NODE),),
+    "exec": (_Request("CONNECT", "exec", _POD),),
+    "cp": (_Request("CONNECT", "exec", _POD),),
+    "attach": (_Request("CONNECT", "attach", _POD),),
+    "port-forward": (_Request("CONNECT", "portforward", _POD),),
+    "certificate": (_Request("UPDATE", "approval", _on("certificatesigningrequest")),),
+    # reconcile; can-i and whoami create a review
+    "auth": (_Request("CREATE", kinds=_RBAC), _Request("UPDATE", kinds=_RBAC),
+             _Request("CREATE", kinds=_on("selfsubjectaccessreview", "selfsubjectreview"))),
+}
+# What the condition of a field-derived clause looks for, by the action it was
+# compiled for.
+_CLAUSE_LOOKS_FOR = {
+    "set-image": "images", "rollout-restart": "restart", "rollout-undo": "template",
+    "scale": "replicas", "cordon": "cordon", "drain": "cordon", "uncordon": "uncordon",
+    "label": "labels", "annotate": "annotations", "taint": "taints",
+}
+
+
+def _sends_into(request: _Request, cl: Clause, owner: str, kind: str,
+                flags: frozenset[str]) -> bool:
+    if request.operation != cl.operation:
+        return False
+    if "*" not in (cl.subresource, request.subresource) and (
+            cl.subresource != request.subresource):
+        return False
+    if kind != "*" and request.kinds is not None and not request.kinds(kind, flags):
+        return False
+    if cl.condition and request.changes is not None:
+        return _CLAUSE_LOOKS_FOR.get(owner) in request.changes
+    return True
+
+
+def _client_verbs(cl: Clause, owner: str, kind: str, flags: frozenset[str]) -> set[str]:
+    """The kubectl verbs that can send a request clause ``cl`` (compiled for the
+    action ``owner`` on ``kind``) denies."""
+    return {verb for verb, requests in KUBECTL_REQUESTS.items()
+            if any(_sends_into(r, cl, owner, kind, flags) for r in requests)}
+
+
 @dataclass
 class _Rule:
     c: Constraint
@@ -338,6 +463,17 @@ class _Rule:
     policy: str | None = None
     expression: str | None = None
     resource_rules: list[dict[str, Any]] = field(default_factory=list)
+    client_verbs: set[str] = field(default_factory=set)
+
+    def client_parity(self) -> dict[str, Any]:
+        """How the commands this policy refuses compare with the rule's own
+        verbs, separately from ``status``: ``same``, ``wider-than-client`` (the
+        verbs the client hook lets through on this rule alone, that the policy
+        denies when they make the same change) or ``not-compiled``."""
+        if self.expression is None:
+            return {"status": "not-compiled", "widened_verbs": []}
+        widened = [] if ANY_ACTION in self.c.actions else sorted(self.client_verbs - self.c.actions)
+        return {"status": "wider-than-client" if widened else "same", "widened_verbs": widened}
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"id": self.c.id, "effect": self.c.effect, "status": self.status}
@@ -350,6 +486,7 @@ class _Rule:
                            ("notes", self.notes)):
             if value:
                 d[key] = value
+        d["client_parity"] = self.client_parity()
         return d
 
 
@@ -473,6 +610,7 @@ def _compile_rule(c: Constraint, target: KubernetesTarget) -> _Rule:
                 if cr == "*":
                     rules_by_group.setdefault((cg, "*"), set()).add(cl.operation)
                 requests.append(f"{cl.operation} {res}")
+                rule.client_verbs |= _client_verbs(cl, verb, kind, flags)
             disjuncts.append("(" + " || ".join(parts) + ")")
             rule.enforced.append({"kind": kind, "action": verb, "requests": requests})
             if verb == "rollout-undo":
@@ -697,6 +835,12 @@ def _coverage_md(cov: dict[str, Any]) -> str:
         for key, label in (("not_enforced", "not enforced"), ("over_enforced", "over-enforced"),
                            ("notes", "note")):
             lines += [f"- {label}: {item}" for item in r.get(key, [])]
+        widened = r["client_parity"]["widened_verbs"]
+        if widened:
+            lines.append(f"- client parity: this policy also denies {', '.join(widened)} when "
+                         "they send a request it covers (some only with a flag, such as "
+                         "`replace --force`); admission does not see the kubectl verb, and the "
+                         "client hook lets them through unless another rule covers them")
         lines.append("")
     skipped = [r for r in cov["rules"] if r["status"] == "not-applicable"]
     if skipped:

@@ -151,6 +151,26 @@ A constraint's `scope: {...}` (and a plan selector's `scope`) is matched against
   timezone-aware everywhere in the matcher; a naive `datetime` raises `ValueError` rather than silently
   assuming UTC.
 
+## Duplicate ids
+
+Each entry in a constraints or plan-constraints file is judged on its own, wherever it is in the
+file, and a rejected entry never displaces another one. So a rejected entry written ahead of a
+trusted rule with the same id changes nothing: it is quarantined with its own reason (`tampered`,
+`forged`, `invalid: ...`) and the trusted rule loads. A `warnings` line names every id that
+appeared more than once. Among the entries that pass:
+
+| Entries with one id | Result |
+|---|---|
+| identical | one loads; each extra one is quarantined as `invalid: duplicate id` |
+| differing, one authorized | it loads; those whose principal is not authorized are quarantined as `unauthorized` |
+| differing, none authorized | none loads; all are quarantined as `unauthorized` |
+| differing, more than one authorized | the load fails with an error, as for any unusable policy file |
+
+The last case does not pick one because nothing says which one the policy means. `aegis check`
+exits with a data error, and the agent hook denies infrastructure commands until the file is
+fixed. With a source directory, the source usually settles it first, by rejecting the entries it
+does not back as `forged`.
+
 ## Authority policy
 
 `../data/authority.example.yaml` maps each principal to the constraint classes it may assert:
