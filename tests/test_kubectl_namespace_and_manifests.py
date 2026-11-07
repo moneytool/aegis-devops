@@ -220,3 +220,256 @@ def test_an_unread_manifest_never_takes_the_contexts_namespace(two_kubeconfigs):
     [(explicit, _)] = _decide_resolved([rule], ["kubectl", "apply", "-f", "-", "-n", "dev"],
                                        {}, home)
     assert explicit.verdict == "ALLOW"
+
+
+# --- what cannot be resolved does not dismiss a rule on a runtime target (#64) ---------------
+
+MONDAY_NY = {"days": ["Mon"], "start": "09:00", "end": "17:00", "tz": "America/New_York"}
+IN_WINDOW = datetime(2026, 1, 5, 15, tzinfo=UTC)  # Monday, 10:00 in New York
+OUT_OF_WINDOW = datetime(2026, 1, 6, 15, tzinfo=UTC)  # Tuesday
+EXEC_DEPLOY = "kubectl exec deploy/web -- id"
+
+
+def _windowed(pattern: str, action: str, scope: dict | None = None,
+              principal: str = "admin") -> Constraint:
+    return Constraint.create(id="r", provider="kubernetes", resource_pattern=pattern,
+                             actions={action}, scope=scope or {}, time_window=MONDAY_NY,
+                             effect="BLOCK", constraint_class="deletion", principal=principal,
+                             source_ref="t", source_timestamp="2026-10-08T00:00:00+00:00",
+                             rule_text="r")
+
+
+def _at(rule: Constraint, command: str, now: datetime, *, tzdata: bool = True,
+        **kwargs) -> tuple[str, list[str], list[dict]]:
+    store = ConstraintStore(authority_map=dict(AUTHORITY))
+    store.add_constraint(rule)
+    store.tzdata_available = tzdata
+    gate = AegisInterceptor(store, **kwargs)
+    decisions = [gate.intercept(i, now=now) for i in from_kubectl_multi(command.split())]
+    order = {"ALLOW": 0, "ESCALATE": 1, "BLOCK": 2}
+    return (max((d.verdict for d in decisions), key=order.get),
+            sorted({n for d in decisions for n in d.notes}),
+            [x for d in decisions for x in d.discarded])
+
+
+@pytest.mark.parametrize("pattern,action,command,note", [
+    ("pod/payments-0", "exec", EXEC_DEPLOY, "target-unresolved: r"),
+    ("pod?payments-0", "exec", EXEC_DEPLOY, "target-unresolved: r"),
+    ("pod/payments-0", "attach", "kubectl attach svc/web", "target-unresolved: r"),
+    ("pod/payments-0", "port-forward", "kubectl port-forward sts/web 80", "target-unresolved: r"),
+    ("deployment/payments", "delete", "kubectl delete all --all", "target-unresolved: r"),
+    ("widget/*", "delete", "kubectl delete all --all", "target-unresolved: r"),
+    # the kind-level intents, and the name written
+    ("pod/*", "exec", EXEC_DEPLOY, "time-window-unresolved: r"),
+    ("deployment/web", "exec", EXEC_DEPLOY, "time-window-unresolved: r"),
+    ("deployment/*", "delete", "kubectl delete all --all", "time-window-unresolved: r"),
+    ("all/*", "delete", "kubectl delete all --all", "time-window-unresolved: r"),
+    # as a direct command always did
+    ("pod/payments-0", "exec", "kubectl exec payments-0 -- id", "time-window-unresolved: r"),
+    # a manifest shares the check
+    ("secret/*", "delete", "kubectl delete -f x.yaml", "manifest-not-inspected: r"),
+])
+def test_no_tzdata_asks_on_a_window_that_cannot_be_evaluated(pattern, action, command, note):
+    for now in (IN_WINDOW, OUT_OF_WINDOW):  # the day cannot be told without the zone either
+        verdict, notes, _ = _at(_windowed(pattern, action), command, now, tzdata=False)
+        assert verdict == "ESCALATE" and note in notes, (pattern, command, notes)
+
+
+@pytest.mark.parametrize("pattern,action,command", [
+    ("secret/x", "delete", "kubectl delete all --all"),
+    ("pod/payments-0", "delete", EXEC_DEPLOY),
+    ("deployment/x", "exec", EXEC_DEPLOY),
+])
+def test_no_tzdata_leaves_rules_that_cannot_be_about_the_target(pattern, action, command):
+    assert _at(_windowed(pattern, action), command, IN_WINDOW, tzdata=False)[0] == "ALLOW"
+
+
+def test_a_window_that_can_be_evaluated_still_decides():
+    for rule, command in ((_windowed("pod/payments-0", "exec"), EXEC_DEPLOY),
+                          (_windowed("deployment/payments", "delete"),
+                           "kubectl delete all --all")):
+        assert _at(rule, command, IN_WINDOW)[0] == "ESCALATE"
+        assert _at(rule, command, OUT_OF_WINDOW)[0] == "ALLOW"
+    assert _at(_windowed("pod/*", "exec"), EXEC_DEPLOY, IN_WINDOW)[0] == "BLOCK"
+    assert _at(_windowed("pod/*", "exec"), EXEC_DEPLOY, OUT_OF_WINDOW)[0] == "ALLOW"
+
+
+@pytest.mark.parametrize("pattern", ["pod/payments-0", "pod/*"])
+@pytest.mark.parametrize("scope,command,verdict", [
+    ({"namespace": "prod"}, EXEC_DEPLOY, "ESCALATE"),
+    ({"namespace": "prod"}, "kubectl exec deploy/web -n prod -- id", "ESCALATE"),
+    ({"namespace": "prod"}, "kubectl exec deploy/web -A -- id", "ESCALATE"),
+    ({"namespace": "prod"}, "kubectl exec deploy/web -n dev -- id", "ALLOW"),
+    ({"env": "prod"}, EXEC_DEPLOY, "ESCALATE"),
+])
+def test_no_tzdata_and_a_scope_are_both_unknowns(pattern, scope, command, verdict):
+    rule = _windowed(pattern, "exec", scope)
+    assert _at(rule, command, IN_WINDOW, tzdata=False)[0] == verdict
+
+
+@pytest.mark.parametrize("pattern,action,command", [
+    ("pod/payments-0", "exec", EXEC_DEPLOY),
+    ("deployment/payments", "delete", "kubectl delete all --all"),
+])
+def test_an_untrusted_rule_cannot_force_a_question(pattern, action, command):
+    """Discarded, as when it matches outright."""
+    rule = _windowed(pattern, action, principal="intruder")
+    store = ConstraintStore(authority_map=dict(AUTHORITY))
+    store.constraints[rule.id] = rule
+    store.tzdata_available = False
+    decisions = [AegisInterceptor(store).intercept(i, now=IN_WINDOW)
+                 for i in from_kubectl_multi(command.split())]
+    assert {d.verdict for d in decisions} == {"ALLOW"}
+    assert {"id": "r", "reason": "unauthorized"} in [x for d in decisions for x in d.discarded]
+
+
+@pytest.mark.parametrize("tzdata", [True, False])
+@pytest.mark.parametrize("pattern,action,command", [
+    ("pod/payments-0", "exec", EXEC_DEPLOY),
+    ("pod?payments-0", "exec", EXEC_DEPLOY),
+    ("pod/*", "exec", EXEC_DEPLOY),
+    ("deployment/payments", "delete", "kubectl delete all --all"),
+    ("deployment/*", "delete", "kubectl delete all --all"),
+    ("widget/*", "delete", "kubectl delete all --all"),
+])
+def test_a_quarantined_rule_on_a_runtime_target_fails_closed(pattern, action, command, tzdata):
+    rule = _windowed(pattern, action)
+    store = ConstraintStore(authority_map=dict(AUTHORITY))
+    store.tzdata_available = tzdata
+    store.quarantined.append({"id": rule.id, "reason": "tampered"})
+    store.quarantined_constraints.append(rule)
+
+    def run(**kwargs):
+        gate = AegisInterceptor(store, **kwargs)
+        return [gate.intercept(i, now=IN_WINDOW) for i in from_kubectl_multi(command.split())]
+
+    escalating = run(on_untrusted_match="escalate")
+    assert "ESCALATE" in {d.verdict for d in escalating}
+    assert "fail-closed: r (tampered)" in {n for d in escalating for n in d.notes}
+    discarding = run()
+    assert {d.verdict for d in discarding} == {"ALLOW"}
+    assert {"id": "r", "reason": "tampered"} in [x for d in discarding for x in d.discarded]
+
+
+def test_a_quarantined_rule_outside_its_window_or_elsewhere_stays_out():
+    store = ConstraintStore(authority_map=dict(AUTHORITY))
+    for rule in (_windowed("pod/payments-0", "exec"), _windowed("secret/x", "delete")):
+        store.quarantined.append({"id": rule.id, "reason": "tampered"})
+        store.quarantined_constraints.append(rule)
+    gate = AegisInterceptor(store, on_untrusted_match="escalate")
+    for command, now in ((EXEC_DEPLOY, OUT_OF_WINDOW), ("kubectl delete all --all", IN_WINDOW),
+                         ("kubectl exec deploy/web -- id", IN_WINDOW)):
+        verdicts = {gate.intercept(i, now=now).verdict
+                    for i in from_kubectl_multi(command.split())}
+        expected = {"ALLOW", "ESCALATE"} if now == IN_WINDOW and "exec" in command else {"ALLOW"}
+        assert verdicts == expected, command
+
+
+# --- a quarantined rule asks wherever the same rule, live, would not allow ------------------
+
+
+def _live_and_quarantined(rule: Constraint, command: str, now: datetime, tzdata: bool):
+    argv = command.split()
+    live = ConstraintStore(authority_map=dict(AUTHORITY))
+    live.add_constraint(rule)
+    live.tzdata_available = tzdata
+    quarantined = ConstraintStore(authority_map=dict(AUTHORITY))
+    quarantined.quarantined.append({"id": rule.id, "reason": "tampered"})
+    quarantined.quarantined_constraints.append(rule)
+    quarantined.tzdata_available = tzdata
+    order = {"ALLOW": 0, "ESCALATE": 1, "BLOCK": 2}
+    results = []
+    for store in (live, quarantined):
+        gate = AegisInterceptor(store, on_untrusted_match="escalate")
+        results.append(max((gate.intercept(i, now=now).verdict for i in from_kubectl_multi(argv)),
+                           key=order.get))
+    return results
+
+
+def _bare(pattern: str, action: str, scope: dict | None = None) -> Constraint:
+    return _rule("r", pattern, [action], scope)
+
+
+NO_DELETE_PROD_SECRETS = _windowed("secret/*", "delete", {"namespace": "prod"})
+
+
+@pytest.mark.parametrize("rule,command,now,tzdata,live,quarantined", [
+    # direct match
+    (_bare("pod/x", "exec"), "kubectl exec x -- id", NOW, True, "BLOCK", "ESCALATE"),
+    # manifest, with and without the rest being known
+    (_bare("secret/*", "delete"), "kubectl delete -f x.yaml", NOW, True, "ESCALATE", "ESCALATE"),
+    (NO_DELETE_PROD_SECRETS, "kubectl delete -f x.yaml", IN_WINDOW, True, "ESCALATE", "ESCALATE"),
+    (NO_DELETE_PROD_SECRETS, "kubectl delete -f x.yaml", IN_WINDOW, False, "ESCALATE", "ESCALATE"),
+    (NO_DELETE_PROD_SECRETS, "kubectl delete -f x.yaml", OUT_OF_WINDOW, True, "ALLOW", "ALLOW"),
+    (_bare("manifest/y.yaml", "delete"), "kubectl delete -f x.yaml", NOW, True, "ALLOW", "ALLOW"),
+    (_bare("secret/*", "create"), "kubectl delete -f x.yaml", NOW, True, "ALLOW", "ALLOW"),
+    # runtime target
+    (_bare("pod/p", "exec"), "kubectl exec deploy/w -- id", NOW, True, "ESCALATE", "ESCALATE"),
+    (_bare("deployment/p", "delete"), "kubectl delete all --all", NOW, True,
+     "ESCALATE", "ESCALATE"),
+    (_bare("pod/*", "exec"), "kubectl exec deploy/w -- id", NOW, True, "BLOCK", "ESCALATE"),
+    (_bare("secret/*", "delete"), "kubectl delete all --all", NOW, True, "ALLOW", "ALLOW"),
+    # scope: namespace, env
+    (_bare("pod/x", "exec", {"namespace": "prod"}), "kubectl exec x -- id", NOW, True,
+     "ESCALATE", "ESCALATE"),
+    (_bare("pod/x", "exec", {"namespace": "prod"}), "kubectl exec x -n dev -- id", NOW, True,
+     "ALLOW", "ALLOW"),
+    (_bare("pod/x", "exec", {"env": "prod"}), "kubectl exec x -- id", NOW, True,
+     "ESCALATE", "ESCALATE"),
+    # time window
+    (_windowed("pod/x", "exec"), "kubectl exec x -- id", IN_WINDOW, False, "ESCALATE", "ESCALATE"),
+    (_windowed("pod/x", "exec"), "kubectl exec x -- id", IN_WINDOW, True, "BLOCK", "ESCALATE"),
+    (_windowed("pod/x", "exec"), "kubectl exec x -- id", OUT_OF_WINDOW, True, "ALLOW", "ALLOW"),
+    # scope and window together, on a runtime target
+    (_windowed("pod/p", "exec", {"namespace": "prod"}), "kubectl exec deploy/w -- id",
+     IN_WINDOW, False, "ESCALATE", "ESCALATE"),
+])
+def test_quarantine_mirrors_every_live_path(rule, command, now, tzdata, live, quarantined):
+    assert _live_and_quarantined(rule, command, now, tzdata) == [live, quarantined]
+
+
+# --- only a kind no table knows may be a custom kind in a category --------------------------
+
+
+@pytest.mark.parametrize("pattern", [
+    "apiservice/*", "customresourcedefinition/*", "endpointslice/*", "podtemplate/*",
+    "controllerrevision/*", "runtimeclass/x", "csinode/*", "volumeattachment/*", "ipaddress/*",
+    "secret/*", "secrets/*", "node/x", "flowschema/*",
+])
+def test_a_rule_on_a_builtin_kind_outside_all_stays_out_of_it(pattern):
+    assert _decide([_bare(pattern, "delete")], ["kubectl", "delete", "all", "--all"]) == (
+        "ALLOW", [])
+
+
+@pytest.mark.parametrize("pattern", ["widget/*", "widgets/*", "rollout/web", "wid*/x"])
+def test_a_rule_on_an_unknown_kind_may_be_in_all(pattern):
+    verdict, notes = _decide([_bare(pattern, "delete")], ["kubectl", "delete", "all", "--all"])
+    assert verdict == "ESCALATE" and notes == ["target-unresolved: r"]
+
+
+def test_a_category_kind_outside_it_stays_out_of_the_other_category():
+    assert _decide([_bare("deployment/*", "delete")],
+                   ["kubectl", "delete", "api-extensions", "--all"]) == ("ALLOW", [])
+    assert _decide([_bare("apiservice/*", "delete")],
+                   ["kubectl", "delete", "api-extensions", "--all"])[0] == "BLOCK"
+
+
+def test_the_builtin_table_holds_every_category_kind():
+    from aegis_core.parser import _KUBECTL_BUILTIN_KINDS, _KUBECTL_CATEGORIES
+
+    for kinds in _KUBECTL_CATEGORIES.values():
+        assert set(kinds) <= set(_KUBECTL_BUILTIN_KINDS)
+
+
+@pytest.mark.parametrize("spelled,kind", [
+    ("endpointslices", "endpointslice"), ("podtemplates", "podtemplate"),
+    ("controllerrevisions", "controllerrevision"), ("runtimeclasses", "runtimeclass"),
+    ("csinodes", "csinode"), ("volumeattachments", "volumeattachment"), ("ip", "ipaddress"),
+    ("ipaddresses", "ipaddress"), ("vac", "volumeattributesclass"), ("cs", "componentstatus"),
+    ("flowschemas", "flowschema"), ("resourceclaims", "resourceclaim"), ("ep", "endpoints"),
+    ("endpoints", "endpoints"), ("limits", "limitrange"), ("quota", "resourcequota"),
+    ("crds", "customresourcedefinition"), ("deploy", "deployment"), ("widgets", "widgets"),
+])
+def test_every_builtin_spelling_is_normalised(spelled, kind):
+    assert [i.resource for i in from_kubectl_multi(["kubectl", "delete", spelled, "x"])] == [
+        f"{kind}/x"]

@@ -65,6 +65,11 @@ Two more fail-closed clauses (REVIEW-4 T1.3 / T1.7):
   <file>|-``: the objects are in a manifest Aegis does not read, so a rule
   for the same action written on kinds or objects (not on ``manifest/``
   file names) contributes ESCALATE with ``"manifest-not-inspected: <id>"``.
+* **target-unresolved** -- an intent whose targets kubectl only finds when
+  it runs (``params["resolved_at_runtime"]``: ``kubectl exec deploy/web``,
+  ``kubectl delete all --all``): a rule for the same action that might be
+  about one of them but does not match, such as ``pod/payments-0``,
+  contributes ESCALATE with ``"target-unresolved: <id>"``.
 * **unknown-target** -- an intent whose parser could not determine what
   it targets (``params["unknown_target"]``, e.g. ``git push -f`` with no
   refspec) contributes ESCALATE with the note ``"unknown-target"``, so it
@@ -193,6 +198,8 @@ class AegisInterceptor:
         manifest_unresolved = (
             get_manifest_unresolved(intent, now) if get_manifest_unresolved else []
         )
+        get_runtime_unresolved = getattr(self.store, "get_runtime_unresolved", None)
+        runtime_unresolved = get_runtime_unresolved(intent, now) if get_runtime_unresolved else []
         get_time_window_unresolved = getattr(self.store, "get_time_window_unresolved", None)
         time_window_unresolved = (
             get_time_window_unresolved(intent, now) if get_time_window_unresolved else []
@@ -204,6 +211,7 @@ class AegisInterceptor:
             and not quarantined_matches
             and not scope_unresolved
             and not manifest_unresolved
+            and not runtime_unresolved
             and not time_window_unresolved
         )
         if uncovered:
@@ -237,6 +245,7 @@ class AegisInterceptor:
         unresolved = [
             *((c, ", ".join(f"{k}-unresolved" for k in keys)) for c, keys in scope_unresolved),
             *((c, "manifest-not-inspected") for c in manifest_unresolved),
+            *((c, "target-unresolved") for c in runtime_unresolved),
             *((c, "time-window-unresolved") for c in time_window_unresolved),
         ]
         for c, label in unresolved:

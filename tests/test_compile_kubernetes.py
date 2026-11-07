@@ -551,18 +551,17 @@ def test_client_parity_lists_a_verb_whose_flag_changes_the_request(tmp_path, pat
     ("deployment/*", "delete", "delete all --all"),
     ("deployment/*", "label", "label all --all a=b"),
 ])
-def test_the_own_verb_on_another_name_is_a_known_difference_the_record_cannot_list(
+def test_the_own_verb_on_another_name_is_refused_by_the_client_too(
         tmp_path, pattern, verb, spelled):
-    """The policy sees the pods or deployments behind these; the client matches
-    the name as written. docs/server-side.md says so. This records it, so a
-    change in the client's matching is seen."""
+    """The policy sees the pods or deployments behind these, and so does the
+    client (#64): the record is right not to list a rule's own verb."""
     rule = _rule("r", pattern, [verb])
     assert verb not in _cov(_compile(tmp_path, rule), "r")["client_parity"]["widened_verbs"]
     store = ConstraintStore(authority_map={"admin": {"deletion"}})
     store.add_constraint(rule)
     gate = AegisInterceptor(store)
     intents = from_kubectl_multi(["kubectl", *spelled.split()])
-    assert {gate.intercept(i).verdict for i in intents} == {"ALLOW"}
+    assert "BLOCK" in {gate.intercept(i).verdict for i in intents}
 
 
 def test_client_parity_for_a_rule_on_any_action_and_with_listed_verbs(tmp_path):
