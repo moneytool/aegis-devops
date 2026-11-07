@@ -3044,12 +3044,11 @@ def test_a_verb_run_on_a_pod_behind_a_name(verb, spelled, named):
     ("kubectl attach web", ["pod/web"]),
     ("kubectl attach pod web", ["pod/web"]),
     ("kubectl attach deploy web", ["deployment/web", "pod/*"]),
-    # logs resolves too, but is a read; run's word names a new pod
-    ("kubectl logs deploy/web", ["deployment/web"]),
+    # run's word names a new pod; debug's words name pods
     ("kubectl run all --image=x", ["all/*"]),
     ("kubectl run all --image=x a", ["all/a"]),
-    ("kubectl debug all --image=x", ["all/*"]),
-    ("kubectl debug all other --image=x", ["all/other"]),
+    ("kubectl debug all --image=x", ["pod/all", "all/*"]),
+    ("kubectl debug all other --image=x", ["pod/all", "pod/other", "all/other"]),
 ])
 def test_names_that_stay_what_they_are(command, targets):
     assert _kubectl_targets(command) == targets
@@ -3325,7 +3324,8 @@ def test_a_selector_on_a_verb_that_names_its_target_stays_refused(command):
 
 @pytest.mark.parametrize("command", ["kubectl run web --image=x", "kubectl debug web --image=x"])
 def test_a_word_that_names_a_new_or_given_pod_is_not_marked(command):
-    assert "resolved_at_runtime" not in from_kubectl(command.split()).params
+    assert all("resolved_at_runtime" not in i.params
+               for i in from_kubectl_multi(command.split()))
 
 
 def test_marking_kinds_stays_linear():
@@ -3334,3 +3334,288 @@ def test_marking_kinds_stays_linear():
     started = time.monotonic()
     assert len(from_kubectl_multi(command.split())) == 11000
     assert time.monotonic() - started < 1
+
+
+# --- kubectl: the object a command reaches, whatever word names it (#68) -----------
+
+
+@pytest.mark.parametrize("command,targets,behind_from", [
+    ("kubectl logs deploy/web", ["deployment/web", "pod/*"], "deployment/web"),
+    ("kubectl logs deployment.apps/web", ["deployment/web", "pod/*"], "deployment/web"),
+    ("kubectl logs svc/web -f -n prod", ["service/web", "pod/*"], "service/web"),
+    ("kubectl logs job/web --all-pods", ["job/web", "pod/*"], "job/web"),
+    ("kubectl logs -c app sts/web", ["statefulset/web", "pod/*"], "statefulset/web"),
+    # a second word is the container, not a name (kubectl's logs.go)
+    ("kubectl logs deploy/web app", ["deployment/web", "pod/*"], "deployment/web"),
+    ("kubectl logs web", ["pod/web"], None),
+    ("kubectl logs pod/web", ["pod/web"], None),
+    ("kubectl logs pod web", ["pod/pod"], None),
+])
+def test_logs_reads_a_pod_behind_the_name(command, targets, behind_from):
+    intents = from_kubectl_multi(command.split())
+    assert [(i.action, i.resource) for i in intents] == [("logs", t) for t in targets]
+    assert "resolved_at_runtime" not in intents[0].params
+    if behind_from:
+        assert intents[1].params["resolved_at_runtime"] == {"from": behind_from, "kinds": ["pod"]}
+
+
+@pytest.mark.parametrize("command,targets", [
+    # the target earlier versions gave stays last
+    ("kubectl debug web --image=busybox", ["pod/web", "web/*"]),
+    ("kubectl debug --image=busybox -c dbg web -it", ["pod/web", "web/*"]),
+    ("kubectl debug -n prod web --image=busybox -- sh", ["pod/web", "web/*"]),
+    ("kubectl debug pod/web --image=busybox", ["pod/web"]),
+    ("kubectl debug po/web --image=busybox", ["pod/web"]),
+    ("kubectl debug a b --image=busybox", ["pod/a", "pod/b", "a/b"]),
+    # kubectl reads each word alone, so these name pods
+    ("kubectl debug pods web --image=busybox", ["pod/pods", "pod/web"]),
+    ("kubectl debug node/n1 --image=busybox", ["node/n1"]),
+    ("kubectl debug no/n1 --image=busybox", ["node/n1"]),
+    # kubectl refuses this kind, and reaches no pod
+    ("kubectl debug deploy/web --image=busybox", ["deployment/web"]),
+    ("kubectl debug web --copy-to=c --image=busybox", ["pod/web", "pod/c", "web/*"]),
+    ("kubectl debug web --copy-to c --set-image=*=x", ["pod/web", "pod/c", "web/*"]),
+    ("kubectl debug web --copy-to=c --replace --image=x", ["pod/web", "pod/c", "web/*"]),
+    ("kubectl debug node/n1 --copy-to=c --image=x", ["node/n1"]),
+    # a name stays as it is written, and so does the flag's value
+    ("kubectl debug web --copy-to=001 --image=x", ["pod/web", "pod/001", "web/*"]),
+    ("kubectl debug web --copy-to 1e5 --image=x", ["pod/web", "pod/1e5", "web/*"]),
+    ("kubectl debug web --copy-to=0 --image=x", ["pod/web", "pod/0", "web/*"]),
+    ("kubectl debug 001 --image=x", ["pod/001", "001/*"]),
+])
+def test_debug_names_pods(command, targets):
+    intents = from_kubectl_multi(command.split())
+    assert [(i.action, i.resource) for i in intents] == [("debug", t) for t in targets]
+    assert all("resolved_at_runtime" not in i.params for i in intents)
+
+
+def test_debug_copy_to_is_raw_in_the_target_and_as_before_in_params():
+    intents = from_kubectl_multi("kubectl debug web --copy-to=001 --image=x".split())
+    assert "pod/001" in [i.resource for i in intents]
+    assert all(i.params["copy-to"] == 1 for i in intents)
+
+
+def test_the_last_copy_to_wins_as_in_params():
+    intents = from_kubectl_multi("kubectl debug web --copy-to=a --copy-to=b --image=x".split())
+    assert [i.resource for i in intents] == ["pod/web", "pod/b", "web/*"]
+
+
+def test_debug_with_a_comma_list_and_a_name_stays_refused():
+    with pytest.raises(ValueError, match="comma-separated"):
+        from_kubectl_multi("kubectl debug a,b c --image=x".split())
+
+
+def test_debug_keeps_the_words_after_dash_as_its_command():
+    intents = from_kubectl_multi("kubectl debug web --image=x -- sh -c id".split())
+    assert [i.resource for i in intents] == ["pod/web", "web/*"]
+    assert intents[0].params["command"] == ["sh", "-c", "id"]
+
+
+@pytest.mark.parametrize("command,pods,first,namespace", [
+    ("kubectl cp web:/a b", ["pod/web"], "web:/a", None),
+    ("kubectl cp b web:/a", ["pod/web"], "b", None),
+    ("kubectl cp web:a b", ["pod/web"], "web:a", None),
+    ("kubectl cp prod/web:/a b", ["pod/web"], "prod/web:/a", "prod"),
+    ("kubectl cp b prod/web:/a", ["pod/web"], "b", "prod"),
+    ("kubectl cp b web:/a -n prod", ["pod/web"], "b", "prod"),
+    ("kubectl -n prod cp b web:/a -c app", ["pod/web"], "b", "prod"),
+    ("kubectl cp -c app --retries 3 b -nprod web:/a", ["pod/web"], "b", "prod"),
+    ("kubectl cp --no-preserve b web:/a", ["pod/web"], "b", None),
+    # the namespace written with the pod wins over -n (kubectl's cp.go)
+    ("kubectl cp -n dev b prod/web:/a", ["pod/web"], "b", "prod"),
+    # only the first colon counts, and the path may have more
+    ("kubectl cp web:/a:b:c d", ["pod/web"], "web:/a:b:c", None),
+    # what comes before the colon is [ns/]pod, even when it looks like a path
+    ("kubectl cp ./web:/a b", ["pod/web"], "./web:/a", "."),
+    ("kubectl cp b ../web:/a", ["pod/web"], "b", ".."),
+    ("kubectl cp b ~/web:/a", ["pod/web"], "b", "~"),
+    # an empty namespace is the one kubectl would use
+    ("kubectl cp /web:a b", ["pod/web"], "/web:a", None),
+    ("kubectl cp -n dev /web:a b", ["pod/web"], "/web:a", "dev"),
+    # "--" ends the flags, and the word after it is still an operand
+    ("kubectl cp b -- web:/a", ["pod/web"], "b", None),
+    # a pod name is text
+    ("kubectl cp b 001:/a", ["pod/001"], "b", None),
+    # kubectl refuses these (checked with kubectl 1.36), and only the first word is left
+    ("kubectl cp a b", [], "a", None),
+    ("kubectl cp /tmp/x:y b", [], "/tmp/x:y", None),
+    ("kubectl cp a/b/c:d e", [], "a/b/c:d", None),
+    ("kubectl cp :a b", [], ":a", None),
+    ("kubectl cp ns/:a b", [], "ns/:a", None),
+    ("kubectl cp /:a b", [], "/:a", None),
+    # as is this, with both pods kept
+    ("kubectl cp a:b c:d", ["pod/a", "pod/c"], "a:b", None),
+    ("kubectl cp /tmp/x:y web:/a", ["pod/web"], "/tmp/x:y", None),
+])
+def test_cp_finds_the_pod_as_kubectl_does(command, pods, first, namespace):
+    intents = from_kubectl_multi(command.split())
+    assert [(i.action, i.resource) for i in intents] == [("cp", t) for t in [*pods, first]]
+    assert all(i.metadata.get("namespace") == namespace for i in intents[:-1])
+    assert all("resolved_at_runtime" not in i.params for i in intents)
+
+
+def test_cp_keeps_the_first_word_with_the_namespace_as_it_was():
+    written = from_kubectl_multi("kubectl cp -n dev prod/web:/a b".split())[-1]
+    assert (written.resource, written.metadata["namespace"]) == ("prod/web:/a", "dev")
+
+
+def test_cp_with_nothing_to_copy_stays_refused():
+    for command in ("kubectl cp", "kubectl cp -- a web:/b"):
+        with pytest.raises(ValueError, match="target resource"):
+            from_kubectl_multi(command.split())
+
+
+@pytest.mark.parametrize("command,resource,marker", [
+    ("kubectl describe pod pay", "pod/pay",
+     {"from": "pod/pay", "kinds": ["pod"], "name_prefix": "pay"}),
+    ("kubectl describe pods pay -n prod", "pod/pay",
+     {"from": "pod/pay", "kinds": ["pod"], "name_prefix": "pay"}),
+    ("kubectl describe widgets pay", "widgets/pay",
+     {"from": "widgets/pay", "kinds": ["widgets"], "name_prefix": "pay", "custom_kinds": True}),
+])
+def test_describe_type_name_is_a_prefix(command, resource, marker):
+    intent = from_kubectl(command.split())
+    assert intent.resource == resource
+    assert intent.params["resolved_at_runtime"] == marker
+
+
+@pytest.mark.parametrize("command", [
+    "kubectl describe pod/pay",
+    "kubectl describe pods/pay",
+    "kubectl get pod pay",
+    "kubectl delete pod pay",
+])
+def test_only_describe_type_name_is_a_prefix(command):
+    assert "resolved_at_runtime" not in from_kubectl(command.split()).params
+
+
+@pytest.mark.parametrize("command,targets", [
+    ("kubectl describe pod api -- payments-0", ["pod/api", "pod/payments-0"]),
+    ("kubectl delete widgets foo -- bar", ["widgets/foo", "widgets/bar"]),
+    ("kubectl delete pod -- x", ["pod/x"]),
+    ("kubectl get pods a -- b", ["pod/a", "pod/b"]),
+    ("kubectl edit deploy a -- b", ["deployment/a", "deployment/b"]),
+    ("kubectl patch deploy a -- b", ["deployment/a", "deployment/b"]),
+    ("kubectl scale deploy a -- b", ["deployment/a", "deployment/b"]),
+    ("kubectl label pod a -- b x=y", ["pod/a", "pod/b"]),
+    ("kubectl annotate pod a -- b x=y", ["pod/a", "pod/b"]),
+    ("kubectl wait pod a -- b", ["pod/a", "pod/b"]),
+    ("kubectl rollout restart deploy a -- b", ["deployment/a", "deployment/b"]),
+    ("kubectl set image deploy a -- b x=y", ["deployment/a", "deployment/b"]),
+    ("kubectl taint node a -- b x=y:NoSchedule", ["node/a", "node/b"]),
+    ("kubectl expose deploy a -- b", ["deployment/a", "deployment/b"]),
+    ("kubectl autoscale deploy a -- b", ["deployment/a", "deployment/b"]),
+    ("kubectl cordon a -- b", ["node/a", "node/b"]),
+    ("kubectl uncordon a -- b", ["node/a", "node/b"]),
+    ("kubectl drain a -- b", ["node/a", "node/b"]),
+])
+def test_words_after_dash_are_operands(command, targets):
+    intents = from_kubectl_multi(command.split())
+    assert [i.resource for i in intents] == targets
+    assert all("command" not in i.params for i in intents)
+
+
+@pytest.mark.parametrize("command,prefix", [
+    ("kubectl describe pod -- pay", "pay"),
+    ("kubectl describe pod pay -- other", None),
+])
+def test_a_prefix_counts_the_words_after_dash(command, prefix):
+    marks = [i.params.get("resolved_at_runtime") for i in from_kubectl_multi(command.split())]
+    assert [m and m["name_prefix"] for m in marks] == (
+        [prefix] if prefix else [None, None])
+
+
+@pytest.mark.parametrize("command,targets,kept", [
+    # "--" starts a command here (ArgsLenAtDash in kubectl's source)
+    ("kubectl exec web -- ls -la", ["pod/web"], ["ls", "-la"]),
+    ("kubectl exec deploy/web -- ls", ["deployment/web", "pod/*"], ["ls"]),
+    ("kubectl run web --image=x -- sleep 1", ["web/*"], ["sleep", "1"]),
+    ("kubectl create deployment web --image=x -- sleep 1", ["deployment/web"], ["sleep", "1"]),
+    ("kubectl create job j --image=x -- sleep 1", ["job/j"], ["sleep", "1"]),
+    ("kubectl debug node/n1 --image=x -- sh", ["node/n1"], ["sh"]),
+    # these take their target from the first word
+    ("kubectl logs web -- app", ["pod/web"], ["app"]),
+    ("kubectl port-forward web -- 80", ["pod/web"], ["80"]),
+    ("kubectl top pod a -- b", ["pod/a"], ["b"]),
+    # kubectl refuses three words on attach
+    ("kubectl attach a b -- c", ["a/b"], ["c"]),
+])
+def test_the_verbs_whose_words_after_dash_stay_as_they_were(command, targets, kept):
+    intents = from_kubectl_multi(command.split())
+    assert [i.resource for i in intents][:len(targets)] == targets
+    assert intents[0].params["command"] == kept
+
+
+@pytest.mark.parametrize("command,targets", [
+    ("kubectl attach deploy -- web", ["deployment/web", "pod/*", "pod/deploy"]),
+    ("kubectl attach pod -- web", ["pod/web", "pod/pod"]),
+    ("kubectl attach web -- x", ["web/x", "pod/*", "pod/web"]),
+])
+def test_attach_reads_a_word_after_dash_as_its_name(command, targets):
+    assert [i.resource for i in from_kubectl_multi(command.split())] == targets
+
+
+@pytest.mark.parametrize("command", [
+    "kubectl describe -- pod pay", "kubectl delete -- pod x", "kubectl get --", "kubectl cp -- a b",
+])
+def test_nothing_before_dash_stays_refused(command):
+    with pytest.raises(ValueError):
+        from_kubectl_multi(command.split())
+
+
+@pytest.mark.parametrize("command", [
+    "kubectl delete pods,svc -- x", "kubectl delete all -- x",
+])
+def test_a_kind_list_with_a_name_after_dash_is_refused(command):
+    with pytest.raises(ValueError):
+        from_kubectl_multi(command.split())
+
+
+@pytest.mark.parametrize("command,marker_name,key", [
+    ("kubectl describe pod 001", "001", "name_prefix"),
+    ("kubectl delete widgets 001", "001", "name"),
+])
+def test_a_name_in_a_mark_is_text(command, marker_name, key):
+    assert from_kubectl(command.split()).params["resolved_at_runtime"][key] == marker_name
+
+
+def test_describe_with_two_names_takes_them_exactly():
+    # kubectl only falls back to a prefix with exactly two words (describe.go)
+    intents = from_kubectl_multi("kubectl describe pod a b".split())
+    assert [i.resource for i in intents] == ["pod/a", "pod/b"]
+    assert all("resolved_at_runtime" not in i.params for i in intents)
+
+
+@pytest.mark.parametrize("command,resource,marker", [
+    ("kubectl delete widgets --all", "widgets/*",
+     {"from": "widgets/*", "kinds": ["widgets"], "custom_kinds": True}),
+    ("kubectl get wd", "wd/*", {"from": "wd/*", "kinds": ["wd"], "custom_kinds": True}),
+    ("kubectl delete widgets.x.io -l a=b", "widgets/*",
+     {"from": "widgets/*", "kinds": ["widgets"], "custom_kinds": True}),
+    ("kubectl label widgets --all a=b", "widgets/*",
+     {"from": "widgets/*", "kinds": ["widgets"], "custom_kinds": True}),
+    ("kubectl delete widgets foo", "widgets/foo",
+     {"from": "widgets/foo", "kinds": ["widgets"], "name": "foo", "custom_kinds": True}),
+    ("kubectl scale wd/foo --replicas=1", "wd/foo",
+     {"from": "wd/foo", "kinds": ["wd"], "name": "foo", "custom_kinds": True}),
+    ("kubectl autoscale widgets foo --max=3", "widgets/foo",
+     {"from": "widgets/foo", "kinds": ["widgets"], "name": "foo", "custom_kinds": True}),
+])
+def test_a_kind_outside_the_table_may_be_any_custom_kind(command, resource, marker):
+    intent = from_kubectl(command.split())
+    assert intent.resource == resource
+    assert intent.params["resolved_at_runtime"] == marker
+
+
+@pytest.mark.parametrize("command,marker", [
+    ("kubectl delete pods --all", {"from": "pod/*", "kinds": ["pod"]}),
+    ("kubectl get deploy", {"from": "deployment/*", "kinds": ["deployment"]}),
+    ("kubectl delete pod web", None),
+    # these reach the parser as kind/name but are not about a kind
+    ("kubectl config view", {"from": "view/*", "kinds": ["view"]}),
+    ("kubectl run web --image=x", None),
+    ("kubectl rollout restart widgets/foo", None),
+    ("kubectl taint widgets foo a=b:NoSchedule", None),
+])
+def test_the_kinds_that_stay_as_they_were(command, marker):
+    assert from_kubectl(command.split()).params.get("resolved_at_runtime") == marker
