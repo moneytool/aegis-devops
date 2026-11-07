@@ -8,6 +8,10 @@ behaviour.
 
 ## [Unreleased]
 
+## [1.3.3] — 2026-11-07
+
+`kubectl run --expose` now meets the rules on the Service it creates.
+
 ### Fixed
 - `kubectl run web --image=x --expose --port=80` creates a pod and a Service, but the hook saw only
   the pod, so a `run` rule on `service/web` or `service/*` allowed a command that a compiled policy
@@ -1205,6 +1209,7 @@ See "Project status" in the README and [`docs/dev/PLAN.md`](docs/dev/PLAN.md) §
 rather than real connectors, signing uses a shared secret, and a principal is a signed name
 rather than a bound identity.
 
+[1.3.3]: https://github.com/moneytool/aegis-devops/releases/tag/v1.3.3
 [1.3.2]: https://github.com/moneytool/aegis-devops/releases/tag/v1.3.2
 [1.3.1]: https://github.com/moneytool/aegis-devops/releases/tag/v1.3.1
 [1.3.0]: https://github.com/moneytool/aegis-devops/releases/tag/v1.3.0
