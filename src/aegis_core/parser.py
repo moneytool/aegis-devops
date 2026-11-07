@@ -31,8 +31,11 @@ rule on one pod, which cannot be decided here, escalates
 (``target-unresolved: <id>``). The categories ``all`` and ``api-extensions``
 yield one ``kind/*`` per kind in them, as a comma list does, plus a marked
 ``all/*``, so a rule on one object of those kinds, or on a custom kind that
-may have joined the category, escalates too. Neither adds anything when no
-rule is about the action.
+may have joined the category, escalates too. Any other ``kind/*`` (``--all``,
+a selector, or a kind with no name, as in ``get pods`` or ``rollout restart
+deploy``) is marked with its own kind, since kubectl may pick any object of it:
+a rule on ``kind/*`` decides as usual, and a rule on one object escalates. None
+of this adds anything when no rule is about the action and kind.
 
 **Namespace deletion cascade.** ``kubectl delete namespace/<ns>`` (in any
 form: ``namespace <ns>``, ``ns/<ns>``, ``namespaces <ns>``) deletes every
@@ -734,15 +737,22 @@ def _make_intents(
     ]
 
 
-def _mark_categories(intents: list[InfrastructureIntent]) -> list[InfrastructureIntent]:
-    """Marks the ``<category>/*`` intent: what it reaches beyond its listed kinds
-    is only known when kubectl runs."""
+def _mark_open_targets(intents: list[InfrastructureIntent]) -> list[InfrastructureIntent]:
+    """Marks the ``kind/*`` intents: which objects they reach is only known when
+    kubectl runs. A category's kinds need no mark of their own: its intent has
+    them all."""
+    covered = {k for intent in intents if intent.resource.endswith("/*")
+               for k in _KUBECTL_CATEGORIES.get(intent.resource[:-2], ())}
     for intent in intents:
         kind, _, name = intent.resource.partition("/")
-        if name == "*" and kind in _KUBECTL_CATEGORIES:
+        if name != "*":
+            continue
+        if kind in _KUBECTL_CATEGORIES:
             intent.params["resolved_at_runtime"] = {
                 "from": kind, "kinds": list(_KUBECTL_CATEGORIES[kind]), "custom_kinds": True,
             }
+        elif kind not in covered:
+            intent.params["resolved_at_runtime"] = {"from": intent.resource, "kinds": [kind]}
     return intents
 
 
@@ -831,7 +841,7 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
         resources = _expand_categories(_parse_resources(positional))
         if not resources:
             raise ValueError(f"could not find a target resource in: {argv!r}")
-        return _mark_categories(_make_intents(resources, f"rollout-{subverb}", params, metadata))
+        return _mark_open_targets(_make_intents(resources, f"rollout-{subverb}", params, metadata))
 
     if verb in _LITERAL_RESOURCE_VERBS:
         if not positional:
@@ -873,7 +883,7 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
         removed = [t[:-1] for t in operands if "=" not in t]
         if removed:
             params[f"{key}_removed"] = removed
-        return _mark_categories(_make_intents(resources, verb, params, metadata))
+        return _mark_open_targets(_make_intents(resources, verb, params, metadata))
 
     if verb == "set":  # "set image"
         resource_tokens = [t for t in positional if not _is_pair_operand(t)]
@@ -882,18 +892,21 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
         if not resources:
             raise ValueError(f"could not find a target resource in: {argv!r}")
         params["images"] = {k: v for k, _, v in (t.partition("=") for t in kv_tokens)}
-        return _mark_categories(_make_intents(resources, "set-image", params, metadata))
+        return _mark_open_targets(_make_intents(resources, "set-image", params, metadata))
 
     # get, describe, delete, scale, patch, cordon, drain, taint, expose, ...
     if verb == "taint":
         positional = [t for t in positional if not _is_taint_operand(t)]
     resources = _parse_resources(positional)
+    if verb == "taint" and resources and (params.get("all") or params.get("selector")):
+        # kubectl taint ignores a name given with --all or -l (checked on kind)
+        resources.append(f"{_split_resource_token(positional[0])[0]}/*")
     if not resources:
         raise ValueError(f"could not find a target resource in: {argv!r}")
     if verb in _POD_NAME_FIRST_VERBS:
         return _make_intents(resources, verb, params, metadata)
     resources = _expand_categories(resources)
-    intents = _mark_categories(_make_intents(resources, verb, params, metadata))
+    intents = _mark_open_targets(_make_intents(resources, verb, params, metadata))
     if verb == "delete":
         intents.extend(_namespace_cascade_intents(resources, params, metadata))
     return intents

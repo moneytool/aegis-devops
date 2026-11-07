@@ -10,8 +10,8 @@ behaviour.
 
 ## [1.3.1] (not released yet)
 
-Three fixes found while preparing the formal model for a conference submission, and a kubectl
-hook fix found while building the third (#64).
+Three fixes found while preparing the formal model for a conference submission, and two kubectl
+hook fixes: one found while building the third (#64), one found while fixing that (#66).
 
 ### Fixed
 - A constraint changed and rehashed after its source check no longer votes. The provenance hash is
@@ -51,6 +51,16 @@ hook fix found while building the third (#64).
   rule's scope is unresolved too. A quarantined rule under `on_untrusted_match: escalate` now asks
   whenever a live one would, also when its scope, time window, target or manifest cannot be
   resolved.
+
+- A kubectl command that picks objects with `--all` or a selector no longer gets past a rule on one
+  object (#66). `kubectl delete deployments --all` and `kubectl delete deploy -l a=b` passed a
+  `deployment/payments` delete rule, though both can delete `payments`, and `kubectl taint nodes
+  --all a-` passed a `node/n1` taint rule. Such a rule now asks, with the note `target-unresolved:
+  <id>`, because the hook cannot tell whether that object is picked. The same holds for a kind with
+  no name on the verbs that then act on every object: `kubectl get pods` asks under a `get` rule
+  on one pod, and `kubectl rollout restart deploy` under a rule on one deployment. Rules on the
+  whole kind decide as before, and a command with no rule on that kind and action is not affected.
+  `kubectl taint node n1 --all` also counts as every node, since kubectl ignores the name there.
 
 ### Added
 - `aegis compile kubernetes`: every rule in `coverage.json` has a `client_parity` record, and
