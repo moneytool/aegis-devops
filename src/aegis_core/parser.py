@@ -72,7 +72,19 @@ known boolean flags through :func:`_coerce_bool`, so ``--prune=true`` is
 ``"false"``. ``params["dry_run"]`` is set *only* when the flag is bare or
 truthy (``--dry-run``, ``--dry-run=true``, kubectl/helm ``=client`` /
 ``=server``); ``--dry-run=false`` / ``=none`` / ``=0`` leave the key
-absent, so a "real run" rule fires.
+absent, so a "real run" rule fires. The last one decides (#75): pflag and
+argparse read a repeated flag that way, so ``--dry-run=client --dry-run=none``
+is a real run, and ``--dry-run --no-dry-run`` is too where the tool has it.
+
+**Short kubectl, helm and flux flags (#75).** pflag reads a short word letter by
+letter: ``-qnprod`` is ``-q -n prod``, and ``-fp`` on ``logs`` is ``-f -p``. A
+letter that takes a value ends the word and the rest is its value. So each walker
+splits a short word as it reaches it, from one table of letters per tool, and a
+word with an unknown letter in front of a value letter or ``A`` is refused.
+
+**Several manifests (#75).** ``--filename`` is a StringSlice, so ``-f a -f b`` and
+``-f a,b`` are one ``manifest/<name>`` intent per file. ``--kustomize`` is a plain
+string, so its last value is the one.
 
 **Provider-namespace aliases (REVIEW-4 T1.7).** ``aws s3api`` / ``s3control``
 collapse to service ``s3``; ``az ... --ids <ARM path>`` is parsed into the
@@ -90,7 +102,9 @@ checked) and ``metadata["type_name"]`` — the module-stripped
 address and the short form to try against ``resource_pattern``.
 """
 
+import csv
 import hashlib
+import io
 import json
 import re
 from pathlib import Path
@@ -315,7 +329,9 @@ _KUBECTL_VALUE_FLAGS = {
     "c", "L",
 }
 # Short value flags, recorded under their long name ("-p" only on patch).
-_KUBECTL_SHORT_VALUE_NAMES = {"c": "container", "L": "label-columns", "p": "patch"}
+_KUBECTL_SHORT_VALUE_NAMES = {
+    "c": "container", "L": "label-columns", "p": "patch", "r": "replicas",
+}
 
 # kubectl verbs whose short "-f" is the boolean --follow, not --filename.
 _KUBECTL_FOLLOW_VERBS = {"logs"}
@@ -370,8 +386,14 @@ _SELECTOR_FLAGS = {"l": "selector", "selector": "selector", "field-selector": "f
 _KUBECTL_GLOBAL_VALUE_FLAGS = _KUBECTL_IDENTITY_FLAGS | _DISCARD_VALUE_FLAGS | _IMPERSONATION_FLAGS
 _KUBECTL_GLOBAL_BOOL_FLAGS = {"A", "all-namespaces"} | _DISCARD_BOOL_FLAGS
 
-# Short flags that may be glued to their value: -nprod, -lapp=web, -fx.yaml.
-_KUBECTL_GLUED_SHORT_FLAGS = {"n", "l", "f", "o", "k", "s", "v", "c", "L"}
+# Which short letters take a value and which stand alone, from kubectl 1.36's --help
+# on every command. A letter that takes a value ends a short word, and the rest of
+# the word is its value (-nprod, -lapp=web, -fx.yaml). A boolean letter lets the word
+# go on: -qnprod is -q -n prod. "f", "p" and "r" depend on the command: see
+# _unbundle_short_word. Left out on purpose: -p, -P, -u and -w's value form on proxy,
+# which the parser refuses without a target anyway.
+_KUBECTL_SHORT_VALUE_LETTERS = frozenset("Lcefklnosv")
+_KUBECTL_SHORT_BOOL_LETTERS = frozenset("ARhiqtw")
 
 # Verbs whose target is a pod by default: a bare name is a pod
 # ("exec api-0" -> pod/api-0), and "deploy/web" / "svc/web" normalise like
@@ -496,28 +518,87 @@ def _split_flag(token: str) -> tuple[str, str | None]:
     return key, (value if sep else None)
 
 
-def _expand_glued_short_flags(tokens: list[str], short_value_flags: set[str]) -> list[str]:
-    """``-nprod`` -> ``-n prod`` for every single-letter value flag in
-    ``short_value_flags``. ``-n=prod`` and ``-n prod`` are left alone, as is
-    any token that isn't a short flag."""
-    expanded: list[str] = []
-    for idx, tok in enumerate(tokens):
-        if tok == "--":
-            # everything after "--" is a wrapped command (kubectl exec ... -- ls -la)
-            expanded.extend(tokens[idx:])
+def _record_dry_run(params: dict[str, Any], rehearsal: bool) -> None:
+    """The last ``--dry-run`` decides, as it does in pflag and argparse, so a real
+    run clears an earlier rehearsal: ``--dry-run=client --dry-run=none`` is real."""
+    if rehearsal:
+        params["dry_run"] = True
+    else:
+        params.pop("dry_run", None)
+
+
+def _split_short_word(
+    word: str, bools: frozenset[str], values: frozenset[str], tool: str
+) -> list[str]:
+    """One short-flag word as the separate flags pflag reads in it: ``-qnprod`` is
+    ``-q -n=prod``, ``-qn`` is ``-q -n`` (with the value in the next token) and ``-n=``
+    is namespace ``=``, since pflag only strips a ``=`` that has something after it.
+    The result needs no more splitting, so ``-n=prod`` comes back as it is.
+
+    A letter in neither set makes the tool stop with an error, so nothing after it
+    counts: it is dropped, as an unknown short flag always was. A later version could
+    give that letter a meaning, though, and then a value letter or ``A`` behind it
+    could be real. That word is refused, since which it would be cannot be told."""
+    flags: list[str] = []
+    rest = word[1:]
+    while rest:
+        letter, rest = rest[0], rest[1:]
+        if len(rest) > 1 and rest[0] == "=":
+            flags.append(f"-{letter}{rest}")
             break
-        if (
-            len(tok) > 2
-            and tok[0] == "-"
-            and tok[1] != "-"
-            and tok[1] in short_value_flags
-            and tok[2] != "="
-        ):
-            expanded.append(tok[:2])
-            expanded.append(tok[2:])
-        else:
-            expanded.append(tok)
-    return expanded
+        if letter in values:
+            flags.append(f"-{letter}={rest}" if rest else f"-{letter}")
+            break
+        if letter not in bools:
+            if any(c == "A" or c in values for c in rest):
+                raise ValueError(
+                    f"{tool}: cannot tell what {word!r} means: {letter!r} is not a short "
+                    f"flag known on this command, and {rest!r} follows it"
+                )
+            break
+        flags.append(f"-{letter}")
+    return flags
+
+
+def _unbundle_short_word(word: str, verb: str | None, *, replicas: bool = False) -> list[str]:
+    """:func:`_split_short_word` with kubectl's letters. ``replicas`` says ``-r`` is
+    ``--replicas`` here (``create deployment``). ``proxy`` has letters of its own that
+    are not listed, and is refused without a target anyway."""
+    bools = _KUBECTL_SHORT_BOOL_LETTERS
+    values = _KUBECTL_SHORT_VALUE_LETTERS
+    if verb in _KUBECTL_FOLLOW_VERBS:  # logs -f is --follow and -p is --previous
+        bools, values = bools | {"f", "p"}, values - {"f"}
+    elif verb == "patch":
+        values = values | {"p"}
+    elif replicas:
+        values = values | {"r"}
+    return _split_short_word(word, bools, values, "kubectl")
+
+
+def _helm_short_letters(verb: str | None) -> tuple[frozenset[str], frozenset[str]]:
+    """Helm's short letters: ``-a`` is a value on ``template`` and a boolean on ``list``
+    (helm 3) and ``get values``."""
+    if verb == "template":
+        return _HELM_SHORT_BOOL_LETTERS, _HELM_SHORT_VALUE_LETTERS | {"a"}
+    return _HELM_SHORT_BOOL_LETTERS | {"a"}, _HELM_SHORT_VALUE_LETTERS
+
+
+def _flux_short_letters(verb: str | None) -> tuple[frozenset[str], frozenset[str]]:
+    """Flux's short letters: ``-f`` is only a flag on ``logs`` of the verbs parsed here."""
+    if verb == "logs":
+        return _FLUX_SHORT_BOOL_LETTERS | {"f"}, _FLUX_SHORT_VALUE_LETTERS
+    return _FLUX_SHORT_BOOL_LETTERS, _FLUX_SHORT_VALUE_LETTERS
+
+
+def _read_string_slice(value: str) -> list[str]:
+    """A pflag StringSlice value: one CSV record, so ``a,b`` is two and ``"a,b"`` is one.
+    An empty value stays one empty word: kubectl refuses it, and it is read as it was."""
+    if not value:
+        return [value]
+    try:
+        return next(csv.reader(io.StringIO(value, newline=""))) or [value]
+    except (csv.Error, StopIteration) as err:
+        raise ValueError(f"cannot read the list {value!r}: {err}") from err
 
 
 def _split_leading_globals(
@@ -526,6 +607,7 @@ def _split_leading_globals(
     value_flags: set[str],
     bool_flags: set[str],
     tool: str,
+    glued_values: bool = False,
 ) -> tuple[list[str], list[str]]:
     """Splits ``tokens`` into ``(leading_global_option_tokens, rest)`` where
     ``rest[0]`` is the tool's verb.
@@ -536,13 +618,16 @@ def _split_leading_globals(
     with ``-`` before the verb is a ``ValueError``: guessing whether an
     unknown option swallows the next token is exactly how a verb gets
     misidentified. Raises ``ValueError`` when no verb follows the options,
-    or when the option's value is missing."""
+    or when the option's value is missing. With ``glued_values``, a single-letter
+    key in ``value_flags`` may carry its value in the same token (``-nprod``)."""
     i = 0
     n = len(tokens)
     while i < n and tokens[i].startswith("-") and tokens[i] != "-":
         tok = tokens[i]
         key, val = _split_flag(tok)
-        if val is not None and (key in value_flags or key in bool_flags):
+        if glued_values and len(tok) > 2 and tok[1] in value_flags and tok[2] != "=":
+            i += 1
+        elif val is not None and (key in value_flags or key in bool_flags):
             i += 1
         elif key in value_flags:
             if i + 1 >= n:
@@ -633,17 +718,21 @@ def _bare_flag(tokens: list[str], i: int) -> bool:
 
 def _parse_flags(
     tokens: list[str], *, verb: str | None = None, raw_copy_to: list[str] | None = None,
-) -> tuple[dict[str, Any], dict[str, Any], list[str], str | None, list[str] | None]:
+) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str], list[str] | None]:
     """Walks kubectl tokens (after the verb/subverb), splitting them into
-    metadata, params, positional args, an optional manifest file/dir value,
+    metadata, params, positional args, the manifest files or directory they name,
     and an optional trailing ``--`` command. ``raw_copy_to`` receives ``--copy-to``
     as written, since a pod name "001" is not the number in params."""
     metadata: dict[str, Any] = {}
     params: dict[str, Any] = {}
     positional: list[str] = []
-    manifest_value: str | None = None
+    manifest_files: list[str] = []
+    kustomize: str | None = None
     command: list[str] | None = None
 
+    tokens = list(tokens)  # short words are split in place as the walk reaches them
+    # Found once here: kubectl also takes -r3 in front of the subcommand.
+    replicas_short = verb == "create" and ("deployment" in tokens or "deploy" in tokens)
     i = 0
     n = len(tokens)
     while i < n:
@@ -653,6 +742,14 @@ def _parse_flags(
             break
         if tok.startswith("-") and tok != "-":
             is_long = tok.startswith("--")
+            if not is_long and len(tok) > 2:
+                # Here and not before the walk: "--context -nprod" is a context
+                # called "-nprod", which only the flag before it can show.
+                flags = _unbundle_short_word(tok, verb, replicas=replicas_short)
+                if flags != [tok]:
+                    tokens[i:i + 1] = flags
+                    n = len(tokens)
+                    continue
             key, val = _split_flag(tok)
             if key in ("n", "namespace"):
                 if val is None:
@@ -660,7 +757,10 @@ def _parse_flags(
                     val = _value_at(tokens, i, tok)
                 metadata["namespace"] = val
             elif key in ("A", "all-namespaces"):
-                metadata["all_namespaces"] = True
+                if val in _GO_FALSE_WORDS:
+                    metadata.pop("all_namespaces", None)
+                else:
+                    metadata["all_namespaces"] = True
             elif key == "context":
                 if val is None:
                     i += 1
@@ -682,8 +782,7 @@ def _parse_flags(
                 # bare --dry-run, --dry-run=client, --dry-run=server (and the
                 # deprecated --dry-run=true) are rehearsals; --dry-run=none /
                 # =false is a real run.
-                if _is_dry_run(val, truthy=_KUBECTL_DRY_RUN_WORDS):
-                    params["dry_run"] = True
+                _record_dry_run(params, _is_dry_run(val, truthy=_KUBECTL_DRY_RUN_WORDS))
             elif key == "f" and verb in _KUBECTL_FOLLOW_VERBS:
                 # kubectl logs -f is --follow, a boolean.
                 params["follow"] = _bool_param(val)
@@ -696,7 +795,12 @@ def _parse_flags(
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
-                manifest_value = val
+                # --filename is a StringSlice, so every one counts and each may be a list.
+                # --kustomize is a plain string, so the last one counts.
+                if key in ("f", "filename"):
+                    manifest_files.extend(_read_string_slice(val))
+                else:
+                    kustomize = val
             elif key in _IMPERSONATION_FLAGS:
                 # kubectl --as / --as-group / --as-uid: the request runs as
                 # someone else. Recorded (never silently dropped), so a
@@ -721,7 +825,8 @@ def _parse_flags(
                 params[key] = val not in _GO_FALSE_WORDS
             elif key in _KNOWN_BOOL_FLAGS or (key == "raw" and verb == "config"):
                 params[key] = _bool_param(val)
-            elif key in _KUBECTL_VALUE_FLAGS or (key == "p" and verb == "patch"):
+            elif (key in _KUBECTL_VALUE_FLAGS or (key == "p" and verb == "patch")
+                  or (key == "r" and replicas_short)):
                 # Always the next token, even "-1" or "--context": that is
                 # what kubectl does with it.
                 if val is None:
@@ -751,12 +856,13 @@ def _parse_flags(
                 # as its value.
                 i += 1
                 params[key] = _coerce(tokens[i])
-            # else: unrecognised bare short flag -- ignored.
+            # else: unrecognised bare short flag -- ignored (kubectl refuses it).
         else:
             positional.append(tok)
         i += 1
 
-    return metadata, params, positional, manifest_value, command
+    manifests = manifest_files + ([kustomize] if kustomize is not None else [])
+    return metadata, params, positional, manifests, command
 
 
 def _make_intents(
@@ -917,12 +1023,12 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
     if len(argv) < 2 or not (argv[0] == "kubectl" or argv[0].endswith("/kubectl")):
         raise ValueError(f"not a recognizable kubectl invocation: {argv!r}")
 
-    all_tokens = _expand_glued_short_flags(argv[1:], _KUBECTL_GLUED_SHORT_FLAGS)
     leading, rest = _split_leading_globals(
-        all_tokens,
+        argv[1:],
         value_flags=_KUBECTL_GLOBAL_VALUE_FLAGS,
         bool_flags=_KUBECTL_GLOBAL_BOOL_FLAGS,
         tool="kubectl",
+        glued_values=True,
     )
     verb = rest[0]
     after_verb = rest[1:]
@@ -943,6 +1049,7 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
             value_flags=_KUBECTL_GLOBAL_VALUE_FLAGS,
             bool_flags=_KUBECTL_GLOBAL_BOOL_FLAGS,
             tool="kubectl",
+            glued_values=True,
         )
         subverb, after_verb = sub_rest[0], between + sub_rest[1:]
         if verb == "set":
@@ -955,7 +1062,7 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
     tokens = leading + after_verb
 
     raw_copy_to: list[str] = []
-    metadata, params, positional, manifest_value, command = _parse_flags(
+    metadata, params, positional, manifests, command = _parse_flags(
         tokens, verb=verb, raw_copy_to=raw_copy_to)
     # attach takes at most two words, and a second one after "--" is its NAME.
     attach_name_after_dash = (verb == "attach" and len(positional) == 1
@@ -965,12 +1072,15 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
     elif command is not None:
         params["command"] = command
 
-    if manifest_value is not None and verb in ("apply", "create", "replace", "delete"):
-        basename = manifest_value if manifest_value == "-" else Path(manifest_value).name
+    if manifests and verb in ("apply", "create", "replace", "delete"):
         # The objects are in the manifest, which is not read: kind- and
         # name-based rules escalate on it (manifest-not-inspected).
-        params = {**params, "file": manifest_value, "manifest_not_inspected": True}
-        return _make_intents([f"manifest/{basename}"], verb, params, metadata)
+        intents: list[InfrastructureIntent] = []
+        for manifest in manifests:
+            basename = manifest if manifest == "-" else Path(manifest).name
+            with_file = {**params, "file": manifest, "manifest_not_inspected": True}
+            intents.extend(_make_intents([f"manifest/{basename}"], verb, with_file, metadata))
+        return intents
 
     if verb == "rollout":
         resources = _expand_categories(_parse_resources(positional))
@@ -1470,10 +1580,9 @@ def _parse_aws_tokens(
                     val = _value_at(tokens, i, tok)
                 metadata["profile"] = val
             elif key == "dry-run":
-                if _is_dry_run(val):
-                    params["dry_run"] = True
+                _record_dry_run(params, _is_dry_run(val))
             elif key == "no-dry-run":
-                pass  # explicitly a real run; nothing to record
+                params.pop("dry_run", None)  # explicitly a real run
             elif key in _AWS_BOOL_FLAGS:
                 params[key] = _bool_param(val)
             elif key in _AWS_DISCARD_VALUE_FLAGS:
@@ -1778,8 +1887,7 @@ def _parse_az_tokens(
                     val = _value_at(tokens, i, tok)
                 name_value = val
             elif key in ("what-if", "dry-run"):
-                if _is_dry_run(val):
-                    params["dry_run"] = True
+                _record_dry_run(params, _is_dry_run(val))
             elif key == "ids":
                 # `az <group> <verb> --ids ID [ID ...]`: one or more ARM
                 # resource ids in place of -g/-n (REVIEW-4 T1.7).
@@ -2031,8 +2139,11 @@ def _parse_gcloud_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, A
             elif key in ("quiet", "q"):
                 params["quiet"] = _bool_param(val)
             elif key == "dry-run":
-                if _is_dry_run(val):
-                    params["dry_run"] = True
+                _record_dry_run(params, _is_dry_run(val))
+            elif key == "no-dry-run":
+                # No gcloud command was found with this flag. If one has it, it is a real
+                # run, and reading it as one can only be stricter.
+                params.pop("dry_run", None)
             elif key == "async":
                 params["async"] = _bool_param(val)
             elif key in _GCLOUD_BOOL_FLAGS:
@@ -2155,6 +2266,15 @@ _HELM_BOOL_FLAGS = {
 
 _HELM_READ_VERBS = {"history", "status", "list", "get"}
 
+# Helm's short letters on the verbs parsed here, read from helm's source (v4.3.1 and
+# v3.22.1; helm is not run in the tests): -i is --install on upgrade, -f --values or list's
+# --filter. "a" depends on the verb: see _helm_short_letters. -g (--generate-name) is left
+# out on purpose: with it there is no release name, and "install -g ./c" must not read
+# ./c as one, so it stays refused.
+_HELM_SHORT_VALUE_LETTERS = frozenset("flmnos")
+_HELM_SHORT_BOOL_LETTERS = frozenset("Adhiqr")
+_HELM_SHORT_BOOL_NAMES = {"i": "install"}
+
 # Helm global options (accepted before or after the verb).
 _HELM_GLOBAL_VALUE_FLAGS = {
     "n",
@@ -2215,16 +2335,27 @@ def _split_helm_set_pairs(value: str) -> list[str]:
     return pairs
 
 
-def _parse_helm_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+def _parse_helm_tokens(
+    tokens: list[str], verb: str | None = None
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     metadata: dict[str, Any] = {}
     params: dict[str, Any] = {}
     positional: list[str] = []
+    short_bools, short_values = _helm_short_letters(verb)
 
+    tokens = list(tokens)  # short words are split in place as the walk reaches them
     i = 0
     n = len(tokens)
     while i < n:
         tok = tokens[i]
         if tok.startswith("-") and tok != "-":
+            is_long = tok.startswith("--")
+            if not is_long and len(tok) > 2:
+                flags = _split_short_word(tok, short_bools, short_values, "helm")
+                if flags != [tok]:
+                    tokens[i:i + 1] = flags
+                    n = len(tokens)
+                    continue
             key, val = _split_flag(tok)
             if key in ("n", "namespace"):
                 if val is None:
@@ -2246,8 +2377,7 @@ def _parse_helm_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, Any
             elif key == "dry-run":
                 # helm: --dry-run, =client, =server, =true rehearse;
                 # =none / =false run for real.
-                if _is_dry_run(val, truthy=_KUBECTL_DRY_RUN_WORDS):
-                    params["dry_run"] = True
+                _record_dry_run(params, _is_dry_run(val, truthy=_KUBECTL_DRY_RUN_WORDS))
             elif key == "version":
                 if val is None:
                     i += 1
@@ -2282,6 +2412,15 @@ def _parse_helm_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, Any
                 params.setdefault(dest, []).append(val)
             elif key in _HELM_BOOL_FLAGS:
                 params[key.replace("-", "_")] = _bool_param(val)
+            elif not is_long and key in short_bools:
+                # Takes no value: in "-i api ./c" the release is "api".
+                params[_HELM_SHORT_BOOL_NAMES.get(key, key)] = _bool_param(val)
+            elif not is_long and key in short_values:
+                # Always the next token, whatever it looks like, as pflag reads it.
+                if val is None:
+                    i += 1
+                    val = _value_at(tokens, i, tok)
+                params[key] = _coerce(val)
             elif val is not None:
                 params[key.replace("-", "_")] = _coerce(val)
             elif i + 1 < n and not tokens[i + 1].startswith("-"):
@@ -2308,14 +2447,15 @@ def from_helm(argv: list[str]) -> InfrastructureIntent:
         raise ValueError(f"not a recognizable helm invocation: {argv!r}")
 
     leading, rest = _split_leading_globals(
-        _expand_glued_short_flags(argv[1:], {"n"}),
+        argv[1:],
         value_flags=_HELM_GLOBAL_VALUE_FLAGS,
         bool_flags=_HELM_GLOBAL_BOOL_FLAGS,
         tool="helm",
+        glued_values=True,
     )
     verb = rest[0]
     tokens = leading + rest[1:]
-    metadata, params, positional = _parse_helm_tokens(tokens)
+    metadata, params, positional = _parse_helm_tokens(tokens, verb)
     params["raw_action"] = verb
 
     if verb == "install":
@@ -2462,8 +2602,7 @@ def _parse_argocd_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, A
             elif key in _ARGOCD_GLOBAL_BOOL_FLAGS:
                 pass  # consumed, intentionally not recorded
             elif key == "dry-run":
-                if _is_dry_run(val):
-                    params["dry_run"] = True
+                _record_dry_run(params, _is_dry_run(val))
             elif key in _ARGOCD_BOOL_FLAGS:
                 params[key.replace("-", "_")] = _bool_param(val)
             elif val is not None:
@@ -2610,6 +2749,11 @@ _FLUX_GLOBAL_BOOL_FLAGS = {"verbose", "insecure-skip-tls-verify"}
 # timeout") and lands there whichever side of the verb it's on.
 _FLUX_DISCARD_VALUE_FLAGS = _FLUX_GLOBAL_VALUE_FLAGS - {"n", "namespace", "context", "timeout"}
 
+# Flux's short letters on the verbs parsed here, read from its source (flux2 main; flux is
+# not run in the tests). -o is on none of them, and is listed so -oyaml reads as a value.
+_FLUX_SHORT_VALUE_LETTERS = frozenset("lnopuv")
+_FLUX_SHORT_BOOL_LETTERS = frozenset("Ahsw")
+
 _FLUX_KIND_ALIASES = {
     "kustomization": "kustomization",
     "kustomizations": "kustomization",
@@ -2620,16 +2764,28 @@ _FLUX_KIND_ALIASES = {
 }
 
 
-def _parse_flux_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+def _parse_flux_tokens(
+    tokens: list[str], verb: str | None = None
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     metadata: dict[str, Any] = {}
     params: dict[str, Any] = {}
     positional: list[str] = []
+    dry_run = False
+    short_bools, short_values = _flux_short_letters(verb)
 
+    tokens = list(tokens)  # short words are split in place as the walk reaches them
     i = 0
     n = len(tokens)
     while i < n:
         tok = tokens[i]
         if tok.startswith("-") and tok != "-":
+            is_long = tok.startswith("--")
+            if not is_long and len(tok) > 2:
+                flags = _split_short_word(tok, short_bools, short_values, "flux")
+                if flags != [tok]:
+                    tokens[i:i + 1] = flags
+                    n = len(tokens)
+                    continue
             key, val = _split_flag(tok)
             if key in ("n", "namespace"):
                 if val is None:
@@ -2649,13 +2805,18 @@ def _parse_flux_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, Any
             elif key in _FLUX_GLOBAL_BOOL_FLAGS:
                 pass  # consumed, intentionally not recorded
             elif key == "dry-run":
-                if _is_dry_run(val):
-                    params["dry_run"] = True
+                dry_run = _is_dry_run(val)
             elif key == "export":
-                export = _bool_param(val)
-                params["export"] = export
-                if export is True:
-                    params["dry_run"] = True
+                params["export"] = _bool_param(val)
+            elif not is_long and key in short_bools:
+                # Takes no value: in "get ks -A a" the name is "a".
+                params[key] = _bool_param(val)
+            elif not is_long and key in short_values:
+                # Always the next token, whatever it looks like, as pflag reads it.
+                if val is None:
+                    i += 1
+                    val = _value_at(tokens, i, tok)
+                params[key] = _coerce(val)
             elif val is not None:
                 params[key.replace("-", "_")] = _coerce(val)
             elif i + 1 < n and not tokens[i + 1].startswith("-"):
@@ -2667,6 +2828,9 @@ def _parse_flux_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, Any
             positional.append(tok)
         i += 1
 
+    # Each flag's last value counts: --export only prints YAML, so it rehearses as well.
+    if dry_run or params.get("export") is True:
+        params["dry_run"] = True
     return metadata, params, positional
 
 
@@ -2700,14 +2864,15 @@ def from_flux(argv: list[str]) -> InfrastructureIntent:
         raise ValueError(f"not a recognizable flux invocation: {argv!r}")
 
     leading, rest = _split_leading_globals(
-        _expand_glued_short_flags(argv[1:], {"n"}),
+        argv[1:],
         value_flags=_FLUX_GLOBAL_VALUE_FLAGS,
         bool_flags=_FLUX_GLOBAL_BOOL_FLAGS,
         tool="flux",
+        glued_values=True,
     )
     verb = rest[0]
     tokens = leading + rest[1:]
-    metadata, params, positional = _parse_flux_tokens(tokens)
+    metadata, params, positional = _parse_flux_tokens(tokens, verb)
     params["raw_action"] = verb
 
     if verb == "bootstrap":
@@ -2813,8 +2978,9 @@ def _parse_git_tokens(tokens: list[str]) -> tuple[dict[str, Any], list[str]]:
             elif key == "amend":
                 params["amend"] = True
             elif key in ("dry-run", "n"):
-                if _is_dry_run(val):
-                    params["dry_run"] = True
+                _record_dry_run(params, _is_dry_run(val))
+            elif key == "no-dry-run":
+                params.pop("dry_run", None)
             elif key in _GIT_BOOL_FLAGS:
                 params[key.replace("-", "_")] = _bool_param(val)
             elif val is not None:

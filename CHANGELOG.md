@@ -8,6 +8,58 @@ behaviour.
 
 ## [Unreleased]
 
+### Fixed
+- Two kubectl flag spellings were read differently from kubectl, on every verb, so a BLOCK could
+  pass (#75). Checked on kubectl 1.36 against a local stub API server.
+  - A repeated `--dry-run`: the first rehearsal stuck, so `kubectl delete pod x --dry-run=client
+    --dry-run=none` was allowed as a rehearsal, and it is a real delete. The last one now decides,
+    both ways. `--no-dry-run` after `--dry-run` was missed on aws and git, and now clears it, which
+    was checked on both CLIs. helm `install`, `upgrade` and `rollback` and `argocd app sync` get the
+    same reading, and `flux create --export --export=false` no longer counts as a rehearsal. Those
+    three come from reading each tool's source, and none of them was run. gcloud now reads
+    `--no-dry-run` as a real run, though no gcloud command the parser takes was found with the flag.
+  - A bundled short flag: the whole word was ignored, so `kubectl run web --image=x -n dev -qnprod`
+    was read as `dev`, and it runs in `prod`. Short words are now read letter by letter as pflag
+    reads them, from one table of which letters take a value. `-Rf dir` is now the manifest
+    `dir` (it was a kind called `dir`), `-Ao yaml` is every namespace (it was a pod called `yaml`),
+    and `logs -fc app web` is `pod/web` (it was `pod/c`). `-r` is `--replicas` on `create
+    deployment`, so `-r 3` no longer adds a target called `deployment/3`.
+
+  Also read as kubectl reads them now: `--context -nprod` is a context called `-nprod`, since a flag
+  that takes a value takes the next word whatever it looks like, `-n=` is the namespace `=`, and
+  `--all-namespaces=false` turns off an earlier `-A`, which used to stick and make a namespace rule
+  escalate.
+
+  A word with an unknown letter in front of a value letter or `A` is now refused, because the
+  letter's meaning in a later kubectl cannot be known. kubectl 1.36 refuses the ones tried:
+  `get pods -xnprod`, `get pods -rf` and `delete pod x -rf`.
+
+  `kubectl logs -fl app=x` is now refused too, where it was read as `pod/l`. kubectl accepts it, and
+  it accepts `kubectl logs -l app=x`, which the parser already refused. Both stay refused until the
+  parser can read `logs` by selector.
+- helm and flux short flags are read as pflag reads them, with the same rules as kubectl (#75). Which
+  letters they have comes from reading their source (helm 4.3.1 and 3.22.1, flux2 `main`), and neither
+  tool was run. `helm upgrade -i api ./c` was `release/./c`, with `api` taken as the value of `-i`:
+  it is now `release/api` with `install` set. `helm upgrade api ./c -n dev -inprod` was read as `dev`,
+  and pflag reads it as `prod`. So does `flux get ks -n dev -wnprod`. `-fv.yaml` and `-oyaml` now
+  carry their values, and `flux get ks -A a` is `kustomization/a`. A flag's value is never split, so
+  `--kube-context -nprod` is a context called `-nprod`.
+
+  A word with an unknown letter in front of a value letter or `A` is refused here too, and that
+  includes `flux reconcile ks a -qnprod`, since flux has no `-q`. `helm install -g ./c` stays refused
+  as it was, though helm accepts it, because there is no release name to read.
+- Every file in a kubectl `--filename` now meets the rules (#75). `kubectl delete -f x.yaml -f y.yaml`
+  was only `manifest/y.yaml`, so a rule on `manifest/x.yaml` missed, and kubectl deletes both. Each
+  file is now one intent with its own `file` param, also for `--filename=x --filename=y`, `-f x,y` and
+  `-f - -f y`. These were run on kubectl 1.36 against the stub server, which saw both deletes. One file
+  gives the same intent as before. Repeated `-k` needed no fix: kubectl uses the last one, and so did
+  the parser.
+
+  This takes `kubectl delete -f x.yaml -f y.yaml` from one intent to two, which can change a plan rule.
+  A count such as `max_intents` can rise, and a `ratio` can drop: the command under a ratio of
+  `manifest/y.yaml` over all intents with `max: 0.75` went from BLOCK to ALLOW, because 1/1 became
+  1/2. `from_kubectl` now raises `ValueError` on two files. Use `from_kubectl_multi`.
+
 ## [1.3.3] — 2026-11-07
 
 `kubectl run --expose` now meets the rules on the Service it creates.

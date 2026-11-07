@@ -250,9 +250,7 @@ or a pod `delete` because `create --raw` can POST to any URI. A rule's own verb 
 client decides on it too, for the objects behind a name as well (`kubectl exec deploy/web` against a
 `pod/*` `exec` rule, `kubectl delete all --all` against a `deployment/*` `delete` rule, `kubectl run
 web --expose` against a `service/*` `run` rule; see
-[Kubernetes resource names](constraints.md#kubernetes-resource-names)). Two flag spellings are the
-exception, on any verb: a repeated `--dry-run` and a bundled `-n` are misread on the client (#75).
-Commands the hook cannot
+[Kubernetes resource names](constraints.md#kubernetes-resource-names)). Commands the hook cannot
 parse are refused on the client, so they are not listed: `set env` and the other `set` subcommands
 except `set image`, `diff -f`, `proxy`.
 

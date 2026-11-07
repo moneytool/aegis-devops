@@ -3761,3 +3761,108 @@ def test_a_kind_outside_the_table_may_be_any_custom_kind(command, resource, mark
 ])
 def test_the_kinds_that_stay_as_they_were(command, marker):
     assert from_kubectl(command.split()).params.get("resolved_at_runtime") == marker
+
+
+# A repeated dry-run flag: the last one decides (#75). aws and git were run, with a stub
+# endpoint and a local remote. helm, argocd, flux and az are not installed here, so these
+# come from their source: helm pkg/cmd/helpers.go, argocd app.go (app sync), flux create.go
+# and azure-cli resource/_params.py. Flux has no --dry-run on any command the parser takes,
+# and no gcloud command it takes was found with the flag, so neither has a case here.
+@pytest.mark.parametrize("argv,rehearsal", [
+    ("helm upgrade api ./c --dry-run=client --dry-run=none", False),
+    ("helm upgrade api ./c --dry-run=none --dry-run=client", True),
+    ("argocd app sync web --dry-run --dry-run=false", False),
+    ("argocd app sync web --dry-run=false --dry-run", True),
+    ("flux create source git a --url=https://x --branch=main --export --export=false", False),
+    ("flux create source git a --url=https://x --branch=main --export=false --export", True),
+    ("aws ec2 terminate-instances --instance-ids i-1 --dry-run --no-dry-run", False),
+    ("aws ec2 terminate-instances --instance-ids i-1 --no-dry-run --dry-run", True),
+    ("az deployment group create -g r --template-file t.json --what-if", True),
+    ("git push origin main --dry-run --no-dry-run", False),
+    ("git push origin main -n --no-dry-run", False),
+    ("git push origin main --no-dry-run --dry-run", True),
+    ("git push --no-dry-run origin main", False),
+])
+def test_the_last_dry_run_decides_in_the_other_tools(argv, rehearsal):
+    intent = from_argv(argv.split())[0]
+    assert intent.params.get("dry_run", False) is rehearsal
+
+
+# Bundled short flags on helm and flux (#75). Neither is installed here, so the letters come
+# from their source: helm v4.3.1 and v3.22.1, flux2 main.
+@pytest.mark.parametrize("argv,resource,params,metadata", [
+    # common spellings
+    ("helm upgrade -i api ./c", "release/api", {"install": True, "chart": "./c"}, {}),
+    ("helm upgrade api ./c -i", "release/api", {"install": True, "chart": "./c"}, {}),
+    ("helm upgrade api ./c -i=false", "release/api", {"install": False, "chart": "./c"}, {}),
+    ("helm upgrade -if v.yaml api ./c", "release/api",
+     {"install": True, "values_files": ["v.yaml"], "chart": "./c"}, {}),
+    ("helm upgrade api ./c -f v.yaml", "release/api",
+     {"values_files": ["v.yaml"], "chart": "./c"}, {}),
+    ("helm upgrade api ./c -fv.yaml", "release/api",
+     {"values_files": ["v.yaml"], "chart": "./c"}, {}),
+    ("helm upgrade api ./c -nprod", "release/api", {"chart": "./c"}, {"namespace": "prod"}),
+    ("helm upgrade api ./c -n=prod", "release/api", {"chart": "./c"}, {"namespace": "prod"}),
+    ("helm -nprod upgrade api ./c", "release/api", {"chart": "./c"}, {"namespace": "prod"}),
+    ("helm status api -oyaml", "release/api", {"o": "yaml"}, {}),
+    ("helm status -oyaml api", "release/api", {"o": "yaml"}, {}),
+    ("helm status -o yaml api", "release/api", {"o": "yaml"}, {}),
+    ("helm list -A", "release/*", {"A": True}, {}),
+    ("helm list -aq", "release/*", {"a": True, "q": True}, {}),
+    ("helm list -l a=b", "release/*", {"l": "a=b"}, {}),
+    # a namespace in a word
+    ("helm upgrade api ./c -n dev -inprod", "release/api",
+     {"install": True, "chart": "./c"}, {"namespace": "prod"}),
+    ("helm upgrade api ./c -n dev -qnprod", "release/api",
+     {"q": True, "chart": "./c"}, {"namespace": "prod"}),
+    # a flag's value is not split
+    ("helm upgrade api ./c -n dev --kube-context -nprod", "release/api", {"chart": "./c"},
+     {"namespace": "dev", "context": "-nprod"}),
+    ("helm upgrade api ./c -n dev -l -nprod", "release/api", {"l": "-nprod", "chart": "./c"},
+     {"namespace": "dev"}),
+    # flux
+    ("flux get ks -A", "kustomization/*", {"A": True}, {}),
+    ("flux get ks -A a", "kustomization/a", {"A": True}, {}),
+    ("flux get ks a -w", "kustomization/a", {"w": True}, {}),
+    ("flux get ks -Aw", "kustomization/*", {"A": True, "w": True}, {}),
+    ("flux get ks -l a=b", "kustomization/*", {"l": "a=b"}, {}),
+    ("flux get ks -nprod", "kustomization/*", {}, {"namespace": "prod"}),
+    ("flux -nprod get ks", "kustomization/*", {}, {"namespace": "prod"}),
+    ("flux get ks -n dev -wnprod", "kustomization/*", {"w": True}, {"namespace": "prod"}),
+    ("flux delete ks -s a", "kustomization/a", {"s": True}, {}),
+    ("flux delete ks a -n dev -snprod", "kustomization/a", {"s": True}, {"namespace": "prod"}),
+    ("flux create source git a -u -nprod -n dev", "source-git/a", {"u": "-nprod"},
+     {"namespace": "dev"}),
+])
+def test_helm_and_flux_short_words(argv, resource, params, metadata):
+    intent = from_argv(argv.split())[0]
+    assert intent.resource == resource
+    assert {k: v for k, v in intent.params.items() if k != "raw_action"} == params
+    assert intent.metadata == metadata
+
+
+def test_flux_logs_f_is_follow():
+    intent = from_argv("flux logs -fnprod".split())[0]
+    assert intent.params["f"] is True
+    assert intent.metadata == {"namespace": "prod"}
+
+
+def test_helm_a_takes_a_value_on_template_only():
+    assert from_argv("helm template api ./c -av1".split())[0].params["a"] == "v1"
+    assert from_argv("helm get values api -a".split())[0].params["a"] is True
+
+
+@pytest.mark.parametrize("argv", [
+    "helm upgrade api ./c -xnprod",
+    "helm upgrade api ./c -xA",
+    "helm -inprod upgrade api ./c",
+    "helm install -g ./c",  # there is no release name to read
+    "helm upgrade api ./c -in",
+    "flux reconcile ks a -n dev -qnprod",  # flux has no -q
+    "flux get ks -xnprod",
+    "flux get ks -fnprod",  # -f is only on logs
+    "flux -Anprod get ks",
+])
+def test_refused_helm_and_flux_short_words(argv):
+    with pytest.raises(ValueError):
+        from_argv(argv.split())
