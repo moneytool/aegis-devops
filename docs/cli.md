@@ -13,7 +13,8 @@ Global options in front of the verb (`kubectl -n prod delete …`, `git -C /repo
 their canonical forms; a leading option Aegis does not recognise is an error (exit 65), never a
 guess at where the verb starts. kubectl's short flags can also be bundled, so `-itnprod` is `-i -t
 -n prod` and `-Rf dir` is `-R -f dir`. A bundle with an unknown letter in front of a flag Aegis
-reads (`-xnprod`) is the same error, and kubectl refuses it too. `kubectl delete namespace prod`
+reads (`-xnprod`) is the same error, and kubectl refuses it too. helm and flux words are read the
+same way, from the letters in their source. `kubectl delete namespace prod`
 additionally emits a synthetic `*/*` delete intent scoped to that namespace, so namespace-scoped
 deletion rules fire on it.
 
@@ -109,8 +110,8 @@ intent whose target the parser could not pin down (`git push -f` with no refspec
 ESCALATE with the note `unknown-target`, so it cannot slip past a `ref/main` rule as `ref/*`.
 In the same way a namespace-scoped rule escalates with `namespace-unresolved: <id>` when a
 kubectl/helm command names no namespace (or uses `-A`), and a kind- or object-based rule
-escalates with `manifest-not-inspected: <id>` on `kubectl … -f <file>|-`, whose manifest is never
-read ([Environment mapping](constraints.md#environment-mapping)). The note
+escalates with `manifest-not-inspected: <id>` on `kubectl … -f <file>|-`, once per file, whose
+manifest is never read ([Environment mapping](constraints.md#environment-mapping)). The note
 `target-unresolved: <id>` is the same idea for targets kubectl finds when it runs: `kubectl exec
 deploy/web` or `kubectl logs deploy/web` reaches some pod, so a rule on `pod/payments-0` escalates
 while a rule on `pod/*` decides as usual, and `--all` or a selector does the same for a rule on one

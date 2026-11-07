@@ -37,7 +37,7 @@ A plan-level constraint (`../data/plan_constraints.example.yaml`) carries exactl
 predicate instead of a per-intent match, evaluated over every intent from one plan/invocation.
 One kubectl command can be more than one intent: `kubectl cp b web:/a` is two (`pod/web` and `b`),
 `kubectl debug web` and `kubectl run web` are two (`pod/web` and `web/*`), `--copy-to` adds a third
-on `debug`, `--expose` adds a third on `run`, and `kubectl exec deploy/web` is two (`deployment/web` and `pod/*`). Each counts toward `max_intents` and
+on `debug`, `--expose` adds a third on `run`, `kubectl exec deploy/web` is two (`deployment/web` and `pod/*`), and `kubectl delete -f x.yaml -f y.yaml` is two (one per file). Each counts toward `max_intents` and
 `max_matching`, so a count can rise. A `ratio` can also drop, since the extra intents join its
 denominator: `kubectl cp web:/a b` under a ratio of `web:*` over all intents with `max: 0.75` went
 from 1/1 to 1/2, which passes a ratio that used to fire:
@@ -302,8 +302,8 @@ instead of silently not applying: `kubectl rollout restart deploy/web` escalates
 never affected. (Until 1.0 such a rule simply did not match; reported by a reader on dev.to.)
 
 **Manifests are not read.** `kubectl apply|create|replace|delete -f <file>` (or a directory,
-`-k <kustomization>`, or `-f -` for stdin) is one intent on `manifest/<name>`; the objects inside
-are never parsed, since the file can change between the check and the run. A rule for the same
+`-k <kustomization>`, or `-f -` for stdin) is one intent on `manifest/<name>`, with one for each
+file in `-f a -f b` or `-f a,b`; the objects inside are never parsed, since the file can change between the check and the run. A rule for the same
 action written on kinds or objects (`secret/*`, `deployment/web`) might be exactly what the
 manifest holds, so it escalates with the note `manifest-not-inspected: <id>`. A rule on `*`
 matches the manifest intent outright (`kubectl delete -f ./manifests/ -n prod` is a BLOCK under

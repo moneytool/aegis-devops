@@ -831,6 +831,24 @@ def test_kubectl_run_can_drop_a_ratio_over_the_old_spelling():
     assert decision.verdict == "ALLOW"
 
 
+# kubectl delete -f x -f y gives one intent per file (#75)
+_TWO_FILES = "kubectl delete -f x.yaml -f y.yaml"
+
+
+def test_two_manifests_count_as_two_intents_for_a_plan_rule():
+    decision = _run_web_plan(_TWO_FILES, max_intents=1)
+    assert decision.verdict == "BLOCK"
+    assert any(n.startswith("max_intents: 2 > 1") for n in decision.notes)
+    assert _run_web_plan("kubectl delete -f y.yaml", max_intents=1).verdict == "ALLOW"
+
+
+def test_two_manifests_can_drop_a_ratio_over_the_last_file():
+    """Only y.yaml was an intent on earlier versions: 1/1 then, 1/2 now."""
+    ratio = {"numerator": {"resource_pattern": "manifest/y.yaml"}, "denominator": {}, "max": 0.75}
+    assert _run_web_plan("kubectl delete -f y.yaml", ratio=ratio).verdict == "BLOCK"
+    assert _run_web_plan(_TWO_FILES, ratio=ratio).verdict == "ALLOW"
+
+
 # kubectl run --expose gives three (#73)
 _RUN_WEB_EXPOSED = "kubectl run web --image=x --expose --port=80"
 

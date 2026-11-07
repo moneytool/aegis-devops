@@ -1080,3 +1080,90 @@ def test_a_refused_short_word_reaches_the_hook_as_a_refusal():
 def test_the_spellings_against_the_example_policy(command, decision):
     verdict = decide(command, ROOT / "data")
     assert verdict.decision == decision, verdict
+
+
+# --- several manifests (#75) ---------------------------------------------------------
+# Checked on kubectl 1.36 against a local stub API server: both files were deleted for
+# each -f spelling, stdin first or last, and only the last directory for -k.
+
+
+@pytest.mark.parametrize("flags,files", [
+    ("-f x.yaml", ["x.yaml"]),
+    ("-f x.yaml -f y.yaml", ["x.yaml", "y.yaml"]),
+    ("--filename=x.yaml --filename=y.yaml", ["x.yaml", "y.yaml"]),
+    ("--filename x.yaml -fy.yaml", ["x.yaml", "y.yaml"]),
+    ("-f x.yaml,y.yaml", ["x.yaml", "y.yaml"]),
+    ("-f x.yaml,y.yaml -f z.yaml", ["x.yaml", "y.yaml", "z.yaml"]),
+    ("-Rf x.yaml -f y.yaml", ["x.yaml", "y.yaml"]),
+    ("-Rf x.yaml,y.yaml", ["x.yaml", "y.yaml"]),
+    ("-f - -f y.yaml", ["-", "y.yaml"]),
+    ("-f y.yaml -f -", ["y.yaml", "-"]),
+    ("-f x.yaml -f x.yaml", ["x.yaml", "x.yaml"]),
+    ('-f "c,d.yaml"', ["c,d.yaml"]),  # a quoted comma is part of the name
+])
+@pytest.mark.parametrize("verb", ["apply", "create", "replace", "delete"])
+def test_every_manifest_is_an_intent(verb, flags, files):
+    argv = ["kubectl", verb, *flags.split(" ")]
+    intents = from_kubectl_multi(argv)
+    assert [i.params["file"] for i in intents] == files
+    assert [i.resource for i in intents] == [f"manifest/{f}" for f in files]
+    assert all(i.action == verb and i.params["manifest_not_inspected"] is True for i in intents)
+
+
+def test_a_single_manifest_keeps_its_result():
+    intents = from_kubectl_multi("kubectl delete -f ./m/x.yaml -n prod --force".split())
+    assert len(intents) == 1
+    assert intents[0].resource == "manifest/x.yaml"
+    assert intents[0].action == "delete"
+    assert intents[0].params == {"force": True, "file": "./m/x.yaml",
+                                 "manifest_not_inspected": True}
+    assert intents[0].metadata == {"namespace": "prod"}
+    assert from_kubectl("kubectl delete -f ./m/x.yaml".split()).resource == "manifest/x.yaml"
+
+
+def test_from_kubectl_raises_on_two_manifests():
+    with pytest.raises(ValueError):
+        from_kubectl("kubectl delete -f x.yaml -f y.yaml".split())
+
+
+@pytest.mark.parametrize("flags", [
+    "-f x.yaml -f y.yaml",
+    "-f y.yaml -f x.yaml",
+    "--filename=x.yaml --filename=y.yaml",
+    "-f x.yaml,y.yaml",
+    "-f y.yaml,x.yaml",
+    "-Rf x.yaml -f y.yaml",
+])
+def test_each_manifest_meets_a_rule_on_it(flags):
+    rule = _rule("no-x", "manifest/x.yaml", ["delete"])
+    assert _decide([rule], f"kubectl delete {flags}".split())[0] == "BLOCK"
+    assert _decide([rule], f"kubectl delete {flags} --dry-run=client".split())[0] == "ALLOW"
+
+
+def test_a_kind_rule_still_escalates_on_every_manifest():
+    verdict, notes = _decide([_rule("no-pods", "pod/*", ["delete"])],
+                             "kubectl delete -f x.yaml -f y.yaml".split())
+    assert verdict == "ESCALATE"
+    assert "manifest-not-inspected: no-pods" in notes
+
+
+def test_several_manifests_against_the_example_policy():
+    verdict = decide("kubectl delete -f x.yaml -f y.yaml -n prod", ROOT / "data")
+    assert verdict.decision == "deny", verdict
+
+
+@pytest.mark.parametrize("flags,expect", [
+    ("-k ka -k kb", ["kb"]),
+    ("--kustomize=ka --kustomize=kb", ["kb"]),
+    ("-Rk ka", ["ka"]),
+    ("-k ka,kb", ["ka,kb"]),  # one path to kubectl, which then fails to find it
+])
+def test_the_last_kustomize_is_the_one(flags, expect):
+    intents = from_kubectl_multi(f"kubectl delete {flags}".split())
+    assert [i.params["file"] for i in intents] == expect
+
+
+def test_get_with_files_stays_refused():
+    # get -f has no target the parser can name, as before
+    with pytest.raises(ValueError):
+        from_kubectl_multi("kubectl get -f x.yaml -f y.yaml".split())
