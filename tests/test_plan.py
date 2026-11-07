@@ -4,6 +4,7 @@ import pytest
 
 from aegis_core.intent import InfrastructureIntent
 from aegis_core.interceptor import AegisInterceptor
+from aegis_core.parser import from_kubectl_multi
 from aegis_core.plan import (
     PlanConstraint,
     PlanConstraintStore,
@@ -803,3 +804,28 @@ def test_env_scoped_selector_with_unresolved_env_escalates():
     assert decision.verdict == "ALLOW" and decision.notes == []
     prod = [k8s_intent("delete", "pod/x", metadata={"env": "prod"})]
     assert evaluate_plan(empty_interceptor(), plan_store, prod, now=NOW).verdict == "BLOCK"
+
+
+# ---------------------------------------------------------------------------
+# kubectl run gives two intents (#71)
+# ---------------------------------------------------------------------------
+
+
+def _run_web_plan(**rule):
+    store = PlanConstraintStore(authority_map=AUTHORITY)
+    store.add(make_pc(provider="kubernetes", **rule))
+    intents = from_kubectl_multi("kubectl run web --image=x".split())
+    return evaluate_plan(empty_interceptor(), store, intents, now=NOW)
+
+
+def test_kubectl_run_counts_as_two_intents_for_a_plan_rule():
+    decision = _run_web_plan(max_intents=1)
+    assert decision.verdict == "BLOCK"
+    assert any(n.startswith("max_intents: 2 > 1") for n in decision.notes)
+
+
+def test_kubectl_run_can_drop_a_ratio_over_the_old_spelling():
+    """1/1 on earlier versions, 1/2 now: the ratio has a bigger denominator."""
+    decision = _run_web_plan(ratio={"numerator": {"resource_pattern": "web/*"},
+                                    "denominator": {}, "max": 0.75})
+    assert decision.verdict == "ALLOW"

@@ -378,9 +378,6 @@ _POD_TARGET_VERBS = {"exec", "logs", "port-forward", "attach"}
 # rule on that verb to decide (see "Names kubectl resolves at run time" above).
 _POD_RESOLVING_VERBS = {"exec", "port-forward", "attach", "logs"}
 
-# Verbs whose first word names a pod, whatever it says, so it is never a category.
-_POD_NAME_FIRST_VERBS = {"run"}
-
 # Verbs whose words after "--" are operands like any other, read from kubectl's
 # source and checked on kubectl 1.36: `kubectl get pod/a -- b` fails as `get pod/a b`
 # does. exec, run, create and debug use ArgsLenAtDash, so "--" starts a command there.
@@ -393,7 +390,7 @@ _KUBECTL_OPERAND_VERBS = {
 
 # Verbs that take TYPE [NAME] and work on a custom resource. The kind they are
 # given may be a plural or short name no table here can resolve. `config view`
-# and `run web` also reach the parser as kind/name, and are not about a kind.
+# also reaches the parser as kind/name, and is not about a kind.
 _KUBECTL_CUSTOM_KIND_VERBS = {
     "annotate", "autoscale", "delete", "describe", "edit", "get", "label", "patch", "scale",
     "wait",
@@ -852,6 +849,19 @@ def _debug_intents(
     return _make_intents(list(dict.fromkeys(targets + earlier)), "debug", params, metadata)
 
 
+def _run_intents(
+    positional: list[str], params: dict[str, Any], metadata: dict[str, Any]
+) -> list[InfrastructureIntent]:
+    """``kubectl run NAME`` creates a pod called NAME, whatever the word says, so it
+    is never a category, and any words after it are arguments for that pod. A word
+    with a slash is refused as a pod name, so it stays the kind/name it was read as.
+    The targets earlier versions gave (``web/*``) stay beside the pod, unmarked as
+    they were, since a signed rule may name them."""
+    earlier = _parse_resources(positional)
+    targets = _default_kind_targets(positional[:1], "pod")
+    return _make_intents(list(dict.fromkeys(targets + earlier)), "run", params, metadata)
+
+
 def _default_kind_targets(positional: list[str], kind: str) -> list[str]:
     """``kind/<word>`` for a bare word, ``<kind>/<name>`` normalised for TYPE/NAME."""
     targets = []
@@ -965,6 +975,11 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
             raise ValueError(f"could not find a target resource in: {argv!r}")
         return _debug_intents(positional, raw_copy_to, params, metadata)
 
+    if verb == "run":
+        if not positional:
+            raise ValueError(f"could not find a target resource in: {argv!r}")
+        return _run_intents(positional, params, metadata)
+
     if verb in _POD_TARGET_VERBS:
         if not positional:
             raise ValueError(f"could not find a target resource in: {argv!r}")
@@ -1023,8 +1038,6 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
         resources.append(f"{_split_resource_token(positional[0])[0]}/*")
     if not resources:
         raise ValueError(f"could not find a target resource in: {argv!r}")
-    if verb in _POD_NAME_FIRST_VERBS:
-        return _make_intents(resources, verb, params, metadata)
     resources = _expand_categories(resources)
     intents = _mark_open_targets(_make_intents(resources, verb, params, metadata),
                                  custom_kinds=verb in _KUBECTL_CUSTOM_KIND_VERBS)

@@ -36,8 +36,8 @@ free-form string; every other field feeds either matching, provenance, or author
 A plan-level constraint (`../data/plan_constraints.example.yaml`) carries exactly one batch
 predicate instead of a per-intent match, evaluated over every intent from one plan/invocation.
 One kubectl command can be more than one intent: `kubectl cp b web:/a` is two (`pod/web` and `b`),
-`kubectl debug web` is two (`pod/web` and `web/*`), `--copy-to` adds a third, and `kubectl exec
-deploy/web` is two (`deployment/web` and `pod/*`). Each counts toward `max_intents` and
+`kubectl debug web` and `kubectl run web` are two (`pod/web` and `web/*`), `--copy-to` adds a third
+on `debug`, and `kubectl exec deploy/web` is two (`deployment/web` and `pod/*`). Each counts toward `max_intents` and
 `max_matching`, so a count can rise. A `ratio` can also drop, since the extra intents join its
 denominator: `kubectl cp web:/a b` under a ratio of `web:*` over all intents with `max: 0.75` went
 from 1/1 to 1/2, which passes a ratio that used to fire:
@@ -81,6 +81,15 @@ A kubectl target is normalised to `<singular kind>/<name>` before matching, so w
   keeps matching. A plan `ratio` over it can change (see plan constraints above). The action stays `debug`: a rule on `delete` or `create` does not meet `--replace`
   or `--copy-to` in the hook. The server-side policy covers those ([client
   parity](server-side.md)).
+- `run` creates a pod called its first word, whatever the word says: `kubectl run web --image=x` is
+  `pod/web` and `kubectl run all --image=x` is `pod/all`, with no kind from the `all` category. The
+  name stays as written, so `kubectl run 001` is `pod/001`. Words after the name are arguments for
+  the pod, so they name no pod. `web/*`, the target earlier versions gave, stays beside the pod, so
+  a per-intent rule on it keeps matching. A plan `ratio` over it can change: `kubectl run web` under
+  a ratio of `web/*` over all intents with `max: 0.75` went from 1/1 to 1/2. A word with a slash,
+  such as `deploy/web`, is one the API refuses as a pod name, so it stays `deployment/web`. The
+  action stays `run`: a rule on `create` does not meet it in the hook, and a rule on `delete` does
+  not meet `--rm`. The server-side policy covers those ([client parity](server-side.md)).
 - `cp` names its pod in `[namespace/]pod:path`, on either side: `kubectl cp web:/a b` and `kubectl
   cp b prod/web:/a` are both `pod/web`, and a namespace written there wins over `-n`, as it does in
   kubectl. Aegis reads the operands as kubectl does. Only the first colon counts, and what comes

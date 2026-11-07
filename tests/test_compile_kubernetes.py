@@ -457,6 +457,7 @@ def test_every_kubectl_command_is_placed():
     ("role/*", "create", "exact", ["apply", "auth", "replace"]),
     ("pod/*", "exec", "exact", ["cp", "create"]),
     ("pod/*", "attach", "exact", ["create", "debug", "run"]),
+    ("pod/*", "run", "exact", ["apply", "create", "debug", "replace"]),
     ("pod/*", "port-forward", "exact", ["create"]),
     ("selfsubjectreview/*", "create", "over-enforced", ["apply", "auth", "replace"]),
     ("deployment/*", "patch", "over-enforced",

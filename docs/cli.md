@@ -115,8 +115,9 @@ object of that kind. `kubectl describe pod pay` escalates under a `describe` rul
 name starts with `pay`, because kubectl treats the name as a prefix when no pod has exactly that
 name. A kind outside the built-in table, as in `kubectl delete widgets --all`, escalates under a
 rule on a custom kind, because a plural or short name cannot be resolved from the command
-([Kubernetes resource names](constraints.md#kubernetes-resource-names)). `kubectl debug web` and
-`kubectl cp b web:/a` need no note: they are `pod/web`, beside the target earlier versions gave.
+([Kubernetes resource names](constraints.md#kubernetes-resource-names)). `kubectl debug web`,
+`kubectl run web` and `kubectl cp b web:/a` need no note: they are `pod/web`, beside the target
+earlier versions gave.
 Words after `--` count as operands on the verbs that take them, so `kubectl describe pod api --
 payments-0` is two pods.
 
