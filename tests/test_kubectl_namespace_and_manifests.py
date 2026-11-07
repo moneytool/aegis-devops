@@ -738,6 +738,28 @@ def test_a_quarantined_rule_asks_where_a_live_one_would(command, rule):
     ("pod/ls", "exec", "kubectl exec web -- ls", "ALLOW"),
     ("pod/sh", "debug", "kubectl debug web --image=x -- sh", "ALLOW"),
     ("pod/sleep", "run", "kubectl run web --image=x -- sleep", "ALLOW"),
+    ("pod/1", "run", "kubectl run web --image=x -- 1", "ALLOW"),
+    # run names a pod (#71)
+    ("pod/web", "run", "kubectl run web --image=x", "BLOCK"),
+    ("pod/*", "run", "kubectl run web --image=x", "BLOCK"),
+    ("pod/*", "run", "kubectl run --image=x -n prod web", "BLOCK"),
+    ("pod/web", "run", "kubectl run web --image=x -- sleep 1", "BLOCK"),
+    ("pod/all", "run", "kubectl run all --image=x", "BLOCK"),
+    ("pod/*", "run", "kubectl run all --image=x", "BLOCK"),
+    ("pod/001", "run", "kubectl run 001 --image=x", "BLOCK"),
+    ("pod/1", "run", "kubectl run 001 --image=x", "ALLOW"),
+    ("pod/other", "run", "kubectl run web --image=x", "ALLOW"),
+    # a category is not read: run all is a pod and reaches no deployment
+    ("deployment/*", "run", "kubectl run all --image=x", "ALLOW"),
+    # the action stays run
+    ("pod/*", "create", "kubectl run web --image=x", "ALLOW"),
+    # a rehearsal stays a rehearsal
+    ("pod/*", "run", "kubectl run web --image=x --dry-run=client", "ALLOW"),
+    ("pod/*", "run", "kubectl run web --image=x --dry-run=none", "BLOCK"),
+    ("web/*", "run", "kubectl run web --image=x", "BLOCK"),
+    ("all/*", "run", "kubectl run all --image=x", "BLOCK"),
+    ("web/a", "run", "kubectl run web a --image=x", "BLOCK"),
+    ("other/*", "run", "kubectl run web --image=x", "ALLOW"),
     # the spelling earlier versions gave keeps its rule
     ("web:*", "cp", "kubectl cp web:/a b", "BLOCK"),
     ("web:/a", "cp", "kubectl cp web:/a b", "BLOCK"),

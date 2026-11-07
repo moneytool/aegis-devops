@@ -4815,6 +4815,15 @@ def test_a_long_list_of_kinds_through_the_hook_stays_linear(opted_in_project):
     ("web:*", "cp", "kubectl cp web:/a b", "deny"),
     ("b", "cp", "kubectl cp b web:/a", "deny"),
     ("web/*", "debug", "kubectl debug web --image=x", "deny"),
+    ("web/*", "run", "kubectl run web --image=x", "deny"),
+    # run names a pod (#71)
+    ("pod/web", "run", "kubectl run web --image=x", "deny"),
+    ("pod/*", "run", "kubectl run web --image=x -n prod", "deny"),
+    ("pod/all", "run", "kubectl run all --image=x", "deny"),
+    ("pod/web", "run", "kubectl run web --image=x -- sleep 1", "deny"),
+    ("pod/*", "run", "kubectl run web --image=x --dry-run=client", "allow"),
+    ("pod/other", "run", "kubectl run web --image=x", "allow"),
+    ("deployment/*", "run", "kubectl run all --image=x", "allow"),
     # a name is text
     ("pod/001", "debug", "kubectl debug web --image=x --copy-to=001", "deny"),
     ("widget/foo", "autoscale", "kubectl autoscale widgets foo --max=3", "ask"),

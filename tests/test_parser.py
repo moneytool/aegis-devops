@@ -3045,8 +3045,8 @@ def test_a_verb_run_on_a_pod_behind_a_name(verb, spelled, named):
     ("kubectl attach pod web", ["pod/web"]),
     ("kubectl attach deploy web", ["deployment/web", "pod/*"]),
     # run's word names a new pod; debug's words name pods
-    ("kubectl run all --image=x", ["all/*"]),
-    ("kubectl run all --image=x a", ["all/a"]),
+    ("kubectl run all --image=x", ["pod/all", "all/*"]),
+    ("kubectl run all --image=x a", ["pod/all", "all/a"]),
     ("kubectl debug all --image=x", ["pod/all", "all/*"]),
     ("kubectl debug all other --image=x", ["pod/all", "pod/other", "all/other"]),
 ])
@@ -3328,6 +3328,74 @@ def test_a_word_that_names_a_new_or_given_pod_is_not_marked(command):
                for i in from_kubectl_multi(command.split()))
 
 
+# --- kubectl run: the word names a pod (#71) ----------------------------------------
+
+
+@pytest.mark.parametrize("command,targets", [
+    ("kubectl run web --image=x", ["pod/web", "web/*"]),
+    ("kubectl run --image=x web", ["pod/web", "web/*"]),
+    ("kubectl run --image x web", ["pod/web", "web/*"]),
+    ("kubectl run -it --rm web --image=x", ["pod/web", "web/*"]),
+    ("kubectl run --restart=Never --env A=b --port 80 web --image=x", ["pod/web", "web/*"]),
+    # no category, whichever one the word spells
+    ("kubectl run all --image=x", ["pod/all", "all/*"]),
+    ("kubectl run api-extensions --image=x", ["pod/api-extensions", "api-extensions/*"]),
+    # the word as written, with what earlier versions made of it beside it
+    ("kubectl run 001 --image=x", ["pod/001", "001/*"]),
+    ("kubectl run 1e5 --image=x", ["pod/1e5", "1e5/*"]),
+    ("kubectl run Web --image=x", ["pod/Web", "web/*"]),
+    ("kubectl run pods --image=x", ["pod/pods", "pod/*"]),
+    ("kubectl run deploy --image=x", ["pod/deploy", "deployment/*"]),
+    # more words are arguments for the pod (checked on kind)
+    ("kubectl run web a b --image=x", ["pod/web", "web/a", "web/b"]),
+    ("kubectl run pods web --image=x", ["pod/pods", "pod/web"]),
+    # a pod name can't have a slash: the API refuses it (checked on kind)
+    ("kubectl run pod/web --image=x", ["pod/web"]),
+    ("kubectl run deploy/web --image=x", ["deployment/web"]),
+    ("kubectl run all/web --image=x", ["all/web"]),
+])
+def test_run_names_a_pod(command, targets):
+    intents = from_kubectl_multi(command.split())
+    assert [i.resource for i in intents] == targets
+    assert {i.action for i in intents} == {"run"}
+
+
+@pytest.mark.parametrize("command", [
+    "kubectl run web --image=x -n prod",
+    "kubectl -n prod run web --image=x",
+    "kubectl run -n prod --image=x web",
+    "kubectl run -nprod web --image=x",
+    "kubectl run --namespace=prod web --image=x",
+])
+def test_run_keeps_the_namespace_on_every_intent(command):
+    intents = from_kubectl_multi(command.split())
+    assert [i.resource for i in intents] == ["pod/web", "web/*"]
+    assert [i.metadata["namespace"] for i in intents] == ["prod", "prod"]
+
+
+def test_run_keeps_its_params_on_every_intent():
+    command = "kubectl run 001 --image=001 --dry-run=client -- sleep 1"
+    intents = from_kubectl_multi(command.split())
+    assert [i.resource for i in intents] == ["pod/001", "001/*"]
+    for intent in intents:
+        assert intent.params == {"image": 1, "dry_run": True, "command": ["sleep", "1"]}
+
+
+@pytest.mark.parametrize("command", [
+    "kubectl run --image=x",
+    "kubectl run --image=x -- web",
+    "kubectl run a,b c --image=x",
+])
+def test_run_stays_refused(command):
+    with pytest.raises(ValueError):
+        from_kubectl_multi(command.split())
+
+
+def test_from_kubectl_raises_on_run_with_two_intents():
+    with pytest.raises(ValueError, match="found 2"):
+        from_kubectl("kubectl run web --image=x".split())
+
+
 def test_marking_kinds_stays_linear():
     command = "kubectl delete " + ",".join(f"k{i}" for i in range(11000)) + " --all"
     assert len(command) > 64 * 1024
@@ -3529,7 +3597,7 @@ def test_a_prefix_counts_the_words_after_dash(command, prefix):
     # "--" starts a command here (ArgsLenAtDash in kubectl's source)
     ("kubectl exec web -- ls -la", ["pod/web"], ["ls", "-la"]),
     ("kubectl exec deploy/web -- ls", ["deployment/web", "pod/*"], ["ls"]),
-    ("kubectl run web --image=x -- sleep 1", ["web/*"], ["sleep", "1"]),
+    ("kubectl run web --image=x -- sleep 1", ["pod/web", "web/*"], ["sleep", "1"]),
     ("kubectl create deployment web --image=x -- sleep 1", ["deployment/web"], ["sleep", "1"]),
     ("kubectl create job j --image=x -- sleep 1", ["job/j"], ["sleep", "1"]),
     ("kubectl debug node/n1 --image=x -- sh", ["node/n1"], ["sh"]),
@@ -3611,9 +3679,8 @@ def test_a_kind_outside_the_table_may_be_any_custom_kind(command, resource, mark
     ("kubectl delete pods --all", {"from": "pod/*", "kinds": ["pod"]}),
     ("kubectl get deploy", {"from": "deployment/*", "kinds": ["deployment"]}),
     ("kubectl delete pod web", None),
-    # these reach the parser as kind/name but are not about a kind
+    # this reaches the parser as kind/name but is not about a kind
     ("kubectl config view", {"from": "view/*", "kinds": ["view"]}),
-    ("kubectl run web --image=x", None),
     ("kubectl rollout restart widgets/foo", None),
     ("kubectl taint widgets foo a=b:NoSchedule", None),
 ])

@@ -45,6 +45,19 @@ behaviour.
   `from_kubectl` now raises `ValueError` on `kubectl cp` with a pod and on `kubectl debug <name>`, as
   it does for `kubectl exec deploy/web`, because they give more than one intent. Use
   `from_kubectl_multi`.
+- `kubectl run web --image=x` created a pod called `web` but was read as `web/*`, the word taken as a
+  kind, so it passed a `run` rule on `pod/*` or `pod/web` (#71). It is now `pod/web`, and
+  `kubectl run all --image=x` is `pod/all`, with no kind from the `all` category. The name stays as
+  written (`kubectl run 001` is `pod/001`), and `--` operands, `params["command"]` and `--dry-run`
+  are as they were. `web/*` stays beside the pod, so a per-intent rule on the old spelling keeps
+  matching. A word with a slash, such as `kubectl run deploy/web`, is refused by the API as a pod
+  name and stays `deployment/web`.
+
+  This takes `kubectl run` from one intent to two, which can change a plan rule. A count such as
+  `max_intents` can rise, and a `ratio` can drop: `kubectl run web` under a ratio of `web/*` over all
+  intents with `max: 0.75` went from BLOCK to ALLOW, because 1/1 became 1/2. `from_kubectl` now
+  raises `ValueError` on `kubectl run`, as it does for `kubectl debug <name>`. Use
+  `from_kubectl_multi`.
 
 ## [1.3.1] — 2026-11-06
 
