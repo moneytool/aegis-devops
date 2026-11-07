@@ -3761,3 +3761,28 @@ def test_a_kind_outside_the_table_may_be_any_custom_kind(command, resource, mark
 ])
 def test_the_kinds_that_stay_as_they_were(command, marker):
     assert from_kubectl(command.split()).params.get("resolved_at_runtime") == marker
+
+
+# A repeated dry-run flag: the last one decides (#75). aws and git were run, with a stub
+# endpoint and a local remote. helm, argocd, flux and az are not installed here, so these
+# come from their source: helm pkg/cmd/helpers.go, argocd app.go (app sync), flux create.go
+# and azure-cli resource/_params.py. Flux has no --dry-run on any command the parser takes,
+# and no gcloud command it takes was found with the flag, so neither has a case here.
+@pytest.mark.parametrize("argv,rehearsal", [
+    ("helm upgrade api ./c --dry-run=client --dry-run=none", False),
+    ("helm upgrade api ./c --dry-run=none --dry-run=client", True),
+    ("argocd app sync web --dry-run --dry-run=false", False),
+    ("argocd app sync web --dry-run=false --dry-run", True),
+    ("flux create source git a --url=https://x --branch=main --export --export=false", False),
+    ("flux create source git a --url=https://x --branch=main --export=false --export", True),
+    ("aws ec2 terminate-instances --instance-ids i-1 --dry-run --no-dry-run", False),
+    ("aws ec2 terminate-instances --instance-ids i-1 --no-dry-run --dry-run", True),
+    ("az deployment group create -g r --template-file t.json --what-if", True),
+    ("git push origin main --dry-run --no-dry-run", False),
+    ("git push origin main -n --no-dry-run", False),
+    ("git push origin main --no-dry-run --dry-run", True),
+    ("git push --no-dry-run origin main", False),
+])
+def test_the_last_dry_run_decides_in_the_other_tools(argv, rehearsal):
+    intent = from_argv(argv.split())[0]
+    assert intent.params.get("dry_run", False) is rehearsal

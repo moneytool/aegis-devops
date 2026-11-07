@@ -854,3 +854,229 @@ def test_other_actions_and_kinds_stay_quiet(command):
 def test_the_paper_scenarios_keep_their_verdicts(command, verdict):
     rules = [_rule("n", "namespace/*", ["delete"]), _rule("o", "node/*", ["delete"])]
     assert _decide(rules, command.split())[0] == verdict
+
+
+# --- flag spellings kubectl reads differently from how they look (#75) ---------------
+# Checked on kubectl 1.36 against a local stub API server: which namespace the request
+# went to, and whether a DELETE was sent at all.
+
+
+def _one(command: str):
+    return from_kubectl_multi(command.split())[0]
+
+
+@pytest.mark.parametrize("flags,rehearsal", [
+    ("--dry-run=client --dry-run=none", False),
+    ("--dry-run=server --dry-run=none", False),
+    ("--dry-run=server --dry-run=false", False),
+    ("--dry-run --dry-run=none", False),
+    ("--dry-run=none --dry-run=client", True),
+    ("--dry-run=none --dry-run=server", True),
+    ("--dry-run=none --dry-run", True),
+    ("--dry-run=client --dry-run=server", True),
+    ("--dry-run=none", False),
+    ("--dry-run=client", True),
+])
+def test_the_last_dry_run_decides(flags, rehearsal):
+    intent = _one(f"kubectl delete pod x {flags}")
+    assert intent.params.get("dry_run", False) is rehearsal
+    block = [_rule("no-delete", "pod/*", ["delete"])]
+    assert _decide(block, f"kubectl delete pod x {flags}".split())[0] == (
+        "ALLOW" if rehearsal else "BLOCK")
+
+
+@pytest.mark.parametrize("word,namespace", [
+    ("-n prod", "prod"),
+    ("-nprod", "prod"),
+    ("-n=prod", "prod"),
+    ("-n dev -n prod", "prod"),
+    ("-n dev -qnprod", "prod"),
+    ("-qnprod", "prod"),
+    ("-qn prod", "prod"),
+    ("-qn=prod", "prod"),
+    ("-itnprod", "prod"),
+    ("-n prod -qndev", "dev"),
+    ("-n=", "="),  # pflag strips a "=" only when something follows it
+])
+def test_a_bundled_namespace_is_the_one_kubectl_uses(word, namespace):
+    command = f"kubectl run web --image=x {word}"
+    assert _one(command).metadata["namespace"] == namespace
+
+
+@pytest.mark.parametrize("command", [
+    "kubectl run web --image=x -n dev -qnprod",
+    "kubectl run web --image=x -qn prod",
+    "kubectl delete pod x -n dev -inprod",
+    "kubectl exec web -n dev -itnprod -- ls",
+    "kubectl rollout restart deploy/web -n dev -qnprod",
+])
+def test_a_bundled_namespace_meets_a_namespace_rule(command):
+    actions = ["run", "delete", "exec", "rollout-restart"]
+    rule = _rule("prod-only", "*/*", actions, scope={"namespace": "prod"})
+    assert _decide([rule], command.split())[0] == "BLOCK"
+
+
+def test_a_flag_value_is_not_split_as_a_short_word():
+    # kubectl takes the next word as the value, whatever it looks like
+    rule = _rule("prod-only", "*/*", ["delete"], scope={"namespace": "prod"})
+    intent = _one("kubectl delete pod x -n dev --field-manager -qnprod")
+    assert intent.metadata["namespace"] == "dev"
+    assert intent.params["field-manager"] == "-qnprod"
+    command = "kubectl delete pod x -n prod --field-manager -ndev"
+    assert _decide([rule], command.split())[0] == "BLOCK"
+    assert _one("kubectl get pods --context -nprod").metadata == {"context": "-nprod"}
+    assert _one("kubectl --context -nprod get pods").metadata == {"context": "-nprod"}
+
+
+@pytest.mark.parametrize("command,resource,params,metadata", [
+    # harmless spellings keep their result
+    ("kubectl exec web -it -- sh", "pod/web", {"command": ["sh"]}, {}),
+    ("kubectl exec web -ti -- sh", "pod/web", {"command": ["sh"]}, {}),
+    ("kubectl exec web -i -t -- sh", "pod/web", {"command": ["sh"]}, {}),
+    ("kubectl exec -it web -- ls -la", "pod/web", {"command": ["ls", "-la"]}, {}),
+    ("kubectl run web --image=x -it", "pod/web", {"image": "x"}, {}),
+    ("kubectl get pod/a -oyaml", "pod/a", {}, {}),
+    ("kubectl get pod/a -ojson", "pod/a", {}, {}),
+    ("kubectl get pod/a -o=json", "pod/a", {}, {}),
+    ("kubectl get pod/a -o yaml", "pod/a", {}, {}),
+    ("kubectl get pod/a -v9", "pod/a", {}, {}),
+    ("kubectl get pod/a -w", "pod/a", {}, {}),
+    ("kubectl exec web -capp -- ls", "pod/web", {"container": "app", "command": ["ls"]}, {}),
+    ("kubectl -nprod get pod/a", "pod/a", {}, {"namespace": "prod"}),
+    ("kubectl -n=prod get pod/a", "pod/a", {}, {"namespace": "prod"}),
+    ("kubectl -oyaml get pod/a", "pod/a", {}, {}),
+    ("kubectl -v9 get pod/a", "pod/a", {}, {}),
+    ("kubectl rollout -nprod restart deploy/web", "deployment/web", {}, {"namespace": "prod"}),
+    ("kubectl set -nprod image deploy/web a=b", "deployment/web", {"images": {"a": "b"}},
+     {"namespace": "prod"}),
+    ("kubectl get pod/a -x", "pod/a", {}, {}),
+    ("kubectl get pod/a -xyz", "pod/a", {}, {}),
+    # read as kubectl reads them
+    ("kubectl get pod/a -wA", "pod/a", {}, {"all_namespaces": True}),
+    ("kubectl get pod/a -Aw", "pod/a", {}, {"all_namespaces": True}),
+    ("kubectl get pod/a -Aoyaml", "pod/a", {}, {"all_namespaces": True}),
+    ("kubectl get pod/a -Ao yaml", "pod/a", {}, {"all_namespaces": True}),
+    ("kubectl get pod/a -Alapp=x", "pod/a", {"selector": "app=x"}, {"all_namespaces": True}),
+    ("kubectl get pod/a -Al app=x", "pod/a", {"selector": "app=x"}, {"all_namespaces": True}),
+    ("kubectl get pod/a -l=app=x", "pod/a", {"selector": "app=x"}, {}),
+    ("kubectl logs -fp web", "pod/web", {"follow": True}, {}),
+    ("kubectl logs -pf web", "pod/web", {"follow": True}, {}),
+    ("kubectl logs -fc app web", "pod/web", {"follow": True, "container": "app"}, {}),
+    ("kubectl logs web -fcapp", "pod/web", {"follow": True, "container": "app"}, {}),
+    ("kubectl logs -f=false web", "pod/web", {"follow": False}, {}),
+    ("kubectl exec -itc app web -- sh", "pod/web", {"container": "app", "command": ["sh"]}, {}),
+    ("kubectl patch deploy/web -p{}", "deployment/web", {"patch": "{}"}, {}),
+    ("kubectl get pod/a -test.nprod", "pod/a", {"e": "st.nprod"}, {}),  # pflag skips it
+])
+def test_short_words(command, resource, params, metadata):
+    intent = _one(command)
+    assert intent.resource == resource
+    assert intent.metadata == metadata
+    recorded = {k: v for k, v in intent.params.items() if k != "resolved_at_runtime"}
+    assert recorded == params
+
+
+@pytest.mark.parametrize("word,verb", [
+    ("-Rf dir", "delete"),
+    ("-Rfdir", "delete"),
+    ("-iRf dir", "delete"),
+    ("-Rk dir", "delete"),
+    ("-Rf dir", "apply"),
+])
+def test_a_bundled_manifest_is_a_manifest(word, verb):
+    intent = _one(f"kubectl {verb} {word}")
+    assert intent.resource == "manifest/dir"
+    assert intent.params["manifest_not_inspected"] is True
+
+
+@pytest.mark.parametrize("flags,every_namespace", [
+    ("-A", True),
+    ("-A=false", False),
+    ("-A --all-namespaces=false", False),
+    ("--all-namespaces=false -A", True),
+    ("--all-namespaces", True),
+])
+def test_the_last_all_namespaces_decides(flags, every_namespace):
+    intent = _one(f"kubectl get pod/a -n prod {flags}")
+    assert intent.metadata.get("all_namespaces", False) is every_namespace
+    assert intent.metadata["namespace"] == "prod"
+
+
+@pytest.mark.parametrize("command", [
+    # kubectl 1.36 has no -x or -r here and refuses them; a later one might have them
+    "kubectl get pods -xnprod",
+    "kubectl get pods -xn prod",
+    "kubectl get pods -xn=prod",
+    "kubectl get pods -xA",
+    "kubectl get pods -qxlapp=x",
+    "kubectl delete pod x -rf",
+    # only a value letter or A in front of the verb, as before
+    "kubectl -qnprod get pods",
+    "kubectl -An prod get pods",
+    "kubectl -lapp=x get pods",
+    "kubectl -fx.yaml apply",
+    # -r is only a flag on create deployment
+    "kubectl get pods -rf",
+    "kubectl create configmap c -rf",
+    "kubectl create configmap c -rnprod",
+    # the value is missing
+    "kubectl run web --image=x -qn",
+])
+def test_refused_short_words(command):
+    with pytest.raises(ValueError):
+        from_kubectl_multi(command.split())
+
+
+@pytest.mark.parametrize("command", [
+    "kubectl logs -l app=x",
+    "kubectl logs -fl app=x",
+    "kubectl logs -fl app=x -n dev",
+])
+def test_logs_by_selector_is_refused_though_kubectl_accepts_it(command):
+    # kubectl reads the pods from the selector, and the parser wants a named target.
+    # A gap in the parser that fails closed.
+    with pytest.raises(ValueError):
+        from_kubectl_multi(command.split())
+
+
+@pytest.mark.parametrize("flags,replicas", [
+    ("-r0xf", "0xf"),
+    ("-r3", 3),
+    ("-r 3", 3),
+    ("-r=3", 3),
+    ("-qr3", 3),  # kubectl refuses -q here, and the word still reads this way
+])
+@pytest.mark.parametrize("spelling", ["deployment", "deploy"])
+def test_r_is_replicas_on_create_deployment(flags, replicas, spelling):
+    intents = from_kubectl_multi(
+        f"kubectl create {spelling} web --image=nginx {flags} -n dev".split())
+    assert [i.resource for i in intents] == ["deployment/web"]
+    assert intents[0].params["replicas"] == replicas
+    assert intents[0].metadata == {"namespace": "dev"}
+
+
+def test_r_is_replicas_in_front_of_the_subcommand():
+    intent = _one("kubectl create -r3 deployment web --image=nginx -n dev")
+    assert intent.resource == "deployment/web"
+    assert intent.params["replicas"] == 3
+
+
+def test_the_value_of_r_is_not_read_as_a_namespace():
+    # kubectl refuses "nprod" as a number, and the namespace stays dev either way
+    intent = _one("kubectl create deployment web --image=x -n dev -rnprod")
+    assert intent.metadata == {"namespace": "dev"}
+
+
+def test_a_refused_short_word_reaches_the_hook_as_a_refusal():
+    verdict = decide("kubectl delete deploy web -xnprod", ROOT / "data")
+    assert verdict.decision == "deny", verdict
+
+
+@pytest.mark.parametrize("command,decision", [
+    ("kubectl delete deploy web -n prod --dry-run=client --dry-run=none", "deny"),
+    ("kubectl delete deploy web -n dev -inprod", "deny"),
+    ("kubectl delete deploy web -n prod --dry-run=none --dry-run=client", "allow"),
+])
+def test_the_spellings_against_the_example_policy(command, decision):
+    verdict = decide(command, ROOT / "data")
+    assert verdict.decision == decision, verdict

@@ -8,6 +8,36 @@ behaviour.
 
 ## [Unreleased]
 
+### Fixed
+- Two kubectl flag spellings were read differently from kubectl, on every verb, so a BLOCK could
+  pass (#75). Checked on kubectl 1.36 against a local stub API server.
+  - A repeated `--dry-run`: the first rehearsal stuck, so `kubectl delete pod x --dry-run=client
+    --dry-run=none` was allowed as a rehearsal, and it is a real delete. The last one now decides,
+    both ways. `--no-dry-run` after `--dry-run` was missed on aws and git, and now clears it, which
+    was checked on both CLIs. helm `install`, `upgrade` and `rollback` and `argocd app sync` get the
+    same reading, and `flux create --export --export=false` no longer counts as a rehearsal. Those
+    three come from reading each tool's source, and none of them was run. gcloud now reads
+    `--no-dry-run` as a real run, though no gcloud command the parser takes was found with the flag.
+  - A bundled short flag: the whole word was ignored, so `kubectl run web --image=x -n dev -qnprod`
+    was read as `dev`, and it runs in `prod`. Short words are now read letter by letter as pflag
+    reads them, from one table of which letters take a value. `-Rf dir` is now the manifest
+    `dir` (it was a kind called `dir`), `-Ao yaml` is every namespace (it was a pod called `yaml`),
+    and `logs -fc app web` is `pod/web` (it was `pod/c`). `-r` is `--replicas` on `create
+    deployment`, so `-r 3` no longer adds a target called `deployment/3`.
+
+  Also read as kubectl reads them now: `--context -nprod` is a context called `-nprod`, since a flag
+  that takes a value takes the next word whatever it looks like, `-n=` is the namespace `=`, and
+  `--all-namespaces=false` turns off an earlier `-A`, which used to stick and make a namespace rule
+  escalate.
+
+  A word with an unknown letter in front of a value letter or `A` is now refused, because the
+  letter's meaning in a later kubectl cannot be known. kubectl 1.36 refuses the ones tried:
+  `get pods -xnprod`, `get pods -rf` and `delete pod x -rf`.
+
+  `kubectl logs -fl app=x` is now refused too, where it was read as `pod/l`. kubectl accepts it, and
+  it accepts `kubectl logs -l app=x`, which the parser already refused. Both stay refused until the
+  parser can read `logs` by selector.
+
 ## [1.3.3] — 2026-11-07
 
 `kubectl run --expose` now meets the rules on the Service it creates.

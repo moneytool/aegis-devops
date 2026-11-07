@@ -11,8 +11,11 @@ Global options in front of the verb (`kubectl -n prod delete …`, `git -C /repo
 `helm --kube-context prod uninstall …`), glued short flags (`-nprod`), label selectors
 (`-l role=worker`) and comma-separated kinds (`nodes,pods`) all parse to the same intents as
 their canonical forms; a leading option Aegis does not recognise is an error (exit 65), never a
-guess at where the verb starts. `kubectl delete namespace prod` additionally emits a synthetic
-`*/*` delete intent scoped to that namespace, so namespace-scoped deletion rules fire on it.
+guess at where the verb starts. kubectl's short flags can also be bundled, so `-itnprod` is `-i -t
+-n prod` and `-Rf dir` is `-R -f dir`. A bundle with an unknown letter in front of a flag Aegis
+reads (`-xnprod`) is the same error, and kubectl refuses it too. `kubectl delete namespace prod`
+additionally emits a synthetic `*/*` delete intent scoped to that namespace, so namespace-scoped
+deletion rules fire on it.
 
 ### Exit codes
 
@@ -371,7 +374,8 @@ flag, `aegis check <target>` still treats any shell metacharacter in an argv as 
 A rehearsal (`kubectl --dry-run=client|server`, `aws --dry-run`, `az --what-if|--dry-run`,
 `gcloud --dry-run`) can't change infrastructure, so Aegis never blocks or escalates it — the
 verdict is always `ALLOW`, with `dry_run: true` and `would_be` reporting what a real run would
-have gotten:
+have gotten. When the flag is repeated the last one decides: kubectl `--dry-run=client
+--dry-run=none` is a real run, and so is `--dry-run --no-dry-run` on aws and git.
 
 ```
 ALLOW: kubernetes scale deployment/api-server (dry-run; would be BLOCK)
