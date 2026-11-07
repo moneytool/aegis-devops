@@ -246,11 +246,12 @@ and on pods also `drain` (evictions, `--disable-eviction`), `run` (`--rm`) and `
 --replace`). A rule on `patch` or `update` lists everything that updates the kind, `rollout pause`
 and `rollout resume` included. A `create` rule on services lists `run` (`--expose`), a `delete` rule
 on them lists `run` too (`--rm --expose`), and `create` appears on subresource rules such as `exec`
-or a pod `delete` because `create --raw` can POST to any URI. A rule's own verb is never listed, even
-when the two layers differ on it: for a `pod/*` `exec` rule the policy denies `kubectl exec
-deploy/web` and the client allows it, because the client matches the name as written, and `kubectl
-delete all --all` does the same for a `deployment/*` `delete` rule. Commands the hook cannot parse are refused on the client, so they are
-not listed: `set env` and the other `set` subcommands except `set image`, `diff -f`, `proxy`.
+or a pod `delete` because `create --raw` can POST to any URI. A rule's own verb is never listed: the
+client decides on it too, for the objects behind a name as well (`kubectl exec deploy/web` against a
+`pod/*` `exec` rule, `kubectl delete all --all` against a `deployment/*` `delete` rule; see
+[Kubernetes resource names](constraints.md#kubernetes-resource-names)). Commands the hook cannot
+parse are refused on the client, so they are not listed: `set env` and the other `set` subcommands
+except `set image`, `diff -f`, `proxy`.
 
 ### Guardrails
 

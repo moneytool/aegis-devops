@@ -66,8 +66,19 @@ A kubectl target is normalised to `<singular kind>/<name>` before matching, so w
 implicitly:
 
 - `exec`, `logs`, `attach` and `port-forward` act on a **pod** by default: `kubectl exec api-0`
-  is `pod/api-0`; `kubectl exec deploy/web` is `deployment/web`.
+  is `pod/api-0`. Given another kind, `exec`, `attach` and `port-forward` run on a pod kubectl
+  finds behind it, so `kubectl exec deploy/web` is both `deployment/web` and `pod/*`. A rule on
+  one pod (`pod/payments-0`) cannot be decided from that, so it escalates with the note
+  `target-unresolved: <id>`. `logs deploy/web` is `deployment/web` only.
 - `drain`, `cordon` and `uncordon` act on **nodes**: `kubectl drain node1` is `node/node1`.
+
+The categories `all` and `api-extensions` are expanded like a comma-separated list of their kinds.
+`kubectl delete all --all` is one intent per kind in `kubectl api-resources --categories=all`
+(`pod/*`, `service/*`, `deployment/*`, ...), plus `all/*`. A rule on one object of those kinds
+(`deployment/payments`), or on a custom kind (`widget/*`), which can join a category, escalates
+with `target-unresolved: <id>`. A rule on any other built-in kind (`secret/*`) is untouched, since
+`all` does not reach it. A category a custom resource declares for itself looks like any other
+unknown kind and is not expanded.
 
 (Before v0.2.1 these produced `api-0` and `node1/*`, and plural kinds such as `storageclasses`
 were kept plural, so a rule written for the normal form missed them. Rules written against the

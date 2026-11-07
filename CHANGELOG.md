@@ -10,7 +10,8 @@ behaviour.
 
 ## [1.3.1] (not released yet)
 
-Three fixes found while preparing the formal model for a conference submission.
+Three fixes found while preparing the formal model for a conference submission, and a kubectl
+hook fix found while building the third (#64).
 
 ### Fixed
 - A constraint changed and rehashed after its source check no longer votes. The provenance hash is
@@ -32,6 +33,24 @@ Three fixes found while preparing the formal model for a conference submission.
   `unauthorized`. **Authorized entries that differ now fail the load**, where the first one used
   to win: the check exits with a data error and the hook denies infrastructure commands. A
   file with such duplicates must keep one of them.
+- A kubectl rule's own verb aimed at another name no longer gets past the hook (#64). `kubectl exec
+  deploy/web`, `attach` and `port-forward` on any kind but a pod run on a pod kubectl finds behind
+  the name, so they now match `pod/*` rules as well as rules on the name written. `kubectl delete
+  all --all`, and every other verb given the category `all` or `api-extensions`, now counts as each
+  kind in the category, so it matches rules like `deployment/*`. What cannot be known before kubectl
+  runs asks instead, with the note `target-unresolved: <id>`: a rule on one pod for `exec
+  deploy/web`, and a rule on one object or on a custom kind for `delete all --all`. Commands with no
+  rule on that action are not affected, and neither are other kinds: `delete all --all` still passes
+  a `secret/*` rule, as kubectl does not delete secrets for it. `all/web` and `all web` are refused,
+  as kubectl refuses them. Also read correctly now: `attach deploy web` and `attach pod web` (two
+  words are a type and a name), `label` and `annotate` removals such as `app-` and the operands of
+  `taint`, which used to count as object names, and the plural and short names of every built-in
+  kind (`rc`, `cj`, `endpointslices`, `podtemplates`, `ip`, `vac`, ...).
+- A rule whose time window cannot be evaluated because timezone data is missing now asks in two
+  more cases, where it used to be dismissed: on a manifest (`kubectl delete -f`), and when the
+  rule's scope is unresolved too. A quarantined rule under `on_untrusted_match: escalate` now asks
+  whenever a live one would, also when its scope, time window, target or manifest cannot be
+  resolved.
 
 ### Added
 - `aegis compile kubernetes`: every rule in `coverage.json` has a `client_parity` record, and

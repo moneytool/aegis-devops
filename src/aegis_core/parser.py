@@ -22,6 +22,18 @@ object the selector may match). ``kubectl delete nodes,pods`` yields one
 intent per kind; naming objects alongside a multi-kind list is rejected
 (kubectl rejects it too).
 
+**Names kubectl resolves at run time.** ``params["resolved_at_runtime"]``
+marks an intent whose real targets kubectl only finds when it runs, with the
+``kinds`` they can be. ``kubectl exec deploy/web`` (also ``attach``,
+``port-forward``, any kind but a pod) runs on a pod behind the name: besides
+``deployment/web`` it yields ``pod/*``, marked, so ``pod/*`` rules match and a
+rule on one pod, which cannot be decided here, escalates
+(``target-unresolved: <id>``). The categories ``all`` and ``api-extensions``
+yield one ``kind/*`` per kind in them, as a comma list does, plus a marked
+``all/*``, so a rule on one object of those kinds, or on a custom kind that
+may have joined the category, escalates too. Neither adds anything when no
+rule is about the action.
+
 **Namespace deletion cascade.** ``kubectl delete namespace/<ns>`` (in any
 form: ``namespace <ns>``, ``ns/<ns>``, ``namespaces <ns>``) deletes every
 object inside the namespace, so besides the ``namespace/<ns>`` intent the
@@ -146,69 +158,89 @@ _TERRAFORM_ACTION_MAP = {
     ("delete", "create"): "replace",
 }
 
-# Common plural/short kubectl resource names, normalised to their canonical
-# singular form.
-_RESOURCE_ALIASES = {
-    "deploy": "deployment",
-    "deployments": "deployment",
-    "po": "pod",
-    "pods": "pod",
-    "svc": "service",
-    "services": "service",
-    "no": "node",
-    "nodes": "node",
-    "ns": "namespace",
-    "namespaces": "namespace",
-    "cm": "configmap",
-    "configmaps": "configmap",
-    "sts": "statefulset",
-    "statefulsets": "statefulset",
-    "ds": "daemonset",
-    "daemonsets": "daemonset",
-    "secrets": "secret",
-    "pvc": "persistentvolumeclaim",
-    "persistentvolumeclaims": "persistentvolumeclaim",
-    "ing": "ingress",
-    "ingresses": "ingress",
-    "sa": "serviceaccount",
-    "serviceaccounts": "serviceaccount",
-    "rs": "replicaset",
-    "replicasets": "replicaset",
-    "jobs": "job",
-    "cronjobs": "cronjob",
-    "hpa": "horizontalpodautoscaler",
-    "horizontalpodautoscalers": "horizontalpodautoscaler",
-    "sc": "storageclass",
-    "storageclasses": "storageclass",
-    "ingressclasses": "ingressclass",
-    "pv": "persistentvolume",
-    "persistentvolumes": "persistentvolume",
-    "netpol": "networkpolicy",
-    "networkpolicies": "networkpolicy",
-    "pdb": "poddisruptionbudget",
-    "poddisruptionbudgets": "poddisruptionbudget",
-    "roles": "role",
-    "rolebindings": "rolebinding",
-    "clusterroles": "clusterrole",
-    "clusterrolebindings": "clusterrolebinding",
-    "crd": "customresourcedefinition",
-    "crds": "customresourcedefinition",
-    "customresourcedefinitions": "customresourcedefinition",
-    "validatingwebhookconfigurations": "validatingwebhookconfiguration",
-    "mutatingwebhookconfigurations": "mutatingwebhookconfiguration",
-    "priorityclasses": "priorityclass",
-    "pc": "priorityclass",
-    "limitranges": "limitrange",
-    "limits": "limitrange",
-    "resourcequotas": "resourcequota",
-    "quota": "resourcequota",
-    "certificatesigningrequests": "certificatesigningrequest",
-    "csr": "certificatesigningrequest",
-    "ep": "endpoints",  # the kind is "Endpoints"; its singular name is "endpoints"
-    "leases": "lease",
-    "events": "event",
-    "ev": "event",
+# Every built-in kind with its plural and short names. A fixed copy of `kubectl
+# api-resources` (kubectl 1.36, kind server 1.37), so it needs refreshing when
+# Kubernetes adds a kind: one missing from here counts as a possible custom kind.
+_KUBECTL_BUILTIN_KINDS: dict[str, tuple[str, ...]] = {
+    "apiservice": ("apiservices",),
+    "binding": ("bindings",),
+    "certificatesigningrequest": ("certificatesigningrequests", "csr"),
+    "clusterrole": ("clusterroles",),
+    "clusterrolebinding": ("clusterrolebindings",),
+    "clustertrustbundle": ("clustertrustbundles",),
+    "componentstatus": ("componentstatuses", "cs"),
+    "configmap": ("configmaps", "cm"),
+    "controllerrevision": ("controllerrevisions",),
+    "cronjob": ("cronjobs", "cj"),
+    "csidriver": ("csidrivers",),
+    "csinode": ("csinodes",),
+    "csistoragecapacity": ("csistoragecapacities",),
+    "customresourcedefinition": ("customresourcedefinitions", "crd", "crds"),
+    "daemonset": ("daemonsets", "ds"),
+    "deployment": ("deployments", "deploy"),
+    "deviceclass": ("deviceclasses",),
+    "devicetaintrule": ("devicetaintrules",),
+    "endpoints": ("ep",),
+    "endpointslice": ("endpointslices",),
+    "event": ("events", "ev"),
+    "flowschema": ("flowschemas",),
+    "horizontalpodautoscaler": ("horizontalpodautoscalers", "hpa"),
+    "ingress": ("ingresses", "ing"),
+    "ingressclass": ("ingressclasses",),
+    "ipaddress": ("ipaddresses", "ip"),
+    "job": ("jobs",),
+    "lease": ("leases",),
+    "limitrange": ("limitranges", "limits"),
+    "localsubjectaccessreview": ("localsubjectaccessreviews",),
+    "mutatingadmissionpolicy": ("mutatingadmissionpolicies",),
+    "mutatingadmissionpolicybinding": ("mutatingadmissionpolicybindings",),
+    "mutatingwebhookconfiguration": ("mutatingwebhookconfigurations",),
+    "namespace": ("namespaces", "ns"),
+    "networkpolicy": ("networkpolicies", "netpol"),
+    "node": ("nodes", "no"),
+    "persistentvolume": ("persistentvolumes", "pv"),
+    "persistentvolumeclaim": ("persistentvolumeclaims", "pvc"),
+    "pod": ("pods", "po"),
+    "podcertificaterequest": ("podcertificaterequests",),
+    "poddisruptionbudget": ("poddisruptionbudgets", "pdb"),
+    "podtemplate": ("podtemplates",),
+    "priorityclass": ("priorityclasses", "pc"),
+    "prioritylevelconfiguration": ("prioritylevelconfigurations",),
+    "replicaset": ("replicasets", "rs"),
+    "replicationcontroller": ("replicationcontrollers", "rc"),
+    "resourceclaim": ("resourceclaims",),
+    "resourceclaimtemplate": ("resourceclaimtemplates",),
+    "resourcequota": ("resourcequotas", "quota"),
+    "resourceslice": ("resourceslices",),
+    "role": ("roles",),
+    "rolebinding": ("rolebindings",),
+    "runtimeclass": ("runtimeclasses",),
+    "secret": ("secrets",),
+    "selfsubjectaccessreview": ("selfsubjectaccessreviews",),
+    "selfsubjectreview": ("selfsubjectreviews",),
+    "selfsubjectrulesreview": ("selfsubjectrulesreviews",),
+    "service": ("services", "svc"),
+    "serviceaccount": ("serviceaccounts", "sa"),
+    "servicecidr": ("servicecidrs",),
+    "statefulset": ("statefulsets", "sts"),
+    "storageclass": ("storageclasses", "sc"),
+    "storageversionmigration": ("storageversionmigrations",),
+    "subjectaccessreview": ("subjectaccessreviews",),
+    "tokenreview": ("tokenreviews",),
+    "validatingadmissionpolicy": ("validatingadmissionpolicies",),
+    "validatingadmissionpolicybinding": ("validatingadmissionpolicybindings",),
+    "validatingwebhookconfiguration": ("validatingwebhookconfigurations",),
+    "volumeattachment": ("volumeattachments",),
+    "volumeattributesclass": ("volumeattributesclasses", "vac"),
 }
+
+# Plural and short names normalised to the singular kind.
+_RESOURCE_ALIASES = {
+    spelling: kind for kind, spellings in _KUBECTL_BUILTIN_KINDS.items() for spelling in spellings
+}
+
+# Every spelling of a built-in kind.
+_KUBECTL_BUILTIN_NAMES = frozenset(_KUBECTL_BUILTIN_KINDS) | frozenset(_RESOURCE_ALIASES)
 
 # kubectl flags that take no value token when given without "=value": the
 # boolean flags of every verb the parser handles (from kubectl 1.36's
@@ -323,6 +355,30 @@ _LITERAL_RESOURCE_VERBS = {"cp"}
 # ("exec api-0" -> pod/api-0), and "deploy/web" / "svc/web" normalise like
 # any other kind/name token.
 _POD_TARGET_VERBS = {"exec", "logs", "port-forward", "attach"}
+
+# Of those, the ones whose kind/name kubectl resolves to a pod behind it, for a
+# rule on that verb to decide (see "Names kubectl resolves at run time" above).
+# logs does too, but is a read and is reported separately.
+_POD_RESOLVING_VERBS = {"exec", "port-forward", "attach"}
+
+# Verbs whose first word names a pod, whatever it says, so it is never a category.
+_POD_NAME_FIRST_VERBS = {"run", "debug"}
+
+# The categories kubectl knows without any custom resource definition, from
+# `kubectl api-resources --categories=...` (1.36, on kind 1.37). A custom resource
+# can join either, or declare its own, which no list here can show.
+_KUBECTL_CATEGORIES = {
+    "all": (
+        "pod", "replicationcontroller", "service", "daemonset", "deployment", "replicaset",
+        "statefulset", "horizontalpodautoscaler", "cronjob", "job",
+    ),
+    "api-extensions": (
+        "mutatingadmissionpolicy", "mutatingadmissionpolicybinding",
+        "mutatingwebhookconfiguration", "validatingadmissionpolicy",
+        "validatingadmissionpolicybinding", "validatingwebhookconfiguration",
+        "customresourcedefinition", "apiservice",
+    ),
+}
 
 # Verbs that act on nodes: a bare name is a node ("drain node1" ->
 # node/node1), not a kind to list.
@@ -506,6 +562,33 @@ def _parse_resources(positional: list[str]) -> list[str]:
     return [f"{kind}/{name}" for name in positional[1:]]
 
 
+def _is_pair_operand(token: str) -> bool:
+    """Whether a word given to ``label``, ``annotate`` or ``set image`` is
+    ``key=value`` or ``key-`` and not a resource, as kubectl decides it."""
+    return ("=" in token and token[0] != "=") or (token.endswith("-") and token != "-")
+
+
+def _is_taint_operand(token: str) -> bool:
+    """The same for ``taint``, which also takes ``key:effect``."""
+    return "=" in token or ":" in token or token.endswith("-")
+
+
+def _expand_categories(resources: list[str]) -> list[str]:
+    """Adds the kinds behind a category to ``kind/*`` resources: ``all/*`` keeps
+    its place, followed by one ``kind/*`` per kind in it. A category with a
+    name is refused: kubectl refuses ``all/web`` and ``all web`` too."""
+    out: dict[str, None] = {}
+    for resource in resources:
+        kind, _, name = resource.partition("/")
+        out[resource] = None
+        if kind in _KUBECTL_CATEGORIES:
+            if name != "*":
+                raise ValueError(f"the category {kind!r} cannot be combined with a name: "
+                                 f"{resource!r}")
+            out.update((f"{k}/*", None) for k in _KUBECTL_CATEGORIES[kind])
+    return list(out)
+
+
 def _bare_flag(tokens: list[str], i: int) -> bool:
     """Whether the flag at ``tokens[i]`` has no value token after it: it is
     the last token, or the next token is another option (or ``--``)."""
@@ -651,6 +734,18 @@ def _make_intents(
     ]
 
 
+def _mark_categories(intents: list[InfrastructureIntent]) -> list[InfrastructureIntent]:
+    """Marks the ``<category>/*`` intent: what it reaches beyond its listed kinds
+    is only known when kubectl runs."""
+    for intent in intents:
+        kind, _, name = intent.resource.partition("/")
+        if name == "*" and kind in _KUBECTL_CATEGORIES:
+            intent.params["resolved_at_runtime"] = {
+                "from": kind, "kinds": list(_KUBECTL_CATEGORIES[kind]), "custom_kinds": True,
+            }
+    return intents
+
+
 def from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
     """Parses a kubectl invocation into one InfrastructureIntent per target
     resource (kubectl commands may name more than one, e.g.
@@ -733,10 +828,10 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
         return _make_intents([f"manifest/{basename}"], verb, params, metadata)
 
     if verb == "rollout":
-        resources = _parse_resources(positional)
+        resources = _expand_categories(_parse_resources(positional))
         if not resources:
             raise ValueError(f"could not find a target resource in: {argv!r}")
-        return _make_intents(resources, f"rollout-{subverb}", params, metadata)
+        return _mark_categories(_make_intents(resources, f"rollout-{subverb}", params, metadata))
 
     if verb in _LITERAL_RESOURCE_VERBS:
         if not positional:
@@ -747,8 +842,16 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
         if not positional:
             raise ValueError(f"could not find a target resource in: {argv!r}")
         kind, name = _split_resource_token(positional[0])
+        if verb == "attach" and len(positional) == 2:
+            # attach alone also reads two words as TYPE NAME; exec and
+            # port-forward take the first as the pod.
+            name = positional[1]
         target = f"{kind}/{name}" if name is not None else f"pod/{positional[0]}"
-        return _make_intents([target], verb, params, metadata)
+        intents = _make_intents([target], verb, params, metadata)
+        if verb in _POD_RESOLVING_VERBS and name is not None and kind != "pod":
+            behind = {**params, "resolved_at_runtime": {"from": target, "kinds": ["pod"]}}
+            intents.extend(_make_intents(["pod/*"], verb, behind, metadata))
+        return intents
 
     if verb in _NODE_TARGET_VERBS:
         if not positional:
@@ -760,29 +863,37 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
         return _make_intents(targets, verb, params, metadata)
 
     if verb in ("label", "annotate"):
-        resource_tokens = [t for t in positional if "=" not in t]
-        kv_tokens = [t for t in positional if "=" in t]
-        resources = _parse_resources(resource_tokens)
+        resource_tokens = [t for t in positional if not _is_pair_operand(t)]
+        operands = [t for t in positional if _is_pair_operand(t)]
+        resources = _expand_categories(_parse_resources(resource_tokens))
         if not resources:
             raise ValueError(f"could not find a target resource in: {argv!r}")
         key = "labels" if verb == "label" else "annotations"
-        params[key] = {k: v for k, _, v in (t.partition("=") for t in kv_tokens)}
-        return _make_intents(resources, verb, params, metadata)
+        params[key] = {k: v for k, _, v in (t.partition("=") for t in operands if "=" in t)}
+        removed = [t[:-1] for t in operands if "=" not in t]
+        if removed:
+            params[f"{key}_removed"] = removed
+        return _mark_categories(_make_intents(resources, verb, params, metadata))
 
     if verb == "set":  # "set image"
-        resource_tokens = [t for t in positional if "=" not in t]
-        kv_tokens = [t for t in positional if "=" in t]
-        resources = _parse_resources(resource_tokens)
+        resource_tokens = [t for t in positional if not _is_pair_operand(t)]
+        kv_tokens = [t for t in positional if _is_pair_operand(t)]
+        resources = _expand_categories(_parse_resources(resource_tokens))
         if not resources:
             raise ValueError(f"could not find a target resource in: {argv!r}")
         params["images"] = {k: v for k, _, v in (t.partition("=") for t in kv_tokens)}
-        return _make_intents(resources, "set-image", params, metadata)
+        return _mark_categories(_make_intents(resources, "set-image", params, metadata))
 
     # get, describe, delete, scale, patch, cordon, drain, taint, expose, ...
+    if verb == "taint":
+        positional = [t for t in positional if not _is_taint_operand(t)]
     resources = _parse_resources(positional)
     if not resources:
         raise ValueError(f"could not find a target resource in: {argv!r}")
-    intents = _make_intents(resources, verb, params, metadata)
+    if verb in _POD_NAME_FIRST_VERBS:
+        return _make_intents(resources, verb, params, metadata)
+    resources = _expand_categories(resources)
+    intents = _mark_categories(_make_intents(resources, verb, params, metadata))
     if verb == "delete":
         intents.extend(_namespace_cascade_intents(resources, params, metadata))
     return intents

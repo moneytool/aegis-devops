@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from aegis_core.parser import (
@@ -2500,9 +2502,10 @@ def test_helm_set_replica_count_zero_expressible_as_a_scope_rule():
     ("kubectl cordon node1 node2", [("cordon", "node/node1"), ("cordon", "node/node2")]),
     ("kubectl uncordon node1", [("uncordon", "node/node1")]),
     ("kubectl exec api-0 -- sh", [("exec", "pod/api-0")]),
-    ("kubectl exec deploy/web -- sh", [("exec", "deployment/web")]),
+    ("kubectl exec deploy/web -- sh", [("exec", "deployment/web"), ("exec", "pod/*")]),
     ("kubectl attach api-0", [("attach", "pod/api-0")]),
-    ("kubectl port-forward svc/web 8080:80", [("port-forward", "service/web")]),
+    ("kubectl port-forward svc/web 8080:80",
+     [("port-forward", "service/web"), ("port-forward", "pod/*")]),
     ("kubectl port-forward api-0 8080:80", [("port-forward", "pod/api-0")]),
     ("kubectl logs api-0", [("logs", "pod/api-0")]),
     ("kubectl delete storageclasses fast", [("delete", "storageclass/fast")]),
@@ -2991,3 +2994,203 @@ def test_kubectl_get_raw_is_still_refused(argv):
 def test_kubectl_help_next_to_a_delete_is_still_a_delete(argv):
     intents = from_argv(argv.split())
     assert ("namespace/prod", "delete") in [(i.resource, i.action) for i in intents]
+
+
+# --- names kubectl resolves when it runs (#64) ----------------------------------------------
+
+
+def _kubectl_targets(command: str) -> list[str]:
+    return [i.resource for i in from_kubectl_multi(command.split())]
+
+
+@pytest.mark.parametrize("verb", ["exec", "attach", "port-forward"])
+@pytest.mark.parametrize("spelled,named", [
+    ("deploy/web", "deployment/web"), ("deployment/web", "deployment/web"),
+    ("deployments/web", "deployment/web"), ("deployment.apps/web", "deployment/web"),
+    ("deployments.v1.apps/web", "deployment/web"), ("Deployment/web", "deployment/web"),
+    ("svc/web", "service/web"), ("service/web", "service/web"), ("services/web", "service/web"),
+    ("rs/web", "replicaset/web"), ("rc/web", "replicationcontroller/web"),
+    ("replicationcontrollers/web", "replicationcontroller/web"),
+    ("sts/web", "statefulset/web"), ("ds/web", "daemonset/web"), ("job/web", "job/web"),
+    ("jobs/web", "job/web"), ("widget.x.io/web", "widget/web"),
+])
+def test_a_verb_run_on_a_pod_behind_a_name(verb, spelled, named):
+    named_intent, behind = from_kubectl_multi(
+        ["kubectl", verb, spelled, "-n", "prod", "--context", "kind-x"])
+    assert (named_intent.resource, named_intent.action) == (named, verb)
+    assert "resolved_at_runtime" not in named_intent.params
+    assert (behind.resource, behind.action) == ("pod/*", verb)
+    assert behind.params["resolved_at_runtime"] == {"from": named, "kinds": ["pod"]}
+    for intent in (named_intent, behind):
+        assert intent.metadata == {"namespace": "prod", "context": "kind-x"}
+
+
+@pytest.mark.parametrize("command,targets", [
+    ("kubectl exec web -- ls", ["pod/web"]),
+    ("kubectl exec pod/web -- ls", ["pod/web"]),
+    ("kubectl exec po/web -- ls", ["pod/web"]),
+    ("kubectl exec pods/web -- ls", ["pod/web"]),
+    # a pod called all, and a pod called deploy with the command web
+    ("kubectl exec all -- ls", ["pod/all"]),
+    ("kubectl exec deploy web", ["pod/deploy"]),
+    ("kubectl port-forward deploy 80 81", ["pod/deploy"]),
+    # attach alone reads two words as TYPE NAME (checked on kind)
+    ("kubectl attach web", ["pod/web"]),
+    ("kubectl attach pod web", ["pod/web"]),
+    ("kubectl attach deploy web", ["deployment/web", "pod/*"]),
+    # logs resolves too, but is a read; run's word names a new pod
+    ("kubectl logs deploy/web", ["deployment/web"]),
+    ("kubectl run all --image=x", ["all/*"]),
+    ("kubectl run all --image=x a", ["all/a"]),
+    ("kubectl debug all --image=x", ["all/*"]),
+    ("kubectl debug all other --image=x", ["all/other"]),
+])
+def test_names_that_stay_what_they_are(command, targets):
+    assert _kubectl_targets(command) == targets
+
+
+def test_exec_from_a_manifest_stays_refused():
+    """exec -f names no pod the parser can read; with a word after it kubectl
+    errors (checked on kind)."""
+    with pytest.raises(ValueError, match="target resource"):
+        from_kubectl_multi(["kubectl", "exec", "-f", "pod.yaml", "--", "ls"])
+
+
+_ALL = ["pod/*", "replicationcontroller/*", "service/*", "daemonset/*", "deployment/*",
+        "replicaset/*", "statefulset/*", "horizontalpodautoscaler/*", "cronjob/*", "job/*"]
+_API_EXTENSIONS = [
+    "mutatingadmissionpolicy/*", "mutatingadmissionpolicybinding/*",
+    "mutatingwebhookconfiguration/*", "validatingadmissionpolicy/*",
+    "validatingadmissionpolicybinding/*", "validatingwebhookconfiguration/*",
+    "customresourcedefinition/*", "apiservice/*"]
+
+
+@pytest.mark.parametrize("command,action,extra", [
+    ("kubectl delete all --all", "delete", {"all": True}),
+    ("kubectl delete all -l app=web", "delete", {"selector": "app=web"}),
+    ("kubectl delete all --field-selector=metadata.name=web", "delete",
+     {"field_selector": "metadata.name=web"}),
+    ("kubectl get all", "get", {}),
+    ("kubectl describe all", "describe", {}),
+    ("kubectl label all --all a=b", "label", {"all": True, "labels": {"a": "b"}}),
+    ("kubectl annotate all --all a=b", "annotate", {"all": True, "annotations": {"a": "b"}}),
+    ("kubectl scale all --all --replicas=0", "scale", {"all": True, "replicas": 0}),
+    ("kubectl set image all *=x --all", "set-image", {"all": True, "images": {"*": "x"}}),
+    ("kubectl rollout restart all", "rollout-restart", {}),
+    ("kubectl wait all --all --for=condition=x", "wait", {"all": True, "for": "condition=x"}),
+])
+def test_the_category_all_is_one_intent_per_kind(command, action, extra):
+    intents = from_kubectl_multi(command.split())
+    assert [i.resource for i in intents] == ["all/*", *_ALL]
+    assert {i.action for i in intents} == {action}
+    marked = {k: v for k, v in intents[0].params.items() if k != "resolved_at_runtime"}
+    assert marked == extra
+    assert intents[0].params["resolved_at_runtime"] == {
+        "from": "all", "kinds": [r.removesuffix("/*") for r in _ALL], "custom_kinds": True}
+    for intent in intents[1:]:
+        assert intent.params == extra
+
+
+@pytest.mark.parametrize("command,targets", [
+    ("kubectl delete all,secrets --all", ["all/*", *_ALL, "secret/*"]),
+    ("kubectl delete secrets,all --all", ["secret/*", "all/*", *_ALL]),
+    ("kubectl delete all,all --all", ["all/*", *_ALL]),
+    ("kubectl delete deploy,all --all",
+     ["deployment/*", "all/*", *[r for r in _ALL if r != "deployment/*"]]),
+    ("kubectl delete api-extensions --all", ["api-extensions/*", *_API_EXTENSIONS]),
+    ("kubectl get all,api-extensions", ["all/*", *_ALL, "api-extensions/*", *_API_EXTENSIONS]),
+])
+def test_a_category_in_a_comma_list(command, targets):
+    assert _kubectl_targets(command) == targets
+
+
+@pytest.mark.parametrize("command,key,changed,removed", [
+    ("kubectl label all --all app-", "labels", {}, ["app"]),
+    ("kubectl label all --all app- a=b", "labels", {"a": "b"}, ["app"]),
+    ("kubectl label all a=b app- -l x=y", "labels", {"a": "b"}, ["app"]),
+    ("kubectl annotate all --all description-", "annotations", {}, ["description"]),
+    # a value ending in - is a value
+    ("kubectl label all --all a=b-", "labels", {"a": "b-"}, None),
+])
+def test_label_and_annotate_operands_are_not_names(command, key, changed, removed):
+    intents = from_kubectl_multi(command.split())
+    assert [i.resource for i in intents] == ["all/*", *_ALL]
+    for intent in intents:
+        assert intent.params[key] == changed
+        assert intent.params.get(f"{key}_removed") == removed
+
+
+@pytest.mark.parametrize("command,targets", [
+    ("kubectl label deploy web app-", ["deployment/web"]),
+    ("kubectl label deployment/web app- a=b", ["deployment/web"]),
+    ("kubectl label deploy --all app-", ["deployment/*"]),
+    ("kubectl annotate deploy web a-", ["deployment/web"]),
+    ("kubectl label deploy - a=b", ["deployment/-"]),
+    ("kubectl set image all c=i d=j -l app=web", ["all/*", *_ALL]),
+    ("kubectl set image deploy/web c=i", ["deployment/web"]),
+    ("kubectl taint nodes --all a=b:NoSchedule", ["node/*"]),
+    ("kubectl taint nodes --all a-", ["node/*"]),
+    ("kubectl taint nodes --all a:NoSchedule-", ["node/*"]),
+    ("kubectl taint node n1 a=b:NoSchedule", ["node/n1"]),
+    ("kubectl taint node/n1 a=b:NoSchedule c-", ["node/n1"]),
+    ("kubectl taint all --all a=b:NoSchedule", ["all/*", *_ALL]),
+    ("kubectl scale all --replicas 0 --all", ["all/*", *_ALL]),
+    ("kubectl scale --current-replicas=1 --replicas=0 all --all", ["all/*", *_ALL]),
+    ("kubectl rollout undo all --to-revision 1", ["all/*", *_ALL]),
+    ("kubectl rollout status all --timeout 2s", ["all/*", *_ALL]),
+    ("kubectl rollout history all --revision 1", ["all/*", *_ALL]),
+    ("kubectl autoscale all --max 2", ["all/*", *_ALL]),
+    ("kubectl patch all -p {}", ["all/*", *_ALL]),
+    ("kubectl patch all --patch {}", ["all/*", *_ALL]),
+    ("kubectl delete all --all --grace-period 0", ["all/*", *_ALL]),
+    ("kubectl delete all --all --timeout 5s", ["all/*", *_ALL]),
+    ("kubectl wait all --all --for condition=x --timeout 1s", ["all/*", *_ALL]),
+    ("kubectl get all --sort-by .metadata.name", ["all/*", *_ALL]),
+    ("kubectl get all --chunk-size 10", ["all/*", *_ALL]),
+    ("kubectl get all -L app", ["all/*", *_ALL]),
+    ("kubectl get all -o wide", ["all/*", *_ALL]),
+])
+def test_operands_and_flag_values_are_not_object_names(command, targets):
+    assert _kubectl_targets(command) == targets
+
+
+def test_a_category_keeps_namespace_and_context():
+    intents = from_kubectl_multi(
+        ["kubectl", "-n", "prod", "delete", "all", "--all", "--context=kind-x"])
+    assert all(i.metadata == {"namespace": "prod", "context": "kind-x"} for i in intents)
+
+
+@pytest.mark.parametrize("command", [
+    "kubectl get all web", "kubectl delete all web", "kubectl get all/web",
+    "kubectl delete all/web", "kubectl label all/web a=b", "kubectl label all web a=b",
+    "kubectl patch all web -p {}", "kubectl delete api-extensions x",
+    "kubectl describe all web", "kubectl wait --for=condition=x all web",
+    "kubectl expose all web", "kubectl autoscale all web --max=2", "kubectl edit all web",
+    "kubectl patch all {}",
+])
+def test_a_category_with_a_name_is_refused_as_kubectl_refuses_it(command):
+    with pytest.raises(ValueError, match="category"):
+        from_kubectl_multi(command.split())
+
+
+@pytest.mark.parametrize("spelled,kind", [
+    ("rc", "replicationcontroller"), ("replicationcontrollers", "replicationcontroller"),
+    ("cj", "cronjob"), ("apiservices", "apiservice"),
+    ("validatingadmissionpolicies", "validatingadmissionpolicy"),
+    ("validatingadmissionpolicybindings", "validatingadmissionpolicybinding"),
+    ("mutatingadmissionpolicies", "mutatingadmissionpolicy"),
+    ("mutatingadmissionpolicybindings", "mutatingadmissionpolicybinding"),
+])
+def test_kinds_a_category_names_are_normalised_when_spelled_directly(spelled, kind):
+    assert _kubectl_targets(f"kubectl delete {spelled} x") == [f"{kind}/x"]
+
+
+@pytest.mark.parametrize("command", [
+    "kubectl delete " + "all," * 16000 + "all --all",
+    "kubectl delete " + "all,api-extensions," * 3500 + "all --all",
+    "kubectl exec deploy/web -- " + "x " * 30000,
+])
+def test_resolving_names_stays_linear(command):
+    started = time.monotonic()
+    from_kubectl_multi(command.split())
+    assert time.monotonic() - started < 1

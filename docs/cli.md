@@ -107,7 +107,10 @@ ESCALATE with the note `unknown-target`, so it cannot slip past a `ref/main` rul
 In the same way a namespace-scoped rule escalates with `namespace-unresolved: <id>` when a
 kubectl/helm command names no namespace (or uses `-A`), and a kind- or object-based rule
 escalates with `manifest-not-inspected: <id>` on `kubectl … -f <file>|-`, whose manifest is never
-read ([Environment mapping](constraints.md#environment-mapping)).
+read ([Environment mapping](constraints.md#environment-mapping)). The note
+`target-unresolved: <id>` is the same idea for targets kubectl finds when it runs: `kubectl exec
+deploy/web` runs on some pod, so a rule on `pod/payments-0` escalates while a rule on `pod/*`
+decides as usual ([Kubernetes resource names](constraints.md#kubernetes-resource-names)).
 
 ### Claude Code hook
 

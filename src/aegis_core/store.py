@@ -107,6 +107,7 @@ import yaml
 from aegis_core.gitsource import GIT_PREFIX, SourceNotChecked, SourceRejected
 from aegis_core.gitsource import REASON_MESSAGES as GIT_REASON_MESSAGES
 from aegis_core.intent import InfrastructureIntent
+from aegis_core.parser import _KUBECTL_BUILTIN_NAMES
 from aegis_core.provenance import (
     CachingSourceFetcher,
     SourceFetcher,
@@ -621,6 +622,62 @@ def resource_matches(pattern: str, intent: InfrastructureIntent) -> bool:
     return any(fnmatch.fnmatch(alias, pattern) for alias in intent.resource_aliases())
 
 
+def _pattern_may_name_kind(pattern: str, kind: str) -> bool:
+    """Whether ``pattern`` can match some ``<kind>/<name>``, in ``fnmatch``'s
+    terms: ``*``, ``?`` and ``[...]`` all match ``/``. The positions reached in
+    ``<kind>/`` are carried along the pattern once, so this is linear in it.
+    Whatever follows that prefix is taken as able to match."""
+    prefix = f"{kind}/"
+    size = len(prefix)
+    last_close = pattern.rfind("]")
+    states, p = {0}, 0
+    while p < len(pattern) and states and size not in states:
+        token = pattern[p]
+        if token == "*":
+            states = set(range(min(states), size + 1))
+            p += 1
+            continue
+        if token == "[":
+            # as fnmatch.translate: a ] first in the class is a member, and an
+            # unclosed [ is literal
+            start = p + 1 + pattern.startswith("!", p + 1)
+            start += pattern.startswith("]", start)
+            if start <= last_close:
+                token = pattern[p:pattern.index("]", start) + 1]
+        states = {s + 1 for s in states if fnmatch.fnmatch(prefix[s], token)}
+        p += len(token)
+    return size in states
+
+
+def _may_be_runtime_target(pattern: str, target: dict[str, Any]) -> bool:
+    """Whether a rule on ``pattern`` might be about what ``target`` (an intent's
+    ``params["resolved_at_runtime"]``) turns out to be. A rule that matches
+    ``kind/*`` for a listed kind is decided by that intent, so it is not one.
+    A built-in kind outside the list is not one either: secrets are not in
+    ``all``. An unknown kind may be a custom resource that joined the category."""
+    kinds = target["kinds"]
+    if any(fnmatch.fnmatch(f"{kind}/*", pattern) for kind in kinds):
+        return False
+    if any(_pattern_may_name_kind(pattern, kind) for kind in kinds):
+        return True
+    if not target.get("custom_kinds"):
+        return False
+    head = pattern.partition("/")[0]
+    return head != "manifest" and (
+        head not in _KUBECTL_BUILTIN_NAMES or any(ch in head for ch in "*?["))
+
+
+def _may_be_about_target(pattern: str, intent: InfrastructureIntent) -> bool:
+    """Whether a rule on ``pattern`` matches what ``intent`` targets, or might:
+    its objects are in a manifest nobody read, or kubectl finds them when it runs."""
+    if resource_matches(pattern, intent):
+        return True
+    if intent.params.get("manifest_not_inspected") is True:
+        return not pattern.startswith("manifest/")
+    target = intent.params.get("resolved_at_runtime")
+    return isinstance(target, dict) and _may_be_runtime_target(pattern, target)
+
+
 def _matches_except_scope(
     c: Constraint,
     intent: InfrastructureIntent,
@@ -737,10 +794,11 @@ def time_window_unresolved(
 ) -> bool:
     """Whether ``c`` carries a ``time_window`` that can't be evaluated
     because tzdata is missing entirely, while everything else about ``c``
-    (provider, resource, action, scope) matches ``intent`` (REVIEW-4 L1).
-    Mirrors :func:`env_unresolved`'s shape: the interceptor turns this into
-    an ESCALATE with a ``time-window-unresolved: <id>`` note instead of
-    treating an unevaluable window as "doesn't apply"."""
+    (provider, resource, action, scope, which may be only unresolved) matches
+    ``intent`` (REVIEW-4 L1). Mirrors :func:`env_unresolved`'s shape: the
+    interceptor turns this into an ESCALATE with a
+    ``time-window-unresolved: <id>`` note instead of treating an unevaluable
+    window as "doesn't apply"."""
     if tzdata_available or not c.time_window:
         return False
     if c.provider != intent.provider:
@@ -749,7 +807,7 @@ def time_window_unresolved(
         return False
     if intent.action not in c.actions and ANY_ACTION not in c.actions:
         return False
-    return _scope_matches(c.scope, intent)
+    return _scope_matches(c.scope, intent) or bool(scope_unresolved(c.scope, intent))
 
 
 # Returned by _source_failure_reason when no fetcher applies to a reference:
@@ -1226,20 +1284,49 @@ class ConstraintStore:
         _require_tz_aware(now)
         if intent.params.get("manifest_not_inspected") is not True:
             return []
-        out = []
-        for c in self._candidates(intent):
-            if c.resource_pattern.startswith("manifest/") or resource_matches(
-                    c.resource_pattern, intent):
-                continue
-            if c.provider != intent.provider or (
-                    intent.action not in c.actions and ANY_ACTION not in c.actions):
-                continue
-            if c.time_window and (not self.tzdata_available or not _time_window_matches(
-                    c.time_window, now, self.default_tz)):
-                continue
-            if _scope_matches(c.scope, intent) or scope_unresolved(c.scope, intent):
-                out.append(c)
-        return out
+        return [
+            c
+            for c in self._candidates(intent)
+            if not c.resource_pattern.startswith("manifest/")
+            and not resource_matches(c.resource_pattern, intent)
+            and self._applies_apart_from_resource(c, intent, now)
+        ]
+
+    def get_runtime_unresolved(
+        self, intent: InfrastructureIntent, now: datetime
+    ) -> list[Constraint]:
+        """For an intent whose targets kubectl only finds when it runs
+        (``params["resolved_at_runtime"]``: ``kubectl exec deploy/web``, ``kubectl
+        delete all --all``): every constraint for the same provider and action
+        that might be about one of them but does not match the intent, like a
+        rule on ``pod/payments-0``. The interceptor escalates with
+        ``target-unresolved: <id>``, since neither "applies" nor "does not" can
+        be known here."""
+        _require_tz_aware(now)
+        target = intent.params.get("resolved_at_runtime")
+        if not isinstance(target, dict):
+            return []
+        return [
+            c
+            for c in self._candidates(intent)
+            if not resource_matches(c.resource_pattern, intent)
+            and _may_be_runtime_target(c.resource_pattern, target)
+            and self._applies_apart_from_resource(c, intent, now)
+        ]
+
+    def _applies_apart_from_resource(
+        self, c: Constraint, intent: InfrastructureIntent, now: datetime
+    ) -> bool:
+        """Whether ``c`` is for this provider and action, in its time window or
+        with one that cannot be evaluated (no tzdata: possibly in force, never
+        "doesn't apply"), and its scope matches or is only unresolved."""
+        if c.provider != intent.provider or (
+                intent.action not in c.actions and ANY_ACTION not in c.actions):
+            return False
+        if c.time_window and self.tzdata_available and not _time_window_matches(
+                c.time_window, now, self.default_tz):
+            return False
+        return _scope_matches(c.scope, intent) or bool(scope_unresolved(c.scope, intent))
 
     def get_time_window_unresolved(
         self, intent: InfrastructureIntent, now: datetime
@@ -1261,14 +1348,17 @@ class ConstraintStore:
         self, intent: InfrastructureIntent, now: datetime
     ) -> list[tuple[Constraint, str]]:
         """Returns every *quarantined* constraint whose (current, possibly
-        tampered) fields apply to this intent, paired with its quarantine
+        tampered) fields apply to this intent or might, were it trusted: a
+        manifest, runtime target, scope or time window that cannot be resolved
+        does not dismiss it, as it does not dismiss a live one. Paired with its quarantine
         reason. The interceptor escalates on these; see module docstring."""
         _require_tz_aware(now)
         reasons = {q["id"]: q["reason"] for q in self.quarantined}
         return [
             (c, self._quarantine_reasons.get(id(c)) or reasons.get(c.id, "quarantined"))
             for c in self.quarantined_constraints
-            if _constraint_matches(c, intent, now, self.default_tz, self.tzdata_available)
+            if _may_be_about_target(c.resource_pattern, intent)
+            and self._applies_apart_from_resource(c, intent, now)
         ]
 
     def save(self, path: str | Path) -> None:

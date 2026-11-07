@@ -1263,7 +1263,7 @@ def _evaluate(intents: list[InfrastructureIntent], args: argparse.Namespace) -> 
 def _is_fail_closed_note(note: str) -> bool:
     return note.startswith(
         ("fail-closed", "env-unresolved", "namespace-unresolved", "manifest-not-inspected",
-         "unknown-target", "ledger:", "time-window-unresolved", "runs-code:")
+         "target-unresolved", "unknown-target", "ledger:", "time-window-unresolved", "runs-code:")
     )
 
 
