@@ -8,6 +8,10 @@ behaviour.
 
 ## [Unreleased]
 
+## [1.3.2] — 2026-11-07
+
+Six kubectl commands now meet the rules on what they reach.
+
 ### Fixed
 - Five kubectl commands now meet the rules on what they reach (#68).
   - `kubectl logs deploy/web` reads a pod behind the name, as `kubectl exec deploy/web` does, so it
@@ -1180,6 +1184,7 @@ See "Project status" in the README and [`docs/dev/PLAN.md`](docs/dev/PLAN.md) §
 rather than real connectors, signing uses a shared secret, and a principal is a signed name
 rather than a bound identity.
 
+[1.3.2]: https://github.com/moneytool/aegis-devops/releases/tag/v1.3.2
 [1.3.1]: https://github.com/moneytool/aegis-devops/releases/tag/v1.3.1
 [1.3.0]: https://github.com/moneytool/aegis-devops/releases/tag/v1.3.0
 [1.2.1]: https://github.com/moneytool/aegis-devops/releases/tag/v1.2.1
