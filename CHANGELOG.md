@@ -8,7 +8,7 @@ behaviour.
 
 ## [Unreleased]
 
-## [1.3.1] (not released yet)
+## [1.3.1] — 2026-11-06
 
 Three fixes found while preparing the formal model for a conference submission, and two kubectl
 hook fixes: one found while building the third (#64), one found while fixing that (#66).
@@ -1129,6 +1129,7 @@ See "Project status" in the README and [`docs/dev/PLAN.md`](docs/dev/PLAN.md) §
 rather than real connectors, signing uses a shared secret, and a principal is a signed name
 rather than a bound identity.
 
+[1.3.1]: https://github.com/moneytool/aegis-devops/releases/tag/v1.3.1
 [1.3.0]: https://github.com/moneytool/aegis-devops/releases/tag/v1.3.0
 [1.2.1]: https://github.com/moneytool/aegis-devops/releases/tag/v1.2.1
 [1.2.0]: https://github.com/moneytool/aegis-devops/releases/tag/v1.2.0
