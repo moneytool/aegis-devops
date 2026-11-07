@@ -8,6 +8,27 @@ behaviour.
 
 ## [Unreleased]
 
+### Fixed
+- `kubectl run web --image=x --expose --port=80` creates a pod and a Service, but the hook saw only
+  the pod, so a `run` rule on `service/web` or `service/*` allowed a command that a compiled policy
+  denies at the Service (#73). `--expose` now adds `service/web`, beside `pod/web` and `web/*`, with
+  the same namespace and params, so `--dry-run` and `-n` work as they do on the pod. `--expose=false`
+  adds nothing, and neither do `0`, `f`, `F`, `FALSE` or `False`, the other spellings kubectl reads
+  as false. Any other value adds the Service, though kubectl refuses every value it cannot read as
+  a boolean. In `--expose false` the flag is on and `false` is a word, as in kubectl. A word with a
+  slash adds no Service, because kubectl stops when the API refuses the pod. `--rm` needs nothing of
+  its own: it deletes what was created, and a `run` rule decides on the same intents. A per-intent
+  rule on `pod/web` or `web/*` keeps matching.
+
+  Compile output is unchanged. `client_parity` already left `run` out for a `run` rule on services,
+  as a rule's own verb, and this makes that correct for `--expose`. Two flag spellings can still get
+  past a rule on any verb: a repeated `--dry-run` and a bundled `-n` (#75).
+
+  This takes `kubectl run --expose` from two intents to three, which can change a plan rule. A count
+  such as `max_intents` can rise, and a `ratio` can drop: the command under a ratio of `web/*` over
+  all intents with `max: 0.4` went from BLOCK to ALLOW, because 1/2 became 1/3. `from_kubectl` still
+  raises `ValueError` on `kubectl run`. Use `from_kubectl_multi`.
+
 ## [1.3.2] — 2026-11-07
 
 Six kubectl commands now meet the rules on what they reach.

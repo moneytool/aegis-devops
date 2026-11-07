@@ -320,6 +320,10 @@ _KUBECTL_SHORT_VALUE_NAMES = {"c": "container", "L": "label-columns", "p": "patc
 # kubectl verbs whose short "-f" is the boolean --follow, not --filename.
 _KUBECTL_FOLLOW_VERBS = {"logs"}
 
+# What Go's strconv.ParseBool reads as false, which is how kubectl reads a boolean
+# flag's value. It refuses any other word that is not one of its true spellings.
+_GO_FALSE_WORDS = frozenset({"0", "f", "F", "FALSE", "false", "False"})
+
 # Global boolean flags that are consumed but not recorded anywhere.
 _DISCARD_BOOL_FLAGS = {
     "insecure-skip-tls-verify",
@@ -711,6 +715,10 @@ def _parse_flags(
                     val = _value_at(tokens, i, tok)
             elif key in _DISCARD_BOOL_FLAGS:
                 pass
+            elif key == "expose" and verb == "run":
+                # Only a spelling kubectl reads as false turns the Service off. It
+                # refuses a word like "no", so reading that as on creates nothing.
+                params[key] = val not in _GO_FALSE_WORDS
             elif key in _KNOWN_BOOL_FLAGS or (key == "raw" and verb == "config"):
                 params[key] = _bool_param(val)
             elif key in _KUBECTL_VALUE_FLAGS or (key == "p" and verb == "patch"):
@@ -856,9 +864,14 @@ def _run_intents(
     is never a category, and any words after it are arguments for that pod. A word
     with a slash is refused as a pod name, so it stays the kind/name it was read as.
     The targets earlier versions gave (``web/*``) stay beside the pod, unmarked as
-    they were, since a signed rule may name them."""
+    they were, since a signed rule may name them.
+
+    ``--expose`` also creates a Service called NAME. kubectl creates the pod first and
+    stops if that fails, so a word with a slash reaches no Service and adds none."""
     earlier = _parse_resources(positional)
     targets = _default_kind_targets(positional[:1], "pod")
+    if params.get("expose") and "/" not in positional[0]:
+        targets.append(f"service/{positional[0]}")
     return _make_intents(list(dict.fromkeys(targets + earlier)), "run", params, metadata)
 
 

@@ -811,10 +811,10 @@ def test_env_scoped_selector_with_unresolved_env_escalates():
 # ---------------------------------------------------------------------------
 
 
-def _run_web_plan(**rule):
+def _run_web_plan(command="kubectl run web --image=x", **rule):
     store = PlanConstraintStore(authority_map=AUTHORITY)
     store.add(make_pc(provider="kubernetes", **rule))
-    intents = from_kubectl_multi("kubectl run web --image=x".split())
+    intents = from_kubectl_multi(command.split())
     return evaluate_plan(empty_interceptor(), store, intents, now=NOW)
 
 
@@ -829,3 +829,23 @@ def test_kubectl_run_can_drop_a_ratio_over_the_old_spelling():
     decision = _run_web_plan(ratio={"numerator": {"resource_pattern": "web/*"},
                                     "denominator": {}, "max": 0.75})
     assert decision.verdict == "ALLOW"
+
+
+# kubectl run --expose gives three (#73)
+_RUN_WEB_EXPOSED = "kubectl run web --image=x --expose --port=80"
+
+
+def test_kubectl_run_expose_counts_as_three_intents_for_a_plan_rule():
+    decision = _run_web_plan(_RUN_WEB_EXPOSED, max_intents=2)
+    assert decision.verdict == "BLOCK"
+    assert any(n.startswith("max_intents: 3 > 2") for n in decision.notes)
+    assert _run_web_plan(max_intents=2).verdict == "ALLOW"
+    off = "kubectl run web --image=x --expose=false --port=80"
+    assert _run_web_plan(off, max_intents=2).verdict == "ALLOW"
+
+
+def test_kubectl_run_expose_can_drop_a_ratio_over_the_old_spelling():
+    """1/2 without --expose, 1/3 with it."""
+    ratio = {"numerator": {"resource_pattern": "web/*"}, "denominator": {}, "max": 0.4}
+    assert _run_web_plan(ratio=ratio).verdict == "BLOCK"
+    assert _run_web_plan(_RUN_WEB_EXPOSED, ratio=ratio).verdict == "ALLOW"

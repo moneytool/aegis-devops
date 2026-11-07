@@ -3396,6 +3396,81 @@ def test_from_kubectl_raises_on_run_with_two_intents():
         from_kubectl("kubectl run web --image=x".split())
 
 
+# --- kubectl run --expose: a Service as well (#73) -----------------------------------
+
+
+_WITH_SERVICE = ["pod/web", "service/web", "web/*"]
+_NO_SERVICE = ["pod/web", "web/*"]
+
+
+@pytest.mark.parametrize("command,targets", [
+    ("kubectl run web --image=x --expose --port=80", _WITH_SERVICE),
+    ("kubectl run --expose web --image=x --port=80", _WITH_SERVICE),
+    # kubectl refuses --expose with no --port, and the hook still sees what it asks for
+    ("kubectl run web --image=x --expose", _WITH_SERVICE),
+    # every spelling Go's strconv.ParseBool reads as true
+    *((f"kubectl run web --image=x --expose={w} --port=80", _WITH_SERVICE)
+      for w in ("true", "True", "TRUE", "t", "T", "1")),
+    # and as false
+    *((f"kubectl run web --image=x --expose={w} --port=80", _NO_SERVICE)
+      for w in ("false", "False", "FALSE", "f", "F", "0")),
+    # kubectl refuses these, so nothing is created, and none of them reads as off
+    *((f"kubectl run web --image=x --expose={w} --port=80", _WITH_SERVICE)
+      for w in ("no", "off", "n", "fAlSe", "0.0", "", "maybe", "2")),
+    # the last one wins, as in pflag
+    ("kubectl run web --image=x --expose --expose=false --port=80", _NO_SERVICE),
+    ("kubectl run web --image=x --expose=false --expose --port=80", _WITH_SERVICE),
+    # a bare boolean takes no value: the next word stays a word
+    ("kubectl run --expose false --image=x --port=80",
+     ["pod/false", "service/false", "false/*"]),
+    ("kubectl run web --expose false --image=x --port=80",
+     ["pod/web", "service/web", "web/false"]),
+    # the name as written, with no kind read from it
+    ("kubectl run all --image=x --expose --port=80", ["pod/all", "service/all", "all/*"]),
+    ("kubectl run 001 --image=x --expose --port=80", ["pod/001", "service/001", "001/*"]),
+    ("kubectl run svc --image=x --expose --port=80", ["pod/svc", "service/svc", "service/*"]),
+    ("kubectl run service --image=x --expose --port=80",
+     ["pod/service", "service/service", "service/*"]),
+    # only the first word names anything
+    ("kubectl run web a --image=x --expose --port=80", ["pod/web", "service/web", "web/a"]),
+    # --rm deletes what it created, under the same action
+    ("kubectl run web -i --rm --image=x --expose --port=80", _WITH_SERVICE),
+    # after "--" it is an argument for the pod
+    ("kubectl run web --image=x -- --expose", _NO_SERVICE),
+    # the API refuses the pod, and kubectl stops before the Service
+    ("kubectl run pod/web --image=x --expose --port=80", ["pod/web"]),
+    ("kubectl run deploy/web --image=x --expose --port=80", ["deployment/web"]),
+])
+def test_run_expose_targets(command, targets):
+    intents = from_kubectl_multi(command.split())
+    assert [i.resource for i in intents] == targets
+    assert {i.action for i in intents} == {"run"}
+
+
+@pytest.mark.parametrize("command", [
+    "kubectl run web --image=x --expose --port=80 -n prod",
+    "kubectl -n prod run web --image=x --expose --port=80",
+    "kubectl run -nprod --expose web --image=x --port=80",
+])
+def test_run_expose_keeps_the_namespace_on_every_intent(command):
+    intents = from_kubectl_multi(command.split())
+    assert [i.resource for i in intents] == _WITH_SERVICE
+    assert [i.metadata["namespace"] for i in intents] == ["prod"] * 3
+
+
+def test_run_expose_keeps_its_params_on_every_intent():
+    command = "kubectl run web --image=x --expose --port=80 --dry-run=client -- sleep 1"
+    for intent in from_kubectl_multi(command.split()):
+        assert intent.params == {"image": "x", "expose": True, "port": 80, "dry_run": True,
+                                 "command": ["sleep", "1"]}
+        assert "resolved_at_runtime" not in intent.params
+
+
+def test_from_kubectl_raises_on_run_expose():
+    with pytest.raises(ValueError, match="found 3"):
+        from_kubectl("kubectl run web --image=x --expose --port=80".split())
+
+
 def test_marking_kinds_stays_linear():
     command = "kubectl delete " + ",".join(f"k{i}" for i in range(11000)) + " --all"
     assert len(command) > 64 * 1024
