@@ -12,7 +12,7 @@ import pytest
 
 from aegis_core.hook import decide
 from aegis_core.interceptor import AegisInterceptor
-from aegis_core.parser import from_kubectl_multi
+from aegis_core.parser import from_kubectl, from_kubectl_multi
 from aegis_core.store import Constraint, ConstraintStore
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -473,3 +473,119 @@ def test_the_builtin_table_holds_every_category_kind():
 def test_every_builtin_spelling_is_normalised(spelled, kind):
     assert [i.resource for i in from_kubectl_multi(["kubectl", "delete", spelled, "x"])] == [
         f"{kind}/x"]
+
+
+# --- a rule on one object, and a command that picks objects when it runs (#66) ---------------
+
+
+@pytest.mark.parametrize("pattern,action,command,verdict", [
+    # one object of the kind: cannot be told
+    ("deployment/payments", "delete", "kubectl delete deployments --all", "ESCALATE"),
+    ("deployment/payments", "delete", "kubectl delete deploy -l a=b", "ESCALATE"),
+    ("deployment/pay*", "delete", "kubectl delete deploy --field-selector=a=b", "ESCALATE"),
+    ("deployment?payments", "delete", "kubectl delete deploy --all", "ESCALATE"),
+    ("*/payments", "delete", "kubectl delete deploy --all", "ESCALATE"),
+    ("namespace/prod", "delete", "kubectl delete namespaces --all", "ESCALATE"),
+    ("node/n1", "taint", "kubectl taint nodes --all a-", "ESCALATE"),
+    ("node/n1", "taint", "kubectl taint nodes -l z=a a=b:NoSchedule", "ESCALATE"),
+    ("node/n1", "taint", "kubectl taint node decoy --all a-", "ESCALATE"),
+    ("node/decoy", "taint", "kubectl taint node decoy --all a-", "BLOCK"),
+    ("pod/p", "label", "kubectl label pods --all a=b", "ESCALATE"),
+    ("pod/p", "annotate", "kubectl annotate pods -l x=y a-", "ESCALATE"),
+    ("deployment/p", "scale", "kubectl scale deploy --all --replicas=0", "ESCALATE"),
+    ("deployment/p", "set-image", "kubectl set image deploy --all c=i", "ESCALATE"),
+    ("deployment/p", "rollout-restart", "kubectl rollout restart deploy", "ESCALATE"),
+    ("deployment/p", "rollout-undo", "kubectl rollout undo deploy -l a=b", "ESCALATE"),
+    ("deployment/p", "edit", "kubectl edit deploy", "ESCALATE"),
+    ("pod/p", "wait", "kubectl wait pods --all --for=condition=ready", "ESCALATE"),
+    # a read rule on one object: the read may show it
+    ("secret/db", "get", "kubectl get secrets", "ESCALATE"),
+    ("secret/db", "get", "kubectl get secrets -l a=b", "ESCALATE"),
+    ("secret/db", "describe", "kubectl describe secrets", "ESCALATE"),
+    # the whole kind decides directly
+    ("deployment/*", "delete", "kubectl delete deployments --all", "BLOCK"),
+    ("deployment/*", "delete", "kubectl delete deploy -l a=b", "BLOCK"),
+    ("*", "delete", "kubectl delete deploy -l a=b", "BLOCK"),
+    ("node/*", "taint", "kubectl taint nodes --all a-", "BLOCK"),
+    ("secret/*", "get", "kubectl get secrets", "BLOCK"),
+    # the name decides when there is one
+    ("deployment/payments", "delete", "kubectl delete deploy payments", "BLOCK"),
+    ("deployment/payments", "delete", "kubectl delete deploy other", "ALLOW"),
+    ("deployment/payments", "label", "kubectl label deploy/other a=b --all", "ALLOW"),
+    # another kind, another action
+    ("secret/db", "delete", "kubectl delete deployments --all", "ALLOW"),
+    ("deployment/payments", "get", "kubectl delete deployments --all", "ALLOW"),
+    ("deployment/payments", "delete", "kubectl get deployments", "ALLOW"),
+    ("pod/p", "delete", "kubectl get pods", "ALLOW"),
+    ("deployment/p", "delete", "kubectl logs deploy/p", "ALLOW"),
+    # comma lists, and the category from #65
+    ("deployment/p", "delete", "kubectl delete deploy,svc --all", "ESCALATE"),
+    ("service/p", "delete", "kubectl delete deploy,svc --all", "ESCALATE"),
+    ("secret/p", "delete", "kubectl delete deploy,svc --all", "ALLOW"),
+    ("deployment/p", "delete", "kubectl delete all -l x=y", "ESCALATE"),
+    ("secret/p", "delete", "kubectl delete all -l x=y", "ALLOW"),
+    ("secret/p", "delete", "kubectl delete all,secrets -l x=y", "ESCALATE"),
+])
+def test_a_rule_on_one_object_against_a_command_that_picks(pattern, action, command, verdict):
+    got, notes = _decide([_bare(pattern, action)], command.split())
+    assert got == verdict, (command, notes)
+    if verdict == "ESCALATE":
+        assert notes == ["target-unresolved: r"]
+
+
+@pytest.mark.parametrize("scope,command,verdict", [
+    ({"namespace": "prod"}, "kubectl delete deploy --all -n staging", "ALLOW"),
+    ({"namespace": "prod"}, "kubectl delete deploy --all -n prod", "ESCALATE"),
+    ({"namespace": "prod"}, "kubectl -n prod delete deploy -l a=b", "ESCALATE"),
+    ({"namespace": "prod"}, "kubectl delete deploy --all", "ESCALATE"),
+    ({"namespace": "prod"}, "kubectl delete deploy --all -A", "ESCALATE"),
+    ({"namespace": "prod"}, "kubectl get deploy -A", "ALLOW"),
+    ({"env": "prod"}, "kubectl delete deploy --all", "ESCALATE"),
+])
+def test_a_rule_on_one_object_keeps_its_scope(scope, command, verdict):
+    rule = _bare("deployment/p", "delete", scope)
+    assert _decide([rule], command.split())[0] == verdict
+
+
+@pytest.mark.parametrize("pattern,note", [
+    ("deployment/payments", "target-unresolved: r"), ("deployment/*", "namespace-unresolved: r"),
+])
+def test_the_whole_kind_and_one_object_with_an_unknown_namespace(pattern, note):
+    rule = _bare(pattern, "get", {"namespace": "prod"})
+    verdict, notes = _decide([rule], "kubectl get deploy -A".split())
+    assert verdict == "ESCALATE" and notes == [note]
+
+
+@pytest.mark.parametrize("rule,command,now,tzdata,live,quarantined", [
+    (_bare("deployment/p", "delete"), "kubectl delete deploy --all", NOW, True,
+     "ESCALATE", "ESCALATE"),
+    (_bare("deployment/*", "delete"), "kubectl delete deploy --all", NOW, True,
+     "BLOCK", "ESCALATE"),
+    (_bare("secret/p", "delete"), "kubectl delete deploy --all", NOW, True, "ALLOW", "ALLOW"),
+    (_bare("deployment/p", "delete", {"namespace": "prod"}),
+     "kubectl delete deploy -l a=b -n dev", NOW, True, "ALLOW", "ALLOW"),
+    (_windowed("deployment/p", "delete"), "kubectl delete deploy --all", IN_WINDOW, True,
+     "ESCALATE", "ESCALATE"),
+    (_windowed("deployment/p", "delete"), "kubectl delete deploy --all", OUT_OF_WINDOW, True,
+     "ALLOW", "ALLOW"),
+    (_windowed("deployment/p", "delete"), "kubectl delete deploy --all", IN_WINDOW, False,
+     "ESCALATE", "ESCALATE"),
+    (_windowed("deployment/p", "delete"), "kubectl delete deploy --all", OUT_OF_WINDOW, False,
+     "ESCALATE", "ESCALATE"),
+    (_windowed("node/n1", "taint"), "kubectl taint nodes --all a-", IN_WINDOW, False,
+     "ESCALATE", "ESCALATE"),
+    (_windowed("deployment/p", "delete", {"namespace": "prod"}), "kubectl delete deploy --all",
+     IN_WINDOW, False, "ESCALATE", "ESCALATE"),
+])
+def test_windows_and_quarantine_behave_the_same(rule, command, now, tzdata, live, quarantined):
+    assert _live_and_quarantined(rule, command, now, tzdata) == [live, quarantined]
+
+
+def test_an_untrusted_rule_on_one_object_cannot_force_a_question():
+    bad = _windowed("deployment/p", "delete", principal="intruder")
+    store = ConstraintStore(authority_map=dict(AUTHORITY))
+    store.constraints[bad.id] = bad
+    decision = AegisInterceptor(store).intercept(
+        from_kubectl("kubectl delete deploy --all".split()), now=IN_WINDOW)
+    assert decision.verdict == "ALLOW"
+    assert decision.discarded == [{"id": "r", "reason": "unauthorized"}]

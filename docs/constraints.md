@@ -80,6 +80,17 @@ with `target-unresolved: <id>`. A rule on any other built-in kind (`secret/*`) i
 `all` does not reach it. A category a custom resource declares for itself looks like any other
 unknown kind and is not expanded.
 
+A kind with no name targets `kind/*`: `--all`, `-l` or `--field-selector`, and a bare kind on a verb
+that takes one (`kubectl get pods`, `kubectl describe pods`, `kubectl rollout restart deploy`,
+`kubectl edit deploy`). A rule on `kind/*` decides as usual. A rule on one object of that kind
+(`deployment/payments`) escalates with `target-unresolved: <id>`, because the command may or may
+not pick that object: `kubectl delete deploy -l a=b` asks, and so does `kubectl get pods` under a
+`get` rule on `pod/payments-0`. A rule on another kind or another action is not affected, and a
+namespace in the rule's scope still counts (`-n staging` passes a rule scoped to `prod`).
+`kubectl taint node n1 --all` is both `node/n1` and `node/*`, since kubectl ignores the name there.
+`cordon`, `uncordon`, `drain` and `logs` with `-l` name nothing the parser can read, so the hook
+refuses them.
+
 (Before v0.2.1 these produced `api-0` and `node1/*`, and plural kinds such as `storageclasses`
 were kept plural, so a rule written for the normal form missed them. Rules written against the
 old forms need updating.)

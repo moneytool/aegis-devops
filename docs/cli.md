@@ -110,7 +110,8 @@ escalates with `manifest-not-inspected: <id>` on `kubectl … -f <file>|-`, whos
 read ([Environment mapping](constraints.md#environment-mapping)). The note
 `target-unresolved: <id>` is the same idea for targets kubectl finds when it runs: `kubectl exec
 deploy/web` runs on some pod, so a rule on `pod/payments-0` escalates while a rule on `pod/*`
-decides as usual ([Kubernetes resource names](constraints.md#kubernetes-resource-names)).
+decides as usual, and `--all` or a selector does the same for a rule on one object of that kind
+([Kubernetes resource names](constraints.md#kubernetes-resource-names)).
 
 ### Claude Code hook
 

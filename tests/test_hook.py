@@ -4695,3 +4695,92 @@ def test_resolving_names_through_the_hook_stays_linear(opted_in_project):
         started = time.monotonic()
         assert hook.decide(command, config_dir).decision == "ask"
         assert time.monotonic() - started < 1 * TIMING_SLACK
+
+
+# --- --all and selectors against a rule on one object (#66) ----------------------------------
+
+
+@pytest.mark.parametrize("pattern,action,command,decision", [
+    ("deployment/payments", "delete", "kubectl delete deployments --all", "ask"),
+    ("deployment/payments", "delete", "kubectl delete deploy -l a=b", "ask"),
+    ("deployment/payments", "delete", "kubectl delete deploy --field-selector=a=b", "ask"),
+    ("node/n1", "taint", "kubectl taint nodes --all a-", "ask"),
+    ("node/n1", "taint", "kubectl taint node decoy --all a-", "ask"),
+    ("deployment/p", "scale", "kubectl scale deploy --all --replicas=0", "ask"),
+    ("deployment/p", "rollout-restart", "kubectl rollout restart deploy", "ask"),
+    ("pod/p", "label", "kubectl label pods -l x=y a-", "ask"),
+    ("secret/db", "get", "kubectl get secrets", "ask"),
+    ("deployment/*", "delete", "kubectl delete deployments --all", "deny"),
+    ("node/*", "taint", "kubectl taint nodes --all a-", "deny"),
+    ("deployment/payments", "delete", "kubectl delete deploy payments", "deny"),
+    ("deployment/payments", "delete", "kubectl delete deploy other", "allow"),
+    ("secret/db", "delete", "kubectl delete deployments --all", "allow"),
+    ("deployment/payments", "get", "kubectl delete deployments --all", "allow"),
+    ("deployment/payments", "delete", "kubectl get deployments", "allow"),
+])
+def test_a_command_that_picks_against_a_rule_on_one_object(opted_in_project, pattern, action,
+                                                           command, decision):
+    config_dir = _own_policy(opted_in_project, (pattern, [action]))
+    for wrapper in _WRAPPERS:
+        verdict = hook.decide(wrapper.format(command), config_dir)
+        assert verdict.decision == decision, (wrapper, command, verdict)
+        if decision == "ask":
+            assert "target-unresolved: r0" in verdict.reason
+
+
+def test_a_selector_keeps_the_rule_scope_through_the_hook(opted_in_project):
+    config_dir = _own_policy(opted_in_project, ("deployment/p", ["delete"]),
+                             scope={"namespace": "prod"})
+    assert hook.decide("sudo kubectl delete deploy --all -n staging",
+                       config_dir).decision == "allow"
+    assert hook.decide("bash -c 'kubectl delete deploy --all -n prod'",
+                       config_dir).decision == "ask"
+    assert hook.decide("kubectl delete deploy --all -A", config_dir).decision == "ask"
+
+
+@pytest.mark.parametrize("command", [
+    "kubectl get pods", "kubectl get pods -A", "kubectl get pods -l app=web",
+    "kubectl describe pods", "kubectl get deploy,svc", "kubectl get all",
+    "kubectl rollout status deploy", "kubectl rollout history deploy",
+    "kubectl wait pods --all --for=condition=ready", "kubectl top pod -l app=web",
+    "kubectl delete pods -l app=web", "kubectl label pods --all a=b",
+    "kubectl scale deploy --all --replicas=1",
+])
+def test_everyday_selections_with_no_rule_on_that_kind_and_action(opted_in_project, command):
+    # names one object, but of a kind or an action none of these touch
+    config_dir = _own_policy(opted_in_project, ("secret/db", ["delete", "get"]),
+                             ("pod/p", ["exec"]), ("deployment/p", ["set-image"]))
+    assert hook.decide(command, config_dir).decision == "allow", command
+
+
+@pytest.mark.parametrize("command", [
+    "kubectl get pods", "kubectl get pods -A", "kubectl get secrets", "kubectl describe pods",
+    "kubectl get pods -l app=web", "kubectl rollout status deploy", "kubectl top pod -l a=b",
+])
+def test_everyday_reads_under_the_example_policy(opted_in_project, command):
+    assert hook.decide(command, opted_in_project / ".aegis").decision == "allow", command
+
+
+@pytest.mark.parametrize("command", [
+    "kubectl cordon -l zone=a", "kubectl drain -l zone=a", "kubectl uncordon -l zone=a",
+    "kubectl logs -l app=web",
+])
+def test_a_selector_on_a_verb_that_names_its_target_stays_denied(opted_in_project, command):
+    assert hook.decide(command, opted_in_project / ".aegis").decision == "deny", command
+
+
+def test_a_plan_batch_rule_counts_the_same(opted_in_project):
+    from aegis_core.parser import from_kubectl_multi
+
+    for command in ("kubectl delete deployments --all", "kubectl get pods",
+                    "kubectl taint nodes --all a-"):
+        assert len(from_kubectl_multi(command.split())) == 1
+
+
+def test_a_long_list_of_kinds_through_the_hook_stays_linear(opted_in_project):
+    config_dir = _own_policy(opted_in_project, ("deployment/payments", ["delete"]))
+    command = "kubectl delete deployment," + ",".join(f"k{i}" for i in range(8900)) + " --all"
+    assert len(command) < 64 * 1024
+    started = time.monotonic()
+    assert hook.decide(command, config_dir).decision == "ask"
+    assert time.monotonic() - started < 1 * TIMING_SLACK

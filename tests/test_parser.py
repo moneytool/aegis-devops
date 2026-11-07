@@ -23,6 +23,12 @@ from aegis_core.parser import (
 )
 
 
+def _flag_params(intent):
+    """An intent's params apart from the marker for targets kubectl finds when it
+    runs, which the #66 tests below cover."""
+    return {k: v for k, v in intent.params.items() if k != "resolved_at_runtime"}
+
+
 def test_from_kubectl_scale_with_namespace_flag():
     intent = from_kubectl(["kubectl", "scale", "deployment/x", "--replicas=5", "-n", "prod"])
     assert intent.resource == "deployment/x"
@@ -1491,7 +1497,7 @@ def test_unrecognised_leading_option_or_missing_verb_raises(argv):
 def test_kubectl_glued_short_flags_are_expanded(argv, expected_metadata, expected_params):
     intent = from_kubectl(argv)
     assert intent.metadata == expected_metadata
-    assert intent.params == expected_params
+    assert _flag_params(intent) == expected_params
 
 
 def test_kubectl_glued_manifest_and_kustomize_flags():
@@ -1531,7 +1537,7 @@ def test_kubectl_selectors_are_value_flags_and_target_every_object_of_kind(argv,
     intent = from_kubectl(argv)
     assert intent.resource == "node/*"
     assert intent.action == "delete"
-    assert intent.params == expected_params
+    assert _flag_params(intent) == expected_params
 
 
 def test_kubectl_comma_separated_kinds_yield_one_intent_per_kind():
@@ -1540,7 +1546,7 @@ def test_kubectl_comma_separated_kinds_yield_one_intent_per_kind():
     )
     assert [i.resource for i in intents] == ["node/*", "pod/*"]
     assert all(i.action == "delete" for i in intents)
-    assert all(i.params == {"all": True} for i in intents)
+    assert all(_flag_params(i) == {"all": True} for i in intents)
     assert all(i.metadata == {"context": "prod-us-east"} for i in intents)
 
 
@@ -1552,7 +1558,7 @@ def test_kubectl_comma_separated_kinds_with_names_is_rejected():
 def test_kubectl_delete_all_of_kind_in_namespace():
     intent = from_kubectl(["kubectl", "delete", "--all", "pods", "-n", "prod"])
     assert intent.resource == "pod/*"
-    assert intent.params == {"all": True}
+    assert _flag_params(intent) == {"all": True}
     assert intent.metadata == {"namespace": "prod"}
 
 
@@ -2680,7 +2686,7 @@ def test_kubectl_boolean_flags_take_no_value(argv, resource, params):
     intents = from_kubectl_multi(shlex.split(argv))
     assert [i.resource for i in intents] == [resource]
     if params is not None:
-        assert intents[0].params == params
+        assert _flag_params(intents[0]) == params
     if "-n prod" in argv:
         assert intents[0].metadata["namespace"] == "prod"
 
@@ -2773,13 +2779,13 @@ def test_kubectl_value_flags_keep_their_value_next_to_booleans(argv, namespace, 
     glued and '=' forms are unchanged."""
     (intent,) = from_kubectl_multi(argv.split())
     assert intent.metadata["namespace"] == namespace
-    assert intent.params == params
+    assert _flag_params(intent) == params
 
 
 def test_kubectl_unknown_long_flag_before_a_word_still_takes_it_as_value():
     (intent,) = from_kubectl_multi(["kubectl", "get", "pods", "--sort-by", "name", "-n", "prod"])
     assert intent.resource == "pod/*"
-    assert intent.params == {"sort-by": "name"}
+    assert _flag_params(intent) == {"sort-by": "name"}
 
 
 def test_kubectl_dash_f_is_still_a_manifest_outside_logs():
@@ -3193,4 +3199,138 @@ def test_kinds_a_category_names_are_normalised_when_spelled_directly(spelled, ki
 def test_resolving_names_stays_linear(command):
     started = time.monotonic()
     from_kubectl_multi(command.split())
+    assert time.monotonic() - started < 1
+
+
+# --- a kind with no name: kubectl picks the objects when it runs (#66) -----------------------
+
+
+def _open_marker(kind: str) -> dict:
+    return {"from": f"{kind}/*", "kinds": [kind]}
+
+
+@pytest.mark.parametrize("command,kind", [
+    ("kubectl delete deployments --all", "deployment"),
+    ("kubectl delete deploy -l a=b", "deployment"),
+    ("kubectl delete deploy --selector=a=b", "deployment"),
+    ("kubectl delete deploy --field-selector=metadata.name=x", "deployment"),
+    ("kubectl delete pods --all -A", "pod"),
+    ("kubectl delete namespaces --all", "namespace"),
+    ("kubectl label pods --all a=b", "pod"),
+    ("kubectl label pods -l x=y a-", "pod"),
+    ("kubectl annotate pods --all a=b", "pod"),
+    ("kubectl annotate pods --field-selector=status.phase=Failed a-", "pod"),
+    ("kubectl scale deploy --all --replicas=0", "deployment"),
+    ("kubectl scale deploy -l a=b --replicas=0", "deployment"),
+    ("kubectl taint nodes --all a-", "node"),
+    ("kubectl taint nodes -l zone=a a=b:NoSchedule", "node"),
+    ("kubectl set image deploy --all c=i", "deployment"),
+    ("kubectl set image deploy -l a=b c=i", "deployment"),
+    ("kubectl rollout restart deploy", "deployment"),
+    ("kubectl rollout restart deploy -l a=b", "deployment"),
+    ("kubectl rollout undo deploy", "deployment"),
+    ("kubectl rollout pause deploy", "deployment"),
+    ("kubectl rollout resume deploy -l a=b", "deployment"),
+    ("kubectl rollout status deploy", "deployment"),
+    ("kubectl rollout history deploy", "deployment"),
+    ("kubectl wait pods --all --for=condition=ready", "pod"),
+    ("kubectl wait pods -l a=b --for=condition=ready", "pod"),
+    ("kubectl get pods", "pod"),
+    ("kubectl get pods -A", "pod"),
+    ("kubectl get pods -l a=b", "pod"),
+    ("kubectl get pods --field-selector=status.phase=Failed", "pod"),
+    ("kubectl describe pods", "pod"),
+    ("kubectl describe pods -l a=b", "pod"),
+    ("kubectl edit deploy", "deployment"),
+    ("kubectl top pod -l a=b", "pod"),
+    # kubectl errors on these; asking is harmless
+    ("kubectl delete deployments", "deployment"),
+    ("kubectl label deploy a=b", "deployment"),
+    ("kubectl patch deploy -p {}", "deployment"),
+    ("kubectl autoscale deploy --max=2", "deployment"),
+    ("kubectl expose deploy --port=80", "deployment"),
+])
+def test_a_kind_with_no_name_is_marked_and_stays_one_intent(command, kind):
+    """One intent, so a plan's batch counts do not grow."""
+    intent = from_kubectl(command.split())
+    assert intent.resource == f"{kind}/*"
+    assert intent.params["resolved_at_runtime"] == _open_marker(kind)
+
+
+def test_every_kind_in_a_comma_list_is_marked():
+    intents = from_kubectl_multi("kubectl delete deploy,svc,secrets --all -n prod".split())
+    assert [i.resource for i in intents] == ["deployment/*", "service/*", "secret/*"]
+    for intent in intents:
+        assert intent.params["resolved_at_runtime"] == _open_marker(
+            intent.resource.removesuffix("/*"))
+        assert intent.metadata == {"namespace": "prod"}
+
+
+def test_a_category_keeps_its_own_mark_and_its_kinds_need_none():
+    intents = from_kubectl_multi("kubectl delete all,secrets -l a=b".split())
+    by_resource = {i.resource: i for i in intents}
+    assert by_resource["all/*"].params["resolved_at_runtime"]["custom_kinds"] is True
+    assert "resolved_at_runtime" not in by_resource["deployment/*"].params
+    assert by_resource["secret/*"].params["resolved_at_runtime"] == _open_marker("secret")
+
+
+@pytest.mark.parametrize("command,resource", [
+    ("kubectl delete deploy web", "deployment/web"),
+    ("kubectl delete deploy/web", "deployment/web"),
+    ("kubectl get pod web", "pod/web"),
+    # kubectl refuses these (checked on kind): the name is all there is to decide on
+    ("kubectl delete deploy web -l a=b", "deployment/web"),
+    ("kubectl delete deploy/web --all", "deployment/web"),
+    ("kubectl get deploy/web -l a=b", "deployment/web"),
+    ("kubectl rollout restart deploy/web -l a=b", "deployment/web"),
+    # --all with a name acts on the name only (checked on kind)
+    ("kubectl label deploy/web a=b --all", "deployment/web"),
+    ("kubectl scale deploy/web --replicas=1 --all", "deployment/web"),
+    ("kubectl annotate deploy/web a=b --all", "deployment/web"),
+    # --selector here is the new service's
+    ("kubectl expose deploy web --port=80 --selector=x=y", "deployment/web"),
+    ("kubectl cordon n1", "node/n1"),
+    ("kubectl drain n1 --pod-selector=a=b", "node/n1"),
+])
+def test_a_named_object_is_not_marked(command, resource):
+    intent = from_kubectl(command.split())
+    assert intent.resource == resource
+    assert "resolved_at_runtime" not in intent.params
+
+
+@pytest.mark.parametrize("command", [
+    "kubectl taint node decoy --all a-",
+    "kubectl taint node decoy -l zone=a a=b:NoSchedule",
+])
+def test_taint_ignores_a_name_given_with_all_or_a_selector(command):
+    decoy, every = from_kubectl_multi(command.split())
+    assert decoy.resource == "node/decoy" and "resolved_at_runtime" not in decoy.params
+    assert every.resource == "node/*"
+    assert every.params["resolved_at_runtime"] == _open_marker("node")
+
+
+def test_taint_with_a_name_alone_stays_that_name():
+    for command in ("kubectl taint node n1 a-", "kubectl taint node n1 a- --all=false"):
+        assert [i.resource for i in from_kubectl_multi(command.split())] == ["node/n1"]
+
+
+@pytest.mark.parametrize("command", [
+    "kubectl cordon -l zone=a", "kubectl uncordon -l zone=a", "kubectl drain -l zone=a",
+    "kubectl logs -l app=web", "kubectl exec -l app=web -- ls",
+])
+def test_a_selector_on_a_verb_that_names_its_target_stays_refused(command):
+    with pytest.raises(ValueError, match="target resource"):
+        from_kubectl_multi(command.split())
+
+
+@pytest.mark.parametrize("command", ["kubectl run web --image=x", "kubectl debug web --image=x"])
+def test_a_word_that_names_a_new_or_given_pod_is_not_marked(command):
+    assert "resolved_at_runtime" not in from_kubectl(command.split()).params
+
+
+def test_marking_kinds_stays_linear():
+    command = "kubectl delete " + ",".join(f"k{i}" for i in range(11000)) + " --all"
+    assert len(command) > 64 * 1024
+    started = time.monotonic()
+    assert len(from_kubectl_multi(command.split())) == 11000
     assert time.monotonic() - started < 1
