@@ -592,9 +592,10 @@ def _flux_short_letters(verb: str | None) -> tuple[frozenset[str], frozenset[str
 
 def _read_string_slice(value: str) -> list[str]:
     """A pflag StringSlice value: one CSV record, so ``a,b`` is two and ``"a,b"`` is one.
-    An empty value stays one empty word: kubectl refuses it, and it is read as it was."""
+    An empty value is no entries, as pflag reads it, so ``--filename= -f x.yaml`` is only
+    ``x.yaml``."""
     if not value:
-        return [value]
+        return []
     try:
         return next(csv.reader(io.StringIO(value, newline=""))) or [value]
     except (csv.Error, StopIteration) as err:

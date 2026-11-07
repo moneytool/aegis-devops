@@ -849,6 +849,14 @@ def test_two_manifests_can_drop_a_ratio_over_the_last_file():
     assert _run_web_plan(_TWO_FILES, ratio=ratio).verdict == "ALLOW"
 
 
+def test_an_empty_filename_cannot_drop_a_ratio():
+    """--filename= is no file to kubectl, so it must not add an intent that dilutes a ratio."""
+    ratio = {"numerator": {"resource_pattern": "manifest/x.yaml"}, "denominator": {}, "max": 0.75}
+    assert _run_web_plan("kubectl delete -f x.yaml", ratio=ratio).verdict == "BLOCK"
+    assert _run_web_plan("kubectl delete --filename= -f x.yaml", ratio=ratio).verdict == "BLOCK"
+    assert _run_web_plan("kubectl delete -f x.yaml --filename=", ratio=ratio).verdict == "BLOCK"
+
+
 # kubectl run --expose gives three (#73)
 _RUN_WEB_EXPOSED = "kubectl run web --image=x --expose --port=80"
 
