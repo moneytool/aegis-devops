@@ -37,7 +37,7 @@ A plan-level constraint (`../data/plan_constraints.example.yaml`) carries exactl
 predicate instead of a per-intent match, evaluated over every intent from one plan/invocation.
 One kubectl command can be more than one intent: `kubectl cp b web:/a` is two (`pod/web` and `b`),
 `kubectl debug web` and `kubectl run web` are two (`pod/web` and `web/*`), `--copy-to` adds a third
-on `debug`, and `kubectl exec deploy/web` is two (`deployment/web` and `pod/*`). Each counts toward `max_intents` and
+on `debug`, `--expose` adds a third on `run`, and `kubectl exec deploy/web` is two (`deployment/web` and `pod/*`). Each counts toward `max_intents` and
 `max_matching`, so a count can rise. A `ratio` can also drop, since the extra intents join its
 denominator: `kubectl cp web:/a b` under a ratio of `web:*` over all intents with `max: 0.75` went
 from 1/1 to 1/2, which passes a ratio that used to fire:
@@ -87,9 +87,14 @@ A kubectl target is normalised to `<singular kind>/<name>` before matching, so w
   the pod, so they name no pod. `web/*`, the target earlier versions gave, stays beside the pod, so
   a per-intent rule on it keeps matching. A plan `ratio` over it can change: `kubectl run web` under
   a ratio of `web/*` over all intents with `max: 0.75` went from 1/1 to 1/2. A word with a slash,
-  such as `deploy/web`, is one the API refuses as a pod name, so it stays `deployment/web`. The
-  action stays `run`: a rule on `create` does not meet it in the hook, and a rule on `delete` does
-  not meet `--rm`. The server-side policy covers those ([client parity](server-side.md)).
+  such as `deploy/web`, is one the API refuses as a pod name, so it stays `deployment/web`.
+  `--expose` also creates a Service of that name, so `kubectl run web --image=x --expose --port=80`
+  adds `service/web`, and a `run` rule on `service/web` or `service/*` meets it. `--expose=false`
+  adds nothing, and neither do `0`, `f`, `F`, `FALSE` or `False`, the other spellings kubectl reads
+  as false. Any other value adds the Service, though kubectl refuses every value it cannot read
+  as a boolean. A word with a slash adds no Service, because kubectl stops when the API refuses the
+  pod. The action stays `run`: a rule on `create` does not meet it in the hook, and a rule on
+  `delete` does not meet `--rm`. The server-side policy covers those ([client parity](server-side.md)).
 - `cp` names its pod in `[namespace/]pod:path`, on either side: `kubectl cp web:/a b` and `kubectl
   cp b prod/web:/a` are both `pod/web`, and a namespace written there wins over `-n`, as it does in
   kubectl. Aegis reads the operands as kubectl does. Only the first colon counts, and what comes

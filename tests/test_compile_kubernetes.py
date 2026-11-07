@@ -551,6 +551,8 @@ def test_client_parity_lists_a_verb_whose_flag_changes_the_request(tmp_path, pat
     ("pod/*", "port-forward", "port-forward deploy/web 80"),
     ("deployment/*", "delete", "delete all --all"),
     ("deployment/*", "label", "label all --all a=b"),
+    ("service/*", "run", "run web --image=x --expose --port=80"),
+    ("service/web", "run", "run web --image=x --expose --port=80"),
 ])
 def test_the_own_verb_on_another_name_is_refused_by_the_client_too(
         tmp_path, pattern, verb, spelled):
@@ -563,6 +565,14 @@ def test_the_own_verb_on_another_name_is_refused_by_the_client_too(
     gate = AegisInterceptor(store)
     intents = from_kubectl_multi(["kubectl", *spelled.split()])
     assert "BLOCK" in {gate.intercept(i).verdict for i in intents}
+
+
+def test_a_run_rule_on_services_lists_the_other_verbs_and_not_run(tmp_path):
+    """Plain `kubectl run` sends no Service request, and with --expose the client
+    decides on it too (#73), so the record is unchanged."""
+    cov = _cov(_compile(tmp_path, _rule("r", "service/*", ["run"])), "r")
+    assert cov["status"] == "exact"
+    assert cov["client_parity"]["widened_verbs"] == ["apply", "create", "expose", "replace"]
 
 
 def test_client_parity_for_a_rule_on_any_action_and_with_listed_verbs(tmp_path):

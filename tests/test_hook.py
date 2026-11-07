@@ -4824,6 +4824,13 @@ def test_a_long_list_of_kinds_through_the_hook_stays_linear(opted_in_project):
     ("pod/*", "run", "kubectl run web --image=x --dry-run=client", "allow"),
     ("pod/other", "run", "kubectl run web --image=x", "allow"),
     ("deployment/*", "run", "kubectl run all --image=x", "allow"),
+    # run --expose creates a Service too (#73)
+    ("service/web", "run", "kubectl run web --image=x --expose --port=80", "deny"),
+    ("service/*", "run", "kubectl run web --image=x --expose --port=80 -n prod", "deny"),
+    ("web/*", "run", "kubectl run web --image=x --expose --port=80", "deny"),
+    ("service/other", "run", "kubectl run web --image=x --expose --port=80", "allow"),
+    ("service/*", "run", "kubectl run web --image=x --expose=false --port=80", "allow"),
+    ("service/*", "run", "kubectl run web --image=x --expose --port=80 --dry-run=client", "allow"),
     # a name is text
     ("pod/001", "debug", "kubectl debug web --image=x --copy-to=001", "deny"),
     ("widget/foo", "autoscale", "kubectl autoscale widgets foo --max=3", "ask"),
