@@ -18,6 +18,9 @@ identifiers:
     value: "10.5281/zenodo.22950337"
     description: "Concept DOI: all versions, resolves to the latest."
   - type: doi
+    value: "10.5281/zenodo.24026653"
+    description: "v1.3.1 (source evidence bound to the store key; duplicate ids judged alone; kubectl rule gaps closed)"
+  - type: doi
     value: "10.5281/zenodo.23787201"
     description: "v1.3.0 (agent hook: compound commands part by part; scripts and piped code read)"
   - type: doi
