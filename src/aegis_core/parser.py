@@ -25,7 +25,7 @@ intent per kind; naming objects alongside a multi-kind list is rejected
 **Names kubectl resolves at run time.** ``params["resolved_at_runtime"]``
 marks an intent whose real targets kubectl only finds when it runs, with the
 ``kinds`` they can be. ``kubectl exec deploy/web`` (also ``attach``,
-``port-forward``, any kind but a pod) runs on a pod behind the name: besides
+``port-forward``, ``logs``, any kind but a pod) runs on a pod behind the name: besides
 ``deployment/web`` it yields ``pod/*``, marked, so ``pod/*`` rules match and a
 rule on one pod, which cannot be decided here, escalates
 (``target-unresolved: <id>``). The categories ``all`` and ``api-extensions``
@@ -34,8 +34,27 @@ yield one ``kind/*`` per kind in them, as a comma list does, plus a marked
 may have joined the category, escalates too. Any other ``kind/*`` (``--all``,
 a selector, or a kind with no name, as in ``get pods`` or ``rollout restart
 deploy``) is marked with its own kind, since kubectl may pick any object of it:
-a rule on ``kind/*`` decides as usual, and a rule on one object escalates. None
-of this adds anything when no rule is about the action and kind.
+a rule on ``kind/*`` decides as usual, and a rule on one object escalates.
+``kubectl describe pod pay`` falls back to every pod whose name starts with
+``pay`` when no pod is called that, so its mark carries ``name_prefix`` and a
+rule that can name such a pod escalates. A kind outside the built-in table may
+be the plural or short name of any custom kind, so on the verbs that take a
+custom resource its mark carries ``custom_kinds``, and a rule on a custom kind
+escalates unless its name rules out the one written. None of this adds anything
+when no rule is about the action and kind.
+
+**Pods in other words.** ``kubectl cp`` names its pod in ``[ns/]pod:path`` on
+either side, as kubectl itself reads it (:func:`_cp_pod`), and the namespace
+written there counts as ``-n``. ``kubectl debug web`` is ``pod/web``, and
+``--copy-to`` also reaches the copy it names. Both also keep the target earlier
+versions gave them (``web:/a``, ``web/*``) as an intent of its own, so a signed
+rule on that resource keeps its verdict. A plan ratio over them can still change.
+
+**Words after ``--``.** Only ``exec``, ``run``, ``create`` and ``debug`` ask
+kubectl where the ``--`` was (``ArgsLenAtDash``). Every other kubectl verb gets
+those words as plain operands, so on the verbs in
+:data:`_KUBECTL_OPERAND_VERBS` they count as operands: ``kubectl describe pod a
+-- b`` names two pods. With nothing before the ``--`` the command stays refused.
 
 **Namespace deletion cascade.** ``kubectl delete namespace/<ns>`` (in any
 form: ``namespace <ns>``, ``ns/<ns>``, ``namespaces <ns>``) deletes every
@@ -350,10 +369,6 @@ _KUBECTL_GLOBAL_BOOL_FLAGS = {"A", "all-namespaces"} | _DISCARD_BOOL_FLAGS
 # Short flags that may be glued to their value: -nprod, -lapp=web, -fx.yaml.
 _KUBECTL_GLUED_SHORT_FLAGS = {"n", "l", "f", "o", "k", "s", "v", "c", "L"}
 
-# Verbs whose "resource" is just the literal first positional token (a
-# path), not a kind/name pair to be normalised.
-_LITERAL_RESOURCE_VERBS = {"cp"}
-
 # Verbs whose target is a pod by default: a bare name is a pod
 # ("exec api-0" -> pod/api-0), and "deploy/web" / "svc/web" normalise like
 # any other kind/name token.
@@ -361,11 +376,28 @@ _POD_TARGET_VERBS = {"exec", "logs", "port-forward", "attach"}
 
 # Of those, the ones whose kind/name kubectl resolves to a pod behind it, for a
 # rule on that verb to decide (see "Names kubectl resolves at run time" above).
-# logs does too, but is a read and is reported separately.
-_POD_RESOLVING_VERBS = {"exec", "port-forward", "attach"}
+_POD_RESOLVING_VERBS = {"exec", "port-forward", "attach", "logs"}
 
 # Verbs whose first word names a pod, whatever it says, so it is never a category.
-_POD_NAME_FIRST_VERBS = {"run", "debug"}
+_POD_NAME_FIRST_VERBS = {"run"}
+
+# Verbs whose words after "--" are operands like any other, read from kubectl's
+# source and checked on kubectl 1.36: `kubectl get pod/a -- b` fails as `get pod/a b`
+# does. exec, run, create and debug use ArgsLenAtDash, so "--" starts a command there.
+# logs and port-forward read their target from the first word only, top refuses a
+# second one, and attach (at most two words) is handled where it is parsed.
+_KUBECTL_OPERAND_VERBS = {
+    "annotate", "autoscale", "certificate", "cordon", "cp", "delete", "describe", "drain", "edit",
+    "expose", "get", "label", "patch", "rollout", "scale", "set", "taint", "uncordon", "wait",
+}
+
+# Verbs that take TYPE [NAME] and work on a custom resource. The kind they are
+# given may be a plural or short name no table here can resolve. `config view`
+# and `run web` also reach the parser as kind/name, and are not about a kind.
+_KUBECTL_CUSTOM_KIND_VERBS = {
+    "annotate", "autoscale", "delete", "describe", "edit", "get", "label", "patch", "scale",
+    "wait",
+}
 
 # The categories kubectl knows without any custom resource definition, from
 # `kubectl api-resources --categories=...` (1.36, on kind 1.37). A custom resource
@@ -599,11 +631,12 @@ def _bare_flag(tokens: list[str], i: int) -> bool:
 
 
 def _parse_flags(
-    tokens: list[str], *, verb: str | None = None,
+    tokens: list[str], *, verb: str | None = None, raw_copy_to: list[str] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], list[str], str | None, list[str] | None]:
     """Walks kubectl tokens (after the verb/subverb), splitting them into
     metadata, params, positional args, an optional manifest file/dir value,
-    and an optional trailing ``--`` command."""
+    and an optional trailing ``--`` command. ``raw_copy_to`` receives ``--copy-to``
+    as written, since a pod name "001" is not the number in params."""
     metadata: dict[str, Any] = {}
     params: dict[str, Any] = {}
     positional: list[str] = []
@@ -690,6 +723,8 @@ def _parse_flags(
                     i += 1
                     val = _value_at(tokens, i, tok)
                 params[_KUBECTL_SHORT_VALUE_NAMES.get(key, key)] = _coerce(val)
+                if key == "copy-to" and raw_copy_to is not None:
+                    raw_copy_to[:] = [val]
             elif val is not None:
                 params[key] = _coerce(val)
             elif is_long and i + 1 >= len(tokens):
@@ -737,23 +772,93 @@ def _make_intents(
     ]
 
 
-def _mark_open_targets(intents: list[InfrastructureIntent]) -> list[InfrastructureIntent]:
+def _mark_open_targets(
+    intents: list[InfrastructureIntent], *, custom_kinds: bool = False
+) -> list[InfrastructureIntent]:
     """Marks the ``kind/*`` intents: which objects they reach is only known when
     kubectl runs. A category's kinds need no mark of their own: its intent has
-    them all."""
+    them all. With ``custom_kinds``, a kind outside the built-in table is marked
+    too, also with a name: which kind it spells is only known when kubectl runs."""
     covered = {k for intent in intents if intent.resource.endswith("/*")
                for k in _KUBECTL_CATEGORIES.get(intent.resource[:-2], ())}
     for intent in intents:
         kind, _, name = intent.resource.partition("/")
-        if name != "*":
-            continue
-        if kind in _KUBECTL_CATEGORIES:
+        unknown_kind = custom_kinds and kind not in _KUBECTL_BUILTIN_NAMES
+        if kind in _KUBECTL_CATEGORIES and name == "*":
             intent.params["resolved_at_runtime"] = {
                 "from": kind, "kinds": list(_KUBECTL_CATEGORIES[kind]), "custom_kinds": True,
             }
-        elif kind not in covered:
+        elif name == "*" and kind not in covered:
             intent.params["resolved_at_runtime"] = {"from": intent.resource, "kinds": [kind]}
+            if unknown_kind:
+                intent.params["resolved_at_runtime"]["custom_kinds"] = True
+        elif name != "*" and unknown_kind:
+            intent.params["resolved_at_runtime"] = {
+                "from": intent.resource, "kinds": [kind], "name": name, "custom_kinds": True,
+            }
     return intents
+
+
+def _mark_name_prefix(intent: InfrastructureIntent, prefix: str) -> None:
+    """``kubectl describe TYPE NAME`` with no object called NAME describes every
+    object whose name starts with it. Only that two-word form does."""
+    kind = intent.resource.partition("/")[0]
+    target = {"from": intent.resource, "kinds": [kind], "name_prefix": prefix}
+    if intent.params.get("resolved_at_runtime", {}).get("custom_kinds"):
+        target["custom_kinds"] = True
+    intent.params["resolved_at_runtime"] = target
+
+
+def _cp_pod(operand: str) -> tuple[str, str] | None:
+    """The ``(namespace, pod)`` in one ``kubectl cp`` operand, or None when it is
+    a local path. kubectl's extractFileSpec decides by the first colon alone:
+    with no colon it is local, and otherwise what comes before the colon is
+    ``pod`` or ``ns/pod``, so ``./a:b`` is pod ``a``, in a namespace called
+    ``.``. An empty pod name counts as local, and more than one slash, or a
+    colon first, is an error (``/tmp/a:b``, ``:b``), so no pod is reached. An
+    empty namespace means the one kubectl would use anyway."""
+    before, colon, _ = operand.partition(":")
+    pieces = before.split("/")
+    if not colon or len(pieces) > 2 or not pieces[-1]:
+        return None
+    return (pieces[0] if len(pieces) == 2 else "", pieces[-1])
+
+
+def _cp_intents(
+    positional: list[str], params: dict[str, Any], metadata: dict[str, Any]
+) -> list[InfrastructureIntent]:
+    """One ``pod/<name>`` intent per pod named, on either side, then the first word
+    as it is written: the target earlier versions gave, which a signed rule may
+    name. With no pod, kubectl refuses the command, and only that word is left."""
+    intents: list[InfrastructureIntent] = []
+    for namespace, pod in filter(None, map(_cp_pod, positional)):
+        where = {**metadata, "namespace": namespace} if namespace else metadata
+        intents.extend(_make_intents([f"pod/{pod}"], "cp", params, where))
+    return intents + _make_intents([positional[0]], "cp", params, metadata)
+
+
+def _debug_intents(
+    positional: list[str], raw_copy_to: list[str], params: dict[str, Any],
+    metadata: dict[str, Any],
+) -> list[InfrastructureIntent]:
+    """``kubectl debug`` takes pods by bare name, or TYPE/NAME for a node.
+    ``--copy-to`` runs in a new pod of that name. A node has no copy. The targets
+    earlier versions gave (``web/*``) stay beside them, unmarked as they were, since
+    a signed rule may name them, and what they refused stays refused."""
+    earlier = _parse_resources(positional)
+    targets = _default_kind_targets(positional, "pod")
+    if raw_copy_to and raw_copy_to[0] and any(t.startswith("pod/") for t in targets):
+        targets.append(f"pod/{raw_copy_to[0]}")
+    return _make_intents(list(dict.fromkeys(targets + earlier)), "debug", params, metadata)
+
+
+def _default_kind_targets(positional: list[str], kind: str) -> list[str]:
+    """``kind/<word>`` for a bare word, ``<kind>/<name>`` normalised for TYPE/NAME."""
+    targets = []
+    for token in positional:
+        token_kind, name = _split_resource_token(token)
+        targets.append(f"{token_kind}/{name}" if name is not None else f"{kind}/{token}")
+    return targets
 
 
 def from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
@@ -826,8 +931,15 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
     # so "-n prod delete x" and "delete x -n prod" produce identical intents.
     tokens = leading + after_verb
 
-    metadata, params, positional, manifest_value, command = _parse_flags(tokens, verb=verb)
-    if command is not None:
+    raw_copy_to: list[str] = []
+    metadata, params, positional, manifest_value, command = _parse_flags(
+        tokens, verb=verb, raw_copy_to=raw_copy_to)
+    # attach takes at most two words, and a second one after "--" is its NAME.
+    attach_name_after_dash = (verb == "attach" and len(positional) == 1
+                              and command is not None and len(command) == 1)
+    if positional and command and (verb in _KUBECTL_OPERAND_VERBS or attach_name_after_dash):
+        positional = positional + command
+    elif command is not None:
         params["command"] = command
 
     if manifest_value is not None and verb in ("apply", "create", "replace", "delete"):
@@ -843,10 +955,15 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
             raise ValueError(f"could not find a target resource in: {argv!r}")
         return _mark_open_targets(_make_intents(resources, f"rollout-{subverb}", params, metadata))
 
-    if verb in _LITERAL_RESOURCE_VERBS:
+    if verb == "cp":
         if not positional:
             raise ValueError(f"could not find a target resource in: {argv!r}")
-        return _make_intents([positional[0]], verb, params, metadata)
+        return _cp_intents(positional, params, metadata)
+
+    if verb == "debug":
+        if not positional:
+            raise ValueError(f"could not find a target resource in: {argv!r}")
+        return _debug_intents(positional, raw_copy_to, params, metadata)
 
     if verb in _POD_TARGET_VERBS:
         if not positional:
@@ -861,16 +978,18 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
         if verb in _POD_RESOLVING_VERBS and name is not None and kind != "pod":
             behind = {**params, "resolved_at_runtime": {"from": target, "kinds": ["pod"]}}
             intents.extend(_make_intents(["pod/*"], verb, behind, metadata))
+        if attach_name_after_dash:
+            # What this was read as before: a rule on it keeps its verdict.
+            first_kind, first_name = _split_resource_token(positional[0])
+            earlier = (f"{first_kind}/{first_name}" if first_name is not None
+                       else f"pod/{positional[0]}")
+            intents.extend(_make_intents([earlier], verb, params, metadata))
         return intents
 
     if verb in _NODE_TARGET_VERBS:
         if not positional:
             raise ValueError(f"could not find a target resource in: {argv!r}")
-        targets = []
-        for token in positional:
-            kind, name = _split_resource_token(token)
-            targets.append(f"{kind}/{name}" if name is not None else f"node/{token}")
-        return _make_intents(targets, verb, params, metadata)
+        return _make_intents(_default_kind_targets(positional, "node"), verb, params, metadata)
 
     if verb in ("label", "annotate"):
         resource_tokens = [t for t in positional if not _is_pair_operand(t)]
@@ -883,7 +1002,8 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
         removed = [t[:-1] for t in operands if "=" not in t]
         if removed:
             params[f"{key}_removed"] = removed
-        return _mark_open_targets(_make_intents(resources, verb, params, metadata))
+        return _mark_open_targets(_make_intents(resources, verb, params, metadata),
+                                  custom_kinds=True)
 
     if verb == "set":  # "set image"
         resource_tokens = [t for t in positional if not _is_pair_operand(t)]
@@ -906,7 +1026,10 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
     if verb in _POD_NAME_FIRST_VERBS:
         return _make_intents(resources, verb, params, metadata)
     resources = _expand_categories(resources)
-    intents = _mark_open_targets(_make_intents(resources, verb, params, metadata))
+    intents = _mark_open_targets(_make_intents(resources, verb, params, metadata),
+                                 custom_kinds=verb in _KUBECTL_CUSTOM_KIND_VERBS)
+    if verb == "describe" and len(positional) == 2 and not any("/" in t for t in positional):
+        _mark_name_prefix(intents[0], positional[1])
     if verb == "delete":
         intents.extend(_namespace_cascade_intents(resources, params, metadata))
     return intents

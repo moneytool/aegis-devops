@@ -109,9 +109,16 @@ kubectl/helm command names no namespace (or uses `-A`), and a kind- or object-ba
 escalates with `manifest-not-inspected: <id>` on `kubectl … -f <file>|-`, whose manifest is never
 read ([Environment mapping](constraints.md#environment-mapping)). The note
 `target-unresolved: <id>` is the same idea for targets kubectl finds when it runs: `kubectl exec
-deploy/web` runs on some pod, so a rule on `pod/payments-0` escalates while a rule on `pod/*`
-decides as usual, and `--all` or a selector does the same for a rule on one object of that kind
-([Kubernetes resource names](constraints.md#kubernetes-resource-names)).
+deploy/web` or `kubectl logs deploy/web` reaches some pod, so a rule on `pod/payments-0` escalates
+while a rule on `pod/*` decides as usual, and `--all` or a selector does the same for a rule on one
+object of that kind. `kubectl describe pod pay` escalates under a `describe` rule on a pod whose
+name starts with `pay`, because kubectl treats the name as a prefix when no pod has exactly that
+name. A kind outside the built-in table, as in `kubectl delete widgets --all`, escalates under a
+rule on a custom kind, because a plural or short name cannot be resolved from the command
+([Kubernetes resource names](constraints.md#kubernetes-resource-names)). `kubectl debug web` and
+`kubectl cp b web:/a` need no note: they are `pod/web`, beside the target earlier versions gave.
+Words after `--` count as operands on the verbs that take them, so `kubectl describe pod api --
+payments-0` is two pods.
 
 ### Claude Code hook
 

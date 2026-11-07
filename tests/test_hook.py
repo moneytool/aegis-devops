@@ -4560,7 +4560,7 @@ def test_what_a_category_does_to_other_rules(opted_in_project, pattern, command,
     ("deployment/*", "patch", "kubectl patch all -p {}", "deny"),
     ("deployment/*", "delete", "kubectl delete all --all --grace-period 0", "deny"),
     ("secret/*", "delete", "kubectl delete all --all --grace-period 0", "allow"),
-    ("pod/*", "debug", "kubectl debug all --image=x", "allow"),
+    ("pod/*", "debug", "kubectl debug all --image=x", "deny"),
 ])
 def test_all_commands_with_operands_decide_on_their_targets(opted_in_project, pattern, action,
                                                             command, decision):
@@ -4654,9 +4654,9 @@ def test_a_dry_run_of_a_category_is_a_rehearsal(opted_in_project):
     ("", "pod", False),
 ])
 def test_whether_a_pattern_can_name_a_kind(pattern, kind, expected):
-    from aegis_core.store import _pattern_may_name_kind
+    from aegis_core.store import _pattern_may_start_with
 
-    assert _pattern_may_name_kind(pattern, kind) is expected
+    assert _pattern_may_start_with(pattern, f"{kind}/") is expected
 
 
 def test_whether_a_pattern_can_name_a_kind_agrees_with_fnmatch():
@@ -4664,7 +4664,7 @@ def test_whether_a_pattern_can_name_a_kind_agrees_with_fnmatch():
     import fnmatch
     import itertools
 
-    from aegis_core.store import _pattern_may_name_kind
+    from aegis_core.store import _pattern_may_start_with
 
     pieces = ["p", "o", "d", "/", "x", "*", "?", "[p]", "[!p]", "[/]", "[!/]", "[", "]", "!"]
     names = ["pod/x", "pod/", "pod/xx", "pod//", "pod/[", "pod/]", "pod/!", "pod/p"]
@@ -4672,7 +4672,7 @@ def test_whether_a_pattern_can_name_a_kind_agrees_with_fnmatch():
         for parts in itertools.product(pieces, repeat=size):
             pattern = "".join(parts)
             if any(fnmatch.fnmatch(name, pattern) for name in names):
-                assert _pattern_may_name_kind(pattern, "pod"), pattern
+                assert _pattern_may_start_with(pattern, "pod/"), pattern
 
 
 @pytest.mark.parametrize("pattern", [
@@ -4680,10 +4680,10 @@ def test_whether_a_pattern_can_name_a_kind_agrees_with_fnmatch():
     "x" * 60000, "[a]" * 20000, "*x" * 30000, "pod[" * 15000,
 ])
 def test_whether_a_pattern_can_name_a_kind_stays_linear(pattern):
-    from aegis_core.store import _pattern_may_name_kind
+    from aegis_core.store import _pattern_may_start_with
 
     started = time.monotonic()
-    _pattern_may_name_kind(pattern, "horizontalpodautoscaler")
+    _pattern_may_start_with(pattern, "horizontalpodautoscaler/")
     assert time.monotonic() - started < 1 * TIMING_SLACK
 
 
@@ -4784,3 +4784,61 @@ def test_a_long_list_of_kinds_through_the_hook_stays_linear(opted_in_project):
     started = time.monotonic()
     assert hook.decide(command, config_dir).decision == "ask"
     assert time.monotonic() - started < 1 * TIMING_SLACK
+
+
+@pytest.mark.parametrize("pattern,action,command,decision", [
+    # the rows of #68
+    ("pod/*", "logs", "kubectl logs deploy/web", "deny"),
+    ("pod/payments-0", "logs", "kubectl logs deploy/web", "ask"),
+    ("pod/web", "debug", "kubectl debug web --image=busybox", "deny"),
+    ("pod/*", "debug", "kubectl debug web --image=busybox", "deny"),
+    ("pod/web", "cp", "kubectl cp web:/a b", "deny"),
+    ("pod/*", "cp", "kubectl cp web:/a b", "deny"),
+    ("pod/web", "cp", "kubectl cp b web:/a", "deny"),
+    ("pod/*", "cp", "kubectl cp b web:/a", "deny"),
+    ("pod/web", "cp", "kubectl cp -c app b prod/web:/a", "deny"),
+    ("pod/payments-0", "describe", "kubectl describe pod pay", "ask"),
+    ("widget/*", "delete", "kubectl delete widgets --all", "ask"),
+    # and what stays as it was
+    ("pod/other", "logs", "kubectl logs web", "allow"),
+    ("pod/other", "debug", "kubectl debug web --image=busybox", "allow"),
+    ("pod/other", "cp", "kubectl cp b web:/a", "allow"),
+    ("pod/api-0", "describe", "kubectl describe pod pay", "allow"),
+    ("pod/payments-0", "describe", "kubectl describe pod/pay", "allow"),
+    ("deployment/*", "delete", "kubectl delete widgets --all", "allow"),
+    # words after "--"
+    ("pod/payments-0", "describe", "kubectl describe pod api -- payments-0", "deny"),
+    ("widget/bar", "delete", "kubectl delete widgets foo -- bar", "ask"),
+    ("pod/payments-0", "describe", "kubectl describe pod pay -- other", "allow"),
+    ("pod/ls", "exec", "kubectl exec web -- ls", "allow"),
+    # the spelling earlier versions gave
+    ("web:*", "cp", "kubectl cp web:/a b", "deny"),
+    ("b", "cp", "kubectl cp b web:/a", "deny"),
+    ("web/*", "debug", "kubectl debug web --image=x", "deny"),
+    # a name is text
+    ("pod/001", "debug", "kubectl debug web --image=x --copy-to=001", "deny"),
+    ("widget/foo", "autoscale", "kubectl autoscale widgets foo --max=3", "ask"),
+])
+def test_the_object_a_command_reaches_through_the_hook(opted_in_project, pattern, action, command,
+                                                       decision):
+    config_dir = _own_policy(opted_in_project, (pattern, [action]))
+    verdict = hook.decide(command, config_dir)
+    assert verdict.decision == decision, (command, verdict)
+    if decision == "ask":
+        assert "target-unresolved: r0" in verdict.reason
+
+
+def test_logs_with_a_selector_stays_refused(opted_in_project):
+    config_dir = _own_policy(opted_in_project, ("pod/*", ["delete"]))
+    assert hook.decide("kubectl logs -l a=b", config_dir).decision == "deny"
+
+
+@pytest.mark.parametrize("command,decision", [
+    ("kubectl get pods -n prod", "allow"),
+    ("kubectl describe deployment api -n prod", "allow"),
+    ("kubectl delete namespace prod", "deny"),
+    ("kubectl delete nodes --all", "deny"),
+])
+def test_the_paper_scenarios_under_the_example_policy(command, decision):
+    data = Path(__file__).resolve().parent.parent / "data"
+    assert hook.decide(command, data).decision == decision

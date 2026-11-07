@@ -589,3 +589,223 @@ def test_an_untrusted_rule_on_one_object_cannot_force_a_question():
         from_kubectl("kubectl delete deploy --all".split()), now=IN_WINDOW)
     assert decision.verdict == "ALLOW"
     assert decision.discarded == [{"id": "r", "reason": "unauthorized"}]
+
+
+# --- the object a command reaches, whatever word names it (#68) ----------------------
+
+
+@pytest.mark.parametrize("pattern,action,command,verdict", [
+    # logs behind a name, as exec
+    ("pod/*", "logs", "kubectl logs deploy/web", "BLOCK"),
+    ("deployment/web", "logs", "kubectl logs deploy/web", "BLOCK"),
+    ("pod/payments-0", "logs", "kubectl logs deploy/web", "ESCALATE"),
+    ("pod/payments-0", "logs", "kubectl logs payments-0", "BLOCK"),
+    ("pod/payments-0", "logs", "kubectl logs other", "ALLOW"),
+    ("pod/payments-0", "logs", "kubectl logs pod/other", "ALLOW"),
+    ("secret/x", "logs", "kubectl logs deploy/web", "ALLOW"),
+    ("pod/*", "exec", "kubectl logs deploy/web", "ALLOW"),
+    # debug
+    ("pod/web", "debug", "kubectl debug web --image=busybox", "BLOCK"),
+    ("pod/*", "debug", "kubectl debug web --image=busybox", "BLOCK"),
+    ("pod/other", "debug", "kubectl debug web --image=busybox", "ALLOW"),
+    ("node/*", "debug", "kubectl debug web --image=busybox", "ALLOW"),
+    ("node/n1", "debug", "kubectl debug node/n1 --image=busybox", "BLOCK"),
+    ("pod/*", "debug", "kubectl debug node/n1 --image=busybox", "ALLOW"),
+    ("pod/web", "debug", "kubectl debug web --copy-to=c --image=x", "BLOCK"),
+    ("pod/c", "debug", "kubectl debug web --copy-to=c --image=x", "BLOCK"),
+    ("pod/d", "debug", "kubectl debug web --copy-to=c --image=x", "ALLOW"),
+    # cp, either side
+    ("pod/web", "cp", "kubectl cp web:/a b", "BLOCK"),
+    ("pod/*", "cp", "kubectl cp web:/a b", "BLOCK"),
+    ("pod/web", "cp", "kubectl cp b web:/a", "BLOCK"),
+    ("pod/*", "cp", "kubectl cp b web:/a", "BLOCK"),
+    ("pod/web", "cp", "kubectl cp b prod/web:/a -c app", "BLOCK"),
+    ("pod/web", "cp", "kubectl cp b -- web:/a", "BLOCK"),
+    ("pod/other", "cp", "kubectl cp b web:/a", "ALLOW"),
+    ("pod/web", "exec", "kubectl cp b web:/a", "ALLOW"),
+    # no pod, and kubectl refuses it
+    ("pod/*", "cp", "kubectl cp a b", "ALLOW"),
+    ("pod/*", "cp", "kubectl cp /tmp/x:y b", "ALLOW"),
+    # describe TYPE NAME: rules that can name an object starting with NAME
+    ("pod/payments-0", "describe", "kubectl describe pod pay", "ESCALATE"),
+    ("pod/pay*-0", "describe", "kubectl describe pod pay", "ESCALATE"),
+    ("pod/p?y-0", "describe", "kubectl describe pod pay", "ESCALATE"),
+    ("pod/[op]ay-0", "describe", "kubectl describe pod pay", "ESCALATE"),
+    ("pod/*-0", "describe", "kubectl describe pod pay", "ESCALATE"),
+    ("*/payments-0", "describe", "kubectl describe pod pay", "ESCALATE"),
+    ("pod/pay", "describe", "kubectl describe pod pay", "BLOCK"),
+    ("pod/pay*", "describe", "kubectl describe pod pay", "BLOCK"),
+    ("pod/*", "describe", "kubectl describe pod pay", "BLOCK"),
+    ("pod/api-0", "describe", "kubectl describe pod pay", "ALLOW"),
+    ("pod/pa", "describe", "kubectl describe pod pay", "ALLOW"),
+    ("pod/xpayments", "describe", "kubectl describe pod pay", "ALLOW"),
+    ("secret/payments-0", "describe", "kubectl describe pod pay", "ALLOW"),
+    ("pod/payments-0", "get", "kubectl describe pod pay", "ALLOW"),
+    # a name written in the other forms is exact
+    ("pod/payments-0", "describe", "kubectl describe pod/pay", "ALLOW"),
+    ("pod/payments-0", "describe", "kubectl describe pod pay other", "ALLOW"),
+    ("pod/payments-0", "get", "kubectl get pod pay", "ALLOW"),
+    # a metacharacter written in the command is only text
+    ("pod/payments-0", "describe", "kubectl describe pod p*", "ALLOW"),
+    # a kind outside the table
+    ("widget/*", "delete", "kubectl delete widgets --all", "ESCALATE"),
+    ("widget/one", "delete", "kubectl delete widgets --all", "ESCALATE"),
+    ("widget.x.io/*", "delete", "kubectl delete widgets --all", "ESCALATE"),
+    ("widget/*", "delete", "kubectl delete wd -l a=b", "ESCALATE"),
+    ("widgets/*", "delete", "kubectl delete widget --all", "ESCALATE"),
+    ("widgets/*", "delete", "kubectl delete widgets --all", "BLOCK"),
+    ("widget/*", "delete", "kubectl delete widget --all", "BLOCK"),
+    ("*", "delete", "kubectl delete widgets --all", "BLOCK"),
+    ("widget/*", "delete", "kubectl delete widgets foo", "ESCALATE"),
+    ("widget/foo", "delete", "kubectl delete widgets foo", "ESCALATE"),
+    ("widget/f*", "delete", "kubectl delete wd/foo", "ESCALATE"),
+    ("widget/bar", "delete", "kubectl delete widgets foo", "ALLOW"),
+    ("widgets/bar", "delete", "kubectl delete widgets foo", "ALLOW"),
+    ("widget/foo", "delete", "kubectl delete widget foo", "BLOCK"),
+    ("widget/payments-0", "describe", "kubectl describe widgets pay", "ESCALATE"),
+    ("widget/api-0", "describe", "kubectl describe widgets pay", "ALLOW"),
+    # can't be ruled out: another custom kind may have this short name
+    ("gadget/*", "delete", "kubectl delete widgets --all", "ESCALATE"),
+    # built-in kinds are in the table, so a custom name is not one of them
+    ("deployment/*", "delete", "kubectl delete widgets --all", "ALLOW"),
+    ("pod/x", "delete", "kubectl delete widgets --all", "ALLOW"),
+    ("manifest/x.yaml", "delete", "kubectl delete widgets --all", "ALLOW"),
+    ("widget/*", "get", "kubectl delete widgets --all", "ALLOW"),
+    # a built-in kind never asks about a custom rule
+    ("widget/*", "delete", "kubectl delete pods --all", "ALLOW"),
+    ("widget/*", "delete", "kubectl delete pod web", "ALLOW"),
+    # verbs that don't take a custom kind
+    ("widget/*", "*", "kubectl config view", "ALLOW"),
+    ("widget/*", "*", "kubectl run web --image=x", "ALLOW"),
+])
+def test_the_object_a_command_reaches(pattern, action, command, verdict):
+    got, notes = _decide([_bare(pattern, action)], command.split())
+    assert got == verdict, (command, notes)
+    if verdict == "ESCALATE":
+        assert notes == ["target-unresolved: r"]
+
+
+@pytest.mark.parametrize("scope,command,verdict", [
+    ({"namespace": "prod"}, "kubectl cp b prod/web:/a", "BLOCK"),
+    ({"namespace": "prod"}, "kubectl cp -n dev b prod/web:/a", "BLOCK"),
+    ({"namespace": "prod"}, "kubectl cp b dev/web:/a", "ALLOW"),
+    ({"namespace": "prod"}, "kubectl cp -n prod dev/web:/a b", "ALLOW"),
+    ({"namespace": "prod"}, "kubectl cp b web:/a -n prod", "BLOCK"),
+    ({"namespace": "prod"}, "kubectl cp b web:/a", "ESCALATE"),
+])
+def test_cp_takes_its_namespace_from_the_pod_it_names(scope, command, verdict):
+    assert _decide([_bare("pod/web", "cp", scope)], command.split())[0] == verdict
+
+
+@pytest.mark.parametrize("scope,command,verdict", [
+    ({"namespace": "prod"}, "kubectl describe pod pay -n prod", "ESCALATE"),
+    ({"namespace": "prod"}, "kubectl describe pod pay -n dev", "ALLOW"),
+    ({"namespace": "prod"}, "kubectl describe pod pay", "ESCALATE"),
+])
+def test_a_name_prefix_keeps_the_rules_scope(scope, command, verdict):
+    assert _decide([_bare("pod/payments-0", "describe", scope)], command.split())[0] == verdict
+
+
+@pytest.mark.parametrize("command,rule", [
+    ("kubectl describe pod pay", _bare("pod/payments-0", "describe")),
+    ("kubectl delete widgets --all", _bare("widget/*", "delete")),
+    ("kubectl delete widgets foo", _bare("widget/foo", "delete")),
+])
+def test_a_quarantined_rule_asks_where_a_live_one_would(command, rule):
+    assert _live_and_quarantined(rule, command, NOW, True) == ["ESCALATE", "ESCALATE"]
+
+
+@pytest.mark.parametrize("pattern,action,command,verdict", [
+    # words after "--" are operands
+    ("pod/payments-0", "describe", "kubectl describe pod api -- payments-0", "BLOCK"),
+    ("widget/bar", "delete", "kubectl delete widgets foo -- bar", "ESCALATE"),
+    ("pod/x", "delete", "kubectl delete pod a -- x", "BLOCK"),
+    ("pod/x", "delete", "kubectl delete pod -- x", "BLOCK"),
+    ("pod/*", "delete", "kubectl delete pod -- x", "BLOCK"),
+    ("pod/y", "delete", "kubectl delete pod -- x", "ALLOW"),
+    ("node/n2", "cordon", "kubectl cordon n1 -- n2", "BLOCK"),
+    ("node/n2", "drain", "kubectl drain n1 -- n2", "BLOCK"),
+    ("deployment/b", "scale", "kubectl scale deploy a -- b --replicas=1", "BLOCK"),
+    ("pod/web", "cp", "kubectl cp b -- web:/a", "BLOCK"),
+    # and they count for the prefix: three words are exact, two are not
+    ("pod/payments-0", "describe", "kubectl describe pod pay -- other", "ALLOW"),
+    ("pod/payments-0", "describe", "kubectl describe pod -- pay", "ESCALATE"),
+    # attach: at most two words
+    ("deployment/web", "attach", "kubectl attach deploy -- web", "BLOCK"),
+    ("pod/*", "attach", "kubectl attach deploy -- web", "BLOCK"),
+    ("pod/web", "attach", "kubectl attach web -- x", "BLOCK"),
+    # a command stays a command
+    ("pod/ls", "exec", "kubectl exec web -- ls", "ALLOW"),
+    ("pod/sh", "debug", "kubectl debug web --image=x -- sh", "ALLOW"),
+    ("pod/sleep", "run", "kubectl run web --image=x -- sleep", "ALLOW"),
+    # the spelling earlier versions gave keeps its rule
+    ("web:*", "cp", "kubectl cp web:/a b", "BLOCK"),
+    ("web:/a", "cp", "kubectl cp web:/a b", "BLOCK"),
+    ("b", "cp", "kubectl cp b web:/a", "BLOCK"),
+    ("web/*", "debug", "kubectl debug web --image=x", "BLOCK"),
+    ("a/b", "debug", "kubectl debug a b --image=x", "BLOCK"),
+    ("other:*", "cp", "kubectl cp web:/a b", "ALLOW"),
+    ("other/*", "debug", "kubectl debug web --image=x", "ALLOW"),
+    # a name from a flag or an operand stays as written
+    ("pod/001", "debug", "kubectl debug web --image=x --copy-to=001", "BLOCK"),
+    ("pod/1", "debug", "kubectl debug web --image=x --copy-to=001", "ALLOW"),
+    # autoscale takes any kind with a scale subresource
+    ("widget/foo", "autoscale", "kubectl autoscale widgets foo --max=3", "ESCALATE"),
+    ("widget/bar", "autoscale", "kubectl autoscale widgets foo --max=3", "ALLOW"),
+    ("deployment/foo", "autoscale", "kubectl autoscale widgets foo --max=3", "ALLOW"),
+    ("pod/001", "debug", "kubectl debug 001 --image=x", "BLOCK"),
+    ("pod/001", "cp", "kubectl cp b 001:/a", "BLOCK"),
+    ("pod/0012", "describe", "kubectl describe pod 001", "ESCALATE"),
+    ("widget/001", "delete", "kubectl delete widgets 001", "ESCALATE"),
+])
+def test_review_of_the_object_a_command_reaches(pattern, action, command, verdict):
+    got, notes = _decide([_bare(pattern, action)], command.split())
+    assert got == verdict, (command, notes)
+    if verdict == "ESCALATE":
+        assert notes == ["target-unresolved: r"]
+
+
+@pytest.mark.parametrize("pattern,scope,verdict", [
+    ("web/*", {"copy-to": 1}, "BLOCK"),
+    ("web/*", {"copy-to": 2}, "ALLOW"),
+    ("pod/001", {}, "BLOCK"),
+])
+def test_copy_to_stays_a_number_in_a_scope_and_text_in_a_target(pattern, scope, verdict):
+    rule = _bare(pattern, "debug", scope)
+    command = "kubectl debug web --image=x --copy-to=001".split()
+    assert _decide([rule], command)[0] == verdict
+
+
+def test_a_rule_scoped_to_a_namespace_keeps_the_verdict_on_the_old_spelling():
+    rule = _bare("web:*", "cp", {"namespace": "dev"})
+    assert _decide([rule], "kubectl cp -n dev web:/a b".split())[0] == "BLOCK"
+    assert _decide([rule], "kubectl cp -n prod web:/a b".split())[0] == "ALLOW"
+
+
+# Everyday commands under rules that aren't about them decide as if no rule were there.
+@pytest.mark.parametrize("command", [
+    "kubectl get pods -n prod",
+    "kubectl describe deployment api -n prod",
+    "kubectl logs api-0 -n prod",
+    "kubectl logs deploy/web -n prod",
+    "kubectl cp b web:/a",
+    "kubectl debug web --image=busybox",
+    "kubectl describe pod pay",
+    "kubectl get widgets",
+])
+def test_other_actions_and_kinds_stay_quiet(command):
+    rules = [_rule("a", "node/*", ["delete", "drain"]), _rule("b", "secret/db", ["delete"]),
+             _rule("c", "namespace/*", ["delete"]), _rule("d", "pod/payments-0", ["delete"]),
+             _rule("e", "widget/*", ["delete"])]
+    assert _decide(rules, command.split())[0] == "ALLOW"
+
+
+@pytest.mark.parametrize("command,verdict", [
+    ("kubectl get pods -n prod", "ALLOW"),
+    ("kubectl describe deployment api -n prod", "ALLOW"),
+    ("kubectl delete namespace prod", "BLOCK"),
+    ("kubectl delete nodes --all", "BLOCK"),
+])
+def test_the_paper_scenarios_keep_their_verdicts(command, verdict):
+    rules = [_rule("n", "namespace/*", ["delete"]), _rule("o", "node/*", ["delete"])]
+    assert _decide(rules, command.split())[0] == verdict
