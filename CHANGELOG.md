@@ -8,6 +8,44 @@ behaviour.
 
 ## [Unreleased]
 
+### Fixed
+- Five kubectl commands now meet the rules on what they reach (#68).
+  - `kubectl logs deploy/web` reads a pod behind the name, as `kubectl exec deploy/web` does, so it
+    is also `pod/*`: a `pod/*` rule matches and a rule on one pod asks (`target-unresolved: <id>`).
+  - `kubectl debug web --image=busybox` was `web/*`, reading the name as a kind. It is now
+    `pod/web`, and `--copy-to=c` adds `pod/c`, spelled as written (`--copy-to=001` is `pod/001`).
+    `web/*` stays beside them, so a per-intent rule on the old spelling keeps matching.
+  - `kubectl cp web:/a b` kept the pod inside the path and `kubectl cp b web:/a` lost it, so neither
+    met a pod rule. Both are now `pod/web`. `ns/pod:path` sets the namespace, over `-n`, as in
+    kubectl, and a word counts as remote by kubectl's own rule. The first word as written stays
+    beside the pod, so a per-intent rule on the old spelling, such as `web:*`, keeps matching.
+  - `kubectl describe pod pay` falls back to every pod whose name starts with `pay`, so a `describe`
+    rule on `pod/payments-0` now asks. A rule that cannot match such a name, like `pod/api-0`, does
+    not, and `kubectl describe pod/pay` stays exact.
+  - `kubectl delete widgets --all` passed a rule on `widget/*`, because `widget` is not a built-in
+    kind and a plural or short name cannot be resolved from the command. A kind outside the built-in
+    table now asks under a rule on a custom kind, on the verbs that take one. Naming an object keeps
+    it narrow: `kubectl delete widgets foo` asks under `widget/foo` and not under `widget/bar`.
+
+  - Words after `--` were stored as a command on every verb, though only `exec`, `run`, `create`
+    and `debug` use them that way. On the other verbs they are operands now: `kubectl describe pod
+    api -- payments-0` meets a rule on `pod/payments-0`, `kubectl describe pod pay -- other` is
+    exact, and `kubectl delete pod -- x` is `pod/x` where it was `pod/*`. A kind list or category
+    with a word after `--`, such as `kubectl delete pods,svc -- x`, is refused, as kubectl refuses
+    it. With nothing before the `--` the command stays refused.
+
+  `kubectl debug all --image=x` is `pod/all` beside `all/*`, so it meets a `pod/*` `debug` rule.
+  `cp` and `debug` now give one intent more, as `kubectl exec deploy/web` has since #64, and this can
+  change a plan rule. A count such as `max_intents` can rise, and a `ratio` can drop:
+  `kubectl cp web:/a b` under a ratio of `web:*` over all intents with `max: 0.75` went from BLOCK to
+  ALLOW, because 1/1 became 1/2. So the old spelling keeps matching for rules on a resource, and not
+  for ratios. Aside from plan rules, commands with no rule about their action and kind decide as
+  before.
+
+  `from_kubectl` now raises `ValueError` on `kubectl cp` with a pod and on `kubectl debug <name>`, as
+  it does for `kubectl exec deploy/web`, because they give more than one intent. Use
+  `from_kubectl_multi`.
+
 ## [1.3.1] — 2026-11-06
 
 Three fixes found while preparing the formal model for a conference submission, and two kubectl

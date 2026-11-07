@@ -34,7 +34,13 @@ free-form string; every other field feeds either matching, provenance, or author
 ```
 
 A plan-level constraint (`../data/plan_constraints.example.yaml`) carries exactly one batch
-predicate instead of a per-intent match, evaluated over every intent from one plan/invocation:
+predicate instead of a per-intent match, evaluated over every intent from one plan/invocation.
+One kubectl command can be more than one intent: `kubectl cp b web:/a` is two (`pod/web` and `b`),
+`kubectl debug web` is two (`pod/web` and `web/*`), `--copy-to` adds a third, and `kubectl exec
+deploy/web` is two (`deployment/web` and `pod/*`). Each counts toward `max_intents` and
+`max_matching`, so a count can rise. A `ratio` can also drop, since the extra intents join its
+denominator: `kubectl cp web:/a b` under a ratio of `web:*` over all intents with `max: 0.75` went
+from 1/1 to 1/2, which passes a ratio that used to fire:
 
 ```yaml
 plan_constraints:
@@ -62,14 +68,27 @@ plan_constraints:
 A kubectl target is normalised to `<singular kind>/<name>` before matching, so write
 `resource_pattern` in that form: `pod/api-0`, `node/*`, `storageclass/fast`,
 `clusterrolebinding/*`. Plural and short kind names (`pods`, `po`, `sc`, `storageclasses`,
-`crd`, `netpol`, …) are all mapped to the singular. Two families of verbs name their target
-implicitly:
+`crd`, `netpol`, …) are all mapped to the singular. Some verbs name their target implicitly:
 
 - `exec`, `logs`, `attach` and `port-forward` act on a **pod** by default: `kubectl exec api-0`
-  is `pod/api-0`. Given another kind, `exec`, `attach` and `port-forward` run on a pod kubectl
-  finds behind it, so `kubectl exec deploy/web` is both `deployment/web` and `pod/*`. A rule on
+  is `pod/api-0`. Given another kind, they run on a pod kubectl finds behind it, so `kubectl exec
+  deploy/web` is both `deployment/web` and `pod/*`, and so is `kubectl logs deploy/web`. A rule on
   one pod (`pod/payments-0`) cannot be decided from that, so it escalates with the note
-  `target-unresolved: <id>`. `logs deploy/web` is `deployment/web` only.
+  `target-unresolved: <id>`.
+- `debug` takes a pod by bare name, or a kind with a name: `kubectl debug web --image=busybox` is
+  `pod/web` and `kubectl debug node/n1` is `node/n1`. `--copy-to=c` also makes it `pod/c`, the new
+  pod it runs in. `web/*`, the target earlier versions gave, stays beside them, so a per-intent rule on it
+  keeps matching. A plan `ratio` over it can change (see plan constraints above). The action stays `debug`: a rule on `delete` or `create` does not meet `--replace`
+  or `--copy-to` in the hook. The server-side policy covers those ([client
+  parity](server-side.md)).
+- `cp` names its pod in `[namespace/]pod:path`, on either side: `kubectl cp web:/a b` and `kubectl
+  cp b prod/web:/a` are both `pod/web`, and a namespace written there wins over `-n`, as it does in
+  kubectl. Aegis reads the operands as kubectl does. Only the first colon counts, and what comes
+  before it is `pod` or `namespace/pod`, however much it looks like a path: `./web:/a` is pod `web`.
+  The first word as written (`web:/a` or `b`), the target earlier versions gave, stays beside the
+  pod, so a per-intent rule on it keeps matching. A plan `ratio` over it can change. A local path with a colon and more slashes, such as
+  `/tmp/a:b`, or a command with no pod at all, is one kubectl refuses, so only that word is left and
+  a `pod/*` rule does not meet it.
 - `drain`, `cordon` and `uncordon` act on **nodes**: `kubectl drain node1` is `node/node1`.
 
 The categories `all` and `api-extensions` are expanded like a comma-separated list of their kinds.
@@ -90,6 +109,37 @@ namespace in the rule's scope still counts (`-n staging` passes a rule scoped to
 `kubectl taint node n1 --all` is both `node/n1` and `node/*`, since kubectl ignores the name there.
 `cordon`, `uncordon`, `drain` and `logs` with `-l` name nothing the parser can read, so the hook
 refuses them.
+
+`kubectl describe TYPE NAME` describes the object called NAME, and if there is none, every object
+whose name starts with NAME. So `kubectl describe pod pay` is `pod/pay`, and a `describe` rule that
+can match a name starting with `pay` (`pod/payments-0`, `pod/*-0`) escalates with
+`target-unresolved: <id>`, because the hook cannot tell whether a pod called `pay` exists, or which
+pods start with it. A rule that cannot (`pod/api-0`, `pod/pa`) is not affected. This holds only for that
+two-word form, as in kubectl: `kubectl describe pod/pay` and `kubectl describe pod a b` are exact, and
+`get` never takes a prefix. Words after `--` count as words: see below.
+
+kubectl hands words after `--` to most verbs as plain operands. `kubectl describe pod api --
+payments-0` names two pods, `kubectl delete widgets foo -- bar` names two objects, and `kubectl
+describe pod pay -- other` has three words, so it is exact and takes no prefix. This holds for
+`annotate`, `autoscale`, `certificate`, `cordon`, `cp`, `delete`, `describe`, `drain`, `edit`,
+`expose`, `get`, `label`, `patch`, `rollout`, `scale`, `set image`, `taint`, `uncordon` and `wait`,
+and for `attach` when it gives the second of its two words. `exec`, `run`, `create` and `debug` treat
+them as a command, and `logs`, `port-forward` and `top` take their target from what comes first. With
+nothing before the `--` (`kubectl delete -- pod x`) the hook refuses the command.
+
+A kind that is not in the built-in table may be a custom resource, written by its singular, plural
+or short name, and the command alone does not say which: `widgets` may be the plural of `widget`,
+and `wd` may be short for anything. Stripping an `s` would be a guess that fails on the short names
+and could report a match that is not there. So on `delete`, `get`, `describe`, `edit`, `patch`,
+`scale`, `autoscale`, `label`, `annotate` and `wait`, a rule on any kind outside the table escalates with
+`target-unresolved: <id>`: `kubectl delete widgets --all` asks under a rule on `widget/*`, and also
+under one on `gadget/*`, since `widgets` could be its short name. When the command names an object,
+the rule must also be able to match that name: `kubectl delete widgets foo` asks under `widget/foo`
+and `widget/*`, and passes `widget/bar`. A rule on a built-in kind is not affected, and neither is
+a rule written in exactly the command's spelling, which decides as usual. `exec`, `logs`, `rollout`,
+`set image` and `taint` stay as they were, since kubectl refuses a custom kind on them. A custom
+kind's real names stay unresolved, since they are only in the cluster, and a custom resource whose
+name is also in the built-in table counts as the built-in kind.
 
 (Before v0.2.1 these produced `api-0` and `node1/*`, and plural kinds such as `storageclasses`
 were kept plural, so a rule written for the normal form missed them. Rules written against the

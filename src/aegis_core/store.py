@@ -622,12 +622,11 @@ def resource_matches(pattern: str, intent: InfrastructureIntent) -> bool:
     return any(fnmatch.fnmatch(alias, pattern) for alias in intent.resource_aliases())
 
 
-def _pattern_may_name_kind(pattern: str, kind: str) -> bool:
-    """Whether ``pattern`` can match some ``<kind>/<name>``, in ``fnmatch``'s
-    terms: ``*``, ``?`` and ``[...]`` all match ``/``. The positions reached in
-    ``<kind>/`` are carried along the pattern once, so this is linear in it.
-    Whatever follows that prefix is taken as able to match."""
-    prefix = f"{kind}/"
+def _pattern_may_start_with(pattern: str, prefix: str) -> bool:
+    """Whether ``pattern`` can match some text starting with ``prefix``, in
+    ``fnmatch``'s terms: ``*``, ``?`` and ``[...]`` all match ``/``. The positions
+    reached in ``prefix`` are carried along the pattern once, so this is linear in
+    it. Whatever follows that prefix is taken as able to match."""
     size = len(prefix)
     last_close = pattern.rfind("]")
     states, p = {0}, 0
@@ -654,17 +653,30 @@ def _may_be_runtime_target(pattern: str, target: dict[str, Any]) -> bool:
     ``params["resolved_at_runtime"]``) turns out to be. A rule that matches
     ``kind/*`` for a listed kind is decided by that intent, so it is not one.
     A built-in kind outside the list is not one either: secrets are not in
-    ``all``. An unknown kind may be a custom resource that joined the category."""
+    ``all``. An unknown kind may be a custom resource that joined the category,
+    or the one a plural or short name spells.
+
+    The target may also fix the name: ``name`` when the command names one object,
+    ``name_prefix`` when kubectl may pick any object whose name starts with it. A
+    rule on that kind is then only about the target if it can match that name."""
     kinds = target["kinds"]
+    name = target.get("name")
+    prefix = target.get("name_prefix", "")
     if any(fnmatch.fnmatch(f"{kind}/*", pattern) for kind in kinds):
         return False
-    if any(_pattern_may_name_kind(pattern, kind) for kind in kinds):
+    if name is None and any(_pattern_may_start_with(pattern, f"{kind}/{prefix}") for kind in kinds):
         return True
     if not target.get("custom_kinds"):
         return False
-    head = pattern.partition("/")[0]
-    return head != "manifest" and (
-        head not in _KUBECTL_BUILTIN_NAMES or any(ch in head for ch in "*?["))
+    head, slash, rest = pattern.partition("/")
+    if head == "manifest" or (head in _KUBECTL_BUILTIN_NAMES
+                              and not any(ch in head for ch in "*?[")):
+        return False
+    if not slash:
+        return True
+    if name is not None:
+        return fnmatch.fnmatch(name, rest)
+    return _pattern_may_start_with(rest, prefix)
 
 
 def _may_be_about_target(pattern: str, intent: InfrastructureIntent) -> bool:
