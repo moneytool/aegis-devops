@@ -15,9 +15,14 @@ value is read from, values reused from an earlier run -- is marked unresolved, s
 could affect escalates, or the command is refused; so is an ID the tool looks up from a name
 when it runs (an az subscription or location by name, a gcloud project by number). One value
 written several ways (a negated boolean, a URL or a number, a host-qualified name, an ARN, an
-abbreviated option, a literal or a nested key, `-` or `_`) meets a rule written any of those
-ways, and so does a mark that leaves it unresolved. Commands that act on several objects are one intent per
-object, which can raise a plan rule's count (`max_intents`) or change a `ratio`.
+abbreviated option, a literal or a nested key, `-` or `_`, a qualified or a flagged
+namespace) meets a rule written any of those ways, on every subcommand, and so does a mark
+that leaves it unresolved. A target the tool expands when it runs (a selector, `--all`, a
+wildcard bucket, a recursive path) is marked, so a rule on anything it may reach escalates.
+No command is read as a read unless it is one of the commands audited as only reading; any
+other, an unknown one included, is refused or keeps its own verb as its action. Commands that
+act on several objects are one intent per object, which can raise a plan rule's count
+(`max_intents`) or change a `ratio`.
 
 What the hook cannot see and does not mark: a helm chart's own default values (`set.*` is what
 the command line, files and reuse can set, not what the chart ships); kubectl's kuberc and an
@@ -330,6 +335,38 @@ unknown flag before a word is refused.
   With `--ids`, az takes the subscription and resource group of each ID and ignores
   `--subscription` and `-g` (core commands/arm.py); the flags used to win. From azure-cli
   source; az was not run.
+- `argocd app actions run prod/payments restart` returned before the qualified name was split,
+  so it was `app/prod/payments` and a rule on `payments` in `prod` allowed it, while `payments
+  -N prod` was blocked. argocd now splits `NAMESPACE/NAME` once, over every intent of every
+  subcommand, and az normalizes a subscription name and a location display name once over
+  every intent, an `--ids` path included (an ID with a subscription name was recorded as the
+  subscription). aws `s3` commands also mark options read from `file://`. From source.
+- Several commands that change something were read as reads. `git tag -f v1 HEAD` and `git
+  tag v1` were reads of `tag/v1`; they create it, and `-f` also updates it, forced. `git branch
+  side` creates `branch/side`; `-u`, `--unset-upstream` and `--edit-description` update the
+  branch. Every git command other than push, branch, tag and the history rewrites was a read
+  of `history/*`, `commit`, `pull`, `clean`, `stash`, `config x y` and `update-ref`
+  included: only the commands git documents as reading (status, log, diff, show, the list
+  forms of branch, tag, remote, stash, config ...) are reads now, and any other takes its
+  verb as its action. gh's `release edit`, `pr edit`, `repo edit`, `issue edit` and every
+  subcommand not listed were reads; gh's actions now come from one table checked against
+  the gh manual (edit is `update`, comment and review `update`, reopen `start`, fork
+  `create`, ...), and a command not in it is never a read. `argocd app get --refresh` and
+  `--hard-refresh` patch the Application and are updates. `gcloud compute ssh` was a read of
+  `compute/vm`: it is `exec` on `compute/instance`. `export` (gcloud sql export, aws
+  `export-*`) writes the data out and is no longer a read. The verbs every tool reads as
+  reads are pinned in a test, so a new one cannot default to read; an unknown verb is
+  refused on aws, az, gcloud, helm, flux and argocd, and keeps its name on kubectl, git and
+  gh. From each tool's documentation; not run.
+- `gcloud storage rm 'gs://prod-*/secret'` and the same with gsutil were recorded as the
+  bucket `prod-*`, and a rule on `prod-logs` allowed them: both tools expand `*`, `**`, `?`
+  and `[...]` in a bucket name when they run. Such an intent is now marked with the pattern's
+  literal prefix, so a rule on any bucket the pattern may match escalates, and a rule whose
+  names cannot start with that prefix does not. A wildcard in the object, `-r`/`--recursive`,
+  and aws `s3 --recursive` or `sync` (whose keys `--include`/`--exclude` pick) leave the key
+  unresolved. The other tools were checked: kubectl `-l` and `--all`, argocd `-l`, git
+  pattern refspecs and flux `--all` were already marked; kubectl, helm, argocd, az, aws and
+  git names are not expanded by the tools. From gcloud and gsutil documentation; not run.
 - Tests that used `flux reconcile ... --dry-run`, `flux get ... --export` and `git push
   --dry-run=false`, which the tools refuse, now use commands the tools accept (`flux create ...
   --export`, `git push --dry-run --no-dry-run`).

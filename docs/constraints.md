@@ -130,7 +130,10 @@ The same holds where other tools pick their targets when they run: `argocd app s
 reference, in any namespace), `helm install --generate-name` (`release/*`), `git filter-repo`
 (`history/*`) and an aws command whose target is in a `--cli-input-json file://` file
 (`<service>/<kind>/*`; inline input is read). A rule on one of them escalates with
-`target-unresolved: <id>`. So does a rule on a resource the intent may turn out to be
+`target-unresolved: <id>`. So does a wildcard bucket (`gcloud storage rm gs://prod-*/x`,
+gsutil): a rule on any bucket the pattern may match (one that can start with `prod-`)
+escalates, while `storage/bucket/*` matches it outright. A wildcard object, `-r`, and aws `s3
+--recursive` or `sync` leave `key` unresolved. So does a rule on a resource the intent may turn out to be
 (`params.possible_resources`): `git push origin v1.2.0` pushes `ref/v1.2.0`, which is
 `tag/v1.2.0` when the local ref of that name is a tag.
 
