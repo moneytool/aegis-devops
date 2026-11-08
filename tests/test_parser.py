@@ -2773,10 +2773,10 @@ def test_kubectl_value_flags_take_the_next_token_even_a_dash_one(argv, resources
 @pytest.mark.parametrize("argv, key, value", [
     ("kubectl delete pod web --grace-period -1", "grace-period", -1),
     ("kubectl logs api-0 --tail -1", "tail", -1),
-    ("kubectl logs api-0 --since -5m", "since", "-5m"),
+    ("kubectl logs api-0 --since -5m", "since", -300),  # a Duration, in seconds
     ("kubectl logs api-0 -c app", "container", "app"),
     ("kubectl logs api-0 -capp", "container", "app"),
-    ("kubectl get pods -L app", "label-columns", "app"),
+    ("kubectl get pods -L app", "label-columns", ["app"]),  # a StringSlice
     ("kubectl patch deploy x -p {}", "patch", "{}"),
 ])
 def test_kubectl_value_flag_values_are_kept(argv, key, value):
@@ -3129,7 +3129,7 @@ _API_EXTENSIONS = [
     ("kubectl scale all --all --replicas=0", "scale", {"all": True, "replicas": 0}),
     ("kubectl set image all *=x --all", "set-image", {"all": True, "images": {"*": "x"}}),
     ("kubectl rollout restart all", "rollout-restart", {}),
-    ("kubectl wait all --all --for=condition=x", "wait", {"all": True, "for": "condition=x"}),
+    ("kubectl wait all --all --for=condition=x", "wait", {"all": True, "for": ["condition=x"]}),
 ])
 def test_the_category_all_is_one_intent_per_kind(command, action, extra):
     intents = from_kubectl_multi(command.split())
@@ -3882,7 +3882,8 @@ def test_the_last_dry_run_decides_in_the_other_tools(argv, rehearsal):
     # a flag's value is not split
     ("helm upgrade api ./c -n dev --kube-context -nprod", "release/api", {"chart": "./c"},
      {"namespace": "dev", "context": "-nprod"}),
-    ("helm upgrade api ./c -n dev -l -nprod", "release/api", {"labels": "-nprod", "chart": "./c"},
+    ("helm upgrade api ./c -n dev --description -nprod", "release/api",
+     {"description": "-nprod", "chart": "./c"},
      {"namespace": "dev"}),
     # flux
     ("flux get ks -A", "kustomization/*", {}, {"all_namespaces": True}),
@@ -3917,7 +3918,7 @@ def test_flux_logs_f_is_follow():
 
 
 def test_helm_a_takes_a_value_on_template_only():
-    assert from_argv("helm template api ./c -av1".split())[0].params["api_versions"] == "v1"
+    assert from_argv("helm template api ./c -av1".split())[0].params["api_versions"] == ["v1"]
     assert from_argv("helm get values api -a".split())[0].params["all"] is True
 
 

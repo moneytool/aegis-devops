@@ -627,6 +627,130 @@ def _split_short_word(
     return flags
 
 
+# The pflag type of every flag of kubectl, helm, flux, argocd and gh, from their flag
+# registrations (scripts/gen_pflag_types.py): what _pflag_store reads each value as.
+_PFLAG_TYPES_FILE = Path(__file__).parent / "data" / "pflag_types.json"
+_PFLAG_LISTS = frozenset({"StringArray", "StringSlice", "IntSlice", "Int32Slice", "Int64Slice",
+                          "UintSlice", "BoolSlice", "DurationSlice", "Float64Slice",
+                          "Float32Slice", "IPSlice"})
+_PFLAG_CSV = _PFLAG_LISTS - {"StringArray"}
+_PFLAG_INTS = {"Int": 64, "Int8": 8, "Int16": 16, "Int32": 32, "Int64": 64, "Uint": 64,
+               "Uint8": 8, "Uint16": 16, "Uint32": 32, "Uint64": 64}
+_PFLAG_FLOATS = frozenset({"Float32", "Float64"})
+
+
+@lru_cache(maxsize=1)
+def _pflag_tables() -> dict[str, Any]:
+    with open(_PFLAG_TYPES_FILE) as f:
+        return json.load(f)
+
+
+def _pflag_kinds(tool: str, flag: str, command: str | None = None) -> frozenset[str]:
+    """The pflag types ``--flag`` is registered with in ``tool``: the one ``command``
+    (``create deployment``, ``app sync``, ``pr merge``) gives it when its type differs
+    between commands and the table names the command, else every one it has, or none when
+    the tables do not list it."""
+    tables = _pflag_tables()
+    kind = tables.get(tool, {}).get(flag)
+    if kind is None:
+        return frozenset()
+    if kind.startswith("mixed:") and command:
+        want = command.replace(" ", "").replace("-", "")
+        for key, flags in tables.get(f"{tool}:commands", {}).items():
+            norm = key.replace(" ", "")
+            if flag in flags and norm in (want, "add" + want):
+                kind = flags[flag]
+                break
+    return frozenset(kind[len("mixed:"):].split(",")) if kind.startswith("mixed:") \
+        else frozenset({kind})
+
+
+_GO_DURATION_RE = re.compile(r"([0-9]*\.?[0-9]+)(ns|us|µs|μs|ms|s|m|h)")
+_GO_DURATION_UNITS = {"ns": 1e-9, "us": 1e-6, "µs": 1e-6, "μs": 1e-6, "ms": 1e-3, "s": 1.0,
+                      "m": 60.0, "h": 3600.0}
+
+
+def _go_duration(text: str, flag: str) -> int | float:
+    """``text`` as Go's time.ParseDuration reads it (``5m``, ``1h2m3.5s``, ``-1s``, ``0``),
+    in seconds: one representation, so ``--timeout 5m`` and ``--timeout 300s`` record the
+    same. What Go refuses, the parser refuses."""
+    body = text[1:] if text[:1] in "+-" else text
+    sign = -1 if text.startswith("-") else 1
+    if body == "0":
+        return 0
+    if not body or _GO_DURATION_RE.sub("", body):
+        raise ValueError(f"{flag}: {text!r} is not a duration Go reads")
+    total = sum(float(n) * _GO_DURATION_UNITS[u] for n, u in _GO_DURATION_RE.findall(body))
+    total *= sign
+    return int(total) if float(total).is_integer() else total
+
+
+def _go_float(text: str, flag: str) -> float | int:
+    """``text`` as Go's strconv.ParseFloat reads it; an integral value as an int."""
+    try:
+        value = float(text.replace("_", "")) if "_" not in text or text[:2].lower() in (
+            "0x",) else float(text)
+    except ValueError as exc:
+        raise ValueError(f"{flag}: {text!r} is not a number Go reads") from exc
+    return int(value) if value.is_integer() else value
+
+
+def _pflag_store(params: dict[str, Any], tool: str, flag: str, key: str, value: Any,
+                 command: str | None = None) -> None:
+    """Records ``--flag value`` under ``key`` as pflag reads it (:data:`_PFLAG_TYPES_FILE`):
+    a StringArray accumulates every value, a StringSlice (and the other slices) every
+    value split as CSV, an Int is read with base 0 (Go's strconv.ParseInt), a Duration with
+    time.ParseDuration, in seconds, a Float with ParseFloat, a StringToString as a map, a
+    Count counts; a String is kept as before. A flag registered with several types (in
+    different commands) keeps every reading a rule could match: a list when any is one."""
+    if not isinstance(value, str):
+        params[key] = value
+        return
+    kinds = _pflag_kinds(tool, flag, command)
+    if not kinds:
+        params[key] = _coerce(value)
+        return
+    if kinds & _PFLAG_LISTS:
+        values: list[Any] = []
+        if kinds & _PFLAG_CSV:
+            values.extend(_read_string_slice(value))
+        if kinds - _PFLAG_CSV:
+            values.append(value)
+        if kinds <= {"IntSlice", "Int32Slice", "Int64Slice", "UintSlice"}:
+            values = [_go_int(v, f"{tool} --{flag}", 64) for v in values]
+        existing = params.get(key)
+        before = existing if isinstance(existing, list) else (
+            [] if existing is None else [existing])
+        params[key] = before + [v for v in dict.fromkeys(values) if v not in before]
+        return
+    if kinds == {"StringToString"}:
+        pairs = params.get(key) if isinstance(params.get(key), dict) else {}
+        for item in _read_string_slice(value):
+            k, sep, v = item.partition("=")
+            if not sep:
+                raise ValueError(f"{tool} --{flag}: {item!r} must be key=value")
+            pairs[k] = v
+        params[key] = pairs
+        return
+    if kinds <= set(_PFLAG_INTS):
+        bits = min(_PFLAG_INTS[k] for k in kinds)
+        number = _go_int(value, f"{tool} --{flag}", bits)
+        if all(k.startswith("Uint") for k in kinds) and number < 0:
+            raise ValueError(f"{tool} --{flag}: {value!r} is not an unsigned number")
+        params[key] = number
+        return
+    if kinds == {"Count"}:
+        params[key] = _go_int(value, f"{tool} --{flag}", 64)
+        return
+    if kinds == {"Duration"}:
+        params[key] = _go_duration(value, f"{tool} --{flag}")
+        return
+    if kinds <= _PFLAG_FLOATS:
+        params[key] = _go_float(value, f"{tool} --{flag}")
+        return
+    params[key] = _coerce(value)  # a String, as before: a number-looking value compares
+
+
 def _other_flag(
     tokens: list[str], i: int, *, values: Collection[str], bools: Collection[str], tool: str,
 ) -> tuple[int, Any]:
@@ -650,9 +774,9 @@ def _other_flag(
         if val is None:
             i += 1
             val = _value_at(tokens, i, tok)
-        return i, _coerce(val)
+        return i, val  # the text: _pflag_store reads it by the flag's type
     if val is not None:
-        return i, _coerce(val)
+        return i, val
     if i + 1 >= len(tokens):
         return i, True
     raise ValueError(
@@ -880,6 +1004,10 @@ def _bare_flag(tokens: list[str], i: int) -> bool:
     return i + 1 >= len(tokens) or (tokens[i + 1].startswith("-") and tokens[i + 1] != "-")
 
 
+_KUBECTL_SUBCOMMAND_VERBS = frozenset({"create", "set", "rollout", "config", "auth",
+                                       "certificate", "top", "apply", "plugin"})
+
+
 def _parse_flags(
     tokens: list[str], *, verb: str | None = None, raw_copy_to: list[str] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str], list[str] | None]:
@@ -897,6 +1025,9 @@ def _parse_flags(
     tokens = list(tokens)  # short words are split in place as the walk reaches them
     # Found once here: kubectl also takes -r3 in front of the subcommand.
     replicas_short = verb == "create" and ("deployment" in tokens or "deploy" in tokens)
+    # the command whose flag types to read (create deployment, set image, rollout restart)
+    sub = next((t for t in tokens if not t.startswith("-")), None)
+    pflag_command = f"{verb} {sub}" if verb in _KUBECTL_SUBCOMMAND_VERBS and sub else verb
     short_bools, short_values = _kubectl_short_letters(verb, replicas=replicas_short)
     i = 0
     n = len(tokens)
@@ -1014,7 +1145,7 @@ def _parse_flags(
                     bits = 32 if replicas_short and name in ("replicas", "port") else 64
                     params[name] = _go_int(val, f"kubectl {tok}", bits)
                 else:
-                    params[name] = _coerce(val)
+                    _pflag_store(params, "kubectl", name, name, val, pflag_command)
                 if key == "copy-to" and raw_copy_to is not None:
                     raw_copy_to[:] = [val]
             elif not is_long and key in short_bools:
@@ -1028,7 +1159,8 @@ def _parse_flags(
             elif is_long or i + 1 < len(tokens) or val is not None:
                 # Unknown to the parser. Refused unless "=value" or its place at the
                 # end shows how kubectl would read it (see _other_flag).
-                i, params[key] = _other_flag(tokens, i, values=(), bools=(), tool="kubectl")
+                i, value = _other_flag(tokens, i, values=(), bools=(), tool="kubectl")
+                _pflag_store(params, "kubectl", key, key, value, pflag_command)
             # else: an unknown short flag at the end -- ignored (kubectl refuses it).
         else:
             positional.append(tok)
@@ -3813,12 +3945,13 @@ def _parse_helm_tokens(
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
-                params[key.replace("-", "_")] = _coerce(val)
+                _pflag_store(params, "helm", key, key.replace("-", "_"), val, verb)
             else:
                 # A value flag takes the next word whatever it is (#80); a flag in no
                 # table is refused unless "=value" or its place shows its reading.
-                i, params[key.replace("-", "_")] = _other_flag(
+                i, value = _other_flag(
                     tokens, i, values=long_values if is_long else (), bools=(), tool="helm")
+                _pflag_store(params, "helm", key, key.replace("-", "_"), value, verb)
         else:
             positional.append(tok)
         i += 1
@@ -4354,13 +4487,16 @@ def _parse_argocd_tokens(
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
-                params[name.replace("-", "_")] = _coerce(val)
+                _pflag_store(params, "argocd", name, name.replace("-", "_"), val,
+                             f"app {verb}" if verb else None)
             else:
                 # A value flag takes the next word whatever it is (#80); a flag in no
                 # table is refused unless "=value" or its place shows its reading.
-                i, params[key.replace("-", "_")] = _other_flag(
+                i, value = _other_flag(
                     tokens, i, values=_ARGOCD_VALUE_FLAGS if is_long else (), bools=(),
                     tool="argocd")
+                _pflag_store(params, "argocd", key, key.replace("-", "_"), value,
+                             f"app {verb}" if verb else None)
         else:
             positional.append(tok)
         i += 1
@@ -4758,13 +4894,14 @@ def _parse_flux_tokens(
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
-                params[key.replace("-", "_")] = _coerce(val)
+                _pflag_store(params, "flux", key, key.replace("-", "_"), val, verb)
             else:
                 # A value flag takes the next word whatever it is (#80); a flag in no
                 # table is refused unless "=value" or its place shows its reading.
-                i, params[key.replace("-", "_")] = _other_flag(
+                i, value = _other_flag(
                     tokens, i, values=_FLUX_VALUE_FLAGS if is_long else (), bools=(),
                     tool="flux")
+                _pflag_store(params, "flux", key, key.replace("-", "_"), value, verb)
         else:
             positional.append(tok)
         i += 1
@@ -5917,11 +6054,13 @@ def _parse_gh_tokens_inner(
 ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     spec = _GH_COMMAND_FLAGS.get(command) if command else None
     if spec is not None:
-        return _parse_gh_command_tokens(tokens, spec, typed_fields=command == ("api", ""))
+        return _parse_gh_command_tokens(tokens, spec, typed_fields=command == ("api", ""),
+                                        gh_command=" ".join(command).strip())
     metadata: dict[str, Any] = {}
     params: dict[str, Any] = {}
     positional: list[str] = []
     fields: list[tuple[bool, str]] = []
+    gh_command = " ".join(command).strip() if command else None
 
     i = 0
     n = len(tokens)
@@ -5960,10 +6099,10 @@ def _parse_gh_tokens_inner(
                     val = _value_at(tokens, i, tok)
                 params["_method"] = val.upper()
             elif val is not None:
-                params[key.replace("-", "_")] = _coerce(val)
+                _pflag_store(params, "gh", key, key.replace("-", "_"), val, gh_command)
             elif i + 1 < n and not tokens[i + 1].startswith("-"):
                 i += 1
-                params[key.replace("-", "_")] = _coerce(tokens[i])
+                _pflag_store(params, "gh", key, key.replace("-", "_"), tokens[i], gh_command)
             else:
                 params[key.replace("-", "_")] = True
         else:
@@ -6070,7 +6209,7 @@ def _gh_api_field_keys(key: str) -> list[str]:
 
 def _parse_gh_command_tokens(
     tokens: list[str], spec: tuple[frozenset[str], frozenset[str], dict[str, str]],
-    *, typed_fields: bool = False,
+    *, typed_fields: bool = False, gh_command: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     """A gh command from :data:`_GH_COMMAND_FLAGS`, read as pflag reads it: short words
     letter by letter, a value flag takes the next word, ``--`` ends the flags, and a flag
@@ -6110,8 +6249,8 @@ def _parse_gh_command_tokens(
             raise ValueError(f"gh: -{key} is not a short flag the parser knows on this "
                              f"command; write its long flag: {tokens!r}")
         if name is None or (name not in bools and name not in values):
-            i, params[key.replace("-", "_")] = _other_flag(tokens, i, values=(), bools=(),
-                                                           tool="gh")
+            i, value = _other_flag(tokens, i, values=(), bools=(), tool="gh")
+            _pflag_store(params, "gh", key, key.replace("-", "_"), value, gh_command)
         elif name in bools:
             on = _bool_param(val)
             if name in ("squash", "merge", "rebase"):
@@ -6132,7 +6271,7 @@ def _parse_gh_command_tokens(
             elif name == "method":
                 params["_method"] = val.upper()
             else:
-                params[name.replace("-", "_")] = _coerce(val)
+                _pflag_store(params, "gh", name, name.replace("-", "_"), val, gh_command)
         i += 1
 
     _gh_build_fields(params, fields, api=typed_fields)

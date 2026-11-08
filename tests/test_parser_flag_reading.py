@@ -47,7 +47,6 @@ def _targets(command: str) -> list[tuple[str, str, dict]]:
     # issue #80: --description takes the next word, so helm runs this in prod
     ("helm upgrade api ./c -n prod --description -ndev", "prod", {"description": "-ndev"}),
     ("helm upgrade api ./c -n prod --description=-ndev", "prod", {"description": "-ndev"}),
-    ("helm upgrade api ./c -n prod --timeout -ndev", "prod", {"timeout": "-ndev"}),
     ("helm upgrade api ./c -n prod --post-renderer -ndev", "prod", {"post_renderer": "-ndev"}),
     ("helm install api ./c -n prod --name-template -ndev", "prod", {"name_template": "-ndev"}),
     ("helm upgrade api ./c -n prod --server-side -ndev", "prod", {"server_side": "-ndev"}),
@@ -184,7 +183,6 @@ def test_helm_global_color_flag_before_the_verb():
      {"path": "-ndev"}),
     ("flux create hr a -n prod --chart -ndev --source HelmRepository/r", "prod",
      {"chart": "-ndev"}),
-    ("flux reconcile ks a -n prod --timeout -ndev", "prod", {"timeout": "-ndev"}),
 ])
 def test_a_flux_value_flag_takes_the_next_word(command, namespace, params):
     intent = from_argv(command.split())[0]
@@ -285,8 +283,8 @@ def test_flux_create_export_is_the_rehearsal():
     ("argocd app sync a -lteam=x", {"selector": "team=x"}),
     ("argocd app delete a -yl team=x", {"yes": True, "selector": "team=x"}),
     ("argocd app delete a -yp foreground", {"yes": True, "propagation_policy": "foreground"}),
-    ("argocd app create a --repo r --path p -lteam=x -pk=v", {"label": "team=x",
-                                                             "parameter": "k=v"}),
+    ("argocd app create a --repo r --path p -lteam=x -pk=v", {"label": ["team=x"],
+                                                             "parameter": ["k=v"]}),
     # a value flag takes the next word whatever it is
     ("argocd app sync a --revision -l", {"revision": "-l"}),
     ("argocd app set a --nameprefix -y", {"nameprefix": "-y"}),
@@ -2713,3 +2711,61 @@ def test_git_push_mapping_on_the_line_is_applied():
 ])
 def test_git_push_destination_unknown_without_a_full_refspec(command, verdict):
     assert _verdict([_rule("git", "ref/prod", ["push"])], command) == verdict
+
+
+@pytest.mark.parametrize("command,key,value", [
+    # repeated flags accumulate exactly where pflag's type does (StringArray, StringSlice)
+    ("argocd app sync a --resource apps:Deployment:x --resource apps:Deployment:y",
+     "resource", ["apps:Deployment:x", "apps:Deployment:y"]),
+    ("kubectl get pods -L a,b -L c", "label-columns", ["a", "b", "c"]),
+    ("helm template api ./c --api-versions v1,v2 --api-versions v3", "api_versions",
+     ["v1", "v2", "v3"]),
+    # integers with base 0, durations in seconds, as pflag reads them
+    ("helm upgrade r ./c --history-max 0x0", "history_max", 0),
+    ("helm upgrade r ./c --timeout 5m", "timeout", 300),
+    ("helm upgrade r ./c --timeout 300s", "timeout", 300),
+    ("flux reconcile ks a --timeout 1h", "timeout", 3600),
+    ("kubectl logs web --since 1h2m3s", "since", 3723),
+])
+def test_pflag_types_are_read_from_the_registrations(command, key, value):
+    assert from_argv(command.split())[0].params[key] == value
+
+
+@pytest.mark.parametrize("command", [
+    "helm upgrade r ./c --history-max ten",  # an Int pflag refuses
+    "helm upgrade r ./c --timeout 5",  # a Duration needs its unit
+    "flux reconcile ks a --timeout 5x",
+])
+def test_pflag_refuses_values_pflag_refuses(command):
+    with pytest.raises(ValueError):
+        from_argv(command.split())
+
+
+def test_every_typed_flag_in_the_tables_is_read_by_its_type():
+    # class-level: whatever the tool, the store reads each flag by the type its
+    # registration gives it
+    from aegis_core.parser import _pflag_store, _pflag_tables
+
+    for tool in ("kubectl", "helm", "flux", "argocd", "gh"):
+        for flag, kind in _pflag_tables()[tool].items():
+            params: dict = {}
+            if kind in ("Int", "Int32", "Int64"):
+                _pflag_store(params, tool, flag, "k", "0x10")
+                assert params["k"] == 16, (tool, flag)
+            elif kind == "Duration":
+                _pflag_store(params, tool, flag, "k", "1m30s")
+                assert params["k"] == 90, (tool, flag)
+            elif kind == "StringSlice":
+                _pflag_store(params, tool, flag, "k", "a,b")
+                _pflag_store(params, tool, flag, "k", "c")
+                assert params["k"] == ["a", "b", "c"], (tool, flag)
+            elif kind == "StringArray":
+                _pflag_store(params, tool, flag, "k", "a,b")
+                _pflag_store(params, tool, flag, "k", "c")
+                assert params["k"] == ["a,b", "c"], (tool, flag)
+
+
+def test_a_rule_meets_any_value_of_a_repeated_flag():
+    rule = _rule("argocd", "app/*", ["sync"], {"resource": "apps:Deployment:x"})
+    command = "argocd app sync a --resource apps:Deployment:x --resource apps:Deployment:y"
+    assert _verdict([rule], command) == "BLOCK"

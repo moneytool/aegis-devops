@@ -966,7 +966,7 @@ IT = {"stdin": True, "tty": True}  # -i and -t are recorded under their long nam
      {"container": "app", "command": ["sh"], **IT}, {}),
     ("kubectl patch deploy/web -p{}", "deployment/web", {"patch": "{}"}, {}),
     # pflag skips the dot
-    ("kubectl get pod/a -test.nprod", "pod/a", {"tty": True, "env": "st.nprod"}, {}),
+    ("kubectl get pod/a -test.nprod", "pod/a", {"tty": True, "env": ["st.nprod"]}, {}),
 ])
 def test_short_words(command, resource, params, metadata):
     intent = _one(command)
@@ -1285,7 +1285,7 @@ def test_an_unknown_flag_that_shows_its_reading_is_kept(command, resource, param
     ("kubectl create quota q --hard pods=2 -n prod", "resourcequota/q", {"hard": "pods=2"},
      {"namespace": "prod"}),
     ("kubectl create role r --verb get --resource pods -n prod", "role/r",
-     {"verb": "get", "resource": "pods"}, {"namespace": "prod"}),
+     {"verb": ["get"], "resource": ["pods"]}, {"namespace": "prod"}),
     ("kubectl create pdb p --min-available 1 --selector app=x -n prod",
      "poddisruptionbudget/p", {"min-available": 1, "selector": "app=x"}, {"namespace": "prod"}),
     # --current is a flag of its own: this was refused before

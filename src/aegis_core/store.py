@@ -589,6 +589,9 @@ def scope_matches(
     never matches."""
     for key, expected in scope.items():
         actuals = _dig_all(metadata, key) or _dig_all(params, key)
+        # A flag given several times (a StringArray or StringSlice) holds a list: each of
+        # its values counts, as each is applied
+        actuals = [*actuals, *(v for a in actuals if isinstance(a, list) for v in a)]
         if key.rpartition(".")[2] in _CASE_INSENSITIVE_SCOPE_KEYS:
             expected = _casefold(expected)
             actuals = [_casefold(a) for a in actuals]
