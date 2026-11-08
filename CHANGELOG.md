@@ -15,9 +15,10 @@ value is read from, values reused from an earlier run -- is marked unresolved, s
 could affect escalates, or the command is refused; so is an ID the tool looks up from a name
 when it runs (an az subscription or location by name, a gcloud project by number). One value
 written several ways (a negated boolean, a URL or a number, a host-qualified name, an ARN, an
-abbreviated option, a literal or a nested key, `-` or `_`, a qualified or a flagged
-namespace) meets a rule written any of those ways, on every subcommand, and so does a mark
-that leaves it unresolved. A target the tool expands when it runs (a selector, `--all`, a
+abbreviated option, a short option or its long one, a literal or a nested key, `-` or `_`,
+a qualified or a flagged namespace) meets a rule written any of those ways, on every
+subcommand, and so does a mark that leaves it unresolved. A value decoded from JSON or YAML
+is the value the tool sends (helm's JSON numbers are float64, aws reads YAML 1.2). A target the tool expands when it runs (a selector, `--all`, a
 wildcard bucket, a recursive path) is marked, so a rule on anything it may reach escalates.
 No command is read as a read unless it is one of the commands audited as only reading; any
 other, an unknown one included, is refused or keeps its own verb as its action. Commands that
@@ -367,6 +368,41 @@ unknown flag before a word is refused.
   unresolved. The other tools were checked: kubectl `-l` and `--all`, argocd `-l`, git
   pattern refspecs and flux `--all` were already marked; kubectl, helm, argocd, az, aws and
   git names are not expanded by the tools. From gcloud and gsutil documentation; not run.
+- helm `--set-json quota=9007199254740993` kept the exact integer, but helm decodes JSON
+  with Go's encoding/json into float64, so the chart gets 9007199254740992. `--set-json`
+  numbers are now decoded as Go decodes them (an integral value is compared as an int), and
+  NaN, Infinity and numbers out of float64's range are refused. Every other decode path was
+  checked: aws `--cli-input-json` keeps exact integers, as botocore does, and
+  `--cli-input-yaml` is now read as aws-cli v2's YAML 1.2 reads it (`yes` is a string, `010`
+  ten, `0o10` eight; it was read as YAML 1.1, so `yes` was true and `010` eight); `gh api -F`
+  types fields as gh does (true, false, null, an int64), and `-f`, and every `gh workflow
+  run` input, are strings (all were coerced to numbers before). kubectl `-p` patches, argocd
+  `-p` parameters and flux values are kept as text. Checked: aws by running aws 2.37
+  against a closed local port; helm and gh from source.
+- `git branch --no-column -f prod HEAD~1` was read as a list, because `--column` was present
+  though false. List mode now follows builtin/branch.c and builtin/tag.c (git 2.52): `--list`
+  by its value, no name and no other action, the `--contains`, `--no-contains`, `--merged`,
+  `--no-merged` and `--points-at` filters, and on tag `-n` with any count; `--column`,
+  `--sort`, `--format` and `-v` only shape a list. `--show-current` is a read and `git branch
+  -a`/`-r` with a name is refused. The other parsers were checked for a flag read by its
+  presence rather than its value. Run on git 2.52.
+- `gh issue edit 23 34 --add-label bug` kept only `issue/23`: gh edits every issue given. Each
+  gh command's argument count is now checked against its cobra Args (cli v2.103 source); a
+  count gh refuses is refused, and `issue edit`, the one command that takes several, is one
+  intent per issue, each with its own repository.
+- Short options were recorded under their letter: `az aks scale -c 1` was `c: 1` where
+  `--node-count 1` was `node-count: 1`, and `gcloud container clusters delete c -z
+  us-east1-b` was refused, `-z` being `--zone`. Every short option of every tool is now
+  recorded as its long option, and the long option is what feeds metadata: kubectl (`-w`
+  watch, `-i` stdin or interactive, `-p` previous or patch, ...), helm (`-q` short, `-l`
+  labels or selector, `-a` all or api-versions, ...), flux (`-s` silent, `-u` username, ...),
+  gcloud (each reference page's short spellings), az (every `_params.py` of azure-cli,
+  `src/aegis_core/data/az_short_options.json`, written by `scripts/gen_az_short_options.py`;
+  where a command's `-n`, `-g` or `-l` is another option, such as `--account-name`, that
+  option names the target, group or location in either spelling) and git (`-D`, `-M`, `-C`
+  are `--delete`, `--move`, `--copy` with `--force`). argocd and gh already were. Tests check
+  that the short and long spellings give the same intents for every alias in the tables.
+  From each tool's source or reference pages; not run.
 - Tests that used `flux reconcile ... --dry-run`, `flux get ... --export` and `git push
   --dry-run=false`, which the tools refuse, now use commands the tools accept (`flux create ...
   --export`, `git push --dry-run --no-dry-run`).

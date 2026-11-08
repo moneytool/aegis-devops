@@ -392,7 +392,12 @@ the tool registers it and put it in the matching set, with a test that reads it:
   list, as argparse does, and one the operation does not have is refused.
 - az: the short letters in every `command_modules/*/_params.py` of azure-cli: a letter on a
   `store_true` argument goes in `_AZ_SHORT_BOOL_LETTERS`, and every letter in
-  `_AZ_SHORT_KNOWN_LETTERS`.
+  `_AZ_SHORT_KNOWN_LETTERS`. The long option each letter is, per command, is in
+  `src/aegis_core/data/az_short_options.json`: run `scripts/gen_az_short_options.py` on an
+  azure-cli checkout to regenerate it.
+- Short options are recorded under their long name on every tool (`_KUBECTL_SHORT_NAMES`,
+  `_helm_short_name`, `_FLUX_SHORT_NAMES`, `_argocd_short_name`, gh's per-command short maps,
+  the gcloud table's `alias`, the az table): a new letter needs its long name there too.
 - gcloud: the flags of the commands the parser names resources for are in
   `src/aegis_core/data/gcloud_flags.json`, read from their reference pages by
   `scripts/gen_gcloud_flags.py` (add a command to its `COMMANDS` and run it); a flag such a
