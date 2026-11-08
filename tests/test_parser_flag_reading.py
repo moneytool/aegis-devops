@@ -1531,3 +1531,19 @@ def test_argocd_app_namespace_mark_meets_both_spellings(rule_key):
     assert _verdict([rule], "argocd app delete web -y") == "ESCALATE"
     assert _verdict([rule], "argocd app delete web -y --app-namespace prod") == "BLOCK"
     assert _verdict([rule], "argocd app delete web -y --app-namespace dev") == "ALLOW"
+
+
+def test_flux_with_source_namespace_is_not_the_objects():
+    # A1: sourceRef.namespace may name another namespace (reconcile_with_source.go)
+    command = "flux reconcile ks app -n dev --with-source"
+    intents = from_argv(command.split())
+    assert intents[0].metadata["namespace"] == "dev"
+    for source in intents[1:]:
+        assert "namespace" not in source.metadata
+        assert source.metadata["all_namespaces"] is True
+    rule = _rule("flux", "source-git/*", ["sync"], {"namespace": "prod"})
+    assert _verdict([rule], command) == "ESCALATE"
+    assert _verdict([rule], "flux reconcile ks app -n dev") == "ALLOW"
+    # filling the environment's namespace does not settle it either
+    verdict, _ = _flux_verdict(rule, command, environ={"FLUX_SYSTEM_NAMESPACE": "dev"})
+    assert verdict == "ESCALATE"

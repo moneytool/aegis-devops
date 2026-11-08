@@ -3930,7 +3930,9 @@ _FLUX_WORDS = {
 
 # What "reconcile --with-source" also reconciles: the object's source, of one of these
 # kinds, whose name is only known when flux reads the object (reconcile_with_source.go).
-# A HelmRelease's chart is reconciled with its own source as well.
+# A HelmRelease's chart is reconciled with its own source as well. The source reference
+# may name its own namespace (sourceRef.namespace), so the source's namespace is unknown
+# too, whatever -n says: its intents cover every namespace.
 _FLUX_WITH_SOURCE_KINDS = {
     "kustomization": ("source-git", "source-oci", "source-bucket"),
     "helmrelease": ("source-chart", "source-oci", "source-helm", "source-git",
@@ -4128,8 +4130,11 @@ def from_flux_multi(argv: list[str]) -> list[InfrastructureIntent]:
             for name in dict.fromkeys(names):
                 for source in _FLUX_WITH_SOURCE_KINDS.get(kind, ()):
                     marker = {"from": f"{kind}/{name}", "kinds": [source]}
-                    intents.extend(make([f"{source}/*"], action,
-                                        {"resolved_at_runtime": marker}))
+                    for intent in make([f"{source}/*"], action,
+                                       {"resolved_at_runtime": marker}):
+                        intent.metadata.pop("namespace", None)
+                        intent.metadata["all_namespaces"] = True
+                        intents.append(intent)
         return intents
 
     if verb in _FLUX_READ_VERBS:
