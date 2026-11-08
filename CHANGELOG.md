@@ -10,8 +10,19 @@ behaviour.
 
 Every parser reads flags the way its tool does: a flag that takes a value takes the next word
 whatever it looks like, and a flag the parser cannot place is refused instead of guessed (#80).
-Commands that act on several objects are one intent per object, which can raise a plan rule's
-count (`max_intents`) or change a `ratio`.
+What a command takes from outside its argv -- a configuration file, the environment, a file a
+value is read from, values reused from an earlier run -- is marked unresolved, so a rule it
+could affect escalates, or the command is refused. One value written several ways (a negated
+boolean, a URL or a number, a host-qualified name, an ARN, a literal or a nested key) meets a
+rule written any of those ways. Commands that act on several objects are one intent per
+object, which can raise a plan rule's count (`max_intents`) or change a `ratio`.
+
+What the hook cannot see and does not mark: a helm chart's own default values (`set.*` is what
+the command line, files and reuse can set, not what the chart ships); kubectl's kuberc and an
+argocd `$ARGOCD_OPTS` set in the environment rather than in front of the command; aliases a
+tool reads from its own configuration (`aws` cli aliases, `gh alias`, `git` aliases); a gcloud
+project given by number where a rule names its ID; and the key a KMS alias or the secret a
+Secrets Manager name stands for, which are marked rather than resolved.
 
 ### Fixed
 - helm and flux read a long flag with no entry in the parser as a flag with no value, so the
@@ -191,6 +202,56 @@ count (`max_intents`) or change a `ratio`.
   that change something most often (container clusters and node pools, compute instances, sql
   instances, run deploy, functions deploy) and more value flags are listed, from the gcloud
   reference. `gcloud run deploy SVC` is `run/service/SVC` (it was `run/SVC`).
+- A literal dotted helm key (`--set 'securityContext\.privileged=false'`) beside the nested
+  value of the same path (`securityContext.privileged=true`) hid the nested one, so a BLOCK
+  allowed it. The store now reads every value a scope key reaches and matches if any does. A
+  scope key also matches its `-`/`_` twin and a boolean's negated spelling (`no-verify-ssl` is
+  `verify-ssl` negated), and `repo`, `resource_group` and `subscription` compare without case.
+- `helm upgrade` with no values on the command line reuses the release's previous values, and
+  so does `--reuse-values` or `--reset-then-reuse-values` for every key it does not set (helm
+  3.21.1 and 4.3.1 Upgrade.reuseValues); `--reset-values`, checked first, turns that off.
+  `helm rollback` puts back an earlier revision's values. Those are now `set.*`, unresolved.
+- `-A` / `--all-namespaces` on flux and helm was a param, so `flux get kustomizations -A -n
+  dev` met a prod rule as `dev`. It is now `metadata.all_namespaces`, as on kubectl, and the
+  last spelling decides.
+- Scope a tool takes from its configuration or environment when the argv does not give it was
+  read as absent, so a rule scoped on it did not apply: kubeconfig context and cluster, aws
+  region and profile, gcloud project and region (the active configuration, `--configuration`,
+  `$CLOUDSDK_*`), az subscription, resource group and location (`az account`, `az config`),
+  argocd server, project and the Application's namespace, git's push remote, and gh's
+  repository. Each is now in `params.unresolved_scope` when missing, and a rule scoped on it
+  escalates; `--resolve-current-context` fills what the environment says.
+- gh: `gh pr merge https://github.com/o/r/pull/42` was `pr/https://...`. A pull request or
+  issue by `#42`, `OWNER/REPO#42` or URL is `pr/42` (or `issue/42`) with that repository; a
+  branch or no selector is `pr/*`, marked. `issue delete`/`close` and `run cancel`/`delete`/
+  `rerun` were reads and now delete, stop or run. A workflow by display name or ID is marked.
+  `-R` in `HOST/OWNER/REPO`, URL or `git@` form is `owner/repo`; another host than github.com
+  is `host/owner/repo` with `github_host`, so a github.com rule never matches it. Secret and
+  variable names are upper-cased, as GitHub stores them. `-F k=@file`, `--input`, workflow run
+  `--json` and a workflow run without `-r` leave the values they decide unresolved.
+- git: `push.followTags` in any config file can make `git push origin main` send tags. Every
+  push now adds `tag/*`, marked, unless `--no-follow-tags` or `-c push.followTags=false`, so a
+  rule on `tag/...` escalates and one on `ref/main` does not; an explicit `refs/tags/X` is also
+  `tag/X`. With no refspec, push.default, `remote.*.push` (a `+` forces) and `remote.*.mirror`
+  decide what is sent: `force` is unresolved and a possible delete of `ref/*` is marked. A
+  remote given as a URL leaves `remote` unresolved; `--repo` is the remote when none is given.
+  `--no-x` is `x: false`, and `--no-verify` / `commit -n` is `verify: false`.
+- gcloud `--no-deletion-protection` recorded `no-deletion-protection: true` beside
+  `--deletion-protection=false`'s `deletion_protection: false`; both are now
+  `deletion_protection: false`, the last spelling winning. `--flags-file` (more flags from a
+  YAML file, `--project` too) is refused. A resource by URI or path is its plain name in the
+  URI's project, zone and region.
+- aws `--no-x` is `x: false` (`--no-verify-ssl` is `verify_ssl: false`). An ARN keeps the
+  resource and adds its plain name as an alias, with the ARN's account and region, so a rule
+  on the name matches; a target from `file://`/`fileb://`, a KMS alias and a Secrets Manager
+  secret by ARN are marked. az: a name, resource group, location, subscription or `--ids` given
+  as `@file` is refused. argocd `NAMESPACE/NAME` is `app/NAME` with `app_namespace`, as `-N`
+  is, and `--server` is recorded.
+- An inline `HELM_NAMESPACE=prod` was the namespace of any command, kubectl's too. Inline
+  variables now set only the scope of the tool that reads them, in its precedence, with
+  `HELM_KUBECONTEXT`, `GH_REPO`, `AZURE_DEFAULTS_GROUP`/`_LOCATION` and `ARGOCD_SERVER` added;
+  `ARGOCD_OPTS` and `KUBERC` (unless `off`) in front of the command are refused. terraform
+  `-chdir` is one path (`./infra`, `infra/` and `infra` are `workspace/infra`).
 - terraform and tofu `apply -destroy=true` (and `-destroy=T`) were refused as needing a plan, and
   `-destroy -destroy=false` was read as a destroy. Go's flag package reads the last `-destroy`,
   with `strconv.ParseBool`, and so does the parser now; `-auto-approve=true` and
