@@ -1805,7 +1805,7 @@ def test_git_push_with_refspec_has_no_unknown_target():
 
 
 def test_git_push_mirror_does_not_swallow_the_remote_and_implies_force():
-    push, delete = from_git_multi(["git", "push", "--mirror", "origin"])
+    push, _tags, delete = from_git_multi(["git", "push", "--mirror", "origin"])
     assert push.metadata == {"remote": "origin"}
     assert push.params["mirror"] is True
     assert push.params["force"] is True

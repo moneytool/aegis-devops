@@ -4298,12 +4298,17 @@ def _git_last(options: list[tuple[str, Any]], *names: str) -> Any:
 
 
 def _git_option_params(verb: str, options: list[tuple[str, Any]]) -> dict[str, Any]:
-    """The params a git verb's options set, each by its last spelling."""
+    """The params a git verb's options set, each by its last spelling. ``--no-x`` is
+    ``x: False``, and an option that is the negative of another (``--no-verify`` beside
+    ``--verify``, ``-n`` on commit) is that one with ``False``, so one value has one key."""
+    longs = _GIT_OPTIONS[verb][1]
     params: dict[str, Any] = {}
     for name, val in options:
+        if val is True and name.startswith("no-") and name[3:] in longs:
+            name, val = name[3:], None
         key = name.replace("-", "_")
         if val is None:
-            params.pop(key, None)
+            params[key] = False
         else:
             params[key] = _coerce(val) if isinstance(val, str) else val
     for name in ("force", "delete", "dry_run", "amend", "hard"):
@@ -4430,21 +4435,66 @@ def _from_git_push(
     ``HEAD``, whatever push.default, ``--all``/``--branches`` or ``--mirror`` pick (as is
     ``-c remote.<name>.mirror``, a force push that deletes)."""
     remote = positional[0] if positional else None
+    if remote is None and isinstance(params.get("repo"), str):
+        remote = params["repo"]  # --repo is the remote when none is given after the verb
     refspecs = positional[1:]
-    if remote is not None:
+    if remote is not None and _git_remote_is_url(remote):
+        # a URL or path: which configured remote (if any) it is, is not on the argv
+        params = {**params, "remote_url": remote}
+    elif remote is not None:
         metadata = {**metadata, "remote": remote}
     mirror_key = f"remote.{(remote or 'origin').lower()}.mirror"
     if mirror_key in config and _git_config_true(config[mirror_key]):
         params = {**params, "mirror": True, "force": True}
+    if not refspecs:
+        # push.default, remote.<name>.push (a "+" refspec forces) and remote.<name>.mirror
+        # in git's config decide what a push with no refspec sends, and whether it forces
+        params = {**params, "unresolved_scope": [*params.get("unresolved_scope", []), "force"]}
     intents = [_git_push_intent(refspec, params, metadata) for refspec in refspecs or [None]]
+    for refspec in refspecs:
+        dst = refspec.lstrip("+").rpartition(":")[2]
+        if dst.startswith("refs/tags/"):
+            intents.append(_git_push_tag(dst[len("refs/tags/"):], refspec, params, metadata))
+    negated = ("follow-tags", None) in options or (
+        "push.followtags" in config and not _git_config_true(config["push.followtags"]))
     follow = params.get("follow_tags") is True or (
         "push.followtags" in config and _git_config_true(config["push.followtags"])
-        and ("follow-tags", None) not in options)
+        and not negated)
     if refspecs and (params.get("tags") is True or follow):
         intents.append(_git_push_intent(None, params, metadata))
+    if params.get("tags") is True or not negated:
+        # tags: every one with --tags; with push.followTags, in any config file git reads,
+        # the annotated tags reachable from what is pushed. Only a rule on tag/... is
+        # about these: a rule on ref/main is not.
+        intents.append(_git_push_tag("*", None, params, metadata))
     if params.get("prune") is True or params.get("mirror") is True:
         intents.append(_git_push_intent(None, {**params, "delete": True}, metadata))
+    elif not refspecs:
+        # remote.<name>.mirror makes a push with no refspec delete remote refs too
+        delete = _git_push_intent(None, {**params, "delete": True}, metadata)
+        delete.params.pop("unknown_target", None)
+        delete.params["resolved_at_runtime"] = {"from": "ref/*", "kinds": ["ref"]}
+        intents.append(delete)
     return intents
+
+
+def _git_remote_is_url(remote: str) -> bool:
+    """Whether git reads ``remote`` as a URL or a path rather than a remote's name."""
+    return "://" in remote or remote.startswith(("/", ".", "~")) or (
+        ":" in remote and "/" not in remote.split(":", 1)[0])
+
+
+def _git_push_tag(name: str, refspec: str | None, params: dict[str, Any],
+                  metadata: dict[str, Any]) -> InfrastructureIntent:
+    """A tag a push sends, as ``tag/<name>`` (``ref/<name>`` stays for a named refspec).
+    ``tag/*`` is marked: which tags, is only known when git runs."""
+    tag_params = {k: v for k, v in params.items() if k != "unknown_target"}
+    if refspec is not None and refspec.startswith("+"):
+        tag_params["force"] = True
+    if name == "*":
+        tag_params["resolved_at_runtime"] = {"from": "tag/*", "kinds": ["tag"]}
+    return InfrastructureIntent(resource=f"tag/{name}", action="push", provider="git",
+                                params=tag_params, metadata=dict(metadata))
 
 
 def from_git_multi(argv: list[str]) -> list[InfrastructureIntent]:
@@ -4551,7 +4601,9 @@ def _git_branch_move(positional, one, params, argv) -> list[InfrastructureIntent
 def from_git(argv: list[str]) -> InfrastructureIntent:
     """Parses a ``git`` invocation that has exactly one target (see
     :func:`from_git_multi`). Raises ValueError for ``git push origin a b``."""
-    intents = from_git_multi(argv)
+    # The tags and deletes a push may send that the argv does not name (marked) are left
+    # out here: from_git is the one named target.
+    intents = [i for i in from_git_multi(argv) if "resolved_at_runtime" not in i.params]
     if len(intents) != 1:
         raise ValueError(f"expected exactly one git target, found {len(intents)}: {argv!r}")
     return intents[0]
@@ -5435,7 +5487,10 @@ def mark_config_scope(intents: list[InfrastructureIntent]) -> list[Infrastructur
     --resolve-current-context fills later counts as given (the store looks at metadata
     first)."""
     for intent in intents:
-        missing = [key for key in _CONFIG_SCOPE_KEYS.get(intent.provider, ())
+        keys = _CONFIG_SCOPE_KEYS.get(intent.provider, ())
+        if intent.provider == "git" and intent.params.get("raw_action") != "push":
+            keys = ()  # only a push has a remote
+        missing = [key for key in keys
                    if key not in intent.metadata and key not in intent.params]
         if missing:
             marks = intent.params.setdefault("unresolved_scope", [])

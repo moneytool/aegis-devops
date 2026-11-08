@@ -379,7 +379,7 @@ def test_argocd_dry_run_is_a_rehearsal_only_on_sync():
      {"force": True, "unknown_target": True}),
 ])
 def test_git_push_is_read_as_git_reads_it(command, resources, params):
-    intents = from_argv(command.split())
+    intents = [i for i in from_argv(command.split()) if i.resource != "tag/*"]
     assert [i.resource for i in intents] == resources
     last = intents[-1].params
     assert {k: last.get(k) for k in params} == params
@@ -1104,7 +1104,8 @@ def test_gh_repo_resolves_from_gh_repo():
     ("git push origin main --atomic", [("ref/main", "push")]),
 ])
 def test_git_push_marks_every_ref_the_argv_does_not_name(command, targets):
-    intents = from_argv(command.split())
+    intents = [i for i in from_argv(command.split())
+               if i.resource != "tag/*" and "resolved_at_runtime" not in i.params]
     assert [(i.resource, i.action) for i in intents] == targets
     for intent in intents:
         assert (intent.resource == "ref/*") == (intent.params.get("unknown_target") is True)
@@ -1322,3 +1323,50 @@ def test_a_rule_on_one_pull_request_holds_on_every_spelling(command, verdict):
 ])
 def test_gh_values_from_files_or_defaults_are_unresolved(command, mark):
     assert mark in from_argv(command.split())[0].params["unresolved_scope"]
+
+
+# --- git: what config files can change about a push ------------------------------------
+
+
+@pytest.mark.parametrize("command,tags", [
+    # push.followTags may be set in any config file git reads
+    ("git push origin main", True),
+    ("git push origin main --no-follow-tags", False),
+    ("git -c push.followTags=false push origin main", False),
+    ("git push origin main --tags --no-follow-tags", True),
+    ("git push", True),
+])
+def test_git_push_may_send_tags_unless_told_not_to(command, tags):
+    resources = [i.resource for i in from_argv(command.split())]
+    assert ("tag/*" in resources) is tags
+
+
+@pytest.mark.parametrize("rule,command,verdict", [
+    # only a rule on tags is about the tags config may add
+    (_rule("git", "ref/main", ["push"]), "git push origin feature", "ALLOW"),
+    (_rule("git", "tag/v*", ["push"]), "git push origin feature", "ESCALATE"),
+    (_rule("git", "tag/v*", ["push"]), "git push origin feature --no-follow-tags", "ALLOW"),
+    (_rule("git", "tag/v1", ["push"]), "git push origin refs/tags/v1 --no-follow-tags",
+     "BLOCK"),
+    # with no refspec, config decides the refs, whether they are forced, and the remote
+    (_rule("git", "ref/main", ["push"], {"force": True}), "git push origin", "ESCALATE"),
+    (_rule("git", "ref/main", ["delete"]), "git push origin", "ESCALATE"),
+    (_rule("git", "ref/main", ["push"], {"remote": "origin"}),
+     "git push https://example.com/o/r main --no-follow-tags", "ESCALATE"),
+])
+def test_git_config_only_reaches_the_rules_it_could_affect(rule, command, verdict):
+    assert _verdict([rule], command) == verdict
+
+
+@pytest.mark.parametrize("command,key,value", [
+    ("git push --no-thin origin main", "thin", False),
+    ("git commit -n --amend -m x", "verify", False),
+    ("git commit --no-verify --verify --amend -m x", "verify", True),
+    ("git push --repo=origin", None, None),
+])
+def test_git_negated_options_have_one_key(command, key, value):
+    intent = from_argv(command.split())[0]
+    if key is None:
+        assert intent.metadata["remote"] == "origin"  # --repo is the remote
+    else:
+        assert intent.params[key] is value

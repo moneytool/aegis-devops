@@ -595,7 +595,8 @@ def test_acceptance_git_force_push_through_wrappers_and_tee(example_gate):
     verdicts = _verdicts(
         "nice -n 5 git -C /repo push -f origin main 2>&1 | tee push.log", example_gate
     )
-    assert verdicts == [("ref/main", "BLOCK")]
+    # the tags push.followTags may add are their own target, which no rule here is on
+    assert verdicts == [("ref/main", "BLOCK"), ("tag/*", "ALLOW")]
 
 
 # --- code the hook cannot read (runs_code) ------------------------------------
