@@ -2163,7 +2163,9 @@ def test_gh_api_workflow_dispatch_matches_gh_workflow_run():
     assert (via_api.resource, via_api.action) == (via_porcelain.resource, via_porcelain.action)
     assert via_api.metadata["repo"] == via_porcelain.metadata["repo"] == "o/r"
     assert via_api.metadata["ref"] == via_porcelain.metadata["ref"] == "main"
-    assert via_api.params["inputs"] == {"ref": "main", "inputs[env]": "prod"}
+    # gh api builds the nested body gh sends; its inputs are the porcelain's inputs
+    assert via_api.params["body"] == {"ref": "main", "inputs": {"env": "prod"}}
+    assert via_api.params["inputs"] == via_porcelain.params["inputs"] == {"env": "prod"}
 
 
 def test_gh_api_unrouted_paths_and_methods_keep_the_generic_api_resource():

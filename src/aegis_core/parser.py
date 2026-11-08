@@ -1175,6 +1175,12 @@ def from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
                 and "resolved_at_runtime" not in intent.params):
             raise ValueError(f"kubectl: a name and a selector together, which kubectl "
                              f"refuses: {argv!r}")
+        if intent.params.get("overrides") is not None and intent.action == "run":
+            # --overrides is a JSON patch kubectl applies over the object it built, after
+            # every other flag: it can change the image, the name and anything else
+            _mark_unresolved(intent.params, "**")
+            kind = intent.resource.partition("/")[0]
+            intent.params["resolved_at_runtime"] = {"from": intent.resource, "kinds": [kind]}
     return intents
 
 
@@ -5655,6 +5661,7 @@ def _parse_gh_tokens_inner(
     metadata: dict[str, Any] = {}
     params: dict[str, Any] = {}
     positional: list[str] = []
+    fields: list[tuple[bool, str]] = []
 
     i = 0
     n = len(tokens)
@@ -5676,9 +5683,7 @@ def _parse_gh_tokens_inner(
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
-                k, _sep, v = val.partition("=")
-                params.setdefault("inputs", {})[k] = _gh_field_value(
-                    v, typed=key in ("F", "field"))
+                fields.append((key in ("F", "field"), val))
             elif key == "admin":
                 params["admin"] = _bool_param(val)
             elif key in ("squash", "merge", "rebase") and val is None:
@@ -5701,6 +5706,7 @@ def _parse_gh_tokens_inner(
             positional.append(tok)
         i += 1
 
+    _gh_build_fields(params, fields, api=False)
     return metadata, params, positional
 
 
@@ -5724,6 +5730,76 @@ def _gh_field_value(text: str, *, typed: bool) -> Any:
     return text
 
 
+def _gh_build_fields(params: dict[str, Any], fields: list[tuple[bool, str]], *,
+                     api: bool) -> None:
+    """``params["inputs"]`` from the ``-f``/``-F`` fields, in gh's order: every raw field
+    (``-f``) first, then every magic one (``-F``), whatever their order on the line
+    (cli v2.103 api/fields.go and workflow/run/run.go parseFields). ``gh workflow run``
+    keeps the last value of a key, all strings. ``gh api`` builds nested keys
+    (``a[b]=1``) and arrays (``a[]=1``), types ``-F`` values (:func:`_gh_field_value`),
+    and refuses a key set twice, a field with no ``=`` (bar ``a[]``) and a key it cannot
+    read. A ``-F`` value ``@file`` is read from a file or stdin: that key is unresolved."""
+    if not fields:
+        return
+    inputs: dict[str, Any] = {}
+    ordered = [f for f in fields if not f[0]] + [f for f in fields if f[0]]
+    for magic, text in ordered:
+        key, sep, value = text.partition("=")
+        from_file = magic and sep and value.startswith("@")
+        if not api:
+            if not sep:
+                raise ValueError(f"gh: field {text!r} requires a value separated by '='")
+            inputs[key] = value
+            if from_file:
+                _mark_unresolved(params, f"inputs.{key}")
+            continue
+        keys = _gh_api_field_keys(key)
+        if not sep and keys[-1] != "":
+            raise ValueError(f"gh api: field {text!r} requires a value separated by '='")
+        typed: Any = None if not sep else _gh_field_value(value, typed=magic)
+        dest, is_array, subkey = inputs, False, ""
+        for k in keys:
+            if k == "":
+                is_array = True
+                continue
+            if subkey:
+                if is_array:
+                    items = dest.setdefault(subkey, [])
+                    if not isinstance(items, list):
+                        raise ValueError(f"gh api: expected an array under {subkey!r}")
+                    if not items or not isinstance(items[-1], dict) or k in items[-1]:
+                        items.append({})
+                    dest, is_array = items[-1], False
+                else:
+                    inner = dest.setdefault(subkey, {})
+                    if not isinstance(inner, dict):
+                        raise ValueError(f"gh api: expected a map under {subkey!r}")
+                    dest = inner
+            subkey = k
+        if is_array:
+            items = dest.setdefault(subkey, [])
+            if not isinstance(items, list):
+                raise ValueError(f"gh api: expected an array under {subkey!r}")
+            if sep:
+                items.append(typed)
+        else:
+            if subkey in dest:
+                raise ValueError(f"gh api: unexpected override of the field {subkey!r}, "
+                                 "which gh refuses")
+            dest[subkey] = typed
+        if from_file:
+            _mark_unresolved(params, "inputs." + ".".join(k for k in keys if k))
+    params["inputs"] = inputs
+
+
+def _gh_api_field_keys(key: str) -> list[str]:
+    """``a[b][]`` as gh api reads a field's key: ``["a", "b", ""]``."""
+    match = re.fullmatch(r"([^\[\]]+)((?:\[[^\[\]]*\])*)", key)
+    if not match:
+        raise ValueError(f"gh api: invalid field key {key!r}")
+    return [match.group(1), *re.findall(r"\[([^\[\]]*)\]", match.group(2))]
+
+
 def _parse_gh_command_tokens(
     tokens: list[str], spec: tuple[frozenset[str], frozenset[str], dict[str, str]],
     *, typed_fields: bool = False,
@@ -5739,6 +5815,7 @@ def _parse_gh_command_tokens(
     metadata: dict[str, Any] = {}
     params: dict[str, Any] = {}
     positional: list[str] = []
+    fields: list[tuple[bool, str]] = []
 
     tokens = list(tokens)  # short words are split in place as the walk reaches them
     i = 0
@@ -5780,19 +5857,14 @@ def _parse_gh_command_tokens(
             elif name == "ref":
                 metadata["ref"] = val
             elif name in ("field", "raw-field"):
-                k, _sep, v = val.partition("=")
-                params.setdefault("inputs", {})[k] = _gh_field_value(
-                    v, typed=typed_fields and name == "field")
-                if name == "field" and v.startswith("@"):
-                    # -F k=@file reads the value from a file (or stdin), not on the argv
-                    marks = params.setdefault("unresolved_scope", [])
-                    marks.append(f"inputs.{k}")
+                fields.append((name == "field", val))
             elif name == "method":
                 params["_method"] = val.upper()
             else:
                 params[name.replace("-", "_")] = _coerce(val)
         i += 1
 
+    _gh_build_fields(params, fields, api=typed_fields)
     return metadata, params, positional
 
 
@@ -6082,8 +6154,19 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
             groups[:2] = [g.lower() for g in groups[:2]]  # owner/repo, without case
             resource = resource_template.format(*groups)
             if resource.startswith("workflow/"):
-                ref = (params.get("inputs") or {}).get("ref")
+                # the dispatch body is {"ref": ..., "inputs": {...}}: its inputs are what
+                # gh workflow run's -f/-F give, so a rule on inputs.<name> meets both
+                body = params.get("inputs") or {}
                 from_file = "inputs.ref" in params.get("unresolved_scope", [])
+                params["body"] = body
+                params["inputs"] = dict(body["inputs"]) if isinstance(body.get("inputs"),
+                                                                       dict) else {}
+                if "unresolved_scope" in params:
+                    params["unresolved_scope"] = [
+                        "inputs." + m[len("inputs.inputs."):]
+                        if m.startswith("inputs.inputs.") else m
+                        for m in params["unresolved_scope"]]
+                ref = body.get("ref")
                 if ref is not None and "ref" not in metadata and not from_file:
                     metadata["ref"] = ref
                 elif "ref" not in metadata and "ref" not in params.get("unresolved_scope", []):

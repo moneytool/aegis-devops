@@ -2252,3 +2252,45 @@ def test_az_value_read_from_a_file_is_unresolved():
 def test_kubectl_run_l_is_labels():
     intent = from_argv("kubectl run web --image x -l app=web".split())[0]
     assert intent.params["labels"] == "app=web" and "selector" not in intent.params
+
+
+@pytest.mark.parametrize("command,inputs", [
+    # gh reads every -f first, then every -F (cli v2.103 run.go and api/fields.go)
+    ("gh workflow run d.yml -R o/r -F environment=prod -f environment=dev",
+     {"environment": "prod"}),
+    ("gh workflow run d.yml -R o/r -f environment=dev -F environment=prod",
+     {"environment": "prod"}),
+    # gh api builds nested keys and arrays
+    ("gh api -X POST repos/o/r/x -f a[b]=1 -F a[c]=2 -f l[]=x -f l[]=y",
+     {"a": {"b": "1", "c": 2}, "l": ["x", "y"]}),
+])
+def test_gh_fields_follow_gh_order(command, inputs):
+    assert from_argv(command.split())[0].params["inputs"] == inputs
+
+
+def test_gh_workflow_environment_rule_sees_the_value_gh_sends():
+    rule = _rule("github", "workflow/*", ["run"], {"inputs.environment": "prod"})
+    command = "gh workflow run d.yml -R o/r --ref main -F environment=prod -f environment=dev"
+    assert _verdict([rule], command) == "BLOCK"
+
+
+@pytest.mark.parametrize("command", [
+    "gh api -X POST repos/o/r/x -f a=1 -F a=2",  # gh: unexpected override existing field
+    "gh api -X POST repos/o/r/x -f a",  # requires a value
+])
+def test_gh_api_refuses_fields_gh_refuses(command):
+    with pytest.raises(ValueError):
+        from_argv(command.split())
+
+
+def test_kubectl_run_overrides_leave_the_object_unknown():
+    command = "kubectl run web --image=safe --overrides {}"
+    rule = _rule("kubernetes", "pod/*", ["run"], {"image": "evil"})
+    assert _verdict([rule], command.split()) == "ESCALATE"
+
+
+def test_gh_api_dispatch_inputs_meet_the_porcelain_rule():
+    rule = _rule("github", "workflow/*", ["run"], {"inputs.env": "prod"})
+    command = ["gh", "api", "-X", "POST", "repos/o/r/actions/workflows/d.yml/dispatches",
+               "-f", "ref=main", "-F", "inputs[env]=prod"]
+    assert _verdict([rule], command) == "BLOCK"

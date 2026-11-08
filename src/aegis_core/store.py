@@ -883,6 +883,8 @@ def param_unresolved(key: str, intent: InfrastructureIntent) -> bool:
             return True
         if canon == "*" and not _dig_all(intent.params, key):
             return True  # every key the command line does not give (aws input in a file)
+        if canon == "**":
+            return True  # every key, given or not (kubectl run --overrides patches them all)
         if (canon.endswith(".*") and any(s.startswith(canon[:-1]) for s in spellings)
                 and not _dig_all(intent.params, key)):
             return True
