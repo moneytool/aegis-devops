@@ -122,7 +122,7 @@ from aegis_core.parser import (
     from_gcloud,
     from_gh,
     from_git,
-    from_helm,
+    from_helm_multi,
     from_kubectl_multi,
     from_terraform_plan,
 )
@@ -183,7 +183,7 @@ _ARGV_TARGET_PARSERS = {
     "aws": from_aws_multi,
     "az": from_az_multi,
     "gcloud": lambda argv: [from_gcloud(argv)],
-    "helm": lambda argv: [from_helm(argv)],
+    "helm": from_helm_multi,
     "argocd": from_argocd_multi,
     "flux": lambda argv: [from_flux(argv)],
     "git": lambda argv: [from_git(argv)],

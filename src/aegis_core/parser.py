@@ -2349,27 +2349,15 @@ def from_gcloud(argv: list[str]) -> InfrastructureIntent:
 
 # --- Helm -----------------------------------------------------------------
 
-_HELM_BOOL_FLAGS = {
-    "atomic",
-    "wait",
-    "create-namespace",
-    "force",
-    "reuse-values",
-    "reset-values",
-    "cleanup-on-fail",
-    "install",
-}
-
 _HELM_READ_VERBS = {"history", "status", "list", "get"}
 
 # Helm's short letters on the verbs parsed here, read from helm's source (v4.3.1 and
 # v3.22.1; helm is not run in the tests): -i is --install on upgrade, -f --values or list's
-# --filter. "a" depends on the verb: see _helm_short_letters. -g (--generate-name) is left
-# out on purpose: with it there is no release name, and "install -g ./c" must not read
-# ./c as one, so it stays refused.
+# --filter, -g --generate-name on install and template. "a" depends on the verb: see
+# _helm_short_letters.
 _HELM_SHORT_VALUE_LETTERS = frozenset("flmnos")
-_HELM_SHORT_BOOL_LETTERS = frozenset("Adhiqr")
-_HELM_SHORT_BOOL_NAMES = {"i": "install"}
+_HELM_SHORT_BOOL_LETTERS = frozenset("Adghiqr")
+_HELM_SHORT_BOOL_NAMES = {"i": "install", "g": "generate_name"}
 
 # Helm global options (accepted before or after the verb).
 _HELM_GLOBAL_VALUE_FLAGS = {
@@ -2388,10 +2376,56 @@ _HELM_GLOBAL_VALUE_FLAGS = {
     "repository-config",
     "burst-limit",
     "qps",
+    "content-cache",  # helm 4
+    "color",
+    "colour",
 }
 _HELM_GLOBAL_BOOL_FLAGS = {"debug", "kube-insecure-skip-tls-verify"}
 # Global value flags whose value is consumed but not recorded.
 _HELM_DISCARD_VALUE_FLAGS = _HELM_GLOBAL_VALUE_FLAGS - {"n", "namespace", "kube-context"}
+
+# Every long flag of every helm command, read from helm's flag registrations (v4.3.1
+# pkg/cmd and v3.21.1 cmd/helm, and pkg/cli for the globals). Those that take a value
+# take the next word whatever it looks like (#80). The ones with a default for a bare use
+# (helm 4's --wait, --dry-run) are with the booleans. "server-side" is a boolean on
+# install and template and takes a value on upgrade and rollback (helm 4).
+_HELM_VALUE_FLAGS = frozenset({
+    "api-versions", "app-version", "burst-limit", "ca-file", "cascade", "cert-file",
+    "chart-api-version", "color", "colour", "content-cache", "description", "destination",
+    "dir", "endpoint", "filter", "history-max", "jsonpath", "key", "key-file", "keyring",
+    "kube-apiserver", "kube-as-group", "kube-as-user", "kube-ca-file", "kube-context",
+    "kube-tls-server-name", "kube-token", "kube-version", "kubeconfig", "labels", "max",
+    "max-col-width", "merge", "name", "name-template", "namespace", "offset", "output",
+    "output-dir", "passphrase-file", "password", "post-renderer", "post-renderer-args", "qps",
+    "registry-config", "repo", "repository-cache", "repository-config", "revision",
+    "selector", "set", "set-file", "set-json", "set-literal", "set-string", "show-only",
+    "starter", "template", "time-format", "timeout", "type", "untardir", "url", "username",
+    "values", "version",
+})
+_HELM_BOOL_ONLY_FLAGS = frozenset({
+    "all", "all-namespaces", "allow-deprecated-repos", "atomic", "cleanup-on-fail", "client",
+    "create-namespace", "date", "debug", "dependency-update", "deployed", "devel",
+    "disable-openapi-validation", "dry-run", "enable-dns", "fail-on-no-result",
+    "fail-on-repo-update-fail", "failed", "force", "force-conflicts", "force-replace",
+    "force-update", "generate-headers", "generate-name", "help", "hide-notes", "hide-secret",
+    "ignore-not-found", "include-crds", "insecure", "insecure-skip-tls-verify", "install",
+    "is-upgrade", "json", "keep-history", "kube-insecure-skip-tls-verify", "list-repo-url",
+    "logs", "no-descriptions", "no-headers", "no-hooks", "no-update", "pass-credentials",
+    "password-stdin", "pending", "plain-http", "prov", "quiet", "recreate-pods", "regexp",
+    "release-name", "render-subchart-notes", "replace", "reset-then-reuse-values",
+    "reset-values", "reuse-values", "reverse", "rollback-on-failure", "short", "show-desc",
+    "show-resources", "show-rollback-revision", "sign", "skip-crds", "skip-refresh",
+    "skip-schema-validation", "skip-tests", "strict", "superseded", "take-ownership",
+    "uninstalled", "uninstalling", "untar", "validate", "verify", "versions", "wait",
+    "wait-for-jobs", "with-subcharts",
+})
+
+
+def _helm_long_flags(verb: str | None) -> tuple[frozenset[str], frozenset[str]]:
+    """Helm's value and boolean long flags on ``verb``."""
+    if verb in ("upgrade", "rollback"):
+        return _HELM_VALUE_FLAGS | {"server-side"}, _HELM_BOOL_ONLY_FLAGS
+    return _HELM_VALUE_FLAGS, _HELM_BOOL_ONLY_FLAGS | {"server-side"}
 
 
 def _split_helm_set_pairs(value: str) -> list[str]:
@@ -2438,12 +2472,20 @@ def _parse_helm_tokens(
     params: dict[str, Any] = {}
     positional: list[str] = []
     short_bools, short_values = _helm_short_letters(verb)
+    long_values, long_bools = _helm_long_flags(verb)
+    # helm merges --set, then --set-string, then --set-literal, whatever their order on
+    # the line, so a later kind wins over an earlier one (pkg/cli/values MergeValues).
+    sets: dict[str, list[str]] = {"set": [], "set-string": [], "set-literal": []}
 
     tokens = list(tokens)  # short words are split in place as the walk reaches them
     i = 0
     n = len(tokens)
     while i < n:
         tok = tokens[i]
+        if tok == "--":
+            # pflag: every word after it is an operand, "-nprod" too
+            positional.extend(tokens[i + 1:])
+            break
         if tok.startswith("-") and tok != "-":
             is_long = tok.startswith("--")
             if not is_long and len(tok) > 2:
@@ -2479,26 +2521,22 @@ def _parse_helm_tokens(
                     i += 1
                     val = _value_at(tokens, i, tok)
                 params["version"] = _coerce(val)
-            elif key in ("f", "values"):
+            elif key == "values" or (key == "f" and not is_long and verb != "list"):
+                # A StringSlice: "-f a.yaml,b.yaml" is two files.
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
-                params.setdefault("values_files", []).append(val)
-            elif key in ("set", "set-string"):
+                params.setdefault("values_files", []).extend(_read_string_slice(val))
+            elif key in sets:
                 # REVIEW-4 T2.5: comma-separated `k=v` pairs (Helm's own
                 # splitting rule, see _split_helm_set_pairs); nested keys
                 # like `image.tag=v2` are kept as the dotted string key --
                 # the store's dotted-path scope matching handles them.
-                # `--set-string` values are never coerced.
+                # `--set-string` and `--set-literal` values are never coerced.
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
-                target = params.setdefault("set", {})
-                for pair in _split_helm_set_pairs(val):
-                    k, _sep, v = pair.partition("=")
-                    if not k:
-                        continue
-                    target[k] = v if key == "set-string" else _coerce(v)
+                sets[key].append(val)
             elif key in ("set-file", "set-json"):
                 # Recorded raw (not parsed) -- see module docs.
                 if val is None:
@@ -2506,7 +2544,7 @@ def _parse_helm_tokens(
                     val = _value_at(tokens, i, tok)
                 dest = "set_file" if key == "set-file" else "set_json"
                 params.setdefault(dest, []).append(val)
-            elif key in _HELM_BOOL_FLAGS:
+            elif is_long and key in long_bools:
                 params[key.replace("-", "_")] = _bool_param(val)
             elif not is_long and key in short_bools:
                 # Takes no value: in "-i api ./c" the release is "api".
@@ -2517,27 +2555,42 @@ def _parse_helm_tokens(
                     i += 1
                     val = _value_at(tokens, i, tok)
                 params[key] = _coerce(val)
-            elif val is not None:
-                params[key.replace("-", "_")] = _coerce(val)
-            elif i + 1 < n and not tokens[i + 1].startswith("-"):
-                i += 1
-                params[key.replace("-", "_")] = _coerce(tokens[i])
             else:
-                params[key.replace("-", "_")] = True
+                # A value flag takes the next word whatever it is (#80); a flag in no
+                # table is refused unless "=value" or its place shows its reading.
+                i, params[key.replace("-", "_")] = _other_flag(
+                    tokens, i, values=long_values if is_long else (), bools=(), tool="helm")
         else:
             positional.append(tok)
         i += 1
 
+    if any(sets.values()):
+        target = params.setdefault("set", {})
+        for kind in ("set", "set-string"):
+            for value in sets[kind]:
+                for pair in _split_helm_set_pairs(value):
+                    k, _sep, v = pair.partition("=")
+                    if k:
+                        target[k] = v if kind == "set-string" else _coerce(v)
+        for value in sets["set-literal"]:  # one pair, the rest of the word its value
+            k, _sep, v = value.partition("=")
+            if k:
+                target[k] = v
     return metadata, params, positional
 
 
-def from_helm(argv: list[str]) -> InfrastructureIntent:
-    """Parses a ``helm`` invocation, e.g.:
+def from_helm_multi(argv: list[str]) -> list[InfrastructureIntent]:
+    """Parses a ``helm`` invocation into one InfrastructureIntent per release it acts
+    on, e.g.:
 
     ``helm upgrade --install api ./chart -n prod --dry-run``
       -> resource "release/api", action "update",
          params {"raw_action": "upgrade", "install": True, "chart": "./chart",
                   "dry_run": True}, metadata {"namespace": "prod"}
+
+    ``helm uninstall a b`` uninstalls both releases, so it is two intents. ``helm install
+    ./chart --generate-name`` (or ``--name-template``) names its release when it runs:
+    the target is ``release/*``, marked ``resolved_at_runtime``.
     """
     if len(argv) < 2 or _basename(argv[0]) != "helm":
         raise ValueError(f"not a recognizable helm invocation: {argv!r}")
@@ -2554,68 +2607,69 @@ def from_helm(argv: list[str]) -> InfrastructureIntent:
     metadata, params, positional = _parse_helm_tokens(tokens, verb)
     params["raw_action"] = verb
 
-    if verb == "install":
+    def one(release: str, action: str) -> InfrastructureIntent:
+        return InfrastructureIntent(
+            resource=f"release/{release}", action=action, provider="helm",
+            params=dict(params), metadata=dict(metadata),
+        )
+
+    if verb in ("install", "template"):
+        if verb == "template":
+            params["dry_run"] = True
+        named_at_run = params.get("generate_name") is True or "name_template" in params
+        if len(positional) == 1 and named_at_run:
+            # helm's NameAndChart: the one word is the chart, and the name comes later
+            params["chart"] = positional[0]
+            return _mark_open_targets([one("*", "create" if verb == "install" else "read")])
+        if verb == "template":
+            if len(positional) > 1:
+                params["chart"] = positional[1]
+            return [one(positional[0] if positional else "*", "read")]
         if not positional:
             raise ValueError(f"could not find a helm release name in: {argv!r}")
-        release = positional[0]
         if len(positional) > 1:
             params["chart"] = positional[1]
-        return InfrastructureIntent(
-            resource=f"release/{release}", action="create", provider="helm",
-            params=params, metadata=metadata,
-        )
+        return [one(positional[0], "create")]
 
     if verb == "upgrade":
         if not positional:
             raise ValueError(f"could not find a helm release name in: {argv!r}")
-        release = positional[0]
         if len(positional) > 1:
             params["chart"] = positional[1]
-        return InfrastructureIntent(
-            resource=f"release/{release}", action="update", provider="helm",
-            params=params, metadata=metadata,
-        )
+        return [one(positional[0], "update")]
 
     if verb in ("uninstall", "delete"):
+        # helm uninstalls every release named, one after the other
         if not positional:
             raise ValueError(f"could not find a helm release name in: {argv!r}")
-        release = positional[0]
-        return InfrastructureIntent(
-            resource=f"release/{release}", action="delete", provider="helm",
-            params=params, metadata=metadata,
-        )
+        return [one(release, "delete") for release in dict.fromkeys(positional)]
 
     if verb == "rollback":
         if not positional:
             raise ValueError(f"could not find a helm release name in: {argv!r}")
-        release = positional[0]
         if len(positional) > 1:
             params["revision"] = _coerce(positional[1])
-        return InfrastructureIntent(
-            resource=f"release/{release}", action="rollback", provider="helm",
-            params=params, metadata=metadata,
-        )
-
-    if verb == "template":
-        params["dry_run"] = True
-        release = positional[0] if positional else "*"
-        return InfrastructureIntent(
-            resource=f"release/{release}", action="read", provider="helm",
-            params=params, metadata=metadata,
-        )
+        return [one(positional[0], "rollback")]
 
     if verb in _HELM_READ_VERBS:
         sub_positional = positional
         if verb == "get" and sub_positional:
             params["get_target"] = sub_positional[0]
             sub_positional = sub_positional[1:]
-        release = sub_positional[0] if sub_positional else "*"
-        return InfrastructureIntent(
-            resource=f"release/{release}", action="read", provider="helm",
-            params=params, metadata=metadata,
-        )
+        return [one(sub_positional[0] if sub_positional else "*", "read")]
 
     raise ValueError(f"unsupported helm subcommand: {argv!r}")
+
+
+def from_helm(argv: list[str]) -> InfrastructureIntent:
+    """Parses a ``helm`` invocation that acts on exactly one release (see
+    :func:`from_helm_multi`). Raises ValueError for ``helm uninstall a b``."""
+    intents = from_helm_multi(argv)
+    if len(intents) != 1:
+        raise ValueError(
+            f"expected exactly one target release, found {len(intents)}: {argv!r}"
+        )
+    return intents[0]
 
 
 # --- ArgoCD -----------------------------------------------------------------
@@ -3803,7 +3857,7 @@ def from_argv(argv: list[str]) -> list[InfrastructureIntent]:
     if name in ("gcloud", "gsutil"):
         return [from_gcloud(argv)]
     if name == "helm":
-        return [from_helm(argv)]
+        return from_helm_multi(argv)
     if name == "argocd":
         return from_argocd_multi(argv)
     if name == "flux":

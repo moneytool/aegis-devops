@@ -3876,7 +3876,6 @@ def test_helm_a_takes_a_value_on_template_only():
     "helm upgrade api ./c -xnprod",
     "helm upgrade api ./c -xA",
     "helm -inprod upgrade api ./c",
-    "helm install -g ./c",  # there is no release name to read
     "helm upgrade api ./c -in",
     "flux reconcile ks a -n dev -qnprod",  # flux has no -q
     "flux get ks -xnprod",
