@@ -1695,7 +1695,7 @@ def test_aws_desired_capacity_rule_holds_in_every_spelling(command, verdict):
      {"discard-local-ssd": True}),
     ("gcloud container clusters resize c --num-nodes 0 --region r",
      ["container/cluster/c"], {"num-nodes": 0}),
-    ("gcloud storage rm -r gs://b/x", ["storage/bucket/b"], {"r": True}),
+    ("gcloud storage rm -r gs://b/x", ["storage/bucket/b"], {"recursive": True}),
     ("gcloud compute instances list --filter name=x", ["compute/instance/*"],
      {"filter": "name=x"}),
 ])
