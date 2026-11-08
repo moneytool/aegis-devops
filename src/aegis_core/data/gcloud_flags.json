@@ -1,6 +1,9 @@
 {
  "_source": "https://cloud.google.com/sdk/gcloud/reference (fetched 2026-11-08); value types from github.com/google-cloud-sdk-unofficial/google-cloud-sdk 3dfad14e7f5495f14b555f3dbc148f59f9518f72",
  "compute disks add-iam-policy-binding": {
+  "actions": {
+   "zone": "unresolved"
+  },
   "alias": {},
   "bool": [],
   "dict": [
@@ -8,6 +11,7 @@
   ],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {
    "role": "unresolved"
   },
@@ -20,6 +24,12 @@
   ]
  },
  "compute disks create": {
+  "actions": {
+   "labels": "unresolved",
+   "region": "unresolved",
+   "resource-manager-tags": "unresolved",
+   "zone": "unresolved"
+  },
   "alias": {},
   "bool": [
    "confidential-compute",
@@ -35,8 +45,9 @@
    "resource-policies"
   ],
   "optional": [],
+  "specs": {},
   "types": {
-   "labels": "unresolved",
+   "labels": "dict",
    "licenses": "list:str",
    "provisioned-iops": "int",
    "provisioned-throughput": "int",
@@ -84,11 +95,16 @@
   ]
  },
  "compute disks delete": {
+  "actions": {
+   "region": "unresolved",
+   "zone": "unresolved"
+  },
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "region",
@@ -96,11 +112,16 @@
   ]
  },
  "compute disks describe": {
+  "actions": {
+   "region": "unresolved",
+   "zone": "unresolved"
+  },
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "region",
@@ -108,6 +129,7 @@
   ]
  },
  "compute disks list": {
+  "actions": {},
   "alias": {
    "r": "regexp"
   },
@@ -121,10 +143,11 @@
    "zones"
   ],
   "optional": [],
+  "specs": {},
   "types": {
    "limit": "unresolved",
    "regions": "list:str",
-   "zones": "unresolved"
+   "zones": "list:str"
   },
   "value": [
    "filter",
@@ -138,6 +161,9 @@
   ]
  },
  "compute disks remove-iam-policy-binding": {
+  "actions": {
+   "zone": "unresolved"
+  },
   "alias": {},
   "bool": [
    "all"
@@ -147,6 +173,7 @@
   ],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {
    "role": "unresolved"
   },
@@ -159,11 +186,16 @@
   ]
  },
  "compute disks resize": {
+  "actions": {
+   "region": "unresolved",
+   "zone": "unresolved"
+  },
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {
    "size": "unresolved"
   },
@@ -174,17 +206,28 @@
   ]
  },
  "compute disks set-iam-policy": {
+  "actions": {
+   "zone": "unresolved"
+  },
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "zone"
   ]
  },
  "compute disks update": {
+  "actions": {
+   "append-licenses": "update",
+   "region": "unresolved",
+   "remove-licenses": "update",
+   "replace-license": "update",
+   "zone": "unresolved"
+  },
   "alias": {},
   "bool": [
    "clear-architecture",
@@ -199,6 +242,7 @@
    "remove-licenses"
   ],
   "optional": [],
+  "specs": {},
   "types": {
    "append-licenses": "list:str",
    "provisioned-iops": "int",
@@ -223,6 +267,10 @@
   ]
  },
  "compute firewall-rules create": {
+  "actions": {
+   "network": "unresolved",
+   "resource-manager-tags": "unresolved"
+  },
   "alias": {},
   "bool": [
    "disabled",
@@ -243,6 +291,7 @@
    "target-tags"
   ],
   "optional": [],
+  "specs": {},
   "types": {
    "action": "unresolved",
    "direction": "unresolved",
@@ -269,24 +318,29 @@
   ]
  },
  "compute firewall-rules delete": {
+  "actions": {},
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": []
  },
  "compute firewall-rules describe": {
+  "actions": {},
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": []
  },
  "compute firewall-rules list": {
+  "actions": {},
   "alias": {
    "r": "regexp"
   },
@@ -298,6 +352,7 @@
    "sort-by"
   ],
   "optional": [],
+  "specs": {},
   "types": {
    "limit": "unresolved"
   },
@@ -311,6 +366,7 @@
   ]
  },
  "compute firewall-rules update": {
+  "actions": {},
   "alias": {},
   "bool": [
    "disabled",
@@ -329,6 +385,7 @@
    "target-tags"
   ],
   "optional": [],
+  "specs": {},
   "types": {
    "priority": "unresolved",
    "target-service-accounts": "list:str"
@@ -348,6 +405,9 @@
   ]
  },
  "compute instances add-iam-policy-binding": {
+  "actions": {
+   "zone": "unresolved"
+  },
   "alias": {},
   "bool": [],
   "dict": [
@@ -355,6 +415,7 @@
   ],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {
    "role": "unresolved"
   },
@@ -367,6 +428,21 @@
   ]
  },
  "compute instances create": {
+  "actions": {
+   "address": "unresolved",
+   "create-disk": "append",
+   "disk": "unresolved",
+   "labels": "unresolved",
+   "local-ssd": "append",
+   "maintenance-policy": "unresolved",
+   "metadata": "once",
+   "network": "unresolved",
+   "network-interface": "append",
+   "network-performance-configs": "append",
+   "resource-manager-tags": "unresolved",
+   "subnet": "unresolved",
+   "zone": "unresolved"
+  },
   "alias": {},
   "bool": [
    "async",
@@ -419,6 +495,120 @@
    "tags"
   ],
   "optional": [],
+  "specs": {
+   "accelerator": {
+    "key_only": false,
+    "members": {
+     "count": "int",
+     "type": null
+    },
+    "required": []
+   },
+   "create-disk": {
+    "key_only": false,
+    "members": {
+     "architecture": null,
+     "auto-delete": "bool",
+     "boot": "bool",
+     "confidential-compute": "bool",
+     "description": null,
+     "device-name": null,
+     "disk-resource-policy": "list:str",
+     "image": null,
+     "image-csek-key-file": null,
+     "image-family": null,
+     "image-project": null,
+     "interface": null,
+     "kms-key": null,
+     "kms-key-service-account": null,
+     "kms-keyring": null,
+     "kms-location": null,
+     "kms-project": null,
+     "labels": "list:str",
+     "mode": null,
+     "multi-writer": "bool",
+     "name": null,
+     "on-update-action": null,
+     "provisioned-iops": "int",
+     "provisioned-throughput": "int",
+     "replica-zones": "list:str",
+     "size": "size:G",
+     "source-instant-snapshot": null,
+     "source-snapshot": null,
+     "source-snapshot-csek-key-file": null,
+     "source-snapshot-region": null,
+     "storage-pool": null,
+     "type": null
+    },
+    "required": []
+   },
+   "disk": {
+    "key_only": false,
+    "members": {
+     "auto-delete": "bool",
+     "boot": "bool",
+     "count": "int",
+     "device-name": null,
+     "force-attach": "bool",
+     "interface": null,
+     "mode": null,
+     "name": null,
+     "scope": null,
+     "size": "unresolved",
+     "type": "unresolved"
+    },
+    "required": []
+   },
+   "local-ssd": {
+    "key_only": false,
+    "members": {
+     "device-name": null,
+     "interface": "unresolved",
+     "size": "size:G"
+    },
+    "required": []
+   },
+   "network-interface": {
+    "key_only": true,
+    "members": {
+     "address": null,
+     "aliases": null,
+     "dns64-eligible": "unresolved",
+     "enable-vpc-scoped-dns": "unresolved",
+     "external-ipv6-address": null,
+     "external-ipv6-prefix-length": "int",
+     "igmp-query": "unresolved",
+     "internal-ipv6-address": null,
+     "internal-ipv6-prefix-length": "int",
+     "ipv6-address": null,
+     "ipv6-aliases": null,
+     "ipv6-network-tier": "unresolved",
+     "ipv6-prefix-length": "int",
+     "ipv6-public-ptr-domain": null,
+     "nat64-eligible": "unresolved",
+     "network": null,
+     "network-attachment": null,
+     "network-tier": "unresolved",
+     "nic-type": "unresolved",
+     "no-address": "unresolved",
+     "private-network-ip": null,
+     "queue-count": "int",
+     "service-class-id": null,
+     "stack-type": "unresolved",
+     "subnet": null,
+     "vlan": "int"
+    },
+    "required": []
+   },
+   "network-performance-configs": {
+    "key_only": false,
+    "members": {
+     "external-ip-egress-bandwidth-tier": null,
+     "total-egress-bandwidth-tier": null
+    },
+    "required": []
+   }
+  },
   "types": {
    "accelerator": "dict",
    "availability-domain": "int",
@@ -429,7 +619,7 @@
    "custom-cpu": "unresolved",
    "custom-memory": "size:G",
    "discard-local-ssds-at-termination-timestamp": "bool",
-   "disk": "unresolved",
+   "disk": "dict",
    "external-ipv6-address": "unresolved",
    "external-ipv6-prefix-length": "int",
    "graceful-shutdown-max-duration": "duration:s",
@@ -439,13 +629,13 @@
    "internal-ipv6-address": "unresolved",
    "internal-ipv6-prefix-length": "int",
    "ipv6-network-tier": "unresolved",
-   "labels": "unresolved",
+   "labels": "dict",
    "local-ssd": "dict",
    "local-ssd-recovery-timeout": "duration:h",
    "maintenance-policy": "unresolved",
    "max-run-duration": "duration:s",
    "metadata": "dict",
-   "network-interface": "unresolved",
+   "network-interface": "dict",
    "network-performance-configs": "dict",
    "network-tier": "unresolved",
    "node-affinity-file": "file",
@@ -456,7 +646,7 @@
    "resource-policies": "list:str",
    "scopes": "list:str",
    "stack-type": "unresolved",
-   "tags": "unresolved",
+   "tags": "list:str",
    "termination-time": "unresolved",
    "threads-per-core": "int",
    "visible-core-count": "int"
@@ -552,6 +742,9 @@
   ]
  },
  "compute instances delete": {
+  "actions": {
+   "zone": "unresolved"
+  },
   "alias": {},
   "bool": [
    "no-graceful-shutdown"
@@ -559,6 +752,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "delete-disks",
@@ -567,22 +761,30 @@
   ]
  },
  "compute instances describe": {
+  "actions": {
+   "zone": "unresolved"
+  },
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "zone"
   ]
  },
  "compute instances export": {
+  "actions": {
+   "zone": "unresolved"
+  },
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "destination",
@@ -590,6 +792,12 @@
   ]
  },
  "compute instances import": {
+  "actions": {
+   "labels": "unresolved",
+   "network": "unresolved",
+   "subnet": "unresolved",
+   "zone": "unresolved"
+  },
   "alias": {},
   "bool": [
    "async",
@@ -612,14 +820,15 @@
    "tags"
   ],
   "optional": [],
+  "specs": {},
   "types": {
    "custom-cpu": "unresolved",
    "custom-memory": "size:G",
-   "labels": "unresolved",
+   "labels": "dict",
    "network-tier": "unresolved",
    "node-affinity-file": "file",
    "scopes": "list:str",
-   "tags": "unresolved",
+   "tags": "list:str",
    "timeout": "unresolved"
   },
   "value": [
@@ -651,6 +860,7 @@
   ]
  },
  "compute instances list": {
+  "actions": {},
   "alias": {
    "r": "regexp"
   },
@@ -663,9 +873,10 @@
    "zones"
   ],
   "optional": [],
+  "specs": {},
   "types": {
    "limit": "unresolved",
-   "zones": "unresolved"
+   "zones": "list:str"
   },
   "value": [
    "filter",
@@ -678,6 +889,9 @@
   ]
  },
  "compute instances remove-iam-policy-binding": {
+  "actions": {
+   "zone": "unresolved"
+  },
   "alias": {},
   "bool": [
    "all"
@@ -687,6 +901,7 @@
   ],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {
    "role": "unresolved"
   },
@@ -699,28 +914,39 @@
   ]
  },
  "compute instances reset": {
+  "actions": {
+   "zone": "unresolved"
+  },
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "zone"
   ]
  },
  "compute instances set-iam-policy": {
+  "actions": {
+   "zone": "unresolved"
+  },
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "zone"
   ]
  },
  "compute instances start": {
+  "actions": {
+   "zone": "unresolved"
+  },
   "alias": {},
   "bool": [
    "async"
@@ -728,6 +954,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "csek-key-file",
@@ -735,6 +962,9 @@
   ]
  },
  "compute instances stop": {
+  "actions": {
+   "zone": "unresolved"
+  },
   "alias": {},
   "bool": [
    "async",
@@ -745,12 +975,16 @@
   "optional": [
    "discard-local-ssd"
   ],
+  "specs": {},
   "types": {},
   "value": [
    "zone"
   ]
  },
  "compute instances update": {
+  "actions": {
+   "zone": "unresolved"
+  },
   "alias": {},
   "bool": [
    "clear-labels",
@@ -780,6 +1014,7 @@
    "remove-labels"
   ],
   "optional": [],
+  "specs": {},
   "types": {
    "graceful-shutdown-max-duration": "duration:s",
    "identity-type": "unresolved",
@@ -800,6 +1035,12 @@
   ]
  },
  "compute ssh": {
+  "actions": {
+   "network": "unresolved",
+   "region": "unresolved",
+   "ssh-flag": "append",
+   "zone": "unresolved"
+  },
   "alias": {},
   "bool": [
    "dry-run",
@@ -812,6 +1053,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {
    "ssh-key-expiration": "unresolved",
    "ssh-key-expire-after": "duration:s"
@@ -831,6 +1073,13 @@
   ]
  },
  "container clusters create": {
+  "actions": {
+   "additional-zones": "unresolved",
+   "image": "unresolved",
+   "metadata": "once",
+   "network-performance-configs": "append",
+   "zone": "unresolved"
+  },
   "alias": {
    "m": "machine-type",
    "u": "username",
@@ -959,6 +1208,88 @@
    "ephemeral-storage-local-ssd",
    "local-nvme-ssd-block"
   ],
+  "specs": {
+   "accelerator": {
+    "key_only": false,
+    "members": {
+     "count": "int",
+     "gpu-driver-version": null,
+     "gpu-partition-size": null,
+     "gpu-sharing-strategy": null,
+     "max-shared-clients-per-gpu": "int",
+     "max-time-shared-clients-per-gpu": "int",
+     "type": null
+    },
+    "required": [
+     "type"
+    ]
+   },
+   "addons": "unresolved",
+   "autoprovisioning-standard-rollout-policy": {
+    "key_only": false,
+    "members": {
+     "batch-node-count": "int",
+     "batch-percent": "float",
+     "batch-soak-duration": null
+    },
+    "required": []
+   },
+   "ephemeral-storage-local-ssd": {
+    "key_only": false,
+    "members": {
+     "capacity": "size:GB",
+     "count": "int"
+    },
+    "required": []
+   },
+   "local-nvme-ssd-block": {
+    "key_only": false,
+    "members": {
+     "count": "int"
+    },
+    "required": []
+   },
+   "max-accelerator": {
+    "key_only": false,
+    "members": {
+     "count": "int",
+     "type": null
+    },
+    "required": [
+     "count",
+     "type"
+    ]
+   },
+   "min-accelerator": {
+    "key_only": false,
+    "members": {
+     "count": "int",
+     "type": null
+    },
+    "required": [
+     "count",
+     "type"
+    ]
+   },
+   "network-performance-configs": {
+    "key_only": false,
+    "members": {
+     "total-egress-bandwidth-tier": null
+    },
+    "required": []
+   },
+   "notification-config": {
+    "key_only": false,
+    "members": {
+     "filter": null,
+     "pubsub": null,
+     "pubsub-topic": null
+    },
+    "required": [
+     "pubsub"
+    ]
+   }
+  },
   "types": {
    "accelerator": "dict",
    "additional-zones": "list:str",
@@ -1007,7 +1338,7 @@
    "min-cpu": "int",
    "min-memory": "int",
    "min-nodes": "int",
-   "monitoring": "unresolved",
+   "monitoring": "list:str",
    "network-performance-configs": "dict",
    "node-labels": "dict",
    "node-locations": "list:str",
@@ -1021,7 +1352,7 @@
    "service-account-verification-keys": "list:str",
    "storage-pools": "list:str",
    "system-config-from-file": "file",
-   "tags": "unresolved",
+   "tags": "list:str",
    "threads-per-core": "int",
    "total-max-nodes": "int",
    "total-min-nodes": "int",
@@ -1181,6 +1512,9 @@
   ]
  },
  "container clusters delete": {
+  "actions": {
+   "zone": "unresolved"
+  },
   "alias": {
    "z": "zone"
   },
@@ -1190,6 +1524,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "location",
@@ -1199,6 +1534,9 @@
   ]
  },
  "container clusters describe": {
+  "actions": {
+   "zone": "unresolved"
+  },
   "alias": {
    "z": "zone"
   },
@@ -1206,6 +1544,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "location",
@@ -1215,6 +1554,9 @@
   ]
  },
  "container clusters get-credentials": {
+  "actions": {
+   "zone": "unresolved"
+  },
   "alias": {
    "z": "zone"
   },
@@ -1225,6 +1567,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "location",
@@ -1234,6 +1577,9 @@
   ]
  },
  "container clusters list": {
+  "actions": {
+   "zone": "unresolved"
+  },
   "alias": {
    "z": "zone"
   },
@@ -1245,6 +1591,7 @@
    "sort-by"
   ],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "filter",
@@ -1258,6 +1605,9 @@
   ]
  },
  "container clusters resize": {
+  "actions": {
+   "zone": "unresolved"
+  },
   "alias": {
    "z": "zone"
   },
@@ -1267,6 +1617,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {
    "num-nodes": "int",
    "size": "int"
@@ -1282,6 +1633,12 @@
   ]
  },
  "container clusters update": {
+  "actions": {
+   "additional-ip-ranges": "append",
+   "network-performance-configs": "append",
+   "remove-additional-ip-ranges": "append",
+   "zone": "unresolved"
+  },
   "alias": {
    "u": "username",
    "z": "zone"
@@ -1410,6 +1767,79 @@
    "remove-labels"
   ],
   "optional": [],
+  "specs": {
+   "additional-ip-ranges": {
+    "key_only": false,
+    "members": {
+     "pod-ipv4-range": null,
+     "subnetwork": null
+    },
+    "required": [
+     "pod-ipv4-range",
+     "subnetwork"
+    ]
+   },
+   "autoprovisioning-standard-rollout-policy": {
+    "key_only": false,
+    "members": {
+     "batch-node-count": "int",
+     "batch-percent": "float",
+     "batch-soak-duration": null
+    },
+    "required": []
+   },
+   "max-accelerator": {
+    "key_only": false,
+    "members": {
+     "count": "int",
+     "type": null
+    },
+    "required": [
+     "count",
+     "type"
+    ]
+   },
+   "min-accelerator": {
+    "key_only": false,
+    "members": {
+     "count": "int",
+     "type": null
+    },
+    "required": [
+     "count",
+     "type"
+    ]
+   },
+   "network-performance-configs": {
+    "key_only": false,
+    "members": {
+     "total-egress-bandwidth-tier": null
+    },
+    "required": []
+   },
+   "notification-config": {
+    "key_only": false,
+    "members": {
+     "filter": null,
+     "pubsub": null,
+     "pubsub-topic": null
+    },
+    "required": [
+     "pubsub"
+    ]
+   },
+   "remove-additional-ip-ranges": {
+    "key_only": false,
+    "members": {
+     "pod-ipv4-range": null,
+     "subnetwork": null
+    },
+    "required": [
+     "subnetwork"
+    ]
+   },
+   "update-addons": "unresolved"
+  },
   "types": {
    "add-maintenance-exclusion-end": "unresolved",
    "add-maintenance-exclusion-start": "unresolved",
@@ -1444,7 +1874,7 @@
    "min-cpu": "int",
    "min-memory": "int",
    "min-nodes": "int",
-   "monitoring": "unresolved",
+   "monitoring": "list:str",
    "network-performance-configs": "dict",
    "node-locations": "list:str",
    "notification-config": "dict",
@@ -1569,6 +1999,10 @@
   ]
  },
  "container clusters upgrade": {
+  "actions": {
+   "image": "unresolved",
+   "zone": "unresolved"
+  },
   "alias": {
    "z": "zone"
   },
@@ -1579,6 +2013,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {
    "control-plane-soak-duration": "duration:s"
   },
@@ -1596,6 +2031,16 @@
   ]
  },
  "container node-pools create": {
+  "actions": {
+   "additional-node-network": "append",
+   "additional-pod-network": "append",
+   "cluster": "unresolved",
+   "image": "unresolved",
+   "metadata": "once",
+   "network-performance-configs": "append",
+   "secondary-boot-disk": "append",
+   "zone": "unresolved"
+  },
   "alias": {
    "m": "machine-type",
    "z": "zone"
@@ -1652,6 +2097,116 @@
    "ephemeral-storage-local-ssd",
    "local-nvme-ssd-block"
   ],
+  "specs": {
+   "accelerator": {
+    "key_only": false,
+    "members": {
+     "count": "int",
+     "gpu-driver-version": null,
+     "gpu-partition-size": null,
+     "gpu-sharing-strategy": null,
+     "max-shared-clients-per-gpu": "int",
+     "max-time-shared-clients-per-gpu": "int",
+     "type": null
+    },
+    "required": [
+     "type"
+    ]
+   },
+   "additional-node-network": {
+    "key_only": false,
+    "members": {
+     "network": null,
+     "stack-type": "unresolved",
+     "subnetwork": null
+    },
+    "required": [
+     "network",
+     "subnetwork"
+    ]
+   },
+   "additional-pod-network": {
+    "key_only": false,
+    "members": {
+     "max-pods-per-node": "int",
+     "pod-ipv4-range": null,
+     "subnetwork": null
+    },
+    "required": [
+     "pod-ipv4-range"
+    ]
+   },
+   "autoscaled-rollout-policy": {
+    "key_only": false,
+    "members": {
+     "wait-for-drain-duration": null
+    },
+    "required": []
+   },
+   "ephemeral-storage-local-ssd": {
+    "key_only": false,
+    "members": {
+     "capacity": "size:GB",
+     "count": "int"
+    },
+    "required": []
+   },
+   "local-nvme-ssd-block": {
+    "key_only": false,
+    "members": {
+     "count": "int"
+    },
+    "required": []
+   },
+   "network-performance-configs": {
+    "key_only": false,
+    "members": {
+     "total-egress-bandwidth-tier": null
+    },
+    "required": []
+   },
+   "opportunistic-maintenance": {
+    "key_only": false,
+    "members": {
+     "min-nodes": "int",
+     "node-idle-time": null,
+     "window": null
+    },
+    "required": [
+     "min-nodes",
+     "node-idle-time",
+     "window"
+    ]
+   },
+   "sandbox": {
+    "key_only": false,
+    "members": {
+     "type": "unresolved"
+    },
+    "required": [
+     "type"
+    ]
+   },
+   "secondary-boot-disk": {
+    "key_only": false,
+    "members": {
+     "disk-image": null,
+     "mode": null
+    },
+    "required": [
+     "disk-image"
+    ]
+   },
+   "standard-rollout-policy": {
+    "key_only": false,
+    "members": {
+     "batch-node-count": "int",
+     "batch-percent": "float",
+     "batch-soak-duration": null
+    },
+    "required": []
+   }
+  },
   "types": {
    "accelerator": "dict",
    "additional-node-network": "dict",
@@ -1688,7 +2243,7 @@
    "standard-rollout-policy": "dict",
    "storage-pools": "list:str",
    "system-config-from-file": "file",
-   "tags": "unresolved",
+   "tags": "list:str",
    "threads-per-core": "int",
    "total-max-nodes": "int",
    "total-min-nodes": "int",
@@ -1773,6 +2328,10 @@
   ]
  },
  "container node-pools delete": {
+  "actions": {
+   "cluster": "unresolved",
+   "zone": "unresolved"
+  },
   "alias": {
    "z": "zone"
   },
@@ -1782,6 +2341,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "cluster",
@@ -1792,6 +2352,10 @@
   ]
  },
  "container node-pools describe": {
+  "actions": {
+   "cluster": "unresolved",
+   "zone": "unresolved"
+  },
   "alias": {
    "z": "zone"
   },
@@ -1799,6 +2363,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "cluster",
@@ -1809,6 +2374,10 @@
   ]
  },
  "container node-pools list": {
+  "actions": {
+   "cluster": "unresolved",
+   "zone": "unresolved"
+  },
   "alias": {
    "z": "zone"
   },
@@ -1820,6 +2389,7 @@
    "sort-by"
   ],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "cluster",
@@ -1834,6 +2404,10 @@
   ]
  },
  "container node-pools rollback": {
+  "actions": {
+   "cluster": "unresolved",
+   "zone": "unresolved"
+  },
   "alias": {
    "z": "zone"
   },
@@ -1843,6 +2417,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {
    "respect-pdb": "unresolved"
   },
@@ -1856,6 +2431,11 @@
   ]
  },
  "container node-pools update": {
+  "actions": {
+   "cluster": "unresolved",
+   "network-performance-configs": "append",
+   "zone": "unresolved"
+  },
   "alias": {
    "z": "zone"
   },
@@ -1894,6 +2474,46 @@
    "tags"
   ],
   "optional": [],
+  "specs": {
+   "accelerator": {
+    "key_only": false,
+    "members": {
+     "count": "int",
+     "gpu-driver-version": null,
+     "gpu-partition-size": null,
+     "gpu-sharing-strategy": null,
+     "max-shared-clients-per-gpu": "int",
+     "max-time-shared-clients-per-gpu": "int",
+     "type": null
+    },
+    "required": [
+     "type"
+    ]
+   },
+   "autoscaled-rollout-policy": {
+    "key_only": false,
+    "members": {
+     "wait-for-drain-duration": null
+    },
+    "required": []
+   },
+   "network-performance-configs": {
+    "key_only": false,
+    "members": {
+     "total-egress-bandwidth-tier": null
+    },
+    "required": []
+   },
+   "standard-rollout-policy": {
+    "key_only": false,
+    "members": {
+     "batch-node-count": "int",
+     "batch-percent": "float",
+     "batch-soak-duration": null
+    },
+    "required": []
+   }
+  },
   "types": {
    "accelerator": "dict",
    "autoscaled-rollout-policy": "dict",
@@ -1914,7 +2534,7 @@
    "standard-rollout-policy": "dict",
    "storage-pools": "list:str",
    "system-config-from-file": "file",
-   "tags": "unresolved",
+   "tags": "list:str",
    "total-max-nodes": "int",
    "total-min-nodes": "int",
    "workload-metadata": "unresolved"
@@ -1965,11 +2585,15 @@
   ]
  },
  "functions add-iam-policy-binding": {
+  "actions": {
+   "region": "unresolved"
+  },
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "member",
@@ -1978,17 +2602,29 @@
   ]
  },
  "functions delete": {
+  "actions": {
+   "region": "unresolved"
+  },
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "region"
   ]
  },
  "functions deploy": {
+  "actions": {
+   "region": "unresolved",
+   "remove-secrets": "update",
+   "set-secrets": "update",
+   "trigger-event-filters": "update",
+   "trigger-event-filters-path-pattern": "update",
+   "update-secrets": "update"
+  },
   "alias": {},
   "bool": [
    "allow-unauthenticated",
@@ -2031,6 +2667,7 @@
    "remove-secrets"
   ],
   "optional": [],
+  "specs": {},
   "types": {
    "concurrency": "int",
    "docker-repository": "unresolved",
@@ -2102,6 +2739,9 @@
   ]
  },
  "functions describe": {
+  "actions": {
+   "region": "unresolved"
+  },
   "alias": {},
   "bool": [
    "v2"
@@ -2109,12 +2749,14 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "region"
   ]
  },
  "functions list": {
+  "actions": {},
   "alias": {},
   "bool": [
    "v2"
@@ -2125,6 +2767,7 @@
    "sort-by"
   ],
   "optional": [],
+  "specs": {},
   "types": {
    "limit": "int",
    "regions": "list:str"
@@ -2138,11 +2781,15 @@
   ]
  },
  "functions remove-iam-policy-binding": {
+  "actions": {
+   "region": "unresolved"
+  },
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "member",
@@ -2151,17 +2798,22 @@
   ]
  },
  "functions set-iam-policy": {
+  "actions": {
+   "region": "unresolved"
+  },
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "region"
   ]
  },
  "iam service-accounts add-iam-policy-binding": {
+  "actions": {},
   "alias": {},
   "bool": [],
   "dict": [
@@ -2169,6 +2821,7 @@
   ],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {
    "condition": "unresolved",
    "condition-from-file": "file"
@@ -2181,11 +2834,13 @@
   ]
  },
  "iam service-accounts create": {
+  "actions": {},
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "description",
@@ -2193,24 +2848,29 @@
   ]
  },
  "iam service-accounts delete": {
+  "actions": {},
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": []
  },
  "iam service-accounts describe": {
+  "actions": {},
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": []
  },
  "iam service-accounts list": {
+  "actions": {},
   "alias": {},
   "bool": [
    "uri"
@@ -2220,6 +2880,7 @@
    "sort-by"
   ],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "filter",
@@ -2228,6 +2889,7 @@
   ]
  },
  "iam service-accounts remove-iam-policy-binding": {
+  "actions": {},
   "alias": {},
   "bool": [
    "all"
@@ -2237,6 +2899,7 @@
   ],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {
    "condition": "unresolved",
    "condition-from-file": "file"
@@ -2249,20 +2912,24 @@
   ]
  },
  "iam service-accounts set-iam-policy": {
+  "actions": {},
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": []
  },
  "iam service-accounts update": {
+  "actions": {},
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "description",
@@ -2270,6 +2937,7 @@
   ]
  },
  "projects add-iam-policy-binding": {
+  "actions": {},
   "alias": {},
   "bool": [],
   "dict": [
@@ -2277,6 +2945,7 @@
   ],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "condition",
@@ -2286,6 +2955,9 @@
   ]
  },
  "projects create": {
+  "actions": {
+   "tags": "update"
+  },
   "alias": {},
   "bool": [
    "enable-cloud-apis",
@@ -2297,6 +2969,7 @@
   ],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {
    "folder": "unresolved",
    "organization": "unresolved",
@@ -2311,24 +2984,29 @@
   ]
  },
  "projects delete": {
+  "actions": {},
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": []
  },
  "projects describe": {
+  "actions": {},
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": []
  },
  "projects list": {
+  "actions": {},
   "alias": {},
   "bool": [
    "uri"
@@ -2338,6 +3016,7 @@
    "sort-by"
   ],
   "optional": [],
+  "specs": {},
   "types": {
    "page-size": "unresolved"
   },
@@ -2349,6 +3028,7 @@
   ]
  },
  "projects remove-iam-policy-binding": {
+  "actions": {},
   "alias": {},
   "bool": [
    "all"
@@ -2358,6 +3038,7 @@
   ],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "condition",
@@ -2367,31 +3048,37 @@
   ]
  },
  "projects set-iam-policy": {
+  "actions": {},
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": []
  },
  "projects update": {
+  "actions": {},
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "name"
   ]
  },
  "pubsub topics add-iam-policy-binding": {
+  "actions": {},
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "member",
@@ -2399,6 +3086,9 @@
   ]
  },
  "pubsub topics create": {
+  "actions": {
+   "tags": "update"
+  },
   "alias": {},
   "bool": [
    "message-storage-policy-enforce-in-transit"
@@ -2411,6 +3101,7 @@
    "message-storage-policy-allowed-regions"
   ],
   "optional": [],
+  "specs": {},
   "types": {
    "cloud-storage-ingestion-input-format": "unresolved",
    "message-encoding": "unresolved",
@@ -2462,24 +3153,29 @@
   ]
  },
  "pubsub topics delete": {
+  "actions": {},
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": []
  },
  "pubsub topics describe": {
+  "actions": {},
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": []
  },
  "pubsub topics list": {
+  "actions": {},
   "alias": {},
   "bool": [
    "uri"
@@ -2489,6 +3185,7 @@
    "sort-by"
   ],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "filter",
@@ -2498,11 +3195,13 @@
   ]
  },
  "pubsub topics remove-iam-policy-binding": {
+  "actions": {},
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "member",
@@ -2510,15 +3209,18 @@
   ]
  },
  "pubsub topics set-iam-policy": {
+  "actions": {},
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": []
  },
  "pubsub topics update": {
+  "actions": {},
   "alias": {},
   "bool": [
    "clear-ingestion-data-source-settings",
@@ -2537,6 +3239,7 @@
    "remove-labels"
   ],
   "optional": [],
+  "specs": {},
   "types": {
    "cloud-storage-ingestion-input-format": "unresolved",
    "message-encoding": "unresolved",
@@ -2621,6 +3324,20 @@
   ]
  },
  "run deploy": {
+  "actions": {
+   "add-volume": "append",
+   "add-volume-mount": "append",
+   "args": "update",
+   "command": "update",
+   "depends-on": "update",
+   "network-tags": "update",
+   "remove-containers": "update",
+   "remove-volume": "update",
+   "remove-volume-mount": "update",
+   "set-env-vars": "update",
+   "set-secrets": "update",
+   "update-env-vars": "update"
+  },
   "alias": {},
   "bool": [
    "allow-unauthenticated",
@@ -2701,6 +3418,7 @@
    "set-custom-audiences"
   ],
   "optional": [],
+  "specs": {},
   "types": {
    "add-volume": "dict",
    "add-volume-mount": "dict",
@@ -2805,6 +3523,7 @@
   ]
  },
  "run services add-iam-policy-binding": {
+  "actions": {},
   "alias": {},
   "bool": [],
   "dict": [
@@ -2812,6 +3531,7 @@
   ],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "condition",
@@ -2822,6 +3542,7 @@
   ]
  },
  "run services delete": {
+  "actions": {},
   "alias": {},
   "bool": [
    "async",
@@ -2830,6 +3551,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "namespace",
@@ -2837,11 +3559,13 @@
   ]
  },
  "run services describe": {
+  "actions": {},
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "namespace",
@@ -2849,6 +3573,7 @@
   ]
  },
  "run services list": {
+  "actions": {},
   "alias": {},
   "bool": [
    "uri"
@@ -2858,6 +3583,7 @@
    "sort-by"
   ],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "filter",
@@ -2868,6 +3594,7 @@
   ]
  },
  "run services remove-iam-policy-binding": {
+  "actions": {},
   "alias": {},
   "bool": [
    "all"
@@ -2877,6 +3604,7 @@
   ],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "condition",
@@ -2887,17 +3615,33 @@
   ]
  },
  "run services set-iam-policy": {
+  "actions": {},
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "region"
   ]
  },
  "run services update": {
+  "actions": {
+   "add-volume": "append",
+   "add-volume-mount": "append",
+   "args": "update",
+   "command": "update",
+   "depends-on": "update",
+   "network-tags": "update",
+   "remove-containers": "update",
+   "remove-volume": "update",
+   "remove-volume-mount": "update",
+   "set-env-vars": "update",
+   "set-secrets": "update",
+   "update-env-vars": "update"
+  },
   "alias": {},
   "bool": [
    "async",
@@ -2967,6 +3711,7 @@
    "set-custom-audiences"
   ],
   "optional": [],
+  "specs": {},
   "types": {
    "add-volume": "dict",
    "add-volume-mount": "dict",
@@ -3058,6 +3803,7 @@
   ]
  },
  "sql export bak": {
+  "actions": {},
   "alias": {
    "d": "database"
   },
@@ -3073,8 +3819,9 @@
    "database"
   ],
   "optional": [],
+  "specs": {},
   "types": {
-   "database": "unresolved",
+   "database": "list:str",
    "export-log-end-time": "unresolved",
    "export-log-start-time": "unresolved",
    "stripe_count": "int"
@@ -3089,6 +3836,7 @@
   ]
  },
  "sql export csv": {
+  "actions": {},
   "alias": {
    "d": "database"
   },
@@ -3102,8 +3850,9 @@
    "database"
   ],
   "optional": [],
+  "specs": {},
   "types": {
-   "database": "unresolved"
+   "database": "list:str"
   },
   "value": [
    "d",
@@ -3116,6 +3865,7 @@
   ]
  },
  "sql export sql": {
+  "actions": {},
   "alias": {
    "d": "database",
    "t": "table"
@@ -3135,9 +3885,10 @@
    "table"
   ],
   "optional": [],
+  "specs": {},
   "types": {
-   "database": "unresolved",
-   "table": "unresolved",
+   "database": "list:str",
+   "table": "list:str",
    "threads": "unresolved"
   },
   "value": [
@@ -3149,6 +3900,7 @@
   ]
  },
  "sql export tde": {
+  "actions": {},
   "alias": {},
   "bool": [
    "async",
@@ -3157,6 +3909,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "cert-path",
@@ -3166,6 +3919,7 @@
   ]
  },
  "sql import bak": {
+  "actions": {},
   "alias": {
    "d": "database"
   },
@@ -3181,8 +3935,8 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {
-   "database": "unresolved",
    "stop-at": "unresolved"
   },
   "value": [
@@ -3197,6 +3951,7 @@
   ]
  },
  "sql import csv": {
+  "actions": {},
   "alias": {
    "d": "database"
   },
@@ -3208,10 +3963,9 @@
    "columns"
   ],
   "optional": [],
+  "specs": {},
   "types": {
-   "columns": "list:str",
-   "database": "unresolved",
-   "table": "unresolved"
+   "columns": "list:str"
   },
   "value": [
    "columns",
@@ -3226,6 +3980,7 @@
   ]
  },
  "sql import sql": {
+  "actions": {},
   "alias": {
    "d": "database"
   },
@@ -3238,8 +3993,8 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {
-   "database": "unresolved",
    "threads": "unresolved"
   },
   "value": [
@@ -3250,6 +4005,7 @@
   ]
  },
  "sql import tde": {
+  "actions": {},
   "alias": {},
   "bool": [
    "async",
@@ -3258,6 +4014,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "cert-path",
@@ -3267,6 +4024,11 @@
   ]
  },
  "sql instances create": {
+  "actions": {
+   "active-directory-dns-servers": "unresolved",
+   "custom-subject-alternative-names": "unresolved",
+   "psc-auto-connections": "unresolved"
+  },
   "alias": {
    "t": "tier"
   },
@@ -3339,6 +4101,16 @@
    "custom-subject-alternative-names"
   ],
   "optional": [],
+  "specs": {
+   "auto-scale-target-metrics": {
+    "key_only": false,
+    "members": {
+     "AVERAGE_CPU_UTILIZATION": "float",
+     "AVERAGE_DB_CONNECTIONS": "float"
+    },
+    "required": []
+   }
+  },
   "types": {
    "active-directory-dns-servers": "list:str",
    "allowed-psc-projects": "list:str",
@@ -3459,6 +4231,7 @@
   ]
  },
  "sql instances delete": {
+  "actions": {},
   "alias": {},
   "bool": [
    "async",
@@ -3467,6 +4240,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {
    "final-backup-expiry-time": "unresolved",
    "final-backup-retention-days": "unresolved"
@@ -3478,15 +4252,18 @@
   ]
  },
  "sql instances describe": {
+  "actions": {},
   "alias": {},
   "bool": [],
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": []
  },
  "sql instances list": {
+  "actions": {},
   "alias": {},
   "bool": [
    "show-edition",
@@ -3499,6 +4276,7 @@
    "sort-by"
   ],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "filter",
@@ -3508,6 +4286,7 @@
   ]
  },
  "storage buckets add-iam-policy-binding": {
+  "actions": {},
   "alias": {},
   "bool": [],
   "dict": [
@@ -3515,6 +4294,7 @@
   ],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "condition",
@@ -3524,6 +4304,9 @@
   ]
  },
  "storage buckets create": {
+  "actions": {
+   "additional-headers": "unresolved"
+  },
   "alias": {
    "b": "uniform-bucket-level-access",
    "c": "default-storage-class",
@@ -3552,6 +4335,7 @@
    "placement"
   ],
   "optional": [],
+  "specs": {},
   "types": {
    "labels": "dict",
    "placement": "list:str",
@@ -3580,6 +4364,9 @@
   ]
  },
  "storage buckets delete": {
+  "actions": {
+   "additional-headers": "unresolved"
+  },
   "alias": {
    "c": "continue-on-error"
   },
@@ -3590,12 +4377,16 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "additional-headers"
   ]
  },
  "storage buckets describe": {
+  "actions": {
+   "additional-headers": "unresolved"
+  },
   "alias": {},
   "bool": [
    "raw"
@@ -3603,12 +4394,16 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "additional-headers"
   ]
  },
  "storage buckets list": {
+  "actions": {
+   "additional-headers": "unresolved"
+  },
   "alias": {},
   "bool": [
    "raw",
@@ -3619,6 +4414,7 @@
    "sort-by"
   ],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "additional-headers",
@@ -3629,6 +4425,7 @@
   ]
  },
  "storage buckets remove-iam-policy-binding": {
+  "actions": {},
   "alias": {},
   "bool": [
    "all"
@@ -3638,6 +4435,7 @@
   ],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "condition",
@@ -3647,6 +4445,7 @@
   ]
  },
  "storage buckets set-iam-policy": {
+  "actions": {},
   "alias": {
    "c": "continue-on-error",
    "e": "etag"
@@ -3658,6 +4457,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "e",
@@ -3665,6 +4465,13 @@
   ]
  },
  "storage buckets update": {
+  "actions": {
+   "add-acl-grant": "append",
+   "add-default-object-acl-grant": "append",
+   "additional-headers": "unresolved",
+   "remove-acl-grant": "append",
+   "remove-default-object-acl-grant": "append"
+  },
   "alias": {
    "I": "read-paths-from-stdin",
    "a": "canned-acl",
@@ -3716,6 +4523,7 @@
    "update-labels"
   ],
   "optional": [],
+  "specs": {},
   "types": {
    "add-acl-grant": "dict",
    "add-default-object-acl-grant": "dict",
@@ -3756,6 +4564,9 @@
   ]
  },
  "storage cp": {
+  "actions": {
+   "additional-headers": "unresolved"
+  },
   "alias": {
    "A": "all-versions",
    "D": "daisy-chain",
@@ -3826,6 +4637,7 @@
    "z"
   ],
   "optional": [],
+  "specs": {},
   "types": {
    "custom-contexts": "dict",
    "custom-metadata": "dict",
@@ -3875,6 +4687,9 @@
   ]
  },
  "storage mv": {
+  "actions": {
+   "additional-headers": "unresolved"
+  },
   "alias": {
    "A": "all-versions",
    "D": "daisy-chain",
@@ -3940,6 +4755,7 @@
    "z"
   ],
   "optional": [],
+  "specs": {},
   "types": {
    "custom-contexts": "dict",
    "custom-metadata": "dict",
@@ -3989,6 +4805,9 @@
   ]
  },
  "storage rm": {
+  "actions": {
+   "additional-headers": "unresolved"
+  },
   "alias": {
    "I": "read-paths-from-stdin",
    "R": "recursive",
@@ -4011,6 +4830,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "specs": {},
   "types": {},
   "value": [
    "additional-headers",

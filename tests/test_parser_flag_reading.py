@@ -3724,3 +3724,113 @@ def test_kubectl_letters_come_from_each_commands_help():
 def test_pflag_ignores_a_short_word_from_test_dot():
     intent = from_argv("kubectl get pod/a -test.nprod".split())[0]
     assert "namespace" not in intent.metadata
+
+
+# --- review round 17 ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("command,created", [
+    # expose creates a Service named by --name or after the source; autoscale an HPA
+    ("kubectl expose deployment harmless -n prod --port=80 --name=protected", "service/protected"),
+    ("kubectl expose deployment harmless -n prod --port=80", "service/harmless"),
+    ("kubectl autoscale deployment web -n prod --max=5 --name=hpa1",
+     "horizontalpodautoscaler/hpa1"),
+    ("kubectl autoscale deployment web -n prod --max=5", "horizontalpodautoscaler/web"),
+    ("kubectl create token sa1 -n prod", "serviceaccount/sa1"),
+])
+def test_commands_create_objects_besides_the_one_they_name(command, created):
+    intents = from_argv(command.split())
+    made = [i for i in intents if i.resource == created]
+    assert made and made[0].action == "create" and made[0].metadata["namespace"] == "prod"
+
+
+def test_expose_rule_on_the_service_holds():
+    rule = _rule("kubernetes", "service/protected", ["create"])
+    assert _verdict([rule], "kubectl expose deployment harmless -n prod --port=80 "
+                            "--name=protected") == "BLOCK"
+    intent = [i for i in from_argv("kubectl expose deploy web -n prod --port=80 "
+                                   "--overrides={}".split()) if i.resource == "service/web"][0]
+    assert "**" in intent.params["unresolved_scope"]
+
+
+def test_gh_merge_delete_branch_deletes_an_unnamed_branch():
+    intents = from_argv("gh pr merge 42 -s -d".split())
+    branch = [i for i in intents if i.resource == "branch/*"]
+    assert branch and branch[0].action == "delete"
+    assert "resolved_at_runtime" in branch[0].params
+
+
+@pytest.mark.parametrize("command,method", [
+    # gh derives the method from each flag's final value (merge.go)
+    ("gh pr merge 42 --merge --squash --squash=false", "merge"),
+    ("gh pr merge 42 -s", "squash"),
+    ("gh pr merge 42 --rebase=false --squash", "squash"),
+])
+def test_gh_merge_method_from_final_values(command, method):
+    assert from_argv(command.split())[0].params["method"] == method
+
+
+@pytest.mark.parametrize("command", [
+    "gh pr merge 42 --merge --squash",
+    "gh pr merge 42 --auto --admin",
+    "gh repo create a/b --public --private",
+])
+def test_gh_flags_it_allows_one_of_are_refused_together(command):
+    with pytest.raises(ValueError):
+        from_argv(command.split())
+
+
+def test_helm_atomic_leaves_wait_unresolved():
+    marks = from_argv("helm upgrade r ./c --atomic".split())[0].params["unresolved_scope"]
+    assert "wait" in marks
+
+
+@pytest.mark.parametrize("command,key,value", [
+    # each flag's argparse action, from the SDK (UpdateAction extends, append keeps each)
+    ("gcloud run deploy s --region r --image i --args forbidden --args safe", "args",
+     ["forbidden", "safe"]),
+    ("gcloud compute instances create vm --zone z --create-disk name=a "
+     "--create-disk name=b", "create-disk", [{"name": "a"}, {"name": "b"}]),
+])
+def test_gcloud_actions_keep_repeats_as_the_sdk_does(command, key, value):
+    assert from_argv(command.split())[0].params[key] == value
+
+
+@pytest.mark.parametrize("command", [
+    "gcloud run deploy s --region r --image i --args a --args a",  # UpdateAction: a repeat
+    "gcloud compute instances create vm --zone z --metadata a=1 --metadata b=2",  # once
+])
+def test_gcloud_repeats_the_sdk_refuses(command):
+    with pytest.raises(ValueError):
+        from_argv(command.split())
+
+
+def test_gcloud_args_rule_meets_every_value():
+    rule = _rule("gcp", "run/service/*", ["update"], {"args": "forbidden"})
+    assert _verdict([rule], "gcloud run deploy s --region r --image i --args forbidden "
+                            "--args safe") == "BLOCK"
+
+
+@pytest.mark.parametrize("command,key,value", [
+    # ArgDict spec types each member (count: int)
+    ("gcloud compute instances create vm --zone z --accelerator type=nvidia-tesla-t4,count=01",
+     "accelerator", {"type": "nvidia-tesla-t4", "count": 1}),
+    ("gcloud compute instances create vm --zone z --create-disk name=a,size=10GB",
+     "create-disk", {"name": "a", "size": 10 * 1024 ** 3}),
+])
+def test_gcloud_argdict_members_are_typed(command, key, value):
+    assert from_argv(command.split())[0].params[key] == value
+
+
+@pytest.mark.parametrize("rule_value", ["1", "01", "0x1x"])
+def test_gcloud_argdict_member_rule_is_typed_the_same_way(rule_value):
+    rule = _rule("gcp", "compute/instance/*", ["create"], {"accelerator.count": rule_value})
+    verdict = _verdict([rule], "gcloud compute instances create vm --zone z "
+                               "--accelerator type=t4,count=01")
+    assert verdict == ("ESCALATE" if rule_value == "0x1x" else "BLOCK")
+
+
+def test_gcloud_argdict_member_outside_the_spec_is_refused():
+    with pytest.raises(ValueError):
+        from_argv("gcloud compute instances create vm --zone z --accelerator type=t4,bogus=1"
+                  .split())

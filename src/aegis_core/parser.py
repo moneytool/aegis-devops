@@ -1834,7 +1834,48 @@ def _kubectl_target_intents(
                     "from": intent.resource, "kinds": [kind], "name_prefix": f"{name}-"}
     if verb == "delete":
         intents.extend(_namespace_cascade_intents(resources, params, metadata))
+    intents.extend(_kubectl_created_objects(verb, resources, params, metadata))
     return intents
+
+
+def _kubectl_created_objects(
+    verb: str, resources: list[str], params: dict[str, Any], metadata: dict[str, Any],
+) -> list[InfrastructureIntent]:
+    """The objects a command creates besides the one it names, in its namespace: expose
+    creates a Service and autoscale a HorizontalPodAutoscaler, named by ``--name`` or else
+    after the source (expose.go, autoscale.go); create token requests a token of the
+    ServiceAccount it names. ``--overrides`` patches the new object after every other flag,
+    so every key of it is unresolved. A source with no name names nothing: the new object
+    is ``kind/*``, marked."""
+    kinds = {"expose": "service", "autoscale": "horizontalpodautoscaler"}
+    out: list[InfrastructureIntent] = []
+    if verb in kinds and resources:
+        made: set[str] = set()
+        for source in resources:
+            # one new object per source (kubectl visits each); --name names each of them
+            name = params.get("name") or source.partition("/")[2]
+            resource = (f"{kinds[verb]}/{name}" if name and name != "*"
+                        else f"{kinds[verb]}/*")
+            if resource in made:
+                continue
+            made.add(resource)
+            created = {**params}
+            if params.get("overrides") is not None:
+                _mark_unresolved(created, "**")
+            intent = InfrastructureIntent(resource=resource, action="create",
+                                          provider="kubernetes", params=created,
+                                          metadata=dict(metadata))
+            out.append(intent)
+            if resource.endswith("/*"):
+                _mark_open_targets([intent])
+    elif verb == "create":
+        for resource in resources:
+            kind, _, name = resource.partition("/")
+            if kind == "token" and name and name != "*":
+                out.append(InfrastructureIntent(
+                    resource=f"serviceaccount/{name}", action="create", provider="kubernetes",
+                    params={**params, "subresource": "token"}, metadata=dict(metadata)))
+    return out
 
 
 def _namespace_cascade_intents(
@@ -4070,12 +4111,95 @@ def _gcloud_flag_table(command: str) -> dict[str, Any] | None:
                              for kind in ("bool", "value", "optional", "list", "dict")}
     table["alias"] = {**root.get("alias", {}), **entry.get("alias", {})}
     table["types"] = dict(entry.get("types", {}))
+    table["actions"] = dict(entry.get("actions", {}))
+    table["specs"] = dict(entry.get("specs", {}))
     return table
 
 
 # The SDK's declared types (gcloud_flags.json "types") as normalize_typed's kinds.
 _GCLOUD_KINDS = {"int": "gint", "float": "gfloat", "bool": "gbool", "size": "gsize",
                  "duration": "gduration"}
+
+
+def _gcloud_dict_members(params: dict[str, Any], key: str, value: dict[str, Any],
+                         spec: Any, tokens: list[str]) -> dict[str, Any]:
+    """An ArgDict's members as its ``spec`` types them (calliope ArgDict: ``count=01`` with
+    ``{'count': int}`` is 1), each with the same normalizer a rule's value goes through
+    (``value_types`` under ``<flag>.<member>``). With a spec, a member it does not declare,
+    a missing required key, or a key with no value where the spec does not allow one is
+    refused, as gcloud refuses it. A member whose type is not read statically (or a list
+    inside the map) is unresolved; a spec that is not read statically leaves the members as
+    text."""
+    if not isinstance(spec, dict):
+        return value
+    members = spec.get("members", {})
+    out: dict[str, Any] = {}
+    for member, raw in value.items():
+        if member not in members:
+            raise ValueError(f"gcloud: --{key} has no key {member!r} (it takes "
+                             f"{', '.join(sorted(members))}), and gcloud refuses it: {tokens!r}")
+        if raw is None and not spec.get("key_only"):
+            raise ValueError(f"gcloud: --{key} key {member!r} needs a value: {tokens!r}")
+        kind = members[member]
+        base = (kind or "").split(":")[0]
+        if raw is None or kind is None:
+            out[member] = raw
+        elif base in _GCLOUD_KINDS:
+            typed = _GCLOUD_KINDS[base] + (":" + kind.split(":", 1)[1] if ":" in kind else "")
+            try:
+                out[member] = normalize_typed(typed, raw)
+            except ValueError as exc:
+                raise ValueError(f"gcloud: --{key} {member}={raw!r}: {exc}") from exc
+            _mark_type(params, f"{key}.{member}", typed)
+        else:
+            out[member] = raw
+            _mark_unresolved(params, f"{key}.{member}")
+    missing = [k for k in spec.get("required", []) if k not in value]
+    if missing:
+        raise ValueError(f"gcloud: --{key} needs {', '.join(missing)}: {tokens!r}")
+    return out
+
+
+def _gcloud_store(params: dict[str, Any], key: str, value: Any, action: str | None,
+                  seen: dict[str, int], tokens: list[str]) -> None:
+    """A list or map flag's value, kept as its argparse action keeps a repeat (the SDK's
+    ``action=``, gcloud_flags.json "actions"): a plain store keeps the last; ``append``
+    keeps each; ``update`` (UpdateAction) extends a list and merges a map, refusing a
+    repeated item or key; ``update-append`` keeps every value of a repeated key; ``once``
+    (StoreOnceAction) refuses a repeat. An action that is not read statically keeps each
+    value and leaves the key unresolved when the flag is repeated."""
+    count = seen.get(key, 0)
+    seen[key] = count + 1
+    if count == 0:
+        params[key] = value
+        return
+    existing = params.get(key)
+    if action is None:
+        params[key] = value
+    elif action == "once":
+        raise ValueError(f"gcloud: --{key} cannot be given more than once: {tokens!r}")
+    elif action == "append" or action == "unresolved":
+        params[key] = ([*existing] if count > 1 else [existing]) + [value]
+        if action == "unresolved":
+            _mark_unresolved(params, key)
+    elif isinstance(value, dict) and isinstance(existing, dict):
+        merged = dict(existing)
+        for k, v in value.items():
+            if k in merged and action == "update":
+                raise ValueError(f"gcloud: --{key} sets {k!r} twice: {tokens!r}")
+            if k in merged:
+                old = merged[k]
+                merged[k] = [*old, v] if isinstance(old, list) else [old, v]
+            else:
+                merged[k] = v
+        params[key] = merged
+    else:
+        items = list(existing) if isinstance(existing, list) else [existing]
+        for item in (value if isinstance(value, list) else [value]):
+            if item in items:
+                raise ValueError(f"gcloud: --{key} gives {item!r} twice: {tokens!r}")
+            items.append(item)
+        params[key] = items
 
 
 def _gcloud_arg(text: str, is_dict: bool, existing: Any) -> Any:
@@ -4123,6 +4247,7 @@ def _parse_gcloud_tokens(
     metadata: dict[str, Any] = {}
     params: dict[str, Any] = {}
     positional: list[str] = []
+    seen: dict[str, int] = {}  # how many times each list or map flag was given
     # --zone derives metadata["region"] unless --region is given explicitly
     # -- explicit wins regardless of which flag comes first on the argv
     # (REVIEW-4 T2.5), so both are tracked separately and reconciled once
@@ -4187,13 +4312,16 @@ def _parse_gcloud_tokens(
                     val = _value_at(tokens, i, tok)
                 declared = table["types"].get(key)
                 if key in table["list"] or key in table["dict"]:
-                    params[key] = _gcloud_arg(val, key in table["dict"], params.get(key))
+                    value = _gcloud_arg(val, key in table["dict"], None)
                     element = (declared or "").partition(":")[2] if (declared or "").startswith(
                         "list:") else ""
-                    if element in _GCLOUD_KINDS and isinstance(params[key], list):
-                        params[key] = [normalize_typed(_GCLOUD_KINDS[element], v)
-                                       for v in params[key]]
+                    if element in _GCLOUD_KINDS and isinstance(value, list):
+                        value = [normalize_typed(_GCLOUD_KINDS[element], v) for v in value]
                         _mark_type(params, key, _GCLOUD_KINDS[element])
+                    if isinstance(value, dict):
+                        value = _gcloud_dict_members(params, key, value,
+                                                     table["specs"].get(key), tokens)
+                    _gcloud_store(params, key, value, table["actions"].get(key), seen, tokens)
                 elif declared == "unresolved":
                     params[key] = val  # a type the SDK parses its own way: unresolved
                     _mark_unresolved(params, key)
@@ -4205,6 +4333,8 @@ def _parse_gcloud_tokens(
                     except ValueError as exc:
                         raise ValueError(f"gcloud: {tok} {val!r}: {exc}") from exc
                     _mark_type(params, key, kind)
+                elif table["actions"].get(key) is not None:
+                    _gcloud_store(params, key, val, table["actions"][key], seen, tokens)
                 else:
                     params[key] = val
                 _gcloud_mark_file_flag(params, key, declared)
@@ -5248,6 +5378,10 @@ def from_helm_multi(argv: list[str]) -> list[InfrastructureIntent]:
     tokens = leading + rest[1:]
     metadata, params, positional = _parse_helm_tokens(tokens, verb)
     params["raw_action"] = verb
+    if params.get("atomic") is True or params.get("rollback_on_failure") is True:
+        # --atomic (helm 3) turns --wait on, and --rollback-on-failure (helm 4) waits too:
+        # by their final values, so the wait is not what --wait alone says
+        _mark_unresolved(params, "wait")
 
     def one(release: str, action: str) -> InfrastructureIntent:
         return InfrastructureIntent(
@@ -7226,6 +7360,32 @@ def _gh_command_spec(
     return bools, values, shorts
 
 
+# Flags a gh command allows at most one of, by their final values
+# (cmdutil.MutuallyExclusive in pr merge and repo create).
+_GH_EXCLUSIVE = {
+    "pr merge": (("auto", "disable_auto", "admin"),),
+    "repo create": (("public", "private", "internal"),),
+}
+
+
+def _gh_derived_flags(command: str | None, params: dict[str, Any],
+                      method_flags: dict[str, Any], tokens: list[str]) -> None:
+    """What gh derives from several flags, from each flag's final value: pr merge's method
+    from --merge, --rebase and --squash (merge.go: more than one true is refused, so
+    ``--merge --squash --squash=false`` merges), and the flags gh allows at most one of."""
+    if command == "pr merge":
+        chosen = [name for name in ("merge", "rebase", "squash") if method_flags.get(name) is True]
+        if len(chosen) > 1:
+            raise ValueError(f"gh pr merge: only one of --merge, --rebase or --squash can be "
+                             f"enabled, and gh refuses {tokens!r}")
+        if chosen:
+            params["method"] = chosen[0]
+    for group in _GH_EXCLUSIVE.get(command or "", ()):
+        if sum(params.get(name) is True for name in group) > 1:
+            raise ValueError(f"gh {command}: only one of {', '.join(group)} can be given, "
+                             f"and gh refuses {tokens!r}")
+
+
 def _parse_gh_command_tokens(
     tokens: list[str], spec: tuple[frozenset[str], frozenset[str], dict[str, str]],
     *, typed_fields: bool = False, gh_command: str | None = None,
@@ -7241,6 +7401,7 @@ def _parse_gh_command_tokens(
     params: dict[str, Any] = {}
     positional: list[str] = []
     fields: list[tuple[bool, str]] = []
+    method_flags: dict[str, Any] = {}
 
     tokens = list(tokens)  # short words are split in place as the walk reaches them
     i = 0
@@ -7274,9 +7435,8 @@ def _parse_gh_command_tokens(
             _pflag_store(params, "gh", key, key.replace("-", "_"), value, gh_command)
         elif name in bools:
             on = _bool_param(val)
-            if name in ("squash", "merge", "rebase"):
-                if on is True:
-                    params["method"] = name
+            if name in ("squash", "merge", "rebase") and gh_command == "pr merge":
+                method_flags[name] = on  # the method comes from their final values
             else:
                 params[name.replace("-", "_")] = on
         else:
@@ -7296,6 +7456,7 @@ def _parse_gh_command_tokens(
         i += 1
 
     _gh_build_fields(params, fields, api=typed_fields)
+    _gh_derived_flags(gh_command, params, method_flags, tokens)
     return metadata, params, positional
 
 
@@ -7410,6 +7571,14 @@ def from_gh_multi(argv: list[str]) -> list[InfrastructureIntent]:
         intents.append(InfrastructureIntent(resource=resource, action=intent.action,
                                             provider="github", params=params,
                                             metadata=metadata))
+    if intent.params.get("raw_action") == "pr-merge" and intent.params.get("delete_branch"):
+        # --delete-branch deletes the pull request's head branch, remote and local, which
+        # the argv does not name: a branch only gh finds when it runs
+        branch_params = {k: v for k, v in intent.params.items() if k != "resolved_at_runtime"}
+        branch_params["resolved_at_runtime"] = {"from": "branch/*", "kinds": ["branch"]}
+        intents.append(InfrastructureIntent(resource="branch/*", action="delete",
+                                            provider="github", params=branch_params,
+                                            metadata=dict(intent.metadata)))
     return intents
 
 

@@ -3202,7 +3202,7 @@ def test_label_and_annotate_operands_are_not_names(command, key, changed, remove
     ("kubectl rollout undo all --to-revision 1", ["all/*", *_ALL]),
     ("kubectl rollout status all --timeout 2s", ["all/*", *_ALL]),
     ("kubectl rollout history all --revision 1", ["all/*", *_ALL]),
-    ("kubectl autoscale all --max 2", ["all/*", *_ALL]),
+    ("kubectl autoscale all --max 2", ["all/*", *_ALL, "horizontalpodautoscaler/*"]),
     ("kubectl patch all -p {}", ["all/*", *_ALL]),
     ("kubectl patch all --patch {}", ["all/*", *_ALL]),
     ("kubectl delete all --all --grace-period 0", ["all/*", *_ALL]),
@@ -3304,8 +3304,6 @@ def _open_marker(kind: str) -> dict:
     ("kubectl delete deployments", "deployment"),
     ("kubectl label deploy a=b", "deployment"),
     ("kubectl patch deploy -p {}", "deployment"),
-    ("kubectl autoscale deploy --max=2", "deployment"),
-    ("kubectl expose deploy --port=80", "deployment"),
 ])
 def test_a_kind_with_no_name_is_marked_and_stays_one_intent(command, kind):
     """One intent, so a plan's batch counts do not grow."""
@@ -3341,8 +3339,6 @@ def test_a_category_keeps_its_own_mark_and_its_kinds_need_none():
     ("kubectl label deploy/web a=b --all", "deployment/web"),
     ("kubectl scale deploy/web --replicas=1 --all", "deployment/web"),
     ("kubectl annotate deploy/web a=b --all", "deployment/web"),
-    # --selector here is the new service's
-    ("kubectl expose deploy web --port=80 --selector=x=y", "deployment/web"),
     ("kubectl cordon n1", "node/n1"),
     ("kubectl drain n1 --pod-selector=a=b", "node/n1"),
 ])
@@ -3721,8 +3717,11 @@ def test_only_describe_type_name_is_a_prefix(command):
     ("kubectl rollout restart deploy a -- b", ["deployment/a", "deployment/b"]),
     ("kubectl set image deploy a -- b x=y", ["deployment/a", "deployment/b"]),
     ("kubectl taint node a -- b x=y:NoSchedule", ["node/a", "node/b"]),
-    ("kubectl expose deploy a -- b", ["deployment/a", "deployment/b"]),
-    ("kubectl autoscale deploy a -- b", ["deployment/a", "deployment/b"]),
+    ("kubectl expose deploy a -- b", ["deployment/a", "deployment/b", "service/a",
+                                      "service/b"]),
+    ("kubectl autoscale deploy a -- b", ["deployment/a", "deployment/b",
+                                         "horizontalpodautoscaler/a",
+                                         "horizontalpodautoscaler/b"]),
     ("kubectl cordon a -- b", ["node/a", "node/b"]),
     ("kubectl uncordon a -- b", ["node/a", "node/b"]),
     ("kubectl drain a -- b", ["node/a", "node/b"]),
@@ -3816,8 +3815,6 @@ def test_describe_with_two_names_takes_them_exactly():
      {"from": "widgets/foo", "kinds": ["widgets"], "name": "foo", "custom_kinds": True}),
     ("kubectl scale wd/foo --replicas=1", "wd/foo",
      {"from": "wd/foo", "kinds": ["wd"], "name": "foo", "custom_kinds": True}),
-    ("kubectl autoscale widgets foo --max=3", "widgets/foo",
-     {"from": "widgets/foo", "kinds": ["widgets"], "name": "foo", "custom_kinds": True}),
 ])
 def test_a_kind_outside_the_table_may_be_any_custom_kind(command, resource, marker):
     intent = from_kubectl(command.split())
@@ -3958,3 +3955,17 @@ def test_refused_helm_and_flux_short_words(argv):
 def test_a_name_with_a_selector_is_refused(command):
     with pytest.raises(ValueError):
         from_argv(command.split())
+
+
+@pytest.mark.parametrize("command,source,created", [
+    # expose and autoscale also create an object: the source's own intent stays as it was
+    ("kubectl autoscale deploy --max=2", "deployment/*", "horizontalpodautoscaler/*"),
+    ("kubectl expose deploy --port=80", "deployment/*", "service/*"),
+    ("kubectl expose deploy web --port=80 --selector=x=y", "deployment/web", "service/web"),
+    ("kubectl autoscale widgets foo --max=3", "widgets/foo", "horizontalpodautoscaler/foo"),
+])
+def test_expose_and_autoscale_keep_the_source_and_add_the_new_object(command, source, created):
+    intents = from_kubectl_multi(command.split())
+    assert [i.resource for i in intents] == [source, created]
+    assert ("resolved_at_runtime" in intents[0].params) is source.endswith("/*") or \
+        source == "widgets/foo"

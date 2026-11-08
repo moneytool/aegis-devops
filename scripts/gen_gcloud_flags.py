@@ -24,6 +24,7 @@ import subprocess
 import sys
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 BASE = "https://cloud.google.com/sdk/gcloud/reference"
 
@@ -160,13 +161,93 @@ def _type_kind(node: ast.AST | None) -> str | None:
 _FILE_TYPES = frozenset({"FileContents", "YAMLFileContents", "BufferedFileInput"})
 
 
-def sdk_types(root: str) -> dict[str, dict[str, str]]:
-    """Per command group, every flag's type from the SDK mirror's ``add_argument`` and
-    ``base.Argument`` calls. A flag declared with different types in the group is
-    ``unresolved``."""
-    found: dict[str, dict[str, set]] = {}
+_ACTIONS = {
+    "append": "append", "UpdateAction": "update", "UpdateActionWithAppend": "update-append",
+    "StoreOnceAction": "once", "StoreOnceWarningAction": "once",
+}
+
+
+def _action_kind(node: ast.AST | None) -> str | None:
+    """A flag's ``action=`` as the parser reads it: ``append`` (each value kept),
+    ``update`` (arg_parsers.UpdateAction: lists extend, maps merge, a repeat refused),
+    ``update-append`` (UpdateActionWithAppend: a repeated key keeps every value), ``once``
+    (StoreOnceAction: given twice is refused); None for a plain store (the last value) or
+    a boolean; ``unresolved`` for an action that cannot be read statically."""
+    if node is None:
+        return None
+    if isinstance(node, ast.Constant):
+        if node.value in ("store", "store_true", "store_false", "store_const", "count"):
+            return None
+        return _ACTIONS.get(node.value, "unresolved")
+    name = getattr(node, "attr", getattr(node, "id", None))
+    if isinstance(node, ast.Call):
+        name = getattr(node.func, "attr", getattr(node.func, "id", None))
+        if name in ("DeprecationAction",):
+            return None  # warns, then stores as argparse does
+    if name in ("StoreTrueFalseAction", "StoreFalseAction", "StoreTrueAction"):
+        return None
+    return _ACTIONS.get(name or "", "unresolved")
+
+
+def _spec_from_name(name: str, scopes: list[ast.AST]) -> ast.Dict | None:
+    """A spec built in a variable (``spec = {...}``, then ``spec['k'] = T`` under release
+    track conditions) as one literal map: every member any assignment in the enclosing
+    function (or else the module) adds, so a member the SDK may accept is not refused."""
+    for scope in scopes:
+        keys: list[ast.expr] = []
+        values: list[ast.expr] = []
+        for node in ast.walk(scope):
+            if isinstance(node, ast.Assign) and len(node.targets) == 1:
+                target = node.targets[0]
+                if (isinstance(target, ast.Name) and target.id == name
+                        and isinstance(node.value, ast.Dict)):
+                    keys.extend(node.value.keys)
+                    values.extend(node.value.values)
+                elif (isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name)
+                      and target.value.id == name and isinstance(target.slice, ast.Constant)):
+                    keys.append(target.slice)
+                    values.append(node.value)
+        if keys:
+            return ast.Dict(keys=keys, values=values)
+    return None
+
+
+def _dict_spec(node: ast.AST | None, scopes: list[ast.AST] | None = None) -> Any:
+    """An ArgDict's ``spec`` (also inside ArgList(element_type=ArgDict(...))): ``{"members":
+    {key: kind}, "required": [...], "key_only": bool}``, ``unresolved`` when the spec is not
+    a literal map, None for an ArgDict without one (any key)."""
+    if not isinstance(node, ast.Call):
+        return None
+    name = getattr(node.func, "attr", getattr(node.func, "id", ""))
+    kwargs = {k.arg: k.value for k in node.keywords}
+    if name == "ArgList":
+        return _dict_spec(kwargs.get("element_type"), scopes)
+    if name != "ArgDict":
+        return None
+    spec = kwargs.get("spec")
+    if spec is None:
+        return None
+    if isinstance(spec, ast.Name):
+        spec = _spec_from_name(spec.id, scopes or []) or spec
+    if not isinstance(spec, ast.Dict) or not all(
+            isinstance(k, ast.Constant) and isinstance(k.value, str) for k in spec.keys):
+        return "unresolved"
+    required = kwargs.get("required_keys")
+    key_only = kwargs.get("allow_key_only")
+    return {
+        "members": {k.value: _type_kind(v) for k, v in zip(spec.keys, spec.values)},
+        "required": sorted(e.value for e in getattr(required, "elts", [])
+                           if isinstance(e, ast.Constant)),
+        "key_only": bool(getattr(key_only, "value", False)),
+    }
+
+
+def sdk_declarations(root: str) -> dict[str, dict[str, set[tuple[Any, Any, str]]]]:
+    """Per command group, every declaration of each flag in the SDK mirror's
+    ``add_argument`` and ``base.Argument`` calls, as ``(type, action, spec)``."""
+    found: dict[str, dict[str, set[tuple[Any, Any, str]]]] = {}
     for area, dirs in _SDK_AREAS.items():
-        kinds: dict[str, set] = {}
+        decls: dict[str, set[tuple[Any, Any, str]]] = {}
         for sub in dirs:
             for base_dir in (Path(root) / "lib/surface" / sub,
                              Path(root) / "lib/googlecloudsdk/command_lib" / sub):
@@ -175,6 +256,8 @@ def sdk_types(root: str) -> dict[str, dict[str, str]]:
                         tree = ast.parse(path.read_text(errors="ignore"))
                     except SyntaxError:
                         continue
+                    functions = [f for f in ast.walk(tree)
+                                 if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))]
                     for call in ast.walk(tree):
                         if not (isinstance(call, ast.Call) and getattr(
                                 call.func, "attr", getattr(call.func, "id", "")) in (
@@ -185,13 +268,78 @@ def sdk_types(root: str) -> dict[str, dict[str, str]]:
                         if not names:
                             continue
                         kwargs = {k.arg: k.value for k in call.keywords}
-                        kind = _type_kind(kwargs.get("type"))
+                        enclosing = [f for f in functions
+                                     if f.lineno <= call.lineno <= (f.end_lineno or f.lineno)]
+                        scopes = [*sorted(enclosing, key=lambda f: -f.lineno)[:1], tree]
+                        decl = (_type_kind(kwargs.get("type")),
+                                _action_kind(kwargs.get("action")),
+                                json.dumps(_dict_spec(kwargs.get("type"), scopes),
+                                           sort_keys=True))
                         for name in names:
-                            kinds.setdefault(name, set()).add(kind)
-        found[area] = kinds
-    return {area: {name: (next(iter(k)) if len(k) == 1 else "unresolved")
-                   for name, k in kinds.items() if k != {None}}
-            for area, kinds in found.items()}
+                            decls.setdefault(name, set()).add(decl)
+        found[area] = decls
+    return found
+
+
+def _one(kinds: set) -> Any:
+    return next(iter(kinds)) if len(kinds) == 1 else "unresolved"
+
+
+def sdk_details(root: str, shapes: dict[str, str] | None = None,
+                ) -> dict[str, dict[str, dict[str, Any]]]:
+    """Per command group, every flag's type, action and ArgDict spec. ``shapes`` (a
+    command's reference page: ``dict``, ``list`` or ``scalar`` per flag) keeps only the
+    declarations of that shape, since commands of one group can declare a flag of one name
+    differently (``--network-interface`` is a map on instances create and a name on
+    add-access-config). Declared differently still, the value is ``unresolved``."""
+    out: dict[str, dict[str, dict[str, Any]]] = {}
+    for area, decls in sdk_declarations(root).items():
+        out[area] = _details(decls, shapes or {})
+    return out
+
+
+def _details(decls: dict[str, set[tuple[Any, Any, str]]],
+             shapes: dict[str, str]) -> dict[str, dict[str, Any]]:
+    types: dict[str, Any] = {}
+    actions: dict[str, Any] = {}
+    specs: dict[str, Any] = {}
+    for name, found in decls.items():
+        shape = shapes.get(name)
+        kept = {d for d in found if shape is None
+                or (shape == "dict") == str(d[0]).startswith("dict")
+                and (shape == "list") == str(d[0]).startswith("list")} or found
+        kinds = {d[0] for d in kept}
+        if kinds != {None}:
+            types[name] = _one(kinds)
+        acts = {d[1] for d in kept}
+        if acts != {None}:
+            actions[name] = _one(acts)
+        spec_variants = {d[2] for d in kept}
+        if spec_variants != {"null"}:
+            specs[name] = _merge_specs(spec_variants)
+    return {"types": types, "actions": actions, "specs": specs}
+
+
+def _merge_specs(variants: set[str]) -> Any:
+    """One flag's ArgDict specs across the group's declarations, merged: every member any
+    declares, with its kind where they agree and ``unresolved`` where they differ; keys
+    required only where every declaration requires them. A declaration with no spec (any
+    key) or one that is not a literal map leaves the whole spec ``unresolved``."""
+    specs = [json.loads(v) for v in variants]
+    if any(not isinstance(spec, dict) for spec in specs):
+        return "unresolved"
+    members: dict[str, Any] = {}
+    for spec in specs:
+        for key, kind in spec["members"].items():
+            members[key] = kind if members.get(key, kind) == kind else "unresolved"
+    required = set.intersection(*(set(spec["required"]) for spec in specs))
+    return {"members": dict(sorted(members.items())), "required": sorted(required),
+            "key_only": any(spec["key_only"] for spec in specs)}
+
+
+def sdk_types(root: str) -> dict[str, dict[str, str]]:
+    """Per command group, every flag's type (:func:`sdk_details`)."""
+    return {area: d["types"] for area, d in sdk_details(root).items()}
 
 
 def fetch(path: str) -> str:
@@ -209,12 +357,18 @@ def refresh_types(out: str, sdk: str) -> None:
     source, _, _ = table["_source"].partition("; value types from")
     table["_source"] = (f"{source}; value types from "
                         f"github.com/google-cloud-sdk-unofficial/google-cloud-sdk {commit}")
-    types = sdk_types(sdk)
+    declarations = sdk_declarations(sdk)
     for command, entry in table.items():
         if command.startswith("_") or command == "root":
             continue
-        area = types.get(command.split()[0], {})
-        entry["types"] = {name: area[name] for name in entry["value"] if name in area}
+        shapes = {n: "dict" if n in entry.get("dict", []) else
+                  "list" if n in entry.get("list", []) else "scalar"
+                  for n in [*entry["value"], *entry.get("optional", [])]}
+        area = _details(declarations.get(command.split()[0], {}), shapes)
+        flags = [*entry["value"], *entry.get("optional", [])]
+        entry["types"] = {n: area["types"][n] for n in entry["value"] if n in area["types"]}
+        entry["actions"] = {n: area["actions"][n] for n in flags if n in area["actions"]}
+        entry["specs"] = {n: area["specs"][n] for n in flags if n in area["specs"]}
     with open(out, "w") as f:
         json.dump(table, f, indent=1, sort_keys=True)
         f.write("\n")
