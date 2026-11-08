@@ -285,7 +285,6 @@ def test_flux_create_export_is_the_rehearsal():
     ("argocd app sync a -lteam=x", {"selector": "team=x"}),
     ("argocd app delete a -yl team=x", {"yes": True, "selector": "team=x"}),
     ("argocd app delete a -yp foreground", {"yes": True, "propagation_policy": "foreground"}),
-    ("argocd app sync a -Nargocd", {"app_namespace": "argocd"}),
     ("argocd app create a --repo r --path p -lteam=x -pk=v", {"label": "team=x",
                                                              "parameter": "k=v"}),
     # a value flag takes the next word whatever it is
@@ -1370,3 +1369,96 @@ def test_git_negated_options_have_one_key(command, key, value):
         assert intent.metadata["remote"] == "origin"  # --repo is the remote
     else:
         assert intent.params[key] is value
+
+
+# --- gcloud, aws, az, argocd: one spelling, and nothing read from a file ----------------
+
+
+@pytest.mark.parametrize("command,key,value", [
+    ("gcloud compute instances update web --no-deletion-protection", "deletion_protection",
+     False),
+    ("gcloud compute instances update web --deletion-protection=false", "deletion_protection",
+     False),
+    ("gcloud compute instances update web --no-deletion-protection --deletion-protection",
+     "deletion_protection", True),
+    ("aws ec2 terminate-instances --instance-ids i-1 --no-verify-ssl", "verify_ssl", False),
+    ("aws ec2 terminate-instances --instance-ids i-1 --no-force", "force", False),
+])
+def test_negated_booleans_have_one_key(command, key, value):
+    intent = from_argv(command.split())[0]
+    assert intent.params[key] is value
+    assert not any(k.startswith("no") and k.replace("-", "_")[3:] == key for k in intent.params)
+
+
+def test_a_gcloud_deletion_protection_rule_holds_on_both_spellings():
+    rule = _rule("gcp", "compute/instance/*", ["update"], {"deletion_protection": False})
+    for flag in ("--no-deletion-protection", "--deletion-protection=false"):
+        assert _verdict([rule], f"gcloud compute instances update web --project p "
+                                f"--region r {flag}") == "BLOCK"
+
+
+def test_gcloud_flags_file_is_refused():
+    with pytest.raises(ValueError, match="file"):
+        from_argv("gcloud compute instances delete web --flags-file=prod.yaml".split())
+
+
+def test_a_gcloud_uri_is_its_name_in_its_project():
+    uri = ("https://www.googleapis.com/compute/v1/projects/prod/zones/us-east1-b/instances/"
+           "web-1")
+    intent = from_argv(["gcloud", "compute", "instances", "delete", uri])[0]
+    assert intent.resource == "compute/instance/web-1"
+    assert intent.metadata["project"] == "prod"
+    assert intent.metadata["region"] == "us-east1"
+
+
+@pytest.mark.parametrize("command,alias,marked", [
+    ("aws lambda delete-function --function-name "
+     "arn:aws:lambda:us-west-2:123456789012:function:prod-fn", "lambda/function/prod-fn", False),
+    ("aws iam delete-role --role-name arn:aws:iam::123456789012:role/team/prod-admin",
+     "iam/role/prod-admin", False),
+    ("aws secretsmanager delete-secret --secret-id "
+     "arn:aws:secretsmanager:us-east-1:1:secret:prod-db-AbCdEf",
+     "secretsmanager/secret/prod-db-AbCdEf", True),
+])
+def test_an_aws_arn_also_matches_a_rule_on_the_name(command, alias, marked):
+    intent = from_argv(command.split())[0]
+    assert alias in intent.resource_aliases()
+    assert ("resolved_at_runtime" in intent.params) is marked
+
+
+def test_aws_rule_on_a_name_holds_on_its_arn():
+    rule = _rule("aws", "lambda/function/prod-fn", ["delete"])
+    assert _verdict([rule], "aws lambda delete-function --function-name "
+                            "arn:aws:lambda:us-west-2:123456789012:function:prod-fn") == "BLOCK"
+    secret = _rule("aws", "secretsmanager/secret/prod-db", ["delete"])
+    assert _verdict([secret], "aws secretsmanager delete-secret --secret-id "
+                              "arn:aws:secretsmanager:us-east-1:1:secret:prod-db-AbCdEf") == \
+        "ESCALATE"
+
+
+@pytest.mark.parametrize("command", [
+    "aws ec2 terminate-instances --instance-ids file://ids.json",
+    "aws kms schedule-key-deletion --key-id alias/prod",
+])
+def test_aws_targets_known_only_when_aws_runs_are_marked(command):
+    assert "resolved_at_runtime" in from_argv(command.split())[0].params
+
+
+@pytest.mark.parametrize("command", [
+    "az vm delete -n @name.txt -g rg --yes",
+    "az vm delete -n v -g @rg.txt --yes",
+])
+def test_az_values_read_from_files_are_refused(command):
+    with pytest.raises(ValueError, match="file"):
+        from_argv(command.split())
+
+
+@pytest.mark.parametrize("command,namespace", [
+    ("argocd app sync prod/web", "prod"),
+    ("argocd app sync web -N prod", "prod"),
+    ("argocd app sync web --app-namespace=prod", "prod"),
+])
+def test_an_argocd_app_has_one_name_and_its_namespace(command, namespace):
+    intent = from_argv(command.split())[0]
+    assert intent.resource == "app/web"
+    assert intent.metadata["app_namespace"] == namespace

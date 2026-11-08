@@ -999,7 +999,8 @@ def test_from_argocd_project_metadata_and_discarded_flags():
         ["argocd", "app", "create", "prod-web", "--project", "platform",
          "--server", "argocd.internal", "--grpc-web", "--auth-token", "secret"]
     )
-    assert intent.metadata == {"project": "platform"}
+    # the server is where the app lives, as --resolve-current-context's $ARGOCD_SERVER
+    assert intent.metadata == {"project": "platform", "server": "argocd.internal"}
     assert "server" not in intent.params
     assert "auth_token" not in intent.params
     assert "grpc_web" not in intent.params
@@ -1386,7 +1387,7 @@ GLOBAL_FLAG_PLACEMENTS = [
         "argocd-globals-between-app-and-subcommand",
         from_argv,
         ["argocd", "app", "--server", "argo.example", "sync", "prod-web", "--prune"],
-        ["argocd", "app", "sync", "prod-web", "--prune"],
+        ["argocd", "app", "sync", "prod-web", "--prune", "--server", "argo.example"],
     ),
     (
         "flux-namespace-context-kubeconfig-timeout-verbose",

@@ -549,6 +549,17 @@ def _split_flag(token: str) -> tuple[str, str | None]:
     return key, (value if sep else None)
 
 
+def _set_bool_param(params: dict[str, Any], key: str, value: Any) -> None:
+    """Records a boolean flag under one key: ``--no-x`` is ``x: False`` and ``--x=false``
+    is ``x: False`` too, with ``-`` as ``_``; the last spelling wins."""
+    name = key.replace("-", "_")
+    if name.startswith("no_") and isinstance(value, bool):
+        name, value = name[3:], not value
+    for spelling in (name, name.replace("_", "-"), f"no_{name}", f"no-{name.replace('_', '-')}"):
+        params.pop(spelling, None)
+    params[name] = value
+
+
 def _record_all_namespaces(metadata: dict[str, Any], val: str | None) -> None:
     """``-A`` / ``--all-namespaces[=bool]`` as ``metadata["all_namespaces"]``, the one key
     the store reads for every namespace; the last spelling decides."""
@@ -1824,10 +1835,10 @@ def _parse_aws_tokens(
                     i += 1
                     val = _value_at(tokens, i, tok)
                 if key in _AWS_BOOL_FLAGS:
-                    params[key] = _bool_param(val)
+                    _set_bool_param(params, key, _bool_param(val))
                 # the other globals are consumed, intentionally not recorded
             elif key in _AWS_BOOL_FLAGS:
-                params[key] = _bool_param(val)
+                _set_bool_param(params, key, _bool_param(val))
             elif key in ("cli-input-json", "cli-input-yaml"):
                 # read before argparse, so only the full name counts (checked on aws 2.37)
                 if val is None:
@@ -1860,6 +1871,9 @@ def _parse_aws_tokens(
                     i += 1
                     val = _value_at(tokens, i, tok)
                 id_value, id_flag = val, key
+            elif key.startswith("no-") and val is None and tok.startswith("--"):
+                # botocore's "--no-<flag>" is a boolean's off switch: x: False
+                _set_bool_param(params, key, True)
             else:
                 if val is not None:
                     params[key] = _coerce(val)
@@ -2116,14 +2130,58 @@ def from_aws_multi(argv: list[str]) -> list[InfrastructureIntent]:
         id_value = params[target_flag]
     names = multi_ids if multi_ids else [id_value]
     names = list(dict.fromkeys([*names, *also]))
-    resources = [_aws_resource(service, kind, n) for n in names]
-    intents = [
-        InfrastructureIntent(
-            resource=r, action=action, provider="aws", params=dict(params), metadata=dict(metadata)
-        )
-        for r in resources
-    ]
+    intents = []
+    for name in names:
+        target_params, target_metadata = dict(params), dict(metadata)
+        name = _aws_name(service, kind, name, target_params, target_metadata)
+        intents.append(InfrastructureIntent(
+            resource=_aws_resource(service, kind, name), action=action, provider="aws",
+            params=target_params, metadata=target_metadata))
     return _mark_aws_input_targets(intents) if from_input else intents
+
+
+def _aws_name(service: str, kind: str, name: str | None, params: dict[str, Any],
+              metadata: dict[str, Any]) -> str | None:
+    """One target aws takes in several spellings. An ARN stays the resource (the compiled
+    policies need it), with the resource's plain name as ``metadata["resource_aliases"]``
+    so a rule on the name matches too (IAM keeps the last part of a path, CloudFormation
+    the stack name), and the ARN's account and region as the resource's. A value read
+    from a file (``file://``, ``fileb://``) is only known when aws runs, and so are the
+    key a KMS alias names and the full name of a Secrets Manager secret (which ends in a
+    random suffix): those targets are marked."""
+    if name is None:
+        return None
+    if name.startswith(("file://", "fileb://")):
+        params["resolved_at_runtime"] = {"from": f"{service}/{kind}/*",
+                                         "kinds": [f"{service}/{kind}"]}
+        return None
+    plain = name
+    if name.startswith("arn:"):
+        fields = name.split(":", 5)
+        if len(fields) == 6:
+            _arn, _partition, _svc, region, account, resource = fields
+            if region and "region" not in metadata:
+                metadata["region"] = region
+            if account:
+                metadata["account"] = account
+            if service == "kms" and resource.startswith("alias/"):
+                plain = resource
+            else:
+                pieces = re.split(r"[:/]", resource)
+                plain = pieces[-1] if service == "iam" else (
+                    pieces[1] if len(pieces) > 1 else pieces[0])
+            if plain and plain != name:
+                metadata["resource_aliases"] = [_aws_resource(service, kind, plain)]
+    if service == "secretsmanager" and re.search(r"-[A-Za-z0-9]{6}$", plain) and \
+            name.startswith("arn:"):
+        params["resolved_at_runtime"] = {"from": f"{service}/{kind}/{plain}",
+                                         "kinds": [f"{service}/{kind}"],
+                                         "name_prefix": plain[:-7]}
+    if service == "kms" and plain.startswith("alias/"):
+        # an alias names a key, which one is only known when aws runs
+        params["resolved_at_runtime"] = {"from": f"{service}/{kind}/{plain}",
+                                         "kinds": [f"{service}/{kind}"]}
+    return name
 
 
 def _mark_aws_input_targets(intents: list[InfrastructureIntent]) -> list[InfrastructureIntent]:
@@ -2309,6 +2367,8 @@ def _parse_az_tokens(
                 name_value = val
             elif key in ("what-if", "dry-run"):
                 _record_dry_run(params, _is_dry_run(val))
+            elif key in _AZ_BOOL_FLAGS:
+                params["yes" if key == "y" else key] = _bool_param(val)
             elif key == "ids":
                 # `az <group> <verb> --ids ID [ID ...]`: one or more ARM
                 # resource ids in place of -g/-n (REVIEW-4 T1.7).
@@ -2318,8 +2378,6 @@ def _parse_az_tokens(
                     while i + 1 < n and not tokens[i + 1].startswith("-"):
                         i += 1
                         ids_values.append(tokens[i])
-            elif key in _AZ_BOOL_FLAGS:
-                params["yes" if key == "y" else key] = _bool_param(val)
             elif val is not None:
                 params[key] = _coerce(val)
             elif i + 1 < n and not tokens[i + 1].startswith("-"):
@@ -2332,6 +2390,13 @@ def _parse_az_tokens(
             positional.append(tok)
         i += 1
 
+    # az reads an argument value "@path" from that file (knack's argument preprocessing):
+    # the target or its scope would then be a file nobody read
+    for value in (name_value, *ids_values, metadata.get("region"),
+                  metadata.get("resource_group"), metadata.get("subscription")):
+        if isinstance(value, str) and value.startswith("@"):
+            raise ValueError(f"az: {value!r} is read from a file when az runs, and names the "
+                             f"target or its scope: {tokens!r}")
     return metadata, params, positional, name_value, ids_values
 
 
@@ -2665,8 +2730,12 @@ def _parse_gcloud_tokens(
                 params.pop("dry_run", None)
             elif key == "async":
                 params["async"] = _bool_param(val)
+            elif key == "flags-file":
+                # a YAML file of more flags (--project too), which is not read
+                raise ValueError(f"gcloud: {tok} reads flags from a file the hook cannot see: "
+                                 f"{tokens!r}")
             elif key in _GCLOUD_BOOL_FLAGS or (storage and key in _GCLOUD_STORAGE_BOOL_FLAGS):
-                params[key.replace("-", "_")] = _bool_param(val)
+                _set_bool_param(params, key, _bool_param(val))
             elif key in _GCLOUD_VALUE_FLAGS and tok.startswith("--"):
                 if val is None:
                     i += 1
@@ -2675,7 +2744,7 @@ def _parse_gcloud_tokens(
             elif val is not None:
                 params[key] = _coerce(val)
             elif key.startswith("no-") and tok.startswith("--"):
-                params[key] = True
+                _set_bool_param(params, key, True)
             elif i + 1 < n and not tokens[i + 1].startswith("-"):
                 if not storage:
                     raise ValueError(
@@ -2699,6 +2768,25 @@ def _parse_gcloud_tokens(
         metadata["region"] = zone_derived_region
 
     return metadata, params, positional
+
+
+def _gcloud_name(name: str, metadata: dict[str, Any]) -> str:
+    """A resource gcloud is given by URI or path (``https://www.googleapis.com/compute/v1/
+    projects/p/zones/z/instances/web-1``, ``projects/p/zones/z/instances/web-1``) is the
+    same resource as its plain name, in that project and zone, which then win over the
+    flags as they do in gcloud."""
+    if "/" not in name or name.startswith("gs://"):
+        return name
+    parts = [p for p in name.split("?")[0].split("/") if p]
+    for i, part in enumerate(parts[:-1]):
+        if part == "projects":
+            metadata["project"] = parts[i + 1]
+        elif part == "zones":
+            metadata["zone"] = parts[i + 1]
+            metadata["region"] = _region_from_zone(parts[i + 1])
+        elif part in ("regions", "locations"):
+            metadata["region"] = parts[i + 1]
+    return parts[-1]
 
 
 def _gcs_uri_intents(
@@ -2848,6 +2936,7 @@ def from_gcloud_multi(argv: list[str]) -> list[InfrastructureIntent]:
     if resource_prefix is None:
         *head, last = group_words
         resource_prefix = "/".join([*head, _singularize(last)])
+    names = [_gcloud_name(name, metadata) for name in names]
 
     action = "update" if verb in _GCLOUD_IAM_BINDING_VERBS else _normalize_verb(verb)
     params["raw_action"] = verb
@@ -3536,6 +3625,11 @@ def _parse_argocd_tokens(
                     i += 1
                     val = _value_at(tokens, i, tok)
                 metadata["context"] = val
+            elif name in ("server", "app-namespace") and known:
+                if val is None:
+                    i += 1
+                    val = _value_at(tokens, i, tok)
+                metadata[name.replace("-", "_")] = val
             elif name in _ARGOCD_GLOBAL_VALUE_FLAGS and known:
                 if val is None:
                     i += 1
@@ -3654,13 +3748,17 @@ def from_argocd_multi(argv: list[str]) -> list[InfrastructureIntent]:
             raise ValueError(f"could not find an argocd app name in: {argv!r}")
         apps = [positional[0]]
 
-    intents = [
-        InfrastructureIntent(
+    intents = []
+    for app in apps:
+        app_metadata = dict(metadata)
+        if "/" in app and app != "*":
+            # NAMESPACE/NAME, as argocd's ParseFromQualifiedName reads it: the same app as
+            # NAME with -N NAMESPACE
+            app_metadata["app_namespace"], app = app.split("/", 1)
+        intents.append(InfrastructureIntent(
             resource=f"app/{app}", action=action, provider="argocd",
-            params=dict(params), metadata=dict(metadata),
-        )
-        for app in apps
-    ]
+            params=dict(params), metadata=app_metadata,
+        ))
     intents.extend(
         InfrastructureIntent(resource="app/*", action=action, provider="argocd",
                              params=p, metadata=dict(m))

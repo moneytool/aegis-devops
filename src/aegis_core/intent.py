@@ -31,6 +31,10 @@ class InfrastructureIntent:
         type_name = self.metadata.get("type_name")
         if isinstance(type_name, str) and type_name and type_name != self.resource:
             aliases.append(type_name)
+        # other spellings of the same resource a parser found (an ARN's plain name)
+        for alias in self.metadata.get("resource_aliases") or ():
+            if isinstance(alias, str) and alias not in aliases:
+                aliases.append(alias)
         return aliases
 
     def to_dict(self) -> dict[str, Any]:
