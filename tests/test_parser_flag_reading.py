@@ -2523,3 +2523,80 @@ def test_copy_destination_key_is_the_object_written(command, key, unresolved):
 def test_copy_into_a_folder_meets_a_rule_on_the_object():
     rule = _rule("gcp", "storage/bucket/prod", ["put"], {"key": "backup/secret"})
     assert _verdict([rule], "gcloud storage cp /tmp/secret gs://prod/backup/") == "BLOCK"
+
+
+
+# --- az: every long option, against the command's full list ---------------------------
+
+# Everyday az commands from the az reference, written with full option names: each must
+# parse now that an option outside the command's list is refused.
+AZ_EVERYDAY = [
+    ("az vm create --resource-group rg --name vm1 --image Ubuntu2204 -"
+     "-admin-username azureuser --generate-ssh-keys --size Standard_B2s"),
+    "az vm delete --resource-group rg --name vm1 --yes",
+    "az vm start --resource-group rg --name vm1",
+    "az vm stop --resource-group rg --name vm1",
+    "az vm deallocate --resource-group rg --name vm1 --no-wait",
+    "az vm resize --resource-group rg --name vm1 --size Standard_D4s_v5",
+    "az vm restart --resource-group rg --name vm1",
+    ("az aks create --resource-group rg --name aks1 --node-c"
+     "ount 3 --generate-ssh-keys --kubernetes-version 1.30.0"),
+    "az aks scale --resource-group rg --name aks1 --node-count 5",
+    "az aks upgrade --resource-group rg --name aks1 --kubernetes-version 1.31.0 --yes",
+    "az aks delete --resource-group rg --name aks1 --yes --no-wait",
+    "az aks nodepool add --resource-group rg --cluster-name aks1 --name np2 --node-count 2",
+    "az aks nodepool delete --resource-group rg --cluster-name aks1 --name np2",
+    ("az storage account create --resource-group rg --name sa"
+     "1 --location eastus --sku Standard_LRS --kind StorageV2"),
+    "az storage account delete --resource-group rg --name sa1 --yes",
+    "az storage account update --resource-group rg --name sa1 --https-only true",
+    "az keyvault create --resource-group rg --name kv1 --location eastus",
+    "az keyvault delete --resource-group rg --name kv1",
+    "az keyvault secret set --vault-name kv1 --name s1 --value x",
+    "az keyvault secret delete --vault-name kv1 --name s1",
+    "az network nsg create --resource-group rg --name nsg1",
+    ("az network nsg rule create --resource-group rg --nsg-name nsg1 --name r1 "
+     "--priority 100 --access Allow --protocol Tcp --destination-port-ranges 22"),
+    "az network nsg rule delete --resource-group rg --nsg-name nsg1 --name r1",
+    "az network vnet create --resource-group rg --name vnet1 --address-prefixes 10.0.0.0/16",
+    "az group create --name rg --location eastus",
+    "az group delete --name rg --yes --no-wait",
+    "az webapp create --resource-group rg --plan plan1 --name app1 --runtime PYTHON:3.11",
+    "az webapp delete --resource-group rg --name app1",
+    "az webapp deploy --resource-group rg --name app1 --src-path app.zip --type zip",
+    "az sql db delete --resource-group rg --server srv1 --name db1 --yes",
+    "az sql db create --resource-group rg --server srv1 --name db1 --service-objective S0",
+    ("az role assignment create --assignee user@example.com --role Re"
+     "ader --scope /subscriptions/00000000-0000-0000-0000-000000000000"),
+    "az role assignment delete --assignee user@example.com --role Reader --resource-group rg",
+    "az functionapp delete --resource-group rg --name fn1",
+    "az cosmosdb delete --resource-group rg --name db1 --yes",
+]
+
+
+@pytest.mark.parametrize("command", AZ_EVERYDAY)
+def test_everyday_az_commands_parse(command):
+    import shlex
+
+    assert from_argv(shlex.split(command))
+
+
+@pytest.mark.parametrize("command", [
+    # neither an option of the command nor a unique prefix of one: refused
+    "az aks scale --resource-group rg --name c --bogus 1",
+    # --kubernetes-version is declared for the aks group, not on aks scale
+    "az aks scale --resource-group rg --name c --kub 1.30",
+    "az vm delete --resource-group rg --name v --fo",  # --force-deletion, and only it
+])
+def test_az_option_outside_the_command_is_refused(command):
+    if command.endswith("--fo"):
+        assert from_argv(command.split())[0].params["force-deletion"] is True
+        return
+    with pytest.raises(ValueError):
+        from_argv(command.split())
+
+
+def test_az_option_known_only_from_the_signature_is_accepted():
+    # aks scale's --nodepool-name comes from aks_scale's signature, not _params.py
+    intent = from_argv("az aks scale -g rg -n c --nodepool-name np1 --node-count 2".split())[0]
+    assert intent.params["nodepool-name"] == "np1"

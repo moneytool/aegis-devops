@@ -2546,6 +2546,7 @@ _AZ_VERBS = {
     "redeploy",
     "resize",
     "purge",
+    "upgrade",
 }
 
 _AZ_BOOL_FLAGS = {"yes", "y", "no-wait", "debug", "verbose", "only-show-errors"}
@@ -2650,13 +2651,27 @@ def _az_short_tables() -> dict[str, dict[str, str]]:
         return json.load(f)
 
 
+def _az_entry(words: list[str]) -> tuple[dict[str, str], frozenset[str]]:
+    """The short options (each the long option it is) and the long options of
+    ``az <words>``. A command whose every option is known (a custom function's parameters,
+    an AAZ class: ``c`` in the table) has exactly its own; any other has those of every
+    scope above it, some of which may not apply to it."""
+    tables = _az_short_tables()
+    leaf = tables.get(" ".join(words), {})
+    if leaf.get("c"):
+        return dict(leaf.get("s", {})), frozenset(leaf.get("l", ())) | _AZ_GLOBAL_LONGS
+    shorts: dict[str, str] = {}
+    longs: set[str] = set(_AZ_GLOBAL_LONGS)
+    for size in range(1, len(words) + 1):
+        entry = tables.get(" ".join(words[:size]), {})
+        shorts.update(entry.get("s", {}))
+        longs.update(entry.get("l", ()))
+    return shorts, frozenset(longs)
+
+
 def _az_aliases(words: list[str]) -> dict[str, str]:
     """The short options of ``az <words>`` and the long option each is."""
-    tables = _az_short_tables()
-    aliases: dict[str, str] = {}
-    for size in range(1, len(words) + 1):
-        aliases.update(tables.get(" ".join(words[:size]), {}).get("s", {}))
-    return aliases
+    return _az_entry(words)[0]
 
 
 # The long options az's core and knack give every command.
@@ -2667,26 +2682,23 @@ _AZ_GLOBAL_LONGS = frozenset({
 
 
 def _az_longs(words: list[str]) -> frozenset[str]:
-    """The long options declared for ``az <words>`` and the scopes above it, and az's own:
-    what argparse resolves an abbreviated long option against."""
-    tables = _az_short_tables()
-    longs: set[str] = set(_AZ_GLOBAL_LONGS)
-    for size in range(1, len(words) + 1):
-        longs.update(tables.get(" ".join(words[:size]), {}).get("l", ()))
-    return frozenset(longs)
+    """The long options of ``az <words>`` (:func:`_az_entry`) and az's own: what argparse
+    resolves an abbreviated long option against."""
+    return _az_entry(words)[1]
 
 
 def _az_long_option(key: str, longs: frozenset[str]) -> str:
     """The long option ``--key`` names, as argparse's allow_abbrev finds it: the exact name,
-    or the one declared option it is a prefix of; a prefix of several is refused, as az
-    refuses it. A name that is neither is kept: it may be an option the command's function
-    signature gives, which _params.py does not list."""
+    or the one option it is a prefix of. A prefix of several, or a name that is neither, is
+    refused: what it means on this command is not known for certain."""
     if key in longs:
         return key
     found = sorted(o for o in longs if o.startswith(key))
-    if len(found) > 1:
-        raise ValueError(f"az: --{key} is ambiguous ({', '.join(found)}), and az refuses it")
-    return found[0] if found else key
+    if len(found) != 1:
+        reason = f"is ambiguous ({', '.join(found)})" if found else "is not an option the " \
+            "parser knows on this command"
+        raise ValueError(f"az: --{key} {reason}; write the option in full")
+    return found[0]
 
 
 # az's own short options (knack and azure-cli core): -o output, -h help, -y the --yes that

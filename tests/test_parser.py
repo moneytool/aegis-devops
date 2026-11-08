@@ -838,7 +838,7 @@ def test_from_aws_no_dry_run_does_not_set_dry_run():
     assert "dry_run" not in intent.params
 
 
-@pytest.mark.parametrize("flag", ["--what-if", "--dry-run"])
+@pytest.mark.parametrize("flag", ["--what-if"])  # az has no --dry-run on this command
 def test_from_az_what_if_and_dry_run_set_dry_run_true(flag):
     intent = from_az(
         ["az", "deployment", "group", "create", "--resource-group", "rg1", flag]
@@ -1657,8 +1657,8 @@ FALSE_FLAG_CASES = [
     (["aws", "ec2", "terminate-instances", "--instance-ids", "i-1", "--dry-run=false"], "dry_run"),
     (["az", "vm", "delete", "-n", "x", "-g", "rg", "--yes=false"], "yes"),
     (["az", "vm", "delete", "-n", "x", "-g", "rg", "--no-wait=0"], "no-wait"),
-    (["az", "vm", "delete", "-n", "x", "-g", "rg", "--what-if=false"], "dry_run"),
-    (["az", "vm", "delete", "-n", "x", "-g", "rg", "--dry-run=false"], "dry_run"),
+    (["az", "deployment", "group", "create", "-n", "x", "-g", "rg", "--what-if=false"],
+     "dry_run"),
     (["gcloud", "compute", "instances", "delete", "x", "--quiet=false"], "quiet"),
     (["gcloud", "compute", "instances", "delete", "x", "--async=false"], "async"),
     (["gcloud", "compute", "instances", "delete", "x", "--dry-run=false"], "dry_run"),
@@ -1722,7 +1722,7 @@ DRY_RUN_TRUTHY_CASES = [
     ["kubectl", "delete", "pod/x", "--dry-run"],
     ["aws", "ec2", "terminate-instances", "--instance-ids", "i-1", "--dry-run"],
     ["aws", "ec2", "terminate-instances", "--instance-ids", "i-1", "--dry-run=true"],
-    ["az", "vm", "delete", "-n", "x", "-g", "rg", "--what-if=true"],
+    ["az", "deployment", "group", "create", "-n", "x", "-g", "rg", "--what-if=true"],
     ["gcloud", "compute", "instances", "delete", "x", "--dry-run=yes"],
     ["helm", "upgrade", "x", "./c", "--dry-run"],
     ["helm", "upgrade", "x", "./c", "--dry-run=client"],
