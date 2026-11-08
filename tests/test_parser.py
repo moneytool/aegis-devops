@@ -1069,8 +1069,10 @@ def test_from_flux_export_sets_dry_run():
     assert intent.params["dry_run"] is True
 
 
-def test_from_flux_dry_run_flag():
-    intent = from_flux(["flux", "reconcile", "kustomization", "podinfo", "--dry-run"])
+def test_from_flux_create_export_is_a_rehearsal():
+    # flux reconcile has no --dry-run; create --export only prints the object
+    intent = from_flux(["flux", "create", "kustomization", "podinfo",
+                        "--source=GitRepository/podinfo", "--path=./kustomize", "--export"])
     assert intent.params["dry_run"] is True
 
 
@@ -1621,6 +1623,9 @@ def test_helm_debug_flag_does_not_swallow_the_release_name():
 
 # --- REVIEW-4 T1.5: boolean coercion; --dry-run=false is not a dry run ----------
 # (argv, params key): "<flag>=false" (or =no / =0) must never set the boolean.
+# flux reconcile has no --dry-run; create --export is the flux rehearsal
+FLUX_CREATE = ["flux", "create", "kustomization", "x", "--source=GitRepository/x", "--path=./k"]
+
 FALSE_FLAG_CASES = [
     (["kubectl", "delete", "pod/x", "--force=false"], "force"),
     (["kubectl", "delete", "pod/x", "--wait=no"], "wait"),
@@ -1643,9 +1648,9 @@ FALSE_FLAG_CASES = [
     (["argocd", "app", "sync", "x", "--prune=false"], "prune"),
     (["argocd", "app", "sync", "x", "--force=no"], "force"),
     (["argocd", "app", "sync", "x", "--dry-run=false"], "dry_run"),
-    (["flux", "reconcile", "kustomization", "x", "--dry-run=false"], "dry_run"),
-    (["flux", "get", "kustomization", "x", "--export=false"], "export"),
-    (["flux", "get", "kustomization", "x", "--export=false"], "dry_run"),
+    ([*FLUX_CREATE, "--export=false"], "export"),
+    ([*FLUX_CREATE, "--export=false"], "dry_run"),
+    ([*FLUX_CREATE, "--export", "--export=false"], "dry_run"),
     (["gh", "pr", "merge", "1", "--admin=false"], "admin"),
     (["gh", "pr", "merge", "1", "--delete-branch=false"], "delete_branch"),
     (["git", "push", "origin", "main", "--dry-run=false"], "dry_run"),
@@ -1673,8 +1678,8 @@ TRUE_FLAG_CASES = [
     (["argocd", "app", "sync", "x", "--prune=true"], "prune"),
     (["argocd", "app", "sync", "x", "--prune=TRUE"], "prune"),
     (["argocd", "app", "sync", "x", "--prune"], "prune"),
-    (["flux", "get", "kustomization", "x", "--export=true"], "export"),
-    (["flux", "get", "kustomization", "x", "--export=true"], "dry_run"),
+    ([*FLUX_CREATE, "--export=true"], "export"),
+    ([*FLUX_CREATE, "--export=true"], "dry_run"),
     (["gh", "pr", "merge", "1", "--admin=true"], "admin"),
 ]
 
@@ -1702,8 +1707,8 @@ DRY_RUN_TRUTHY_CASES = [
     ["helm", "upgrade", "x", "./c", "--dry-run=true"],
     ["argocd", "app", "sync", "x", "--dry-run"],
     ["argocd", "app", "sync", "x", "--dry-run=true"],
-    ["flux", "reconcile", "kustomization", "x", "--dry-run"],
-    ["flux", "reconcile", "kustomization", "x", "--dry-run=1"],
+    [*FLUX_CREATE, "--export"],
+    [*FLUX_CREATE, "--export=1"],
     ["git", "push", "-n", "origin", "main"],
 ]
 

@@ -2873,44 +2873,148 @@ _FLUX_VERB_ACTION = {
 
 _FLUX_READ_VERBS = {"get", "logs", "export"}
 
-# Flux global options (accepted before or after the verb).
+# Flux global options (accepted before or after the verb): the kubeconfig flags of
+# cli-runtime's ConfigFlags (without --request-timeout), --kube-api-qps/-burst, and
+# flux's own --timeout, --verbose and --ns-follows-kube-context (flux2 v2.10 main.go).
 _FLUX_GLOBAL_VALUE_FLAGS = {
-    "n",
-    "namespace",
-    "context",
-    "kubeconfig",
-    "timeout",
-    "as",
-    "as-group",
-    "as-uid",
-    "cache-dir",
-    "certificate-authority",
-    "client-certificate",
-    "client-key",
-    "server",
-    "token",
-    "tls-server-name",
-    "kube-api-burst",
-    "kube-api-qps",
+    "n", "namespace", "context", "kubeconfig", "timeout", "as", "as-group", "as-uid",
+    "as-user-extra", "cache-dir", "certificate-authority", "client-certificate", "client-key",
+    "cluster", "user", "username", "password", "server", "token", "tls-server-name",
+    "kube-api-burst", "kube-api-qps",
 }
-_FLUX_GLOBAL_BOOL_FLAGS = {"verbose", "insecure-skip-tls-verify"}
+_FLUX_GLOBAL_BOOL_FLAGS = {
+    "verbose", "insecure-skip-tls-verify", "disable-compression", "ns-follows-kube-context",
+}
 # Global value flags whose value is consumed but not recorded. --timeout is
 # kept in params: it's meaningful to a rule author ("reconcile with a long
-# timeout") and lands there whichever side of the verb it's on.
-_FLUX_DISCARD_VALUE_FLAGS = _FLUX_GLOBAL_VALUE_FLAGS - {"n", "namespace", "context", "timeout"}
+# timeout") and lands there whichever side of the verb it's on. --username and
+# --password are also flags of "create source git" and others, and stay recorded.
+_FLUX_DISCARD_VALUE_FLAGS = _FLUX_GLOBAL_VALUE_FLAGS - {
+    "n", "namespace", "context", "timeout", "username", "password"}
 
-# Flux's short letters on the verbs parsed here, read from its source (flux2 main; flux is
+# Every long flag of every flux command, read from flux2 v2.10 cmd/flux (and the globals
+# above). A flag that takes a value takes the next word whatever it looks like (#80).
+# --dry-run is only on build, migrate and uninstall, which the parser does not read.
+_FLUX_VALUE_FLAGS = frozenset(_FLUX_GLOBAL_VALUE_FLAGS) | frozenset({
+    "access-key", "add-ignore-paths", "address", "annotations", "api-version",
+    "app-base-url", "app-client-id", "app-id", "app-installation-id",
+    "app-installation-owner", "app-private-key", "audience-claim", "author-email",
+    "author-name", "bearer-token", "branch", "bucket-name", "ca-cert-file", "ca-crt-file",
+    "ca-file", "cert-file", "cert-ref", "channel", "chart", "chart-interval", "chart-ref",
+    "chart-version", "checkout-branch", "cluster-domain", "cluster-role", "commit",
+    "commit-message-appendix", "commit-template", "components", "components-extra", "crds",
+    "creds", "decryption-provider", "decryption-secret", "depends-on", "digest",
+    "email-claim", "endpoint", "event", "event-severity", "event-source", "extensions",
+    "fetch-timeout", "filter-extract", "filter-regex", "filter-semver", "flux-namespace",
+    "for", "git-repo-namespace", "git-repo-path", "git-repo-ref", "gpg-key-id",
+    "gpg-key-ring", "gpg-passphrase", "group", "health-check", "health-check-timeout",
+    "hostname", "ignore-paths", "image", "image-pull-secret", "image-ref", "interval",
+    "key-file", "kind", "kubeconfig-secret-ref", "kustomization-file", "label",
+    "label-selector", "layer-selector", "level", "local-sources", "log-level", "manifests",
+    "name", "oci-provider", "oidc-audience", "oidc-provider", "oidc-token", "output", "owner",
+    "path", "payload", "policy-change-delay", "poll-interval", "private-key-file",
+    "provider", "provider-ref", "proxy-secret-ref", "push-branch", "reconcile-strategy",
+    "ref-name", "reflect-digest", "region", "registry", "registry-creds", "release-name",
+    "repository", "resource", "retries", "retry-delay", "retry-interval", "revision",
+    "scan-timeout", "secret-key", "secret-name", "secret-ref", "select-alpha",
+    "select-numeric", "select-semver", "service-account", "signing-key-secret",
+    "signing-key-type", "since", "since-time", "source", "sparse-checkout",
+    "sparse-checkout-paths", "ssh-ecdsa-curve", "ssh-hostkey-algos", "ssh-hostname",
+    "ssh-key-algorithm", "ssh-rsa-bits", "ssh-signing-key-file", "ssh-signing-passphrase",
+    "ssh-signing-password", "status-selector", "storage-namespace", "tag", "tag-semver",
+    "tail", "target-namespace", "team", "tls-crt-file", "tls-key-file", "toleration-keys",
+    "trust-policy-file", "type", "types", "url", "validation", "values", "values-from",
+    "verify-issuer", "verify-provider", "verify-secret-ref", "verify-subject", "version",
+    "visibility", "with-namespace", "with-service-account",
+})
+_FLUX_BOOL_FLAGS = frozenset(_FLUX_GLOBAL_BOOL_FLAGS) | frozenset({
+    "all", "all-namespaces", "allow-insecure-http", "client", "compact",
+    "create-target-namespace", "debug", "deploy-token-auth", "digests", "dry-run", "export",
+    "follow", "force", "help", "ignore-not-found", "in-memory-build", "insecure",
+    "insecure-registry", "keep-namespace", "network-policy", "no-header", "pass-credentials",
+    "personal", "pre", "private", "progress-bar", "prune", "read-write-key", "reconcile",
+    "recurse-submodules", "recursive", "reproducible", "reset", "resolve-symlinks",
+    "show-history", "show-source", "show-status", "show-values", "show-vars", "silent",
+    "skip-namespace", "ssh-signing-reuse-private-key", "strict", "strict-substitute",
+    "token-auth", "wait", "watch", "watch-all-namespaces", "with-bearer-token",
+    "with-credentials", "with-source", "yes",
+})
+
+# Flux's short letters on the verbs parsed here, read from its source (flux2 v2.10; flux is
 # not run in the tests). -o is on none of them, and is listed so -oyaml reads as a value.
 _FLUX_SHORT_VALUE_LETTERS = frozenset("lnopuv")
 _FLUX_SHORT_BOOL_LETTERS = frozenset("Ahsw")
 
-_FLUX_KIND_ALIASES = {
-    "kustomization": "kustomization",
-    "kustomizations": "kustomization",
-    "ks": "kustomization",
-    "helmrelease": "helmrelease",
-    "helmreleases": "helmrelease",
-    "hr": "helmrelease",
+# The flux kinds, as the parser names them, with the names flux 2.10 also takes for them in
+# TYPE/NAME and as a word its sub-commands do not have (cmd/flux/resource_arg.go: the kind,
+# plural and short names), and the verbs that take each.
+_FLUX_ALL_TYPE_VERBS = frozenset({"get", "reconcile", "suspend", "resume", "export", "delete"})
+_FLUX_TYPES: dict[str, tuple[frozenset[str], frozenset[str]]] = {
+    "helmrelease": (frozenset({"helmrelease", "helmreleases", "hr"}), _FLUX_ALL_TYPE_VERBS),
+    "kustomization": (frozenset({"kustomization", "kustomizations", "ks"}),
+                      _FLUX_ALL_TYPE_VERBS),
+    "source-git": (frozenset({"gitrepository", "gitrepositories", "gitrepo"}),
+                   _FLUX_ALL_TYPE_VERBS),
+    "source-oci": (frozenset({"ocirepository", "ocirepositories", "ocirepo"}),
+                   _FLUX_ALL_TYPE_VERBS),
+    "source-helm": (frozenset({"helmrepository", "helmrepositories", "helmrepo"}),
+                    _FLUX_ALL_TYPE_VERBS),
+    "source-chart": (frozenset({"helmchart", "helmcharts", "hc"}), _FLUX_ALL_TYPE_VERBS),
+    "source-bucket": (frozenset({"bucket", "buckets"}), _FLUX_ALL_TYPE_VERBS),
+    "source-external": (frozenset({"externalartifact", "externalartifacts", "ea"}),
+                        frozenset({"get", "export"})),
+    "artifact-generator": (frozenset({"artifactgenerator", "artifactgenerators", "ag"}),
+                           _FLUX_ALL_TYPE_VERBS - {"delete"}),
+    "image-repository": (frozenset({"imagerepository", "imagerepositories", "imgrepo",
+                                    "imagerepo"}), _FLUX_ALL_TYPE_VERBS),
+    "image-policy": (frozenset({"imagepolicy", "imagepolicies", "imgpol", "imagepol"}),
+                     _FLUX_ALL_TYPE_VERBS),
+    "image-update": (frozenset({"imageupdateautomation", "imageupdateautomations", "iua",
+                                "imgupd", "imgauto"}), _FLUX_ALL_TYPE_VERBS),
+    "alert": (frozenset({"alert", "alerts"}), _FLUX_ALL_TYPE_VERBS - {"reconcile"}),
+    "alert-provider": (frozenset({"provider", "providers", "alert-provider",
+                                  "alert-providers"}), _FLUX_ALL_TYPE_VERBS - {"reconcile"}),
+    "receiver": (frozenset({"receiver", "receivers"}), _FLUX_ALL_TYPE_VERBS),
+}
+_FLUX_TYPE_NAMES = {name: kind for kind, (names, _verbs) in _FLUX_TYPES.items()
+                    for name in names}
+
+# The sub-commands of each verb: a word for a kind, or a group word whose sub-command is the
+# kind ("source git"). From flux2 v2.10 cmd/flux (the Use and Aliases of each command).
+_FLUX_MUTATION_WORDS = {"kustomization": "kustomization", "ks": "kustomization",
+                        "helmrelease": "helmrelease", "hr": "helmrelease",
+                        "alert": "alert", "alert-provider": "alert-provider",
+                        "receiver": "receiver"}
+_FLUX_SOURCE_KINDS = ("git", "oci", "helm", "chart", "bucket")
+_FLUX_IMAGE_KINDS = ("repository", "policy", "update")
+_FLUX_GROUPS = {
+    "reconcile": {"source": _FLUX_SOURCE_KINDS, "image": _FLUX_IMAGE_KINDS,
+                  "artifact": ("generator",)},
+    "suspend": {"source": _FLUX_SOURCE_KINDS, "image": _FLUX_IMAGE_KINDS,
+                "artifact": ("generator",)},
+    "resume": {"source": _FLUX_SOURCE_KINDS, "image": _FLUX_IMAGE_KINDS,
+               "artifact": ("generator",)},
+    "delete": {"source": _FLUX_SOURCE_KINDS, "image": _FLUX_IMAGE_KINDS},
+    "export": {"source": (*_FLUX_SOURCE_KINDS, "external"), "image": _FLUX_IMAGE_KINDS,
+               "artifact": ("generator",)},
+    "create": {"source": _FLUX_SOURCE_KINDS, "image": _FLUX_IMAGE_KINDS,
+               "secret": ("git", "githubapp", "helm", "notation", "oci", "proxy", "receiver",
+                          "tls")},
+}
+# reconcile alert and alert-provider are gone from flux 2.10 and still in older releases.
+_FLUX_WORDS = {
+    verb: _FLUX_MUTATION_WORDS | ({"tenant": "tenant"} if verb == "create" else {})
+    for verb in _FLUX_GROUPS
+}
+
+# What "reconcile --with-source" also reconciles: the object's source, of one of these
+# kinds, whose name is only known when flux reads the object (reconcile_with_source.go).
+# A HelmRelease's chart is reconciled with its own source as well.
+_FLUX_WITH_SOURCE_KINDS = {
+    "kustomization": ("source-git", "source-oci", "source-bucket"),
+    "helmrelease": ("source-chart", "source-oci", "source-helm", "source-git",
+                    "source-bucket"),
+    "source-chart": ("source-helm", "source-git", "source-bucket"),
 }
 
 
@@ -2920,7 +3024,6 @@ def _parse_flux_tokens(
     metadata: dict[str, Any] = {}
     params: dict[str, Any] = {}
     positional: list[str] = []
-    dry_run = False
     short_bools, short_values = _flux_short_letters(verb)
 
     tokens = list(tokens)  # short words are split in place as the walk reaches them
@@ -2928,6 +3031,10 @@ def _parse_flux_tokens(
     n = len(tokens)
     while i < n:
         tok = tokens[i]
+        if tok == "--":
+            # pflag: every word after it is an operand
+            positional.extend(tokens[i + 1:])
+            break
         if tok.startswith("-") and tok != "-":
             is_long = tok.startswith("--")
             if not is_long and len(tok) > 2:
@@ -2952,12 +3059,16 @@ def _parse_flux_tokens(
                     i += 1
                     val = _value_at(tokens, i, tok)
                 # consumed, intentionally not recorded
-            elif key in _FLUX_GLOBAL_BOOL_FLAGS:
+            elif key in ("verbose", "insecure-skip-tls-verify", "disable-compression"):
                 pass  # consumed, intentionally not recorded
             elif key == "dry-run":
-                dry_run = _is_dry_run(val)
+                # Not a flag of any verb parsed here: flux refuses it and runs nothing.
+                # It is never read as a rehearsal.
+                pass
             elif key == "export":
                 params["export"] = _bool_param(val)
+            elif is_long and key in _FLUX_BOOL_FLAGS:
+                params[key.replace("-", "_")] = _bool_param(val)
             elif not is_long and key in short_bools:
                 # Takes no value: in "get ks -A a" the name is "a".
                 params[key] = _bool_param(val)
@@ -2967,48 +3078,90 @@ def _parse_flux_tokens(
                     i += 1
                     val = _value_at(tokens, i, tok)
                 params[key] = _coerce(val)
-            elif val is not None:
-                params[key.replace("-", "_")] = _coerce(val)
-            elif i + 1 < n and not tokens[i + 1].startswith("-"):
-                i += 1
-                params[key.replace("-", "_")] = _coerce(tokens[i])
             else:
-                params[key.replace("-", "_")] = True
+                # A value flag takes the next word whatever it is (#80); a flag in no
+                # table is refused unless "=value" or its place shows its reading.
+                i, params[key.replace("-", "_")] = _other_flag(
+                    tokens, i, values=_FLUX_VALUE_FLAGS if is_long else (), bools=(),
+                    tool="flux")
         else:
             positional.append(tok)
         i += 1
 
-    # Each flag's last value counts: --export only prints YAML, so it rehearses as well.
-    if dry_run or params.get("export") is True:
+    # --export only prints YAML, so it rehearses; its last value counts.
+    if params.get("export") is True:
         params["dry_run"] = True
     return metadata, params, positional
 
 
-def _flux_kind_and_name(positional: list[str]) -> tuple[str, str]:
-    """Turns the positional tokens following a flux verb into
-    ``(kind, name)``, e.g. ``["source", "git", "podinfo"]`` ->
-    ``("source-git", "podinfo")``, ``["kustomization", "podinfo"]`` ->
-    ``("kustomization", "podinfo")``."""
+def _flux_type_name(word: str, verb: str) -> tuple[str, str]:
+    """``TYPE[.VERSION.GROUP]/NAME`` (flux 2.10) as ``(kind, name)``: flux rewrites it to
+    the sub-command for TYPE. Anything flux refuses is refused."""
+    typ, slash, name = word.partition("/")
+    if not slash or not typ or not name or "/" in name or name.startswith("-"):
+        raise ValueError(f"flux: {word!r} is not a TYPE/NAME flux accepts")
+    kind = _FLUX_TYPE_NAMES.get(typ.split(".", 1)[0].lower())
+    if kind is None or verb not in _FLUX_TYPES[kind][1]:
+        raise ValueError(f"flux {verb}: {typ!r} is not a type flux {verb} takes")
+    return kind, name
+
+
+def _flux_kind_and_names(verb: str, positional: list[str]) -> tuple[str, list[str]]:
+    """The kind and the names a flux verb is given, as flux reads them: a sub-command
+    (``kustomization``, ``hr``, ``source git``, ``image policy``), a type flux 2.10 rewrites
+    to one (``kustomizations``, ``gitrepo``), or TYPE/NAME words (``ks/a ks/b``), all of
+    one type. Whatever flux refuses is a ValueError."""
     if not positional:
         raise ValueError("missing flux resource kind/name")
     head = positional[0]
-    if head == "source":
-        if len(positional) < 3:
-            raise ValueError("missing flux source subkind/name")
-        return f"source-{positional[1]}", positional[2]
-    kind = _FLUX_KIND_ALIASES.get(head, head)
-    if len(positional) < 2:
-        raise ValueError("missing flux resource name")
-    return kind, positional[1]
+    if "/" in head and verb in _FLUX_ALL_TYPE_VERBS:
+        kinds_and_names = [_flux_type_name(word, verb) for word in positional]
+        kinds = {kind for kind, _name in kinds_and_names}
+        if len(kinds) > 1:
+            raise ValueError(f"flux {verb}: TYPE/NAME words of different types: {positional!r}")
+        return kinds.pop(), [name for _kind, name in kinds_and_names]
+    groups = _FLUX_GROUPS.get(verb, {})
+    if head in groups:
+        if len(positional) < 2 or positional[1] not in groups[head]:
+            raise ValueError(f"flux {verb} {head}: missing or unknown kind: {positional!r}")
+        return f"{head}-{positional[1]}", positional[2:]
+    if head in _FLUX_WORDS.get(verb, {}):
+        return _FLUX_WORDS[verb][head], positional[1:]
+    kind = _FLUX_TYPE_NAMES.get(head.lower())
+    if kind is not None and verb in _FLUX_TYPES[kind][1]:
+        return kind, positional[1:]
+    raise ValueError(f"flux {verb}: unknown kind {head!r}")
 
 
-def from_flux(argv: list[str]) -> InfrastructureIntent:
-    """Parses a ``flux`` invocation, e.g.:
+def _flux_read_kind_and_names(verb: str, positional: list[str]) -> tuple[str, list[str]]:
+    """The same for ``get`` and ``export``, which only read: a word no table knows stays
+    the kind it was, so ``get all`` is ``all/*``. ``get`` has plural sub-commands."""
+    if verb == "get" and positional:
+        head, rest = positional[0], positional[1:]
+        group = {"sources": "source", "source": "source", "images": "image", "image": "image",
+                 "artifacts": "artifact", "artifact": "artifact"}.get(head)
+        if group and rest:
+            sub = {"generators": "generator"}.get(rest[0], rest[0])
+            return f"{group}-{sub}", rest[1:]
+        if "/" not in head:
+            kind = _FLUX_TYPE_NAMES.get(head.lower())
+            return (kind or head), rest
+    try:
+        return _flux_kind_and_names(verb, positional)
+    except ValueError:
+        return positional[0], []
+
+
+def from_flux_multi(argv: list[str]) -> list[InfrastructureIntent]:
+    """Parses a ``flux`` invocation into one InfrastructureIntent per object, e.g.:
 
     ``flux reconcile source git podinfo -n flux-system``
       -> resource "source-git/podinfo", action "sync", metadata {"namespace": "flux-system"}
     ``flux suspend kustomization podinfo``
       -> resource "kustomization/podinfo", action "stop"
+    ``flux suspend ks/a ks/b`` and ``flux suspend kustomization a b``
+      -> "kustomization/a" and "kustomization/b"
+    ``flux suspend kustomization --all`` -> "kustomization/*", marked
     """
     if len(argv) < 2 or _basename(argv[0]) != "flux":
         raise ValueError(f"not a recognizable flux invocation: {argv!r}")
@@ -3025,40 +3178,57 @@ def from_flux(argv: list[str]) -> InfrastructureIntent:
     metadata, params, positional = _parse_flux_tokens(tokens, verb)
     params["raw_action"] = verb
 
+    def make(resources: list[str], action: str, extra: dict[str, Any] | None = None):
+        return [InfrastructureIntent(resource=r, action=action, provider="flux",
+                                     params={**params, **(extra or {})},
+                                     metadata=dict(metadata)) for r in resources]
+
     if verb == "bootstrap":
         provider_name = positional[0] if positional else "*"
-        return InfrastructureIntent(
-            resource=f"bootstrap/{provider_name}", action="create", provider="flux",
-            params=params, metadata=metadata,
-        )
+        return make([f"bootstrap/{provider_name}"], "create")
 
     if verb in _FLUX_VERB_ACTION:
-        kind, name = _flux_kind_and_name(positional)
-        return InfrastructureIntent(
-            resource=f"{kind}/{name}", action=_FLUX_VERB_ACTION[verb], provider="flux",
-            params=params, metadata=metadata,
-        )
+        action = _FLUX_VERB_ACTION[verb]
+        kind, names = _flux_kind_and_names(verb, positional)
+        if verb == "create":
+            if not names:
+                raise ValueError(f"could not find a flux object name in: {argv!r}")
+            names = names[:1]  # flux create takes the first word as the name
+        if not names:
+            if verb in ("suspend", "resume") and params.get("all") is True:
+                # every object of the kind in the namespace
+                return _mark_open_targets(make([f"{kind}/*"], action))
+            raise ValueError(f"missing flux resource name in: {argv!r}")
+        intents = make([f"{kind}/{name}" for name in dict.fromkeys(names)], action)
+        if verb == "reconcile" and params.get("with_source") is True:
+            for name in dict.fromkeys(names):
+                for source in _FLUX_WITH_SOURCE_KINDS.get(kind, ()):
+                    marker = {"from": f"{kind}/{name}", "kinds": [source]}
+                    intents.extend(make([f"{source}/*"], action,
+                                        {"resolved_at_runtime": marker}))
+        return intents
 
     if verb in _FLUX_READ_VERBS:
         if verb == "export":
             # "flux export ..." dumps resource YAML; it's read-only and
             # never touches the cluster, same as a dry-run.
             params["dry_run"] = True
-        if positional:
-            try:
-                kind, name = _flux_kind_and_name(positional)
-                resource = f"{kind}/{name}"
-            except ValueError:
-                kind = _FLUX_KIND_ALIASES.get(positional[0], positional[0])
-                resource = f"{kind}/*"
-        else:
-            resource = "*/*"
-        return InfrastructureIntent(
-            resource=resource, action="read", provider="flux",
-            params=params, metadata=metadata,
-        )
+        if not positional:
+            return make(["*/*"], "read")
+        kind, names = _flux_read_kind_and_names(verb, positional)
+        return make([f"{kind}/{name}" for name in dict.fromkeys(names)] or [f"{kind}/*"],
+                    "read")
 
     raise ValueError(f"unsupported flux subcommand: {argv!r}")
+
+
+def from_flux(argv: list[str]) -> InfrastructureIntent:
+    """Parses a ``flux`` invocation that acts on exactly one object (see
+    :func:`from_flux_multi`). Raises ValueError for ``flux suspend ks a b``."""
+    intents = from_flux_multi(argv)
+    if len(intents) != 1:
+        raise ValueError(f"expected exactly one flux object, found {len(intents)}: {argv!r}")
+    return intents[0]
 
 
 # --- Git -----------------------------------------------------------------
@@ -3861,7 +4031,7 @@ def from_argv(argv: list[str]) -> list[InfrastructureIntent]:
     if name == "argocd":
         return from_argocd_multi(argv)
     if name == "flux":
-        return [from_flux(argv)]
+        return from_flux_multi(argv)
     if name == "git":
         return [from_git(argv)]
     if name == "gh":

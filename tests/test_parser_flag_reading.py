@@ -171,3 +171,106 @@ def test_helm_values_is_a_list_of_files():
 def test_helm_global_color_flag_before_the_verb():
     assert _targets("helm --color never uninstall x -n prod") == [
         ("release/x", "delete", {"namespace": "prod"})]
+
+
+# --- flux ----------------------------------------------------------------------------
+# flux2 v2.10 source, not run.
+
+
+@pytest.mark.parametrize("command,namespace,params", [
+    # issue #80: --url takes the next word, so flux creates this in prod
+    ("flux create source git a -n prod --url -ndev --branch main", "prod", {"url": "-ndev"}),
+    ("flux create kustomization a -n prod --path -ndev --source GitRepository/a", "prod",
+     {"path": "-ndev"}),
+    ("flux create hr a -n prod --chart -ndev --source HelmRepository/r", "prod",
+     {"chart": "-ndev"}),
+    ("flux reconcile ks a -n prod --timeout -ndev", "prod", {"timeout": "-ndev"}),
+])
+def test_a_flux_value_flag_takes_the_next_word(command, namespace, params):
+    intent = from_argv(command.split())[0]
+    assert intent.metadata["namespace"] == namespace
+    assert {k: v for k, v in intent.params.items() if k in params} == params
+
+
+@pytest.mark.parametrize("command", [
+    "flux create source git a -n prod --no-such-flag -ndev",
+    "flux reconcile ks --no-such-flag a",
+    "flux suspend ks a -x b",
+])
+def test_a_flux_flag_in_no_table_is_refused(command):
+    with pytest.raises(ValueError, match="cannot tell whether"):
+        from_argv(command.split())
+
+
+def test_a_flux_namespace_rule_holds():
+    rule = _rule("flux", "*/*", ["create"], {"namespace": "prod"})
+    assert _verdict([rule], "flux create source git a -n prod --url -ndev --branch m") == "BLOCK"
+    assert _verdict([rule], "flux create source git a -n dev --url -nprod --branch m") == "ALLOW"
+
+
+@pytest.mark.parametrize("command,resources", [
+    # suspend, resume, reconcile and delete take every name they are given
+    ("flux suspend ks a b", ["kustomization/a", "kustomization/b"]),
+    ("flux resume kustomization a b a", ["kustomization/a", "kustomization/b"]),
+    ("flux reconcile hr a b", ["helmrelease/a", "helmrelease/b"]),
+    ("flux delete source git a b --silent", ["source-git/a", "source-git/b"]),
+    # flux 2.10 also takes TYPE/NAME and the type's plural or short name
+    ("flux suspend ks/a ks/b", ["kustomization/a", "kustomization/b"]),
+    ("flux suspend gitrepo/a gitrepo/b", ["source-git/a", "source-git/b"]),
+    ("flux reconcile kustomizations podinfo", ["kustomization/podinfo"]),
+    ("flux reconcile helmreleases.helm.toolkit.fluxcd.io/podinfo", ["helmrelease/podinfo"]),
+    ("flux suspend bucket b", ["source-bucket/b"]),
+    # the kinds under a group word
+    ("flux reconcile image repository podinfo", ["image-repository/podinfo"]),
+    ("flux suspend image update u", ["image-update/u"]),
+    ("flux reconcile artifact generator g", ["artifact-generator/g"]),
+    ("flux create secret git s --url ssh://h/r", ["secret-git/s"]),
+    ("flux create image policy p --image-ref r", ["image-policy/p"]),
+    # words after "--" are names
+    ("flux delete ks a -- -nprod", ["kustomization/a", "kustomization/-nprod"]),
+])
+def test_flux_reads_every_object(command, resources):
+    assert [i.resource for i in from_argv(command.split())] == resources
+
+
+@pytest.mark.parametrize("command", [
+    "flux suspend ks/a hr/b",  # flux refuses TYPE/NAME words of two types
+    "flux suspend ks/a b",
+    "flux reconcile alert/a",  # no reconcile for alerts in TYPE/NAME
+    "flux suspend source foo a",
+    "flux suspend widget a",
+    "flux suspend ks",
+])
+def test_flux_refuses_what_it_cannot_read(command):
+    with pytest.raises(ValueError):
+        from_argv(command.split())
+
+
+def test_flux_suspend_two_names_meets_a_rule_on_the_second():
+    rule = _rule("flux", "kustomization/payments", ["stop"])
+    assert _verdict([rule], "flux suspend ks web payments") == "BLOCK"
+    assert _verdict([rule], "flux suspend ks/web ks/payments") == "BLOCK"
+
+
+def test_flux_suspend_all_is_every_object_of_the_kind():
+    intents = from_argv("flux suspend kustomization --all -n prod".split())
+    assert [i.resource for i in intents] == ["kustomization/*"]
+    assert intents[0].params["resolved_at_runtime"] == {"from": "kustomization/*",
+                                                        "kinds": ["kustomization"]}
+    rule = _rule("flux", "kustomization/payments", ["stop"])
+    assert _verdict([rule], "flux suspend kustomization --all -n prod") == "ESCALATE"
+
+
+def test_flux_with_source_reaches_the_source():
+    command = "flux reconcile ks a --with-source"
+    resources = [i.resource for i in from_argv(command.split())]
+    assert resources == ["kustomization/a", "source-git/*", "source-oci/*", "source-bucket/*"]
+    assert _verdict([_rule("flux", "source-git/*", ["sync"])], command) == "BLOCK"
+    assert _verdict([_rule("flux", "source-git/infra", ["sync"])], command) == "ESCALATE"
+    assert _verdict([_rule("flux", "source-git/*", ["sync"])], "flux reconcile ks a") == "ALLOW"
+
+
+def test_flux_create_export_is_the_rehearsal():
+    base = "flux create kustomization a --source=GitRepository/a --path=./k"
+    assert from_argv(f"{base} --export".split())[0].params["dry_run"] is True
+    assert "dry_run" not in from_argv(f"{base} --export --export=false".split())[0].params
