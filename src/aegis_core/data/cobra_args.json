@@ -1,0 +1,255 @@
+{
+ "_source": "cobra Args validators: helm=https://github.com/helm/helm@c540ca03765d86ff3a624e8b8504df86d4a79b3a/pkg/cmd; flux=https://github.com/fluxcd/flux2@3fa784edd773d56630bb9f62645e08f70c2cff0a/cmd/flux",
+ "flux": {
+  "check": [
+   0,
+   0
+  ],
+  "debug helmrelease": [
+   1,
+   1
+  ],
+  "debug kustomization": [
+   1,
+   1
+  ],
+  "envsubst": [
+   0,
+   0
+  ],
+  "install": [
+   0,
+   0
+  ],
+  "migrate": [
+   0,
+   0
+  ],
+  "plugin install": [
+   1,
+   1
+  ],
+  "plugin search": [
+   0,
+   1
+  ],
+  "plugin uninstall": [
+   1,
+   1
+  ],
+  "plugin update": [
+   0,
+   1
+  ],
+  "stats": [
+   0,
+   0
+  ],
+  "tree artifact generator": [
+   1,
+   1
+  ],
+  "uninstall": [
+   0,
+   0
+  ]
+ },
+ "helm": {
+  "all": [
+   1,
+   1
+  ],
+  "bash": [
+   0,
+   0
+  ],
+  "chart": [
+   1,
+   1
+  ],
+  "completion": [
+   0,
+   0
+  ],
+  "crds": [
+   1,
+   1
+  ],
+  "create": [
+   1,
+   1
+  ],
+  "dependency": [
+   0,
+   0
+  ],
+  "dependency build": [
+   0,
+   1
+  ],
+  "dependency update": [
+   0,
+   1
+  ],
+  "docs": [
+   0,
+   0
+  ],
+  "env": [
+   0,
+   1
+  ],
+  "fish": [
+   0,
+   0
+  ],
+  "get": [
+   0,
+   0
+  ],
+  "get all": [
+   1,
+   1
+  ],
+  "get hooks": [
+   1,
+   1
+  ],
+  "get manifest": [
+   1,
+   1
+  ],
+  "get metadata": [
+   1,
+   1
+  ],
+  "get notes": [
+   1,
+   1
+  ],
+  "get values": [
+   1,
+   1
+  ],
+  "history": [
+   1,
+   1
+  ],
+  "install": [
+   1,
+   null
+  ],
+  "lint": [
+   1,
+   null
+  ],
+  "list": [
+   0,
+   0
+  ],
+  "plugin install": [
+   1,
+   1
+  ],
+  "plugin package": [
+   1,
+   1
+  ],
+  "plugin verify": [
+   1,
+   1
+  ],
+  "powershell": [
+   0,
+   0
+  ],
+  "pull": [
+   1,
+   null
+  ],
+  "push": [
+   2,
+   null
+  ],
+  "readme": [
+   1,
+   1
+  ],
+  "registry login": [
+   1,
+   null
+  ],
+  "registry logout": [
+   1,
+   null
+  ],
+  "repo": [
+   0,
+   0
+  ],
+  "repo add": [
+   2,
+   2
+  ],
+  "repo index": [
+   1,
+   1
+  ],
+  "repo list": [
+   0,
+   0
+  ],
+  "repo remove": [
+   1,
+   null
+  ],
+  "repo update": [
+   0,
+   null
+  ],
+  "rollback": [
+   1,
+   null
+  ],
+  "show": [
+   0,
+   0
+  ],
+  "status": [
+   1,
+   1
+  ],
+  "template": [
+   1,
+   null
+  ],
+  "test": [
+   1,
+   1
+  ],
+  "uninstall": [
+   1,
+   null
+  ],
+  "upgrade": [
+   2,
+   2
+  ],
+  "values": [
+   1,
+   1
+  ],
+  "verify": [
+   1,
+   1
+  ],
+  "version": [
+   0,
+   0
+  ],
+  "zsh": [
+   0,
+   0
+  ]
+ }
+}

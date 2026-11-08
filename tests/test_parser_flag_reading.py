@@ -380,7 +380,8 @@ def test_argocd_dry_run_is_a_rehearsal_only_on_sync():
      {"force": True, "unknown_target": True}),
 ])
 def test_git_push_is_read_as_git_reads_it(command, resources, params):
-    intents = [i for i in from_argv(command.split()) if i.resource != "tag/*"]
+    intents = [i for i in from_argv(command.split())
+               if i.resource not in ("tag/*", "submodule/*")]
     assert [i.resource for i in intents] == resources
     last = intents[-1].params
     assert {k: last.get(k) for k in params} == params
@@ -428,7 +429,8 @@ def test_git_commit_n_is_not_a_rehearsal():
     ("git branch -D a b", ["branch/a", "branch/b"]),
     ("git branch -d a -- b", ["branch/a", "branch/b"]),
     ("git tag -d v1 v2", ["tag/v1", "tag/v2"]),
-    ("git rebase main feature", ["history/main", "history/feature"]),
+    # and history/*: rebase.updateRefs in a config file may rewrite other branches (r21)
+    ("git rebase main feature", ["history/main", "history/feature", "history/*"]),
     ("git filter-repo --path src", ["history/*"]),
 ])
 def test_git_reads_every_target(command, resources):
@@ -1596,7 +1598,8 @@ def test_flux_with_source_namespace_is_not_the_objects():
 def test_git_push_tags_carry_the_action_git_takes(command, targets):
     # run on git 2.52 against a local bare remote: tag t9, --delete tag t9, and a short
     # name (t8) that is a tag pushing refs/tags/t8
-    assert [(i.resource, i.action) for i in from_argv(command.split())] == targets
+    assert [(i.resource, i.action) for i in from_argv(command.split())
+            if i.resource != "submodule/*"] == targets
 
 
 def test_git_push_tag_force_is_recorded():
@@ -4133,3 +4136,137 @@ EVERYDAY_AWS = [
 @pytest.mark.parametrize("command", EVERYDAY_AWS)
 def test_everyday_aws_commands_parse(command):
     assert from_argv(shlex.split(command))
+
+
+# --- review round 21 ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("command,resource,namespace", [
+    # create sets -N over the qualified name (app.go); every other verb reads the
+    # qualified name over -N (ParseFromQualifiedName)
+    ("argocd app create dev/protected -N prod --repo r", "app/protected", "prod"),
+    ("argocd app create dev/protected --repo r", "app/protected", "dev"),
+    ("argocd app sync dev/a -N prod", "app/a", "dev"),
+    ("argocd app delete dev/a -N prod -y", "app/a", "dev"),
+])
+def test_argocd_namespace_precedence_per_verb(command, resource, namespace):
+    intent = from_argv(command.split())[0]
+    assert (intent.resource, intent.metadata["app_namespace"]) == (resource, namespace)
+
+
+@pytest.mark.parametrize("command,resource", [
+    # one word is the name; with none or several, --name is (cmd/util/app.go)
+    ("argocd app create decoy ignored --name protected --repo r", "app/protected"),
+    ("argocd app create --name protected --repo r", "app/protected"),
+    ("argocd app create web --repo r", "app/web"),
+])
+def test_argocd_create_name_selection(command, resource):
+    assert from_argv(command.split())[0].resource == resource
+
+
+@pytest.mark.parametrize("command", [
+    "argocd app create decoy --name protected --repo r",  # --name must match the word
+    "argocd app create a b --repo r",  # several words and no --name: no name
+    "argocd app set a b --sync-policy none",  # set takes exactly one app
+    "argocd app history a b",
+    "helm upgrade a ./c extra",  # cobra Args: upgrade takes exactly two
+    "helm status a b",
+    "helm list x",
+    "helm install a ./c extra",  # NameAndChart: at most two
+    "helm get values a b",
+])
+def test_argument_counts_the_tools_refuse(command):
+    with pytest.raises(ValueError):
+        from_argv(command.split())
+
+
+def test_helm_pull_takes_several_charts():
+    assert [i.resource for i in from_argv("helm pull a/b c/d".split())] == ["chart/a/b",
+                                                                          "chart/c/d"]
+
+
+@pytest.mark.parametrize("command,extra", [
+    # config may widen what a rebase, a pull or a push changes
+    ("git rebase --update-refs main feature", True),
+    ("git rebase main feature", True),  # rebase.updateRefs in a config file
+    ("git rebase --no-update-refs main feature", False),
+    ("git -c rebase.updateRefs=false rebase main feature", False),
+])
+def test_git_rebase_update_refs_rewrites_other_branches(command, extra):
+    intents = from_argv(command.split())
+    assert any(i.resource == "history/*" for i in intents) is extra
+
+
+@pytest.mark.parametrize("command,rewrite", [
+    ("git pull", True), ("git pull --rebase", True), ("git pull --ff-only", False),
+    ("git pull --no-rebase", False),
+])
+def test_git_pull_may_be_a_rebase(command, rewrite):
+    actions = [i.action for i in from_argv(command.split())]
+    assert ("rewrite" in actions) is rewrite
+
+
+@pytest.mark.parametrize("command,submodules", [
+    ("git push origin main", True),  # push.recurseSubmodules in a config file
+    ("git push --recurse-submodules=on-demand origin main", True),
+    ("git push --recurse-submodules=check origin main", False),
+    ("git push --recurse-submodules=no origin main", False),
+])
+def test_git_push_may_push_submodules(command, submodules):
+    intents = from_argv(command.split())
+    assert any(i.resource == "submodule/*" for i in intents) is submodules
+
+
+@pytest.mark.parametrize("command,resource,action", [
+    # what gh changes besides the object it names
+    ("gh pr close 42 -d", "branch/*", "delete"),
+    ("gh pr merge 42 -s -d", "branch/*", "delete"),
+    ("gh issue transfer 7 acme/other -R acme/src", "issue/*", "create"),
+    ("gh release delete v1 --cleanup-tag -y", "tag/v1", "delete"),
+    ("gh label clone acme/src --force -R acme/dst", "label/*", "update"),
+    ("gh repo rename newname -R acme/old --yes", "repo/acme/newname", "create"),
+    ("gh cache delete --all -R a/b", "cache/*", "delete"),
+])
+def test_gh_secondary_changes(command, resource, action):
+    intents = from_argv(command.split())
+    assert any(i.resource == resource and i.action == action for i in intents)
+
+
+def test_gh_issue_transfer_creates_in_the_target_repo():
+    made = [i for i in from_argv("gh issue transfer 7 acme/other -R acme/src".split())
+            if i.action == "create"][0]
+    assert made.metadata["repo"] == "acme/other"
+
+
+# Flags that write the same field, and the value the tool ends with (each tool's order)
+@pytest.mark.parametrize("command,key,value", [
+    ("az group update -n rg --tags env=safe --set tags.env=prod", "tags", {"env": "prod"}),
+    ("az group update -n rg --set tags.env=prod --tags env=safe", "tags", {"env": "prod"}),
+    ("az group update -n rg --tags env=a team=b --remove tags.team", "tags", {"env": "a"}),
+    ("helm upgrade r ./c --set a=1 --set-string a=2", "set", {"a": "2"}),
+    ("helm upgrade r ./c --set-string a=2 --set a=1", "set", {"a": "2"}),
+    ("gcloud compute instances update vm --zone z --update-labels env=prod,team=a "
+     "--remove-labels team", "labels", {"env": "prod"}),
+    ("gcloud compute instances update vm --zone z --clear-labels --update-labels env=prod",
+     "labels", {"env": "prod"}),
+])
+def test_flags_writing_one_field_end_as_the_tool_does(command, key, value):
+    assert from_argv(command.split())[0].params[key] == value
+
+
+@pytest.mark.parametrize("command,mark", [
+    # a write the parser cannot map to a recorded key is unresolved, with its keys
+    ("az vm update -n v -g rg --set properties.x=1", "properties.*"),
+    ("az vm update -n v -g rg --add networkProfile x=y", "networkProfile.*"),
+    ("az group update -n rg --set tags.env=prod", "tags"),  # the other tags stay
+    ("gcloud compute instances update vm --zone z --update-labels env=prod", "labels"),
+    ("kubectl run web --image=x --overrides={}", "*"),
+])
+def test_writes_into_unknown_state_are_unresolved(command, mark):
+    assert mark in from_argv(command.split())[0].params["unresolved_scope"]
+
+
+def test_aws_command_line_wins_over_cli_input_json():
+    command = ["aws", "autoscaling", "set-desired-capacity", "--cli-input-json",
+               '{"AutoScalingGroupName": "g", "DesiredCapacity": 1}', "--desired-capacity", "3"]
+    assert from_argv(command)[0].params["desired_capacity"] == 3

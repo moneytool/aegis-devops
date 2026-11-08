@@ -1202,9 +1202,10 @@ def test_from_git_read_verbs():
         ["git", "checkout", "main"],
         ["git", "switch", "main"],
         ["git", "fetch"],
-        ["git", "pull"],
     ):
         assert from_git(argv).action == argv[1]
+    # a pull, and the rebase pull.rebase in a config file may make of it (review round 21)
+    assert [i.action for i in from_git_multi(["git", "pull"])] == ["pull", "rewrite"]
 
 
 def test_from_git_raw_action_preserved():
@@ -1817,7 +1818,8 @@ def test_git_push_with_refspec_has_no_unknown_target():
 
 
 def test_git_push_mirror_does_not_swallow_the_remote_and_implies_force():
-    push, _tags, delete, tag_delete = from_git_multi(["git", "push", "--mirror", "origin"])
+    push, _tags, delete, tag_delete, _submodules = from_git_multi(
+        ["git", "push", "--mirror", "origin"])
     assert (tag_delete.resource, tag_delete.action) == ("tag/*", "delete")
     assert push.metadata == {"remote": "origin"}
     assert push.params["mirror"] is True

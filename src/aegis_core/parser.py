@@ -852,6 +852,30 @@ _GCLOUD_FILE_FLAG_TARGETS = {
 }
 
 
+def _gcloud_labels_diff(params: dict[str, Any], tokens: list[str]) -> None:
+    """The labels an update leaves, as labels_util.Diff.Apply computes them: ``--clear-labels``
+    first, then ``--update-labels`` added, then ``--remove-labels`` removed (a key both
+    updated and removed is gone). ``params["labels"]`` holds what the command line knows;
+    without --clear-labels the labels the resource already has stay, so the map as a whole
+    is unresolved. gcloud refuses --clear-labels with --remove-labels."""
+    update = params.get("update-labels")
+    remove = params.get("remove-labels")
+    clear = params.get("clear-labels") is True or params.get("clear_labels") is True
+    if update is None and remove is None and not clear:
+        return
+    if clear and remove:
+        raise ValueError(f"gcloud: --clear-labels and --remove-labels together, which gcloud "
+                         f"refuses: {tokens!r}")
+    labels: dict[str, Any] = {}
+    if isinstance(update, dict):
+        labels.update(update)
+    for key in (remove if isinstance(remove, list) else [remove] if remove else []):
+        labels.pop(key, None)
+    params["labels"] = labels
+    if not clear:
+        _mark_unresolved(params, "labels")
+
+
 def _gcloud_mark_file_flag(params: dict[str, Any], key: str, declared: str | None) -> None:
     """gcloud reads the value of a file flag from a file when it runs: a flag named
     ``*-from-file`` or ``*-file``, or one the SDK types as FileContents, YAMLFileContents or
@@ -3733,6 +3757,62 @@ def _az_roles(aliases: dict[str, str]) -> dict[str, str]:
     return roles
 
 
+def _az_generic_update(params: dict[str, Any], tokens: list[str]) -> None:
+    """az's generic update (azure-cli core commands/arm.py): after the typed arguments,
+    each ``--set path=value``, ``--add path value...`` and ``--remove path [index]`` changes
+    the resource's properties, in the order given. A path into the tags (``tags.env``)
+    is the ``--tags`` map's key: --set writes it, --remove deletes it. Any other path, a
+    list index, or --add (whose value az parses its own way) names a property the parser
+    cannot map to a recorded key with certainty: that key and every key under it are
+    unresolved."""
+    ops: list[tuple[str, list[str]]] = []
+    i = 0
+    while i < len(tokens):
+        word = tokens[i]
+        name = word[2:].partition("=")[0] if word.startswith("--") else None
+        if name in ("set", "add", "remove"):
+            values = [word.partition("=")[2]] if "=" in word else []
+            while not values or (i + 1 < len(tokens) and not _aws_option_like(tokens[i + 1])
+                                 and "=" not in word):
+                if i + 1 >= len(tokens) or _aws_option_like(tokens[i + 1]):
+                    break
+                i += 1
+                values.append(tokens[i])
+            ops.append((name, values))
+        i += 1
+    for op, values in ops:
+        if not values:
+            continue
+        if op == "set":
+            for item in values:
+                path, sep, value = item.partition("=")
+                head, dot, rest = path.partition(".")
+                if (head == "tags" and dot and rest and "[" not in path and sep
+                        and isinstance(params.get("tags"), dict)):
+                    params["tags"][rest] = value
+                elif head == "tags" and dot and rest and "[" not in path and sep:
+                    # the resource's other tags stay: the map as a whole is unknown
+                    params["tags"] = {rest: value}
+                    _mark_unresolved(params, "tags")
+                else:
+                    root = path.split(".")[0].split("[")[0]
+                    _mark_unresolved(params, root)
+                    _mark_unresolved(params, f"{root}.*")
+        else:
+            path = values[0]
+            head, dot, rest = path.partition(".")
+            if (op == "remove" and head == "tags" and dot and rest and "[" not in path
+                    and len(values) == 1):
+                if isinstance(params.get("tags"), dict):
+                    params["tags"].pop(rest, None)
+                else:
+                    _mark_unresolved(params, "tags")  # the other tags stay, unknown
+            else:
+                root = path.split(".")[0].split("[")[0]
+                _mark_unresolved(params, root)
+                _mark_unresolved(params, f"{root}.*")
+
+
 def _az_convert(params: dict[str, Any], nargs: dict[str, str], tokens: list[str],
                 skip: set[str] = frozenset()) -> None:
     """What az does to a value after argparse, from the argument's type or validator
@@ -3946,6 +4026,7 @@ def _parse_az_tokens(
             _mark_unresolved(params, f"{key}.*")
     if nargs is not None:
         _az_convert(params, nargs, tokens, skip=from_file)
+    _az_generic_update(params, tokens)
     # the target or its scope would then be a file nobody read
     for value in (name_value, *ids_values, metadata.get("region"),
                   metadata.get("location_display_name"), metadata.get("resource_group"),
@@ -4592,6 +4673,7 @@ def _parse_gcloud_tokens(
     elif zone_derived_region is not None:
         metadata["region"] = zone_derived_region
 
+    _gcloud_labels_diff(params, tokens)
     return metadata, params, positional
 
 
@@ -5647,6 +5729,36 @@ def from_helm_multi(argv: list[str]) -> list[InfrastructureIntent]:
     return intents + _kube_impersonation_intents(intents)
 
 
+_COBRA_ARGS_FILE = Path(__file__).parent / "data" / "cobra_args.json"
+
+
+@lru_cache(maxsize=1)
+def _cobra_args() -> dict[str, Any]:
+    with open(_COBRA_ARGS_FILE) as f:
+        return json.load(f)
+
+
+def _helm_check_args(verb: str, positional: list[str], argv: list[str]) -> None:
+    """helm's argument counts, from each command's cobra ``Args`` validator
+    (cobra_args.json, scripts/gen_cobra_args.py): ``upgrade`` takes exactly two, ``status``
+    one, ``list`` none; ``install`` and ``template`` at most two besides (NameAndChart).
+    For ``get`` and ``repo`` the first word is the subcommand."""
+    table = _cobra_args().get("helm", {})
+    words = positional
+    key = verb
+    if verb in ("get", "repo") and positional and f"{verb} {positional[0]}" in table:
+        key, words = f"{verb} {positional[0]}", positional[1:]
+    bounds = table.get(key)
+    if bounds is not None:
+        least, most = bounds
+        if len(words) < least or (most is not None and len(words) > most):
+            raise ValueError(f"helm {key}: takes {least} to {'any' if most is None else most} "
+                             f"argument(s), got {words!r}, and helm refuses it: {argv!r}")
+    if verb in ("install", "template") and len(words) > 2:
+        raise ValueError(f"helm {verb}: expected at most two arguments, and helm refuses "
+                         f"{words!r}: {argv!r}")
+
+
 def _from_helm_multi(argv: list[str]) -> list[InfrastructureIntent]:
     """Parses a ``helm`` invocation into one InfrastructureIntent per release it acts
     on, e.g.:
@@ -5674,6 +5786,7 @@ def _from_helm_multi(argv: list[str]) -> list[InfrastructureIntent]:
     tokens = leading + rest[1:]
     metadata, params, positional = _parse_helm_tokens(tokens, verb)
     params["raw_action"] = verb
+    _helm_check_args(verb, positional, argv)
     if params.get("atomic") is True or params.get("rollback_on_failure") is True:
         # --atomic (helm 3) turns --wait on, and --rollback-on-failure (helm 4) waits too:
         # by their final values, so the wait is not what --wait alone says
@@ -5747,12 +5860,11 @@ def _from_helm_multi(argv: list[str]) -> list[InfrastructureIntent]:
         raise ValueError(f"unsupported helm repo invocation: {argv!r}")
 
     if verb in ("pull", "fetch"):
-        # downloads a chart to the local disk
-        if len(positional) != 1:
-            raise ValueError(f"helm pull takes one chart: {argv!r}")
-        return [InfrastructureIntent(resource=f"chart/{positional[0]}", action="read",
+        # downloads each chart named to the local disk
+        return [InfrastructureIntent(resource=f"chart/{chart}", action="read",
                                      provider="helm", params=dict(params),
-                                     metadata=dict(metadata))]
+                                     metadata=dict(metadata))
+                for chart in dict.fromkeys(positional)]
 
     if verb in _HELM_READ_VERBS:
         sub_positional = positional
@@ -5791,6 +5903,8 @@ _ARGOCD_ACTION_MAP = {
 }
 
 _ARGOCD_MULTI_APP_VERBS = {"sync", "delete"}
+# The verbs that take exactly one app (app.go: len(args) != 1 prints the usage and exits).
+_ARGOCD_ONE_APP_VERBS = frozenset({"set", "terminate-op", "history", "diff"})
 
 # ArgoCD global options (persistent flags of the root command, accepted anywhere on the
 # line; argo-cd v3.6.1 and main, cmd/argocd/commands/root.go).
@@ -5962,13 +6076,18 @@ def from_argocd_multi(argv: list[str]) -> list[InfrastructureIntent]:
     """Parses an ``argocd`` invocation (see :func:`_from_argocd_multi`). Every intent, from
     every subcommand, then has its app name normalized once: ``NAMESPACE/NAME`` is
     ``app/NAME`` with ``app_namespace``, as argocd's ParseFromQualifiedName reads it, the
-    same app as ``NAME -N NAMESPACE`` (the qualified namespace wins over ``-N``)."""
+    same app as ``NAME -N NAMESPACE`` (the qualified namespace wins over ``-N``, as every verb
+    reads it with ParseFromQualifiedName(name, -N), except create, which sets ``-N`` last)."""
     intents = _from_argocd_multi(argv)
     for intent in intents:
         name = intent.resource.partition("/")[2]
         if "/" in name and name != "*":
             namespace, name = name.split("/", 1)
-            intent.metadata["app_namespace"] = namespace
+            given = intent.metadata.get("app_namespace")
+            # create is the other way round: it builds the app from the qualified name,
+            # then sets -N over it (app.go: if appNamespace != "" { app.Namespace = ... })
+            if not (intent.params.get("raw_action") == "create" and given):
+                intent.metadata["app_namespace"] = namespace
             intent.resource = f"app/{name}"
     return intents
 
@@ -6063,6 +6182,20 @@ def _from_argocd_multi(argv: list[str]) -> list[InfrastructureIntent]:
         apps = [positional[0]]
         if len(positional) > 1:
             params["revision"] = _go_atoi(positional[1], "revision")
+    elif subverb == "create":
+        # cmd/util/app.go constructAppsBaseOnName: one word is the name (and --name must
+        # match it); with none or several, --name is (the words are not read), and with no
+        # name argocd prints the usage and runs nothing
+        name = params.get("name")
+        if len(positional) == 1:
+            if name and name != positional[0]:
+                raise ValueError(f"argocd: --name {name!r} does not match the app name "
+                                 f"{positional[0]!r}, and argocd refuses it: {argv!r}")
+            apps = [positional[0]]
+        elif name:
+            apps = [name]
+        else:
+            raise ValueError(f"could not find an argocd app name in: {argv!r}")
     elif subverb in _ARGOCD_MULTI_APP_VERBS:
         if not positional and not picked:
             raise ValueError(f"could not find an argocd app name in: {argv!r}")
@@ -6070,7 +6203,11 @@ def _from_argocd_multi(argv: list[str]) -> list[InfrastructureIntent]:
     else:
         if not positional:
             raise ValueError(f"could not find an argocd app name in: {argv!r}")
-        apps = [positional[0]]
+        if subverb in _ARGOCD_ONE_APP_VERBS and len(positional) != 1:
+            # app.go: "if len(args) != 1 { c.HelpFunc()...; os.Exit(1) }"
+            raise ValueError(f"argocd app {subverb} takes one app, and argocd refuses "
+                             f"{positional!r}: {argv!r}")
+        apps = [positional[0]]  # get reads args[0] only (app.go)
 
     if from_file:
         # which apps, in which project and namespace, only argocd knows when it reads them;
@@ -7066,6 +7203,17 @@ def _from_git_push(
         delete.params["resolved_at_runtime"] = {"from": "ref/*", "kinds": ["ref"]}
         intents.append(delete)
         intents.append(_git_push_tag("*", None, "delete", params, metadata))
+    # --recurse-submodules=on-demand (or push.recurseSubmodules / submodule.recurse in any
+    # config file git reads) pushes each submodule's commits to its own remote first: which
+    # submodules and refs, only git knows. Only =no or =check pushes none.
+    recurse = params.get("recurse_submodules")
+    if recurse is False or (isinstance(recurse, str) and recurse in ("no", "check")):
+        return intents
+    submodules = _git_push_intent(None, {**params, "submodules": True}, metadata)
+    submodules.resource = "submodule/*"
+    submodules.params.pop("unknown_target", None)
+    submodules.params["resolved_at_runtime"] = {"from": "submodule/*", "kinds": ["submodule"]}
+    intents.append(submodules)
     return intents
 
 
@@ -7177,7 +7325,27 @@ def from_git_multi(argv: list[str]) -> list[InfrastructureIntent]:
         # marked), as is a name git resolves (HEAD, @{-1}, -)
         targets = positional[:2] or ["HEAD"]
         intents = [one(f"history/{target}", "rewrite") for target in targets]
-        if len(positional) < 2 or any(_git_resolved_name(t) for t in targets):
+        # --update-refs also force-updates every other branch that points into the
+        # rebased commits, and rebase.updateRefs in any config file git reads turns it on:
+        # unless --no-update-refs (or -c rebase.updateRefs=false), those branches, which
+        # only git knows, are rewritten too
+        update_refs = params.get("update_refs")
+        configured = _git_config(leading).get("rebase.updaterefs", "unset")
+        off = update_refs is False or (update_refs is None and configured != "unset"
+                                       and configured is not None
+                                       and not _git_config_true(configured))
+        if (len(positional) < 2 or any(_git_resolved_name(t) for t in targets)
+                or not off):
+            intents.append(one("history/*", "rewrite"))
+        return _mark_open_targets(intents)
+
+    if verb == "pull":
+        # pull.rebase (or branch.<name>.rebase) in a config file turns a pull into a
+        # rebase of the current branch: a rewrite, unless --no-rebase or --ff-only says not
+        rewrite = not any(t in ("--no-rebase", "--ff-only") or t.startswith("--rebase=false")
+                          for t in tokens)
+        intents = [one("history/*", "pull")]
+        if rewrite:
             intents.append(one("history/*", "rewrite"))
         return _mark_open_targets(intents)
 
@@ -7911,15 +8079,53 @@ def from_gh_multi(argv: list[str]) -> list[InfrastructureIntent]:
         intents.append(InfrastructureIntent(resource=resource, action=intent.action,
                                             provider="github", params=params,
                                             metadata=metadata))
-    if intent.params.get("raw_action") == "pr-merge" and intent.params.get("delete_branch"):
-        # --delete-branch deletes the pull request's head branch, remote and local, which
-        # the argv does not name: a branch only gh finds when it runs
-        branch_params = {k: v for k, v in intent.params.items() if k != "resolved_at_runtime"}
-        branch_params["resolved_at_runtime"] = {"from": "branch/*", "kinds": ["branch"]}
-        intents.append(InfrastructureIntent(resource="branch/*", action="delete",
-                                            provider="github", params=branch_params,
-                                            metadata=dict(intent.metadata)))
+    intents.extend(_gh_secondary_changes(intent, argv))
     return intents
+
+
+def _gh_secondary_changes(intent: InfrastructureIntent,
+                          argv: list[str]) -> list[InfrastructureIntent]:
+    """What a gh command changes besides the object it names: ``pr merge -d`` and ``pr
+    close -d`` delete the head branch (which the argv does not name: ``branch/*``, marked);
+    ``issue transfer`` creates the issue in the target repository; ``release delete
+    --cleanup-tag`` deletes the tag; ``label clone`` creates labels in the repository it
+    runs on, and with ``--force`` overwrites them (``label/*``, marked)."""
+    raw = intent.params.get("raw_action")
+    base = {k: v for k, v in intent.params.items() if k != "resolved_at_runtime"}
+
+    def marked(resource: str, action: str, metadata: dict[str, Any] | None = None,
+               **extra: Any) -> InfrastructureIntent:
+        params = {**base, **extra}
+        kind = resource.partition("/")[0]
+        if resource.endswith("/*"):
+            params["resolved_at_runtime"] = {"from": resource, "kinds": [kind]}
+        return InfrastructureIntent(resource=resource, action=action, provider="github",
+                                    params=params, metadata=dict(
+                                        intent.metadata if metadata is None else metadata))
+
+    out: list[InfrastructureIntent] = []
+    if raw in ("pr-merge", "pr-close") and intent.params.get("delete_branch"):
+        out.append(marked("branch/*", "delete"))
+    elif raw == "issue-transfer":
+        words = [w for w in argv[3:] if not w.startswith("-")]
+        if len(words) >= 2:
+            target: dict[str, Any] = {}
+            _gh_set_repo(target, words[1])
+            out.append(marked("issue/*", "create", target))
+    elif raw == "release-delete" and intent.params.get("cleanup_tag"):
+        out.append(marked(f"tag/{intent.resource.partition('/')[2]}", "delete"))
+    elif raw == "label" and intent.resource == "label/clone":
+        out.append(marked("label/*", "update" if intent.params.get("force") else "create"))
+    elif raw == "repo-rename" and intent.params.get("new_name"):
+        # the repository under its new name: same owner
+        repo = intent.metadata.get("repo")
+        owner_path = repo.rsplit("/", 1)[0] if isinstance(repo, str) and "/" in repo else "*"
+        resource = f"repo/{owner_path}/{str(intent.params['new_name']).lower()}"
+        made = marked(resource, "create")
+        if owner_path == "*":
+            made.params["resolved_at_runtime"] = {"from": resource, "kinds": ["repo"]}
+        out.append(made)
+    return out
 
 
 def from_gh(argv: list[str]) -> InfrastructureIntent:
@@ -8061,6 +8267,17 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
         params["raw_action"] = f"repo-{subverb}"
         action = _gh_action("repo", subverb)
         spec = positional[0] if positional else None
+        if subverb == "rename":
+            # rename NEW_NAME acts on -R's repository (or the current one); the word is the
+            # new name, under the same owner (rename.go)
+            if spec is None:
+                raise ValueError(f"gh repo rename needs the new name here: {argv!r}")
+            params["new_name"] = spec
+            spec = None
+            if metadata.get("repo"):
+                return InfrastructureIntent(
+                    resource=f"repo/{metadata['repo']}", action=action, provider="github",
+                    params=params, metadata=metadata)
         if spec is not None and ("/" in spec or ":" in spec):
             _gh_set_repo(metadata, spec)
             resource = f"repo/{metadata['repo']}"
@@ -8193,6 +8410,14 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
             (group,) if _gh_command_spec((group,)) is not None else None)
         metadata, params, positional = _parse_gh_tokens(tokens, command)
     params["raw_action"] = group
+    if group == "cache" and positional[:1] == ["delete"]:
+        # cache delete KEY|ID, or --all: every cache of the repository
+        if params.get("all") or len(positional) < 2:
+            params["resolved_at_runtime"] = {"from": "cache/*", "kinds": ["cache"]}
+            return InfrastructureIntent(resource="cache/*", action="delete",
+                                        provider="github", params=params, metadata=metadata)
+        return InfrastructureIntent(resource=f"cache/{positional[1]}", action="delete",
+                                    provider="github", params=params, metadata=metadata)
     # gh <group> <command> ...: the resource keeps the command word, as before
     subverb = positional[0] if (group, None) not in _GH_ACTIONS and positional else None
     action = _gh_action(group, subverb)
