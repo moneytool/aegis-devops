@@ -1547,3 +1547,59 @@ def test_flux_with_source_namespace_is_not_the_objects():
     # filling the environment's namespace does not settle it either
     verdict, _ = _flux_verdict(rule, command, environ={"FLUX_SYSTEM_NAMESPACE": "dev"})
     assert verdict == "ESCALATE"
+
+
+@pytest.mark.parametrize("command,targets", [
+    # B1: "tag <name>" is refs/tags/<name> (builtin/push.c set_refspecs)
+    ("git push --no-follow-tags origin tag v1", [("ref/v1", "push"), ("tag/v1", "push")]),
+    # B2: a deleted tag is a delete, however it is spelled
+    ("git push --delete origin refs/tags/v1", [("ref/v1", "delete"), ("tag/v1", "delete")]),
+    ("git push origin :refs/tags/v1", [("ref/v1", "delete"), ("tag/v1", "delete")]),
+    ("git push --delete origin tag v1", [("ref/v1", "delete"), ("tag/v1", "delete")]),
+    ("git push origin +refs/tags/v1 --no-follow-tags",
+     [("ref/v1", "push"), ("tag/v1", "push")]),
+    # every tag goes with --mirror, and the remote's other tags are deleted
+    ("git push --mirror --no-follow-tags origin",
+     [("ref/*", "push"), ("tag/*", "push"), ("ref/*", "delete"), ("tag/*", "delete")]),
+    ("git push --prune origin main --no-follow-tags",
+     [("ref/main", "push"), ("ref/*", "delete"), ("tag/*", "delete")]),
+])
+def test_git_push_tags_carry_the_action_git_takes(command, targets):
+    # run on git 2.52 against a local bare remote: tag t9, --delete tag t9, and a short
+    # name (t8) that is a tag pushing refs/tags/t8
+    assert [(i.resource, i.action) for i in from_argv(command.split())] == targets
+
+
+def test_git_push_tag_force_is_recorded():
+    tag = [i for i in from_argv("git push origin +refs/tags/v1".split())
+           if i.resource == "tag/v1"][0]
+    assert tag.params["force"] is True
+
+
+@pytest.mark.parametrize("command", [
+    "git push origin tag",  # tag shorthand without <tag>
+    "git push --delete origin a:b",  # --delete only accepts plain target ref names
+    "git push --delete origin",  # --delete doesn't make sense without any refs
+    "git push --delete --tags origin x",  # cannot be used together
+])
+def test_git_push_refuses_what_git_refuses(command):
+    with pytest.raises(ValueError):
+        from_argv(command.split())
+
+
+@pytest.mark.parametrize("rule,command,verdict", [
+    (_rule("git", "tag/v1", ["delete"]), "git push --delete origin refs/tags/v1", "BLOCK"),
+    (_rule("git", "tag/v1", ["delete"]), "git push origin :refs/tags/v1", "BLOCK"),
+    (_rule("git", "tag/v1", ["push"]), "git push --no-follow-tags origin tag v1", "BLOCK"),
+    # a short name is a tag when the local (or remote) ref of that name is one
+    (_rule("git", "tag/v1*", ["push"]), "git push origin v1.2.0 --no-follow-tags",
+     "ESCALATE"),
+    (_rule("git", "tag/v1", ["delete"]), "git push --delete origin v1", "ESCALATE"),
+    (_rule("git", "tag/v1", ["delete"]), "git push origin :v1", "ESCALATE"),
+    (_rule("git", "tag/v2", ["push"]), "git push origin v1 --no-follow-tags", "ALLOW"),
+    (_rule("git", "tag/*", ["push"]), "git push origin refs/heads/main --no-follow-tags",
+     "ALLOW"),
+    (_rule("git", "tag/*", ["delete"]), "git push --mirror origin", "BLOCK"),
+])
+def test_git_push_tag_rules_hold(rule, command, verdict):
+    assert _verdict([rule], command) == verdict

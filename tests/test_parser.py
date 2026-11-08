@@ -1461,7 +1461,9 @@ def test_kubectl_identity_flags_before_verb_land_in_metadata():
 def test_git_launcher_options_are_not_recorded_in_params():
     intent = from_git(["git", "-C", "/repo", "--no-pager", "push", "-f", "origin", "main"])
     assert intent.resource == "ref/main"
-    assert intent.params == {"force": True, "raw_action": "push"}
+    # a short name may be a tag, as only git knows when it runs
+    assert intent.params == {"force": True, "raw_action": "push",
+                             "possible_resources": ["tag/main"]}
 
 
 def test_helm_kube_context_before_verb_lands_in_metadata():
@@ -1806,7 +1808,8 @@ def test_git_push_with_refspec_has_no_unknown_target():
 
 
 def test_git_push_mirror_does_not_swallow_the_remote_and_implies_force():
-    push, _tags, delete = from_git_multi(["git", "push", "--mirror", "origin"])
+    push, _tags, delete, tag_delete = from_git_multi(["git", "push", "--mirror", "origin"])
+    assert (tag_delete.resource, tag_delete.action) == ("tag/*", "delete")
     assert push.metadata == {"remote": "origin"}
     assert push.params["mirror"] is True
     assert push.params["force"] is True

@@ -744,6 +744,26 @@ def _may_be_runtime_target(pattern: str, target: dict[str, Any]) -> bool:
     return _pattern_may_start_with(rest, prefix)
 
 
+def _may_be_possible_resource(pattern: str, intent: InfrastructureIntent) -> bool:
+    """Whether a rule on ``pattern`` matches a resource ``intent`` may turn out to be
+    (``params["possible_resources"]``): ``git push origin v1`` pushes ``ref/v1``, which
+    is a tag when the local ``v1`` is one, as only git knows when it runs."""
+    possible = intent.params.get("possible_resources")
+    if not isinstance(possible, list):
+        return False
+    return any(resource_matches(pattern, InfrastructureIntent(
+        resource=resource, action=intent.action, provider=intent.provider))
+        for resource in possible if isinstance(resource, str))
+
+
+def _may_be_unresolved_target(pattern: str, intent: InfrastructureIntent) -> bool:
+    """Whether a rule on ``pattern`` that does not match ``intent`` may still be about
+    what it reaches when the tool runs."""
+    target = intent.params.get("resolved_at_runtime")
+    return ((isinstance(target, dict) and _may_be_runtime_target(pattern, target))
+            or _may_be_possible_resource(pattern, intent))
+
+
 def _may_be_about_target(pattern: str, intent: InfrastructureIntent) -> bool:
     """Whether a rule on ``pattern`` matches what ``intent`` targets, or might:
     its objects are in a manifest nobody read, or kubectl finds them when it runs."""
@@ -751,8 +771,7 @@ def _may_be_about_target(pattern: str, intent: InfrastructureIntent) -> bool:
         return True
     if intent.params.get("manifest_not_inspected") is True:
         return not pattern.startswith("manifest/")
-    target = intent.params.get("resolved_at_runtime")
-    return isinstance(target, dict) and _may_be_runtime_target(pattern, target)
+    return _may_be_unresolved_target(pattern, intent)
 
 
 def _matches_except_scope(
@@ -1402,18 +1421,19 @@ class ConstraintStore:
         (``params["resolved_at_runtime"]``: ``kubectl exec deploy/web``, ``kubectl
         delete all --all``): every constraint for the same provider and action
         that might be about one of them but does not match the intent, like a
-        rule on ``pod/payments-0``. The interceptor escalates with
+        rule on ``pod/payments-0``, and a rule on a resource the intent may turn out
+        to be (``params["possible_resources"]``). The interceptor escalates with
         ``target-unresolved: <id>``, since neither "applies" nor "does not" can
         be known here."""
         _require_tz_aware(now)
-        target = intent.params.get("resolved_at_runtime")
-        if not isinstance(target, dict):
+        if not isinstance(intent.params.get("resolved_at_runtime"), dict) and not \
+                intent.params.get("possible_resources"):
             return []
         return [
             c
             for c in self._candidates(intent)
             if not resource_matches(c.resource_pattern, intent)
-            and _may_be_runtime_target(c.resource_pattern, target)
+            and _may_be_unresolved_target(c.resource_pattern, intent)
             and self._applies_apart_from_resource(c, intent, now)
         ]
 

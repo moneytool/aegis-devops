@@ -4541,7 +4541,11 @@ def _from_git_push(
     remote = positional[0] if positional else None
     if remote is None and isinstance(params.get("repo"), str):
         remote = params["repo"]  # --repo is the remote when none is given after the verb
-    refspecs = positional[1:]
+    if params.get("delete") is True and any(
+            params.get(k) is True for k in ("tags", "all", "branches", "mirror")):
+        raise ValueError("git push: --delete cannot be used with --all/--branches/--mirror/"
+                         "--tags")
+    refspecs = _git_push_refspecs(positional[1:], params.get("delete") is True)
     if remote is not None and _git_remote_is_url(remote):
         # a URL or path: which configured remote (if any) it is, is not on the argv
         params = {**params, "remote_url": remote}
@@ -4555,31 +4559,71 @@ def _from_git_push(
         # in git's config decide what a push with no refspec sends, and whether it forces
         params = {**params, "unresolved_scope": [*params.get("unresolved_scope", []), "force"]}
     intents = [_git_push_intent(refspec, params, metadata) for refspec in refspecs or [None]]
-    for refspec in refspecs:
+    for refspec, intent in zip(refspecs, intents, strict=False):
         dst = refspec.lstrip("+").rpartition(":")[2]
         if dst.startswith("refs/tags/"):
-            intents.append(_git_push_tag(dst[len("refs/tags/"):], refspec, params, metadata))
+            intents.append(_git_push_tag(dst[len("refs/tags/"):], refspec, intent.action,
+                                         params, metadata))
+        elif dst and not dst.startswith("refs/") and "*" not in dst and \
+                not intent.params.get("unknown_target"):
+            # git qualifies a short name by what it is: the local ref the source names,
+            # or the remote ref of that name, which may be a tag either way
+            intent.params["possible_resources"] = [f"tag/{intent.resource[4:]}"]
     negated = ("follow-tags", None) in options or (
         "push.followtags" in config and not _git_config_true(config["push.followtags"]))
     follow = params.get("follow_tags") is True or (
         "push.followtags" in config and _git_config_true(config["push.followtags"])
         and not negated)
-    if refspecs and (params.get("tags") is True or follow):
+    # a push that only deletes sends no tags (git refuses --delete with --tags)
+    deleting = bool(refspecs) and all(r.lstrip("+").startswith(":") and r.lstrip("+") != ":"
+                                      for r in refspecs)
+    if refspecs and not deleting and (params.get("tags") is True or follow):
         intents.append(_git_push_intent(None, params, metadata))
-    if params.get("tags") is True or not negated:
-        # tags: every one with --tags; with push.followTags, in any config file git reads,
-        # the annotated tags reachable from what is pushed. Only a rule on tag/... is
-        # about these: a rule on ref/main is not.
-        intents.append(_git_push_tag("*", None, params, metadata))
+    if not deleting and (params.get("tags") is True or params.get("mirror") is True
+                         or not negated):
+        # tags: every one with --tags or --mirror; with push.followTags, in any config
+        # file git reads, the annotated tags reachable from what is pushed. Only a rule on
+        # tag/... is about these: a rule on ref/main is not.
+        intents.append(_git_push_tag("*", None, "push", params, metadata))
     if params.get("prune") is True or params.get("mirror") is True:
         intents.append(_git_push_intent(None, {**params, "delete": True}, metadata))
+        # the remote tags with no local one go too
+        intents.append(_git_push_tag("*", None, "delete", params, metadata))
     elif not refspecs:
         # remote.<name>.mirror makes a push with no refspec delete remote refs too
         delete = _git_push_intent(None, {**params, "delete": True}, metadata)
         delete.params.pop("unknown_target", None)
         delete.params["resolved_at_runtime"] = {"from": "ref/*", "kinds": ["ref"]}
         intents.append(delete)
+        intents.append(_git_push_tag("*", None, "delete", params, metadata))
     return intents
+
+
+def _git_push_refspecs(words: list[str], delete: bool) -> list[str]:
+    """The refspecs git builds from the words after the remote (builtin/push.c
+    set_refspecs): ``tag <name>`` is ``refs/tags/<name>``, and with ``--delete`` every
+    name is ``:<name>``; git refuses ``--delete`` with a ``:`` in a name, an empty name,
+    no name at all, or ``tag`` with no name after it."""
+    refspecs: list[str] = []
+    i = 0
+    while i < len(words):
+        ref = words[i]
+        if ref == "tag":
+            i += 1
+            if i >= len(words):
+                raise ValueError("git push: tag shorthand without <tag>")
+            ref = f"refs/tags/{words[i]}"
+            refspecs.append(f":{ref}" if delete else ref)
+        elif delete:
+            if ":" in ref or not ref:
+                raise ValueError("git push: --delete only accepts plain target ref names")
+            refspecs.append(f":{ref}")
+        else:
+            refspecs.append(ref)
+        i += 1
+    if delete and not refspecs:
+        raise ValueError("git push: --delete doesn't make sense without any refs")
+    return refspecs
 
 
 def _git_remote_is_url(remote: str) -> bool:
@@ -4588,16 +4632,19 @@ def _git_remote_is_url(remote: str) -> bool:
         ":" in remote and "/" not in remote.split(":", 1)[0])
 
 
-def _git_push_tag(name: str, refspec: str | None, params: dict[str, Any],
+def _git_push_tag(name: str, refspec: str | None, action: str, params: dict[str, Any],
                   metadata: dict[str, Any]) -> InfrastructureIntent:
-    """A tag a push sends, as ``tag/<name>`` (``ref/<name>`` stays for a named refspec).
-    ``tag/*`` is marked: which tags, is only known when git runs."""
+    """A tag a push sends or deletes (``action``), as ``tag/<name>`` (``ref/<name>``
+    stays for a named refspec). ``tag/*`` is marked: which tags, is only known when git
+    runs."""
     tag_params = {k: v for k, v in params.items() if k != "unknown_target"}
-    if refspec is not None and refspec.startswith("+"):
+    if (refspec is not None and refspec.startswith("+")) or params.get("mirror") is True:
         tag_params["force"] = True
+    if action == "delete":
+        tag_params["delete"] = True
     if name == "*":
         tag_params["resolved_at_runtime"] = {"from": "tag/*", "kinds": ["tag"]}
-    return InfrastructureIntent(resource=f"tag/{name}", action="push", provider="git",
+    return InfrastructureIntent(resource=f"tag/{name}", action=action, provider="git",
                                 params=tag_params, metadata=dict(metadata))
 
 
