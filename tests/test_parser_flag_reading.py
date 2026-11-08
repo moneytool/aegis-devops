@@ -616,9 +616,10 @@ def test_an_az_name_rule_holds_on_a_glued_name():
     # a --no- flag takes no value, so the word after it is the name
     ("gcloud compute instances delete --no-graceful-shutdown web-1",
      ["compute/instance/web-1"]),
-    # an unknown flag may be a boolean: the word after it may be the name
-    ("gcloud compute instances delete --keep-disks boot web-1",
-     ["compute/instance/boot", "compute/instance/web-1"]),
+    # a flag the table has takes its value; the word after that is the name
+    ("gcloud compute instances delete --keep-disks boot web-1", ["compute/instance/web-1"]),
+    ("gcloud compute instances delete web-1 --some-flag=x prod-1",
+     ["compute/instance/web-1", "compute/instance/prod-1"]),
     ("gcloud compute instances create web --machine-type e2-small",
      ["compute/instance/web"]),
     ("gcloud sql import sql prod-db gs://b/f.sql", ["sql/instance/prod-db"]),
@@ -650,6 +651,27 @@ def test_gcloud_rule_on_one_name_holds(command, verdict):
         rule = _rule("gcp", "storage/bucket/prod-1", ["delete"])
         verdict = "BLOCK"
     assert _verdict([rule], command) == verdict
+
+
+@pytest.mark.parametrize("command", [
+    # an unknown flag followed by a word: its value, or a boolean and then a name
+    "gcloud compute instances delete web-1 --graceful prod-1",
+    "gcloud compute instances delete --unknown-flag web-1",
+    "gcloud --unknown-global x compute instances delete web-1",
+])
+def test_gcloud_refuses_an_unknown_flag_before_a_word(command):
+    with pytest.raises(ValueError, match="cannot tell whether"):
+        from_argv(command.split())
+
+
+@pytest.mark.parametrize("command,resources", [
+    ("gcloud compute instances delete web-1 --unknown-flag", ["compute/instance/web-1"]),
+    ("gcloud compute instances delete web-1 --unknown-flag --zone us-east1-b",
+     ["compute/instance/web-1"]),
+    ("gcloud storage rm --unknown-flag x gs://b", ["storage/bucket/b"]),
+])
+def test_gcloud_unknown_flags_that_cannot_hide_a_name_are_kept(command, resources):
+    assert [i.resource for i in from_argv(command.split())] == resources
 
 
 def test_gsutil_refuses_an_option_it_does_not_know():

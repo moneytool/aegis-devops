@@ -2424,6 +2424,35 @@ _GSUTIL_VERB_LETTERS = {
     "mv": (frozenset("AcDeIMNnpPrRtUvZJ"), frozenset("asjzL")),
 }
 
+# gcloud flags that take a value, beyond --region, --zone and --project, which a following
+# word must not be read past: the global ones (gcloud topic flags) and those of the
+# commands that change something most often, from the gcloud reference. A flag in no table
+# that is followed by a word is refused: gcloud never takes a word starting with "-" as a
+# value, but a word that does not start with "-" is the flag's value if it takes one and a
+# name if it is a boolean, and gcloud reads every name after the verb (see
+# from_gcloud_multi). Write such a flag as --flag=value. Add a flag here only when its
+# reference page shows it taking a value (``--flag=VALUE``): one listed wrongly would
+# take a name as its value.
+_GCLOUD_VALUE_FLAGS = frozenset({
+    # global
+    "account", "billing-project", "configuration", "filter", "flags-file", "flatten",
+    "format", "impersonate-service-account", "access-token-file", "trace-token",
+    "verbosity", "limit", "page-size", "sort-by",
+    # compute instances, disks, firewall rules
+    "machine-type", "image", "image-family", "image-project", "network", "subnet",
+    "boot-disk-size", "boot-disk-type", "size", "type", "labels", "tags", "metadata",
+    "scopes", "service-account", "keep-disks", "delete-disks", "description", "rules",
+    "source-ranges", "target-tags", "allow", "direction", "priority",
+    # container clusters and node pools
+    "cluster", "location", "node-pool", "num-nodes", "min-nodes", "max-nodes",
+    "cluster-version", "node-version",
+    # iam bindings
+    "member", "role", "condition",
+    # run, functions, sql
+    "platform", "memory", "cpu", "port", "set-env-vars", "update-env-vars", "runtime",
+    "entry-point", "source", "tier", "database-version", "storage-size",
+})
+
 # gcloud zone -> region: a zone is "<region>-<letter>" (e.g. "us-east1-b" ->
 # "us-east1"); strip the trailing "-<letter>" component (REVIEW-4 T2.5).
 _ZONE_SUFFIX = re.compile(r"-[a-z]$")
@@ -2435,18 +2464,17 @@ def _region_from_zone(zone: str) -> str:
 
 def _parse_gcloud_tokens(
     tokens: list[str], *, storage: bool = False,
-) -> tuple[dict[str, Any], dict[str, Any], list[str], list[tuple[int, str]]]:
-    """``(metadata, params, positional, maybe_operands)``. gcloud takes no abbreviated flag
-    (calliope disables argparse's prefixes) and never a word starting with "-" as a value.
-    A flag the parser does not know may be a boolean, and then the word after it is an
-    operand, not its value: each such word is in ``maybe_operands`` with the number of
-    operands before it. A ``--no-`` flag is gcloud's off switch of a boolean and takes no
-    value. Words after ``--`` go to the command gcloud runs (``compute ssh``), and are
-    kept in ``params["passthrough"]``."""
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+    """``(metadata, params, positional)``. gcloud takes no abbreviated flag (calliope
+    disables argparse's prefixes) and never a word starting with "-" as a value. A flag in
+    no table followed by a word is refused (see :data:`_GCLOUD_VALUE_FLAGS`). A ``--no-``
+    flag is gcloud's off switch of a boolean and takes no value. Words after ``--`` go to
+    the command gcloud runs (``compute ssh``), and are kept in ``params["passthrough"]``.
+    ``storage`` reads ``gcloud storage``, whose targets are only ``gs://`` paths: there an
+    unknown flag may take a word that is not a path."""
     metadata: dict[str, Any] = {}
     params: dict[str, Any] = {}
     positional: list[str] = []
-    maybe_operands: list[tuple[int, str]] = []
     # --zone derives metadata["region"] unless --region is given explicitly
     # -- explicit wins regardless of which flag comes first on the argv
     # (REVIEW-4 T2.5), so both are tracked separately and reconciled once
@@ -2491,17 +2519,26 @@ def _parse_gcloud_tokens(
                 params["async"] = _bool_param(val)
             elif key in _GCLOUD_BOOL_FLAGS or (storage and key in _GCLOUD_STORAGE_BOOL_FLAGS):
                 params[key.replace("-", "_")] = _bool_param(val)
+            elif key in _GCLOUD_VALUE_FLAGS and tok.startswith("--"):
+                if val is None:
+                    i += 1
+                    val = _value_at(tokens, i, tok)
+                params[key] = _coerce(val)
             elif val is not None:
                 params[key] = _coerce(val)
             elif key.startswith("no-") and tok.startswith("--"):
                 params[key] = True
             elif i + 1 < n and not tokens[i + 1].startswith("-"):
-                if storage and tokens[i + 1].startswith("gs://"):
+                if not storage:
+                    raise ValueError(
+                        f"gcloud: cannot tell whether {tok!r} takes a value (next word "
+                        f"{tokens[i + 1]!r}), and if it does not, that word is a name; write "
+                        f"{tok}=<value> or put {tok} last: {tokens!r}")
+                if tokens[i + 1].startswith("gs://"):
                     params[key] = True  # a path stays a path
                 else:
                     i += 1
                     params[key] = _coerce(tokens[i])
-                    maybe_operands.append((len(positional), tokens[i]))
             else:
                 params[key] = True
         else:
@@ -2513,7 +2550,7 @@ def _parse_gcloud_tokens(
     elif zone_derived_region is not None:
         metadata["region"] = zone_derived_region
 
-    return metadata, params, positional, maybe_operands
+    return metadata, params, positional
 
 
 def _gcs_uri_intents(
@@ -2595,9 +2632,9 @@ def from_gcloud_multi(argv: list[str]) -> list[InfrastructureIntent]:
     ``gcloud compute instances start web-1 --zone us-central1-a``
       -> resource "compute/instance/web-1", action "start"
 
-    One intent per name: ``gcloud compute instances delete a b`` deletes both. A word an
-    unknown flag may have taken as its value, between the verb and the first name, is a
-    name too, since that flag may be a boolean (``--no-graceful-shutdown`` is one by its
+    One intent per name: ``gcloud compute instances delete a b`` deletes both. A flag the
+    parser has no entry for, followed by a word, is refused: the word is its value or a
+    name, and the parser cannot tell which (``--no-graceful-shutdown`` is a boolean by its
     name, and takes none).
     """
     if not argv:
@@ -2610,19 +2647,21 @@ def from_gcloud_multi(argv: list[str]) -> list[InfrastructureIntent]:
         raise ValueError(f"not a recognizable gcloud invocation: {argv!r}")
 
     tokens = argv[1:]
-    metadata, params, positional, maybe = _parse_gcloud_tokens(tokens)
+    # gcloud storage's targets are gs:// paths, so an unknown flag there cannot hide one
+    storage = argv[1:2] == ["storage"] or argv[1:3] in (["alpha", "storage"],
+                                                         ["beta", "storage"])
+    metadata, params, positional = _parse_gcloud_tokens(tokens, storage=storage)
 
     release_track = None
     if positional and positional[0] in ("alpha", "beta"):
         release_track = positional.pop(0)
-        maybe = [(p - 1, w) for p, w in maybe]
 
     if (
         len(positional) >= 2
         and positional[0] == "storage"
         and positional[1] in _GCS_LEGACY_VERB_MAP
     ):
-        metadata, params, positional, _maybe = _parse_gcloud_tokens(tokens, storage=True)
+        metadata, params, positional = _parse_gcloud_tokens(tokens, storage=True)
         if release_track:
             positional.remove(release_track)
             params["release_track"] = release_track
@@ -2646,11 +2685,6 @@ def from_gcloud_multi(argv: list[str]) -> list[InfrastructureIntent]:
         resource_prefix, names = "sql/instance", names[1:2]
     elif verb in _GCLOUD_IAM_BINDING_VERBS or verb in ("get-credentials", "ssh"):
         names = names[:1]  # set-iam-policy NAME POLICY_FILE
-    if not names:
-        # a word a flag may have taken while being a boolean, right after the verb
-        names = [w for p, w in maybe if p == verb_idx + 1][:1]
-    else:
-        names = [w for p, w in maybe if p == verb_idx + 1] + names
     if resource_prefix is None:
         *head, last = group_words
         resource_prefix = "/".join([*head, _singularize(last)])
