@@ -9,7 +9,10 @@ behaviour.
 ## [Unreleased]
 
 Every parser reads flags the way its tool does: a flag that takes a value takes the next word
-whatever it looks like, and a flag the parser cannot place is refused instead of guessed (#80).
+whatever it looks like, and a flag the parser cannot place, or a short letter whose meaning on
+the command it does not know, is refused instead of guessed or recorded as written (#80).
+Values are applied in the tool's own order, and words after `--` are read as the tool reads
+them.
 What a command takes from outside its argv -- a configuration file, the environment, a file a
 value is read from, values reused from an earlier run -- is marked unresolved, so a rule it
 could affect escalates, or the command is refused; so is an ID the tool looks up from a name
@@ -19,7 +22,9 @@ abbreviated option, a short option or its long one, a literal or a nested key, `
 a qualified or a flagged namespace) meets a rule written any of those ways, on every
 subcommand, and so does a mark that leaves it unresolved. A value decoded from JSON or YAML
 is the value the tool sends (helm's JSON numbers are float64, aws reads YAML 1.2). A target the tool expands when it runs (a selector, `--all`, a
-wildcard bucket, a recursive path) is marked, so a rule on anything it may reach escalates.
+wildcard bucket, a recursive path, a file or stdin of objects) is marked, so a rule on anything
+it may reach escalates, and a selection's scope is never copied onto the targets named beside
+it.
 No command is read as a read unless it is one of the commands audited as only reading; any
 other, an unknown one included, is refused or keeps its own verb as its action. Commands that
 act on several objects are one intent per object, which can raise a plan rule's count
@@ -33,7 +38,8 @@ key a KMS alias or the secret a Secrets Manager name stands for, which are marke
 resolved. The aws option table is aws-cli 2.37.4's, so an option or command added later is
 refused until the table is regenerated; the gcloud flag table covers the commands the parser
 names resources for, and other gcloud commands, and alpha and beta, keep the rule that an
-unknown flag before a word is refused.
+unknown long flag before a word is refused (an unknown long flag at the end is kept by its
+name). git verbs without an option table leave every param unresolved when given an option.
 
 ### Fixed
 - helm and flux read a long flag with no entry in the parser as a flag with no value, so the
@@ -403,6 +409,36 @@ unknown flag before a word is refused.
   are `--delete`, `--move`, `--copy` with `--force`). argocd and gh already were. Tests check
   that the short and long spellings give the same intents for every alias in the tables.
   From each tool's source or reference pages; not run.
+- `argocd app create decoy --file - --upsert` was `app/decoy`, but argocd reads the
+  Applications from the file, a URL or stdin and ignores the name: the target is now `app/*`,
+  marked, with every field the line does not give unresolved. The other inputs that decide
+  targets were checked: kubectl `-f -` is a manifest nobody read, helm `-f -` leaves `set.*`
+  unresolved, `gh --input -` its fields, aws `file:///dev/stdin` every option, and gcloud
+  `--flags-file` is refused; az values read from `@file` or `@-` are now unresolved. From
+  source.
+- `argocd app sync payments --project dev` gave `app/payments` the project `dev`, though
+  `--project` only picks more apps to sync: the app named keeps its own (unknown) project, and
+  only the added selection has `project: dev` (and `-l` the selector). kubectl refuses a name
+  beside a selector, and now so does the parser (checked on kubectl 1.36); kubectl `run` and
+  `expose -l` is `--labels`. flux `--all` with names acts on the names only, as before.
+- `gh workflow run ... -F environment=prod -f environment=dev` was `dev`, the last on the
+  line, but gh reads every `-f` first and every `-F` after (cli v2.103 run.go and
+  api/fields.go), so `prod` wins. gh api now also builds nested keys and arrays (`a[b]=1`,
+  `a[]=1`) and refuses a key set twice, as gh does, and a dispatch body's inputs are the
+  porcelain's `inputs`. kubectl `run --overrides` patches the object after every flag, so
+  every key and the name are now unresolved (a `**` mark). helm's set order and aws's command
+  line over its input were already applied.
+- az short options in scopes built with `.format()`, `+`, f-strings or loop variables were
+  missed, and fell back to the letter: `az storage fs file delete -f fs -p prod` recorded `f`
+  and `p`. The generator now reads those scopes (1363 in all), and a short letter with no
+  entry for the command is refused, on az and on kubectl, helm, flux, argocd, gh and gcloud
+  alike. knack's `-y` (`--yes`) is one of az's own. git verbs without an option table no
+  longer record options as written (`git fetch -n` was read as a dry run): any option leaves
+  every param unresolved, and `filter-branch`'s refs are marked.
+- `gcloud compute instances delete safe -- prod` kept `prod` as a command to pass on, but
+  argparse reads it as a positional: both are targets now. Only `ssh` takes a command after
+  `--`; on a command outside the flag table `--` is refused. kubectl, helm, flux, argocd, gh
+  and git read the words after `--` as arguments, and aws and az refuse them, as before.
 - Tests that used `flux reconcile ... --dry-run`, `flux get ... --export` and `git push
   --dry-run=false`, which the tools refuse, now use commands the tools accept (`flux create ...
   --export`, `git push --dry-run --no-dry-run`).
