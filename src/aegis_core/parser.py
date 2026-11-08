@@ -76,11 +76,21 @@ absent, so a "real run" rule fires. The last one decides (#75): pflag and
 argparse read a repeated flag that way, so ``--dry-run=client --dry-run=none``
 is a real run, and ``--dry-run --no-dry-run`` is too where the tool has it.
 
-**Short kubectl, helm and flux flags (#75).** pflag reads a short word letter by
-letter: ``-qnprod`` is ``-q -n prod``, and ``-fp`` on ``logs`` is ``-f -p``. A
+**Short kubectl, helm, flux and argocd flags (#75).** pflag reads a short word letter
+by letter: ``-qnprod`` is ``-q -n prod``, and ``-fp`` on ``logs`` is ``-f -p``. A
 letter that takes a value ends the word and the rest is its value. So each walker
 splits a short word as it reaches it, from one table of letters per tool, and a
 word with an unknown letter in front of a value letter or ``A`` is refused.
+
+**Flags the parser has no entry for (#80).** kubectl, helm, flux and argocd each have
+tables of every long flag that takes a value and every one that does not, read from
+the tool's source. A value flag takes the next word whatever it looks like
+(``--description -ndev``). A flag in no table is refused unless ``=value`` or its
+place at the end shows its reading (:func:`_other_flag`), since the next word is its
+value or an operand depending on what the flag is. Words after ``--`` are operands.
+git's options are read as its parse-options reads them (:func:`_parse_git_options`),
+aws and az as Python's argparse reads them, prefixes included, and terraform's as Go's
+flag package does.
 
 **Several manifests (#75).** ``--filename`` is a StringSlice, so ``-f a -f b`` and
 ``-f a,b`` are one ``manifest/<name>`` intent per file. ``--kustomize`` is a plain
@@ -3004,7 +3014,7 @@ _ARGOCD_ACTION_MAP = {
 _ARGOCD_MULTI_APP_VERBS = {"sync", "delete"}
 
 # ArgoCD global options (persistent flags of the root command, accepted anywhere on the
-# line; argo-cd v3.6 cmd/argocd/commands/root.go).
+# line; argo-cd v3.6.1 and main, cmd/argocd/commands/root.go).
 _ARGOCD_GLOBAL_VALUE_FLAGS = {
     "server", "auth-token", "config", "header", "H", "client-crt", "client-crt-key",
     "server-crt", "kube-context", "port-forward-namespace", "logformat", "loglevel",
@@ -3016,10 +3026,11 @@ _ARGOCD_GLOBAL_BOOL_FLAGS = {
     "skip-test-tls",
 }
 
-# Every long flag of the "argocd app" commands, from argo-cd v3.6 (cmd/argocd/commands
-# app*.go and cmd/util/app.go), and the globals above. A flag that takes a value takes the
-# next word whatever it looks like (#80). "app unset" has booleans of the same names as
-# some value flags of create and set (--nameprefix, --ref, ...), and is not parsed.
+# Every long flag of the "argocd app" commands, from argo-cd v3.6.1 and main
+# (cmd/argocd/commands app*.go and cmd/util/app.go), and the globals above. A flag that
+# takes a value takes the next word whatever it looks like (#80). "app unset" has
+# booleans of the same names as some value flags of create and set (--nameprefix, --ref,
+# ...), and is not parsed.
 _ARGOCD_VALUE_FLAGS = frozenset(_ARGOCD_GLOBAL_VALUE_FLAGS) | frozenset({
     "annotations", "app-namespace", "cluster", "config-management-plugin", "container",
     "dest-name", "dest-namespace", "dest-server", "diff-exit-code", "directory-exclude",

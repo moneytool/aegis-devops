@@ -121,8 +121,15 @@ not pick that object: `kubectl delete deploy -l a=b` asks, and so does `kubectl 
 `get` rule on `pod/payments-0`. A rule on another kind or another action is not affected, and a
 namespace in the rule's scope still counts (`-n staging` passes a rule scoped to `prod`).
 `kubectl taint node n1 --all` is both `node/n1` and `node/*`, since kubectl ignores the name there.
-`cordon`, `uncordon`, `drain` and `logs` with `-l` name nothing the parser can read, so the hook
-refuses them.
+`cordon`, `uncordon` and `drain` with `-l` act on every node the selector matches (`node/*`), and
+`logs -l` reads every pod it matches (`pod/*`), as kubectl 1.36 does.
+
+The same holds where other tools pick their targets when they run: `argocd app sync -l` or
+`--project` and `argocd app delete -l` (`app/*`, beside any app named), `flux suspend|resume
+<kind> --all` (`<kind>/*`), `flux reconcile --with-source` (the source kinds the object can
+reference), `helm install --generate-name` (`release/*`), `git filter-repo` (`history/*`) and an
+aws command whose target is in `--cli-input-json` (`<service>/<kind>/*`). A rule on one of them
+escalates with `target-unresolved: <id>`.
 
 `kubectl describe TYPE NAME` describes the object called NAME, and if there is none, every object
 whose name starts with NAME. So `kubectl describe pod pay` is `pod/pay`, and a `describe` rule that

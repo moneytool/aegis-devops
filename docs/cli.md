@@ -13,8 +13,13 @@ Global options in front of the verb (`kubectl -n prod delete …`, `git -C /repo
 their canonical forms; a leading option Aegis does not recognise is an error (exit 65), never a
 guess at where the verb starts. kubectl's short flags can also be bundled, so `-itnprod` is `-i -t
 -n prod` and `-Rf dir` is `-R -f dir`. A bundle with an unknown letter in front of a flag Aegis
-reads (`-xnprod`) is the same error, and kubectl refuses it too. helm and flux words are read the
-same way, from the letters in their source. `kubectl delete namespace prod`
+reads (`-xnprod`) is the same error, and kubectl refuses it too. helm, flux and argocd words are
+read the same way, from the letters in their source. git's options are read as git's
+parse-options reads them (`-fu`, an unambiguous prefix such as `--amen`, `--no-force`), aws
+takes an unambiguous prefix of an option as argparse does (`--reg` is `--region`), and az reads
+`-nNAME` and `-ynNAME` as argparse does. A prefix of an az option that names the target or its
+scope (`--resource-gr`) is refused, since what it stands for depends on the command.
+`kubectl delete namespace prod`
 additionally emits a synthetic `*/*` delete intent scoped to that namespace, so namespace-scoped
 deletion rules fire on it.
 
@@ -348,15 +353,17 @@ the extension and runs it. Some real probes are therefore still refused, for exa
 do not resolve aliases at all: `git co` is read as a git command, and an unknown aws service
 as that service.
 
-kubectl flags: booleans (`--no-headers`, `--watch`, `--interactive`, …) take no value; value
-flags take the next token even when it starts with `-`, as kubectl does. An unknown long flag
-is a boolean at the end of argv and takes a following word as its value. When another option
-follows it, the command is refused (`cannot tell whether '--x' takes a value`). Because a
-following word is taken as the value, an unknown boolean before a name hides that name
-(`kubectl delete pods --new-bool web other` is read as a delete of `pod/other` only): write
-unknown flags as `--flag=value`, or put them last. `kubectl get --raw <path>` is still
-refused: a URI path can read any kind, secrets included, which no kind-based rule would
-match.
+kubectl, helm, flux and argocd flags: each tool has a table of its flags, read from its
+source (kubectl 1.36's `--help` on every command, helm 4.3.1 and 3.21.1, flux 2.10.0,
+argo-cd 3.6.1). Booleans (`--no-headers`, `--no-hooks`, `--prune`, …) take no value; value flags take the next
+token even when it starts with `-`, as pflag does, so `helm upgrade api ./c -n prod
+--description -ndev` runs in `prod`. A flag in no table is a boolean at the end of argv and
+keeps a value written as `--flag=value`. Anywhere else the command is refused (`cannot tell
+whether '--x' takes a value`): if the flag takes a value the next word is that value, and if it
+does not the next word is a flag, a name or an operand, so either guess could misread the
+namespace or the target. A short flag in no table is read the same way. Words after `--` are
+operands on helm, flux and argocd. `kubectl get --raw <path>` is still refused: a URI path can
+read any kind, secrets included, which no kind-based rule would match.
 
 Inside a pipeline an unknown binary (`| grep x`) produces nothing; on its own it produces a
 synthetic `shell` / `binary/<name>` / `exec` intent that `--fail-closed` escalates. When that
@@ -372,11 +379,15 @@ flag, `aegis check <target>` still treats any shell metacharacter in an argv as 
 
 ## Dry runs
 
-A rehearsal (`kubectl --dry-run=client|server`, `aws --dry-run`, `az --what-if|--dry-run`,
-`gcloud --dry-run`) can't change infrastructure, so Aegis never blocks or escalates it — the
-verdict is always `ALLOW`, with `dry_run: true` and `would_be` reporting what a real run would
-have gotten. When the flag is repeated the last one decides: kubectl `--dry-run=client
---dry-run=none` is a real run, and so is `--dry-run --no-dry-run` on aws and git.
+A rehearsal (`kubectl --dry-run=client|server`, `helm --dry-run`, `argocd app sync --dry-run`,
+`flux create --export`, `aws --dry-run`, `aws s3 --dryrun`, `az --what-if|--dry-run`, `gcloud
+--dry-run`, `git push -n`) can't change infrastructure, so Aegis never blocks or escalates it —
+the verdict is always `ALLOW`, with `dry_run: true` and `would_be` reporting what a real run
+would have gotten. When the flag is repeated the last one decides: kubectl `--dry-run=client
+--dry-run=none` is a real run, and so is `--dry-run --no-dry-run` on aws and git (and a prefix of
+`--no-dry-run` that the tool takes, such as `--no-dry`). A `--dry-run` the verb does not have is
+not a rehearsal: flux has none on the verbs Aegis reads, argocd has it only on `app sync`, and
+`git commit -n` is `--no-verify`.
 
 ```
 ALLOW: kubernetes scale deployment/api-server (dry-run; would be BLOCK)

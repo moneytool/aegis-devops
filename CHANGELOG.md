@@ -8,6 +8,121 @@ behaviour.
 
 ## [Unreleased]
 
+Every parser reads flags the way its tool does: a flag that takes a value takes the next word
+whatever it looks like, and a flag the parser cannot place is refused instead of guessed (#80).
+Commands that act on several objects are one intent per object, which can raise a plan rule's
+count (`max_intents`) or change a `ratio`.
+
+### Fixed
+- helm and flux read a long flag with no entry in the parser as a flag with no value, so the
+  word after it was read as flags: `helm upgrade api ./c -n prod --description -ndev` was read
+  as namespace `dev`, and helm runs it in `prod` with the description `-ndev` (#80). `flux create
+  source git a -n prod --url -ndev` was read as `dev` the same way. Both tools now have tables
+  of every long flag that takes a value and every one that does not, read from their source
+  (helm 4.3.1 and 3.21.1, flux2 v2.10.0), so these read as `prod`. helm's `--server-side` takes a
+  value on `upgrade` and `rollback` and none on `install`, as in helm 4. Neither tool was run.
+
+  A flag in no table is now refused unless it carries `=value` or is the last word, on kubectl,
+  helm, flux and argocd alike: if it takes a value the next word is that value, and if it does
+  not the next word is a flag, a name or an operand, so either guess can misread the namespace
+  or the target. Before, kubectl took a following word as the value, so `kubectl delete pod
+  --new-bool web` was a delete of every pod, and helm and flux did the same, so `helm upgrade
+  --no-hooks api ./c` was `release/./c`. kubectl's tables now hold every flag of kubectl 1.36
+  (from `--help` on every command), which also reads flags that were refused before, such as
+  `kubectl config set-context --current --namespace=prod`. A short flag in no table is refused
+  the same way unless it is last.
+- argocd ignored bundled short flags: `argocd app sync a -qnprod` recorded a flag called
+  `qnprod`. Short words are now read letter by letter, as for kubectl, helm and flux, from the
+  letters argocd's `app` commands have (argo-cd v3.6.1 and main, from source, not run), so
+  `-qnprod` is refused, since argocd has no `-q`, and `-yl team=x` is `--yes --selector
+  team=x`. argocd's long flags are in tables too.
+- `argocd app sync a -l team=x` and `argocd app sync a --project prod` sync every app the
+  selector or project picks besides `a`, and `argocd app delete a -l team=x` deletes the apps
+  the selector picks. Only `app/a` was read. Each is now an `app/*` intent, marked, so a rule on
+  one app escalates, and `sync -l` or `--project` with no app named is read instead of refused.
+  `--dry-run` is a rehearsal only on `app sync`, the one verb that has it (from source).
+- `kubectl logs -l app=x` and `kubectl logs -fl app=x` were refused, though kubectl reads the
+  logs of every pod the selector matches. They are now `pod/*` with the selector, marked, in
+  the namespace given, as other selector verbs are, and so are `cordon`, `uncordon` and `drain
+  -l` (`node/*`). Checked on kubectl 1.36 against a local stub API server: it listed the pods or
+  nodes by the selector in that namespace. `logs` has no `-A`, and kubectl refuses it there.
+- `kubectl create deployment -r0xf` and `--replicas=0xf` were recorded as the text `0xf`.
+  pflag reads integers with base 0, so kubectl creates 15 replicas, and `kubectl scale
+  --replicas=0x0` scales to 0, which a rule on `replicas: 0` did not see. Every kubectl integer
+  flag is now read as Go's `strconv.ParseInt(s, 0, …)` reads it (`0x`, `0o`, `0b`, a leading `0`
+  for octal, `_` between digits), and a number kubectl refuses (`08`, `1e3`, out of range,
+  `-rnprod`) is refused. Each spelling in the tests was run with `kubectl create deployment
+  --dry-run=client`.
+- helm uninstalls every release it is given, so `helm uninstall web payments` was read as
+  `release/web` only. It is now one intent per release, and `from_helm` raises on two, as
+  `from_kubectl` does (use `from_helm_multi`). Words after `--` were taken as a flag's value,
+  and are now releases, as pflag reads them: `helm uninstall a -- -nprod` uninstalls a release
+  called `-nprod` in the default namespace. `helm install ./c --generate-name` (or `-g`, or
+  `--name-template`) was read as a release called `./c`; helm names the release when it runs,
+  so it is now `release/*`, marked. `--set`, `--set-string` and `--set-literal` are merged in
+  helm's order, whatever their order on the line, and `-f a.yaml,b.yaml` is two files.
+- flux `suspend`, `resume`, `reconcile`, `delete` and `export` take every name they are given,
+  and only the first was read: `flux suspend ks web payments` missed `payments`. flux 2.10 also
+  takes `TYPE/NAME` words and plural or short type names (`flux suspend ks/a ks/b`, `flux
+  reconcile kustomizations a`, `gitrepo/a`), which were refused or read as a kind called
+  `ks/a`. All of these are now one intent per object, and `from_flux` raises on two (use
+  `from_flux_multi`). The kinds under `image`, `artifact` and
+  `secret` were read as a kind called `image` named `repository`: `flux reconcile image
+  repository a` is now `image-repository/a`. `flux suspend <kind> --all` is `<kind>/*`, marked,
+  and `flux reconcile ks a --with-source` also reaches the kinds of source it can reference.
+  `flux reconcile ... --dry-run` was read as a rehearsal, and flux has no `--dry-run` on any verb
+  the parser reads, so it no longer is. From flux2 v2.10 source; flux was not run.
+- git read options with its own guesses. Options of `push`, `branch`, `tag`, `rebase`, `reset`
+  and `commit` now come from git 2.52's `-h` and completion lists and are read as git's
+  parse-options reads them, which was run against a local bare repository: `git push -fu origin
+  main` was not a force push (the word `-fu` was a flag of its own, and `origin` its value),
+  `git push --force-w origin main` and `git commit --amen` were missed (git takes an unambiguous
+  prefix), `git commit -n --amend` was read as a rehearsal (`-n` is `--no-verify` on commit; it
+  is `--dry-run` only on push), and `git push --dry-run --no-dry origin x` was a rehearsal, and
+  git pushes. An option git refuses is refused. `git push origin safe +main` force-pushes `main`
+  and was read as `ref/safe` only: every refspec is now an intent, a pattern refspec
+  (`refs/heads/*`) reaches refs the argv does not name, and so do `--tags` and `--prune`. `git
+  branch -D a b` and `git tag -d a b` name every branch or tag, `git rebase <upstream> <branch>`
+  also rewrites `<branch>`, and `git filter-repo` rewrites every ref (`history/*`, marked).
+  `from_git` raises on two targets (use `from_git_multi`).
+- aws-cli's argparse takes an unambiguous prefix of an option, and the parser did not: `aws ec2
+  terminate-instances --instance-ids i-1 --regio us-west-1` runs in `us-west-1` and was read with
+  no region, `aws iam delete-role --role prod-admin` deletes `prod-admin` and was `iam/role/*`,
+  and `--instance-id i-1 i-2` terminates both. Global options are now matched as aws matches
+  them, over the whole line (`--reg`, and `--re` even on `s3 rm`), a prefix of a flag that names
+  the target fills a target no full flag names, and a prefix of `--no-dry-run` ends the
+  rehearsal. `aws s3 cp s3://staging/x s3://prod/x` was read as a write to `staging` only: every
+  `s3://` path is now an intent, `mv` also deletes its source, and `sync --delete` deletes in the
+  destination. The s3 commands' own options are read (`--recursive` takes no value, so `aws s3
+  rm --recursive s3://b` is no longer refused, and `--dryrun` rehearses). A target given only in
+  `--cli-input-json` or `--cli-input-yaml` was `*`, which a rule on one name never met; it is now
+  marked. Words after `--` are refused, as aws refuses them. Each case was run with aws-cli 2.37
+  against a closed local port, reading the request it built.
+- az: `-nprod-vm`, `-n=prod-vm` and `-ynprod-vm` were read with no name (argparse reads them as
+  `-n prod-vm`), so a rule on the VM missed. They are now read as argparse reads them. A prefix of
+  `--name`, `--resource-group`, `--location`, `--subscription` or `--ids` (`--resource-gr rg`) is
+  refused, since argparse takes it and what it stands for depends on the command, and so is a
+  bundled word whose first letter depends on the command when an `n`, `g` or `l` follows it
+  (`-snprod`). From azure-cli and knack source; az was not run.
+- gcloud read only the first name: `gcloud compute instances delete web-1 prod-1` missed
+  `prod-1`. Every name is now an intent. A `--no-` flag is a boolean and no longer takes the name
+  after it as its value (`delete --no-graceful-shutdown prod-1`), and a word another unknown flag
+  may have taken, right after the verb, is a name too. Words after `--` (`compute ssh vm -- …`)
+  are kept as `passthrough`, not names. `gcloud sql import sql prod-db …` was `sql/sql`, and is
+  `sql/instance/prod-db`. `gcloud storage rm --recursive gs://a gs://b` and `gsutil -m rm -r
+  gs://b` were refused or read one bucket; both now read their own booleans and every `gs://`
+  path, and `mv` also deletes its source. gcloud takes no abbreviated flag (calliope turns them
+  off), which needed no change. `from_gcloud` raises on two targets (use `from_gcloud_multi`).
+  From source; gcloud was not run.
+- terraform and tofu `apply -destroy=true` (and `-destroy=T`) were refused as needing a plan, and
+  `-destroy -destroy=false` was read as a destroy. Go's flag package reads the last `-destroy`,
+  with `strconv.ParseBool`, and so does the parser now; `-auto-approve=true` and
+  `--auto-approve` set `auto_approve`. `-destroy=T` and `-destroy=yes` were run with terraform in
+  an empty directory.
+- Tests that used `flux reconcile ... --dry-run`, `flux get ... --export` and `git push
+  --dry-run=false`, which the tools refuse, now use commands the tools accept (`flux create ...
+  --export`, `git push --dry-run --no-dry-run`).
+
 ## [1.3.4] — 2026-11-07
 
 kubectl, helm and flux flag spellings are read as the tools read them: a repeated `--dry-run`,
