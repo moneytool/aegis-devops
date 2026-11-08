@@ -391,7 +391,74 @@ _KUBECTL_FOLLOW_VERBS = {"logs"}
 # flag's value. It refuses any other word that is not one of its true spellings.
 _GO_FALSE_WORDS = frozenset({"0", "f", "F", "FALSE", "false", "False"})
 
-# Global boolean flags that are consumed but not recorded anywhere.
+# Flags that cannot change what a tool does to which object, per tool, each with why. Every
+# other flag a parser consumes is recorded (params under its long name, or metadata). Never
+# here: impersonation, auth, headers, endpoints, kubeconfig, context, server, TLS checks,
+# tokens, certificates (tests/test_parser_flag_reading.py checks every flag of every table).
+_NO_EFFECT_FLAGS: dict[str, dict[str, str]] = {
+    "kubectl": {
+        "o": "how the result is printed", "output": "how the result is printed",
+        "v": "log verbosity", "log-flush-frequency": "how often logs are flushed",
+        "profile": "profiles kubectl itself", "profile-output": "where that profile goes",
+        "request-timeout": "only shortens how long kubectl waits",
+        "warnings-as-errors": "can only make kubectl fail",
+        "match-server-version": "can only make kubectl refuse to run",
+        "disable-compression": "transport encoding of responses",
+    },
+    "helm": {
+        "help": "prints the usage; the command does not run", "debug": "log verbosity",
+        "color": "colour of the output",
+        "colour": "colour of the output", "burst-limit": "client-side rate limit",
+        "qps": "client-side rate limit", "content-cache": "where downloaded charts are cached",
+    },
+    "flux": {
+        "help": "prints the usage; the command does not run", "verbose": "log verbosity",
+        "disable-compression": "transport encoding of responses",
+        "kube-api-burst": "client-side rate limit", "kube-api-qps": "client-side rate limit",
+    },
+    "argocd": {
+        "help": "prints the usage; the command does not run", "logformat": "log format",
+        "loglevel": "log verbosity",
+        "http-retry-max": "how often a failed call is retried",
+        "redis-compress": "compression of the cache it reads",
+        "prompts-enabled": "whether it asks before acting (the command line decides anyway)",
+    },
+    "aws": {
+        "output": "how the result is printed", "query": "which part of the result is printed",
+        "color": "colour of the output", "no-cli-pager": "paging of the output",
+        "no-cli-auto-prompt": "interactive prompting", "cli-auto-prompt": "interactive prompting",
+        "cli-error-format": "how errors are printed", "no-paginate": "how results are paged",
+        "cli-connect-timeout": "only shortens how long aws waits",
+        "cli-read-timeout": "only shortens how long aws waits",
+        "version": "prints the version and does nothing else", "debug": "log verbosity",
+    },
+    "gsutil": {
+        "m": "runs operations in parallel", "q": "quiet output", "d": "debug output",
+        "D": "debug output", "v": "prints the version",
+    },
+}
+# Flags whose value is a secret: recorded as given but not kept (only that it was given).
+_SECRET_FLAGS = frozenset({"token", "password", "kube-token", "auth-token"})
+# Flags that change who the request runs as: the identity scope is then unresolved.
+_IDENTITY_FLAGS = frozenset({
+    "token", "username", "password", "client-certificate", "client-key", "kube-token",
+    "auth-token", "client-crt", "client-crt-key",
+})
+
+
+def _record_flag(params: dict[str, Any], tool: str, key: str, val: Any) -> None:
+    """A consumed flag recorded under its long name, unless it is one of ``tool``'s
+    no-effect flags (:data:`_NO_EFFECT_FLAGS`). A secret's value is not kept; a flag that
+    changes the identity leaves ``user`` unresolved."""
+    if key in _NO_EFFECT_FLAGS.get(tool, {}):
+        return
+    params[key] = "[secret]" if key in _SECRET_FLAGS and isinstance(val, str) else (
+        True if val is None else val)
+    if key in _IDENTITY_FLAGS:
+        _mark_unresolved(params, "user")
+
+
+# Global boolean flags that kubectl consumes before the verb's own (recorded unless no-effect).
 _DISCARD_BOOL_FLAGS = {
     "insecure-skip-tls-verify",
     "warnings-as-errors",
@@ -1425,8 +1492,11 @@ def _parse_flags(
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
+                _record_flag(params, "kubectl", {"o": "output", "s": "server"}.get(key, key),
+                             val)
             elif key in _DISCARD_BOOL_FLAGS:
-                pass
+                if _bool_param(val) is not False:
+                    _record_flag(params, "kubectl", key, True)
             elif key == "expose" and verb == "run":
                 # Only a spelling kubectl reads as false turns the Service off. It
                 # refuses a word like "no", so reading that as on creates nothing.
@@ -1638,10 +1708,22 @@ def _from_kubectl_impersonating(argv: list[str]) -> list[InfrastructureIntent]:
     becomes its own ``impersonate`` intent (``user/<name>``,
     ``group/<name>``, ``uid/<id>``) that a policy can block or escalate."""
     intents = _from_kubectl_multi(argv)
+    return intents + _kube_impersonation_intents(intents)
+
+
+def _kube_impersonation_intents(
+    intents: list[InfrastructureIntent],
+) -> list[InfrastructureIntent]:
+    """Each identity a Kubernetes request is impersonated as (kubectl ``--as``,
+    ``--as-group``, ``--as-uid``; helm ``--kube-as-user``, ``--kube-as-group``; flux
+    ``--as``, ...), as one ``impersonate`` intent on ``user/<name>``, ``group/<name>`` or
+    ``uid/<id>`` with provider ``kubernetes``, so one rule covers every tool."""
     seen: set[str] = set()
     extra: list[InfrastructureIntent] = []
     for intent in intents:
         imp = intent.params.get("impersonate") or {}
+        if not isinstance(imp, dict) or "service_account" in imp:
+            continue
         targets = ([f"user/{imp['user']}"] if "user" in imp else []) + [
             f"group/{g}" for g in imp.get("groups", [])
         ] + ([f"uid/{imp['uid']}"] if "uid" in imp else [])
@@ -1653,7 +1735,7 @@ def _from_kubectl_impersonating(argv: list[str]) -> list[InfrastructureIntent]:
                 resource=target, action="impersonate", provider="kubernetes",
                 params={"impersonate": imp}, metadata=dict(intent.metadata),
             ))
-    return intents + extra
+    return extra
 
 
 def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
@@ -2820,9 +2902,12 @@ def _parse_aws_tokens(
                     val = _value_at(tokens, i, tok)
                 if key in _AWS_BOOL_FLAGS:
                     _set_bool_param(params, key, _bool_param(val))
-                if key == "endpoint-url":
+                elif key == "endpoint-url":
                     metadata["endpoint_url"] = val  # see mark_config_scope
-                # the other globals are consumed, intentionally not recorded
+                else:
+                    # recorded unless it cannot change what aws does (--no-sign-request,
+                    # --no-verify-ssl, --ca-bundle, --cli-binary-format are kept)
+                    _record_flag(params, "aws", key, val)
             elif key in _AWS_BOOL_FLAGS and arity in (None, ""):
                 _set_bool_param(params, key, _bool_param(val))
             elif key in ("cli-input-json", "cli-input-yaml"):
@@ -2853,9 +2938,9 @@ def _parse_aws_tokens(
                         raise ValueError(f"aws: {tok} {ids[0]!r} is not a list of strings")
                     ids = decoded
                 if key == "instance-id" and len(ids) == 1:
-                    id_value, id_flag = ids[0], "instance-ids"
+                    id_value, id_flag = ids[0], key  # its own name (modify-instance-attribute)
                 else:
-                    multi_ids = ids
+                    multi_ids = ids  # --instance-ids (or an abbreviation of it)
             elif key in _AWS_TARGET_FLAG_NAMES:
                 # a resource name is a string, never coerced: "001", "123",
                 # "nan" and "inf" are valid names (review of #19)
@@ -2868,6 +2953,19 @@ def _parse_aws_tokens(
                     i += 1
                     val = _value_at(tokens, i, tok)
                 id_value, id_flag = val, key
+            elif spec is not None and key in spec.get("pb", {}).values():
+                # toplevelbool's --no-x: {"Value": false} under x (aws-cli refuses both)
+                positive = key[len("no-"):]
+                if positive in params:
+                    raise ValueError(f"aws: --{positive} and --{key} together, which aws "
+                                     f"refuses: {tokens!r}")
+                params[positive] = {"Value": False}
+            elif (spec is not None and key in spec.get("pb", {}) and val is None
+                  and (i + 1 >= n or _aws_option_like(tokens[i + 1]))):
+                # toplevelbool's bare --x: {"Value": true}
+                if key in params:
+                    raise ValueError(f"aws: --{key} given twice: {tokens!r}")
+                params[key] = {"Value": True}
             elif key.startswith("no-") and val is None and tok.startswith("--") \
                     and arity in (None, ""):
                 # botocore's "--no-<flag>" is a boolean's off switch: x: False
@@ -3796,9 +3894,13 @@ def _parse_az_tokens(
                 if val is not None:
                     ids_values.append(val)
                 else:
+                    before = len(ids_values)
                     while i + 1 < n and not tokens[i + 1].startswith("-"):
                         i += 1
                         ids_values.append(tokens[i])
+                    if len(ids_values) == before:
+                        # nargs "+": argparse refuses --ids with no ID after it
+                        raise ValueError(f"az: --ids needs at least one ID: {tokens!r}")
             elif val is not None:
                 params[key] = _az_typed(val, nargs, key, tok)
             elif i + 1 < n and not tokens[i + 1].startswith("-"):
@@ -4665,7 +4767,10 @@ def _from_gsutil(argv: list[str]) -> list[InfrastructureIntent]:
                     if not rest:
                         i += 1
                         rest = _value_at(tokens, i, tok)
-                    params[letter] = rest
+                    if verb is None and letter in ("h", "o"):
+                        params.setdefault(letter, []).append(rest)  # each one counts
+                    else:
+                        params[letter] = rest
                     break
                 if letter not in bools:
                     raise ValueError(f"gsutil: -{letter} is not an option the parser knows "
@@ -4683,9 +4788,53 @@ def _from_gsutil(argv: list[str]) -> list[InfrastructureIntent]:
         i += 1
     if verb is None:
         raise ValueError(f"unsupported gsutil invocation: {argv!r}")
-    if params.get("o") is not None or params.get("h") is not None:
-        params = {k: v for k, v in params.items() if k not in ("o", "h")}
-    return _gcs_uri_intents(verb, words, {}, params, argv, "gsutil")
+    params = _gsutil_globals(params)
+    intents = _gcs_uri_intents(verb, words, {}, params, argv, "gsutil")
+    return intents + _gcp_impersonation_intents(params, intents)
+
+
+def _gsutil_globals(params: dict[str, Any]) -> dict[str, Any]:
+    """gsutil's top-level options, recorded (gslib/__main__.py): each ``-h 'Name:value'`` a
+    header sent with every request, under ``headers.<lower-cased name>``, an
+    ``x-goog-meta-<key>`` header the object's ``metadata.<key>``; ``-u`` the project billed
+    (``billing_project``); ``-i`` the service account impersonated; ``-o`` a boto option,
+    which can change the credentials or the endpoint: every key is unresolved. ``-m``,
+    ``-q``, ``-d``, ``-D`` and ``-v`` have no effect on what gsutil does to which object."""
+    out = {k: v for k, v in params.items()
+           if k not in ("h", "o", "u", "i", *_NO_EFFECT_FLAGS["gsutil"])}
+    for header in params.get("h", []):
+        name, sep, value = header.partition(":")
+        if not sep:
+            raise ValueError(f"gsutil: -h {header!r} is not a 'Name:value' header")
+        name, value = name.strip().lower(), value.strip()
+        out.setdefault("headers", {})[name] = value
+        if name.startswith("x-goog-meta-"):
+            out.setdefault("metadata", {})[name[len("x-goog-meta-"):]] = value
+    if params.get("o"):
+        out["boto_options"] = list(params["o"])
+        _mark_unresolved(out, "**")
+    if params.get("u") is not None:
+        out["billing_project"] = params["u"]
+    if params.get("i") is not None:
+        out["impersonate"] = {"service_account": params["i"]}
+    return out
+
+
+def _gcp_impersonation_intents(params: dict[str, Any],
+                               intents: list[InfrastructureIntent]) -> list[InfrastructureIntent]:
+    """The service account a gcloud or gsutil command impersonates
+    (``--impersonate-service-account``, gsutil ``-i``), as one more intent: an
+    ``impersonate`` of ``iam/service-account/<email>``, so a rule on impersonating it holds
+    whatever the command does. Several accounts (a delegation chain) are each one."""
+    impersonate = params.get("impersonate")
+    accounts = impersonate.get("service_account") if isinstance(impersonate, dict) else None
+    if not accounts:
+        return []
+    metadata = dict(intents[0].metadata) if intents else {}
+    return [InfrastructureIntent(resource=f"iam/service-account/{account}",
+                                 action="impersonate", provider="gcp",
+                                 params={"impersonate": impersonate}, metadata=metadata)
+            for account in str(accounts).split(",") if account]
 
 
 # gcloud run commands whose flags after each --container NAME belong to that container
@@ -4768,6 +4917,21 @@ def _gcloud_container_params(containers: dict[str, list[str]], params: dict[str,
 
 
 def from_gcloud_multi(argv: list[str]) -> list[InfrastructureIntent]:
+    """:func:`_from_gcloud_numbered`, and the service account
+    ``--impersonate-service-account`` impersonates (a comma-separated delegation chain names
+    several), as gsutil's ``-i``: ``params["impersonate"]`` and an ``impersonate`` intent on
+    each account."""
+    intents = _from_gcloud_numbered(argv)
+    account = next((i.params.get("impersonate-service-account") for i in intents
+                    if i.params.get("impersonate-service-account")), None)
+    if not account:
+        return intents
+    for intent in intents:
+        intent.params["impersonate"] = {"service_account": account}
+    return intents + _gcp_impersonation_intents(intents[0].params, intents)
+
+
+def _from_gcloud_numbered(argv: list[str]) -> list[InfrastructureIntent]:
     """Parses a ``gcloud`` (or legacy ``gsutil``) CLI invocation (see
     :func:`_from_gcloud_multi`). A project given by number (``--project 123456789``) is
     recorded as ``project_number``: which project ID it is, is only known to gcloud, so
@@ -5053,9 +5217,20 @@ def _parse_helm_tokens(
                     val = _value_at(tokens, i, tok)
                 if key == "kube-apiserver":
                     metadata["server"] = val  # see mark_config_scope
-                # the others are consumed, intentionally not recorded
+                elif key == "kubeconfig":
+                    metadata["kubeconfig"] = val  # as kubectl's
+                elif key in ("kube-as-user", "kube-as-group"):
+                    # helm impersonates as kubectl --as / --as-group does: one structure
+                    imp = params.setdefault("impersonate", {})
+                    if key == "kube-as-group":
+                        imp.setdefault("groups", []).append(val)
+                    else:
+                        imp["user"] = val
+                else:
+                    _record_flag(params, "helm", key, val)
             elif key in _HELM_GLOBAL_BOOL_FLAGS:
-                pass  # consumed, intentionally not recorded
+                if _bool_param(val) is not False:
+                    _record_flag(params, "helm", key, True)
             elif key == "dry-run":
                 # helm: --dry-run, =client, =server, =true rehearse;
                 # =none / =false run for real.
@@ -5446,6 +5621,13 @@ def _merge_helm_values(params: dict[str, Any], sets: dict[str, list[str]],
 
 
 def from_helm_multi(argv: list[str]) -> list[InfrastructureIntent]:
+    """:func:`_from_helm_multi`, and each identity ``--kube-as-user`` and
+    ``--kube-as-group`` impersonate (:func:`_kube_impersonation_intents`)."""
+    intents = _from_helm_multi(argv)
+    return intents + _kube_impersonation_intents(intents)
+
+
+def _from_helm_multi(argv: list[str]) -> list[InfrastructureIntent]:
     """Parses a ``helm`` invocation into one InfrastructureIntent per release it acts
     on, e.g.:
 
@@ -5719,9 +5901,14 @@ def _parse_argocd_tokens(
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
-                # consumed, intentionally not recorded
+                if name in ("header", "H"):
+                    # each -H is one more header sent with every request
+                    params.setdefault("header", []).append(val)
+                else:
+                    _record_flag(params, "argocd", name, val)
             elif name in _ARGOCD_GLOBAL_BOOL_FLAGS:
-                pass  # consumed, intentionally not recorded
+                if _bool_param(val) is not False:
+                    _record_flag(params, "argocd", name, True)
             elif name == "dry-run":
                 # Only "app sync" has --dry-run. argocd refuses it on the other verbs and
                 # runs nothing, so it is a rehearsal only there.
@@ -6121,13 +6308,27 @@ def _parse_flux_tokens(
                     val = _value_at(tokens, i, tok)
                 if key == "server":
                     metadata["server"] = val  # see mark_config_scope
-                # the others are consumed, intentionally not recorded
+                elif key in ("kubeconfig", "cluster"):
+                    metadata[key] = val  # as kubectl's
+                elif key in ("as", "as-group", "as-uid", "as-user-extra"):
+                    # flux impersonates as kubectl --as does: one structure
+                    imp = params.setdefault("impersonate", {})
+                    if key == "as-group":
+                        imp.setdefault("groups", []).append(val)
+                    elif key == "as-user-extra":
+                        imp.setdefault("extra", []).append(val)
+                    else:
+                        imp["user" if key == "as" else "uid"] = val
+                else:
+                    _record_flag(params, "flux", key, val)
             elif key in ("verbose", "insecure-skip-tls-verify", "disable-compression"):
-                pass  # consumed, intentionally not recorded
+                if _bool_param(val) is not False:
+                    _record_flag(params, "flux", key, True)
             elif key == "dry-run":
-                # Not a flag of any verb parsed here: flux refuses it and runs nothing.
-                # It is never read as a rehearsal.
-                pass
+                # Not a flag of any verb parsed here: flux refuses it and runs nothing,
+                # and so does the parser (it is never read as a rehearsal)
+                raise ValueError(f"flux: --dry-run is not a flag of this command, and flux "
+                                 f"refuses it: {tokens!r}")
             elif key == "export":
                 params["export"] = _bool_param(val)
             elif key in ("A", "all-namespaces"):
@@ -6220,6 +6421,13 @@ def _flux_read_kind_and_names(verb: str, positional: list[str]) -> tuple[str, li
 
 
 def from_flux_multi(argv: list[str]) -> list[InfrastructureIntent]:
+    """:func:`_from_flux_multi`, and each identity ``--as``, ``--as-group`` and ``--as-uid``
+    impersonate (:func:`_kube_impersonation_intents`)."""
+    intents = _from_flux_multi(argv)
+    return intents + _kube_impersonation_intents(intents)
+
+
+def _from_flux_multi(argv: list[str]) -> list[InfrastructureIntent]:
     """Parses a ``flux`` invocation into one InfrastructureIntent per object, e.g.:
 
     ``flux reconcile source git podinfo -n flux-system``

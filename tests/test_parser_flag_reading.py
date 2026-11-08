@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from aegis_core.intent import canonical_key
 from aegis_core.interceptor import AegisInterceptor
 from aegis_core.parser import from_argv, from_helm
 from aegis_core.store import Constraint, ConstraintStore
@@ -3994,3 +3995,141 @@ def test_option_aliases_are_one_option(command, key, value):
 def test_az_option_alias_names_the_target():
     intent = from_argv("az compute-fleet delete --name a --fleet-name b -g rg".split())[0]
     assert intent.resource.endswith("/b")
+
+
+# --- review round 20 ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("command,targets", [
+    # helm and flux impersonate as kubectl does: one structure, one impersonate intent each
+    ("helm uninstall web -n prod --kube-as-user admin --kube-as-group sys",
+     ["user/admin", "group/sys"]),
+    ("flux suspend kustomization app --as admin --as-group sys", ["user/admin", "group/sys"]),
+    ("kubectl delete pod x -n prod --as admin", ["user/admin"]),
+])
+def test_impersonation_is_one_structure_for_every_kubernetes_tool(command, targets):
+    intents = from_argv(command.split())
+    imp = [i for i in intents if i.action == "impersonate"]
+    assert [i.resource for i in imp] == targets
+    assert all(i.provider == "kubernetes" for i in imp)
+
+
+def test_one_impersonation_rule_holds_for_helm_and_kubectl():
+    rule = _rule("kubernetes", "user/admin", ["impersonate"])
+    assert _verdict([rule], "helm uninstall web -n prod --kube-as-user admin") == "BLOCK"
+    assert _verdict([rule], "kubectl delete pod x --as admin") == "BLOCK"
+
+
+@pytest.mark.parametrize("command,key", [
+    ("kubectl delete pod x --token abc", "token"),
+    ("kubectl delete pod x --insecure-skip-tls-verify", "insecure-skip-tls-verify"),
+    ("kubectl delete pod x --certificate-authority ca.pem", "certificate-authority"),
+    ("helm uninstall web --kube-token abc", "kube-token"),
+    ("helm uninstall web --kube-insecure-skip-tls-verify", "kube-insecure-skip-tls-verify"),
+    ("helm uninstall web --registry-config r.json", "registry-config"),
+    ("flux suspend kustomization app --token abc", "token"),
+    ("argocd app sync web --auth-token abc", "auth-token"),
+    ("argocd app sync web --insecure", "insecure"),
+    ("argocd app sync web --grpc-web", "grpc-web"),
+    ("aws ec2 terminate-instances --instance-ids i-1 --no-verify-ssl", "verify-ssl"),
+    ("aws ec2 terminate-instances --instance-ids i-1 --ca-bundle ca.pem", "ca-bundle"),
+])
+def test_auth_endpoint_and_tls_flags_are_recorded(command, key):
+    params = from_argv(command.split())[0].params
+    assert any(canonical_key(k) == canonical_key(key) for k in params)
+
+
+def test_a_secret_flag_records_that_it_was_given_not_its_value():
+    params = from_argv("kubectl delete pod x --token abc".split())[0].params
+    assert params["token"] == "[secret]" and "user" in params["unresolved_scope"]
+
+
+def test_aws_singular_instance_id_keeps_its_own_name():
+    intent = from_argv("aws ec2 modify-instance-attribute --instance-id i-1 "
+                       "--instance-type t3.large".split())[0]
+    assert intent.params["instance-id"] == "i-1" and "instance-ids" not in intent.params
+
+
+@pytest.mark.parametrize("command,key,value", [
+    # gsutil's top-level options (gslib/__main__.py)
+    ("gsutil -h x-goog-meta-classification:secret cp f gs://b/k", "metadata",
+     {"classification": "secret"}),
+    ("gsutil -h Content-Type:text/html cp f gs://b/k", "headers", {"content-type": "text/html"}),
+    ("gsutil -u billp rm gs://b/k", "billing_project", "billp"),
+    ("gsutil -i sa@p.iam.gserviceaccount.com rm gs://b/k", "impersonate",
+     {"service_account": "sa@p.iam.gserviceaccount.com"}),
+])
+def test_gsutil_globals_are_recorded(command, key, value):
+    assert from_argv(command.split())[0].params[key] == value
+
+
+def test_gsutil_boto_option_leaves_everything_unresolved():
+    intent = from_argv(["gsutil", "-o", "Credentials:gs_json_host=evil", "cp", "f",
+                        "gs://b/k"])[0]
+    assert "**" in intent.params["unresolved_scope"]
+
+
+@pytest.mark.parametrize("command", [
+    "gsutil -i sa@p.iam.gserviceaccount.com rm gs://b/k",
+    "gcloud compute instances delete vm --zone z "
+    "--impersonate-service-account sa@p.iam.gserviceaccount.com",
+])
+def test_gcp_impersonation_is_an_intent(command):
+    intents = from_argv(command.split())
+    assert any(i.resource == "iam/service-account/sa@p.iam.gserviceaccount.com"
+               and i.action == "impersonate" for i in intents)
+
+
+@pytest.mark.parametrize("command,value", [
+    # aws-cli's toplevelbool switches: --x is {"Value": true}, --no-x false
+    ("aws ec2 modify-instance-attribute --instance-id i-1 --disable-api-termination",
+     {"Value": True}),
+    ("aws ec2 modify-instance-attribute --instance-id i-1 --no-disable-api-termination",
+     {"Value": False}),
+    ("aws ec2 modify-instance-attribute --instance-id i-1 --disable-api-termination "
+     "Value=false", {"Value": False}),
+])
+def test_aws_toplevel_boolean_switches(command, value):
+    assert from_argv(command.split())[0].params["disable-api-termination"] == value
+
+
+EVERYDAY_AWS = [
+    "aws ec2 run-instances --image-id ami-123 --instance-type t3.micro --count 1 "
+    "--key-name k --subnet-id subnet-1",
+    "aws ec2 terminate-instances --instance-ids i-1 i-2",
+    "aws ec2 stop-instances --instance-ids i-1 --force",
+    "aws ec2 start-instances --instance-ids i-1",
+    "aws ec2 modify-instance-attribute --instance-id i-1 --disable-api-termination",
+    "aws ec2 create-tags --resources i-1 --tags Key=env,Value=prod",
+    "aws s3api put-object --bucket b --key k --body f.txt",
+    "aws s3api delete-object --bucket b --key k",
+    "aws s3api put-bucket-policy --bucket b --policy file://policy.json",
+    "aws iam create-role --role-name r --assume-role-policy-document file://trust.json",
+    "aws iam delete-role --role-name r",
+    "aws iam attach-role-policy --role-name r --policy-arn arn:aws:iam::aws:policy/ReadOnlyAccess",
+    "aws lambda update-function-code --function-name f --zip-file fileb://f.zip",
+    "aws lambda delete-function --function-name f",
+    "aws cloudformation deploy --template-file t.yaml --stack-name s --capabilities CAPABILITY_IAM",
+    "aws cloudformation delete-stack --stack-name s",
+    "aws ecs update-service --cluster c --service s --desired-count 2",
+    "aws eks update-nodegroup-config --cluster-name c --nodegroup-name ng "
+    "--scaling-config minSize=1,maxSize=3,desiredSize=2",
+    "aws rds delete-db-instance --db-instance-identifier db1 --skip-final-snapshot",
+    "aws sts assume-role --role-arn arn:aws:iam::123456789012:role/r --role-session-name s",
+    "aws ssm put-parameter --name /app/key --value v --type SecureString --overwrite",
+    "aws secretsmanager delete-secret --secret-id s --force-delete-without-recovery",
+    "aws kms schedule-key-deletion --key-id 1234abcd-12ab-34cd-56ef-1234567890ab "
+    "--pending-window-in-days 7",
+    "aws route53 change-resource-record-sets --hosted-zone-id Z1 --change-batch file://batch.json",
+    "aws dynamodb delete-table --table-name t",
+    "aws sns publish --topic-arn arn:aws:sns:us-east-1:123456789012:t --message hi",
+    "aws sqs delete-queue --queue-url https://sqs.us-east-1.amazonaws.com/123456789012/q",
+    "aws logs delete-log-group --log-group-name /aws/lambda/f",
+    "aws autoscaling set-desired-capacity --auto-scaling-group-name g --desired-capacity 3",
+    "aws ec2 describe-instances --region us-west-2 --output table",
+]
+
+
+@pytest.mark.parametrize("command", EVERYDAY_AWS)
+def test_everyday_aws_commands_parse(command):
+    assert from_argv(shlex.split(command))

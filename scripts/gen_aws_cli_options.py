@@ -17,7 +17,8 @@ each one is, ``t`` the type of each value that is not a string (``integer``, ``l
 ``x`` the botocore shape of each structure, map or list option (in the command's
 ``shapes``, by name), ``a`` options that accumulate (``append``, or ``filter`` for s3's
 ordered --include/--exclude), ``c`` the choices argparse allows, ``k`` the value of a bare
-optional-value option, ``al`` hidden aliases (another name of one argument), ``p``
+optional-value option, ``al`` hidden aliases (another name of one argument), ``pb``
+toplevelbool's switches (``--x`` is ``{"Value": true}``, ``--no-x`` false), ``p``
 positional arguments, ``s`` subcommands (``ec2 wait``)."""
 
 import argparse
@@ -124,6 +125,13 @@ def _command(cmd, depth: int, shapes: dict | None = None) -> dict:
                         aliases[name] = other
         if aliases:
             entry["al"] = aliases
+        # toplevelbool's pairs (a {"Value": bool} structure pulled up to --x and --no-x):
+        # each positive option with its negative
+        pairs = {name: f"no-{name}" for name, arg in arg_table.items()
+                 if type(arg).__name__ == "PositiveBooleanArgument"
+                 and f"no-{name}" in arg_table}
+        if pairs:
+            entry["pb"] = pairs
         if positional:
             entry["p"] = positional
         # what argparse does with a value beyond its count: "a" the options that accumulate
