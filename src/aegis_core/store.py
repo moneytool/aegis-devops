@@ -902,13 +902,19 @@ def param_unresolved(key: str, intent: InfrastructureIntent) -> bool:
     ``set.replicaCount`` when helm --set-file sets it from a file nobody read, and ``*``
     for every key (argocd --file, kubectl run --overrides). An unresolved key is
     unresolved whatever value is recorded for it, in metadata or params: the recorded
-    value never decides. The one prefix mark, helm's ``set.*``, stands for the ``set.``
-    keys the command line leaves to a values file: a key the command line sets is not one
-    of them, since helm applies --set over every file. A mark meets every spelling of the
-    key that matching would meet (:func:`canonical_key`, and a boolean's negated side)."""
+    value never decides. A prefix mark (``tags.*``) covers every key under it, recorded or
+    not. The one exception is a prefix mark the parser also lists in
+    ``params["unresolved_except_recorded"]``: only helm's ``set.*`` with values files or
+    reused values, which stands for the ``set.`` keys the command line leaves to them, so a
+    key --set replaced outright (recorded) is known, since helm applies --set over every
+    file. A mark meets every spelling of the key that matching would meet
+    (:func:`canonical_key`, and a boolean's negated side)."""
     marks = intent.params.get("unresolved_scope")
     if not isinstance(marks, list):
         return False
+    excepted = intent.params.get("unresolved_except_recorded")
+    excepted = {canonical_key(m) for m in excepted if isinstance(m, str)} if isinstance(
+        excepted, list) else set()
     spellings = {canonical_key(spelling) for spelling, _ in _key_spellings(key)}
     for mark in marks:
         if not isinstance(mark, str):
@@ -916,8 +922,9 @@ def param_unresolved(key: str, intent: InfrastructureIntent) -> bool:
         canon = canonical_key(mark)
         if canon in spellings or canon in ("*", "**"):
             return True
-        if (canon.endswith(".*") and any(s.startswith(canon[:-1]) for s in spellings)
-                and not _dig_all(intent.params, key)):
+        if canon.endswith(".*") and any(s.startswith(canon[:-1]) for s in spellings):
+            if canon in excepted and _dig_all(intent.params, key):
+                continue  # helm: a key --set replaced outright is known
             return True
     return False
 

@@ -1845,16 +1845,24 @@ def _kubectl_created_objects(
     creates a Service and autoscale a HorizontalPodAutoscaler, named by ``--name`` or else
     after the source (expose.go, autoscale.go); create token requests a token of the
     ServiceAccount it names. ``--overrides`` patches the new object after every other flag,
-    so every key of it is unresolved. A source with no name names nothing: the new object
-    is ``kind/*``, marked."""
+    its name included, so every key of it is unresolved and the object is ``kind/*``,
+    marked. A source with no name names nothing: the new object is ``kind/*``, marked."""
     kinds = {"expose": "service", "autoscale": "horizontalpodautoscaler"}
     out: list[InfrastructureIntent] = []
     if verb in kinds and resources:
         made: set[str] = set()
+        overridden = params.get("overrides") is not None
         for source in resources:
-            # one new object per source (kubectl visits each); --name names each of them
-            name = params.get("name") or source.partition("/")[2]
-            resource = (f"{kinds[verb]}/{name}" if name and name != "*"
+            # one new object per source (kubectl visits each); --name names each of them.
+            # expose's default name is the source's cut to 63 characters (expose.go: name
+            # = info.Name[:DNS1035LabelMaxLength]); autoscale's is the source's as it is.
+            # --overrides (expose only) can rename the object (metadata.name): any name.
+            # The namespace stays: kubectl creates it in its own (Create(o.Namespace, ...)).
+            source_name = source.partition("/")[2]
+            if verb == "expose" and source_name != "*":
+                source_name = source_name[:63]
+            name = params.get("name") or source_name
+            resource = (f"{kinds[verb]}/{name}" if name and name != "*" and not overridden
                         else f"{kinds[verb]}/*")
             if resource in made:
                 continue
@@ -4113,6 +4121,7 @@ def _gcloud_flag_table(command: str) -> dict[str, Any] | None:
     table["types"] = dict(entry.get("types", {}))
     table["actions"] = dict(entry.get("actions", {}))
     table["specs"] = dict(entry.get("specs", {}))
+    table["shape_unresolved"] = frozenset(entry.get("shape_unresolved", ()))
     return table
 
 
@@ -4319,7 +4328,13 @@ def _parse_gcloud_tokens(
                     i += 1
                     val = _value_at(tokens, i, tok)
                 declared = table["types"].get(key)
-                if key in table["list"] or key in table["dict"]:
+                if key in table["shape_unresolved"]:
+                    # the reference page and the SDK disagree on whether this is a map, a
+                    # list or one value: which gcloud parses is not known
+                    params[key] = val
+                    _mark_unresolved(params, key)
+                    _mark_unresolved(params, f"{key}.*")
+                elif key in table["list"] or key in table["dict"]:
                     value = _gcloud_arg(val, key in table["dict"], None)
                     element = (declared or "").partition(":")[2] if (declared or "").startswith(
                         "list:") else ""
@@ -4329,6 +4344,10 @@ def _parse_gcloud_tokens(
                     if isinstance(value, dict):
                         value = _gcloud_dict_members(params, key, value,
                                                      table["specs"].get(key), tokens)
+                    if declared == "unresolved":
+                        # the SDK builds the type in a way not read statically
+                        _mark_unresolved(params, key)
+                        _mark_unresolved(params, f"{key}.*")
                     _gcloud_store(params, key, value, table["actions"].get(key), seen, tokens)
                 elif declared == "unresolved":
                     params[key] = val  # a type the SDK parses its own way: unresolved
@@ -5348,6 +5367,11 @@ def _merge_helm_values(params: dict[str, Any], sets: dict[str, list[str]],
              or (not base and not params.get("values_files"))))
     if params.get("values_files") or reuse:
         unresolved.append("set.*")
+        # keys --set replaced outright stay known: the store spares recorded keys of this
+        # one prefix mark (store.param_unresolved); the containers it merged into are
+        # marked below
+        if cleaned:
+            params["unresolved_except_recorded"] = ["set.*"]
         # A --set writes into what the files or the reused values hold: a list index
         # keeps the list's other items, a nested key the map's other keys. Those maps and
         # lists, compared whole, are unknown; only a value set whole (a scalar, a {a,b}
@@ -7778,7 +7802,12 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
         if method is None:
             method = "POST" if params.get("inputs") or params.get("input") else "GET"
         if params.get("input") is not None:
-            # --input: the body is a file (or stdin), so are the fields in it
+            # --input: the body is a file (or stdin), so are the fields in it. The -f/-F
+            # fields then go into the URL query, not the body (api.go: with a body file,
+            # params are added with addQuery), so they set nothing the body sets
+            fields = params.pop("inputs", None)
+            if fields:
+                params["api_query"] = {**params.get("api_query", {}), **fields}
             params.setdefault("unresolved_scope", []).extend(["inputs.*", "ref"])
         action = _GH_METHOD_ACTION.get(method, "read")
         params["raw_action"] = f"api-{method.lower()}"

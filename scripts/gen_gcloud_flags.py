@@ -358,20 +358,82 @@ def refresh_types(out: str, sdk: str) -> None:
     table["_source"] = (f"{source}; value types from "
                         f"github.com/google-cloud-sdk-unofficial/google-cloud-sdk {commit}")
     declarations = sdk_declarations(sdk)
+    resolved = 0
     for command, entry in table.items():
         if command.startswith("_") or command == "root":
             continue
+        decls = declarations.get(command.split()[0], {})
+        resolved += _resolve_shapes(entry, decls)
         shapes = {n: "dict" if n in entry.get("dict", []) else
                   "list" if n in entry.get("list", []) else "scalar"
                   for n in [*entry["value"], *entry.get("optional", [])]}
-        area = _details(declarations.get(command.split()[0], {}), shapes)
+        area = _details(decls, shapes)
         flags = [*entry["value"], *entry.get("optional", [])]
         entry["types"] = {n: area["types"][n] for n in entry["value"] if n in area["types"]}
         entry["actions"] = {n: area["actions"][n] for n in flags if n in area["actions"]}
         entry["specs"] = {n: area["specs"][n] for n in flags if n in area["specs"]}
+    _check_shapes(table, declarations)
+    print(f"{resolved} flags whose page shape and SDK type disagreed", file=sys.stderr)
     with open(out, "w") as f:
         json.dump(table, f, indent=1, sort_keys=True)
         f.write("\n")
+
+
+def _shape(kind: Any) -> str:
+    text = str(kind)
+    return "dict" if text.startswith("dict") else "list" if text.startswith("list") else (
+        "unresolved" if text == "unresolved" else "scalar")
+
+
+def _resolve_shapes(entry: dict[str, Any], decls: dict[str, set]) -> int:
+    """One shape per flag. Where the reference page's shape (a ``[KEY=VALUE,…]`` map, a
+    ``A,[B,…]`` list or one value) is not the shape of any SDK declaration of the flag,
+    the SDK's structured type wins (the page moves the flag to ``dict`` or ``list``); where
+    the SDK has no structured type for it (a plain value, or declarations that disagree),
+    which one gcloud parses is not known: the flag goes to ``shape_unresolved``, whose
+    value the parser leaves unresolved. Returns how many flags disagreed."""
+    count = 0
+    unresolved: list[str] = []
+    for name in [*entry["value"], *entry.get("optional", [])]:
+        page = ("dict" if name in entry.get("dict", []) else
+                "list" if name in entry.get("list", []) else "scalar")
+        # a type the SDK builds in a way not read statically says nothing of the shape
+        shapes = {_shape(t) for t, _a, _s in decls.get(name, set())} - {"unresolved"}
+        if not shapes or page in shapes:
+            continue
+        count += 1
+        structured = shapes & {"dict", "list"}
+        if len(structured) == 1 and shapes <= {"dict", "list"}:
+            sdk = next(iter(structured))
+            for kind in ("dict", "list"):
+                members = [n for n in entry.get(kind, []) if n != name]
+                entry[kind] = sorted(members + ([name] if kind == sdk else []))
+        else:
+            unresolved.append(name)
+    if unresolved:
+        entry["shape_unresolved"] = sorted(unresolved)
+    else:
+        entry.pop("shape_unresolved", None)
+    return count
+
+
+def _check_shapes(table: dict[str, Any], declarations: dict[str, Any]) -> None:
+    """Fails on a flag whose shape still disagrees with every SDK declaration and is not
+    listed in ``shape_unresolved``: one source of truth for whether it is a map, a list
+    or one value."""
+    bad = []
+    for command, entry in table.items():
+        if command.startswith("_") or command == "root":
+            continue
+        decls = declarations.get(command.split()[0], {})
+        for name in [*entry["value"], *entry.get("optional", [])]:
+            page = ("dict" if name in entry.get("dict", []) else
+                    "list" if name in entry.get("list", []) else "scalar")
+            shapes = {_shape(t) for t, _a, _s in decls.get(name, set())} - {"unresolved"}
+            if shapes and page not in shapes and name not in entry.get("shape_unresolved", []):
+                bad.append(f"{command} --{name}: page {page}, SDK {sorted(shapes)}")
+    if bad:
+        raise SystemExit("shape disagreements without a resolution:\n" + "\n".join(bad))
 
 
 def main(out: str, sdk: str) -> None:

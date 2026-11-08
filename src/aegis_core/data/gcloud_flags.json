@@ -42,6 +42,7 @@
   "list": [
    "guest-os-features",
    "licenses",
+   "replica-zones",
    "resource-policies"
   ],
   "optional": [],
@@ -239,7 +240,8 @@
   "list": [
    "append-licenses",
    "remove-labels",
-   "remove-licenses"
+   "remove-licenses",
+   "replace-license"
   ],
   "optional": [],
   "specs": {},
@@ -291,6 +293,9 @@
    "target-tags"
   ],
   "optional": [],
+  "shape_unresolved": [
+   "rules"
+  ],
   "specs": {},
   "types": {
    "action": "unresolved",
@@ -385,6 +390,9 @@
    "target-tags"
   ],
   "optional": [],
+  "shape_unresolved": [
+   "rules"
+  ],
   "specs": {},
   "types": {
    "priority": "unresolved",
@@ -1171,22 +1179,26 @@
   "dict": [
    "accelerator",
    "addons",
-   "alpha-cluster-feature-gates",
    "autoprovisioning-resource-manager-tags",
    "autoprovisioning-standard-rollout-policy",
    "cloud-run-config",
    "create-subnetwork",
+   "ephemeral-storage-local-ssd",
    "labels",
+   "local-nvme-ssd-block",
    "max-accelerator",
    "metadata",
    "metadata-from-file",
    "min-accelerator",
    "network-performance-configs",
+   "node-labels",
+   "node-taints",
    "notification-config",
    "resource-manager-tags"
   ],
   "list": [
    "additional-zones",
+   "alpha-cluster-feature-gates",
    "autopilot-privileged-admission",
    "autoprovisioning-locations",
    "autoprovisioning-network-tags",
@@ -1195,9 +1207,8 @@
    "logging",
    "master-authorized-networks",
    "monitoring",
-   "node-labels",
    "node-locations",
-   "node-taints",
+   "patch-update",
    "scopes",
    "service-account-signing-keys",
    "service-account-verification-keys",
@@ -1763,6 +1774,7 @@
    "master-authorized-networks",
    "monitoring",
    "node-locations",
+   "patch-update",
    "remove-additional-pod-ipv4-ranges",
    "remove-labels"
   ],
@@ -2075,20 +2087,24 @@
    "accelerator",
    "additional-node-network",
    "additional-pod-network",
+   "autoscaled-rollout-policy",
    "create-pod-ipv4-range",
+   "ephemeral-storage-local-ssd",
    "labels",
+   "local-nvme-ssd-block",
    "metadata",
    "metadata-from-file",
    "network-performance-configs",
+   "node-labels",
+   "node-taints",
    "opportunistic-maintenance",
    "resource-manager-tags",
+   "sandbox",
    "secondary-boot-disk",
    "standard-rollout-policy"
   ],
   "list": [
-   "node-labels",
    "node-locations",
-   "node-taints",
    "scopes",
    "storage-pools",
    "tags"
@@ -2461,15 +2477,16 @@
   ],
   "dict": [
    "accelerator",
+   "autoscaled-rollout-policy",
    "labels",
    "network-performance-configs",
+   "node-labels",
+   "node-taints",
    "resource-manager-tags",
    "standard-rollout-policy"
   ],
   "list": [
-   "node-labels",
    "node-locations",
-   "node-taints",
    "storage-pools",
    "tags"
   ],
@@ -4329,9 +4346,10 @@
    "public-access-prevention",
    "uniform-bucket-level-access"
   ],
-  "dict": [],
+  "dict": [
+   "labels"
+  ],
   "list": [
-   "labels",
    "placement"
   ],
   "optional": [],
@@ -4515,12 +4533,13 @@
    "uniform-bucket-level-access",
    "versioning"
   ],
-  "dict": [],
-  "list": [
+  "dict": [
    "add-acl-grant",
    "add-default-object-acl-grant",
-   "remove-labels",
    "update-labels"
+  ],
+  "list": [
+   "remove-labels"
   ],
   "optional": [],
   "specs": {},
@@ -4622,18 +4641,19 @@
    "skip-unsupported",
    "v"
   ],
-  "dict": [],
-  "list": [
+  "dict": [
    "custom-contexts",
    "custom-metadata",
+   "update-custom-contexts",
+   "update-custom-metadata"
+  ],
+  "list": [
    "decryption-keys",
    "gzip-in-flight",
    "gzip-local",
    "j",
    "remove-custom-contexts",
    "remove-custom-metadata",
-   "update-custom-contexts",
-   "update-custom-metadata",
    "z"
   ],
   "optional": [],
@@ -4740,18 +4760,19 @@
    "skip-unsupported",
    "v"
   ],
-  "dict": [],
-  "list": [
+  "dict": [
    "custom-contexts",
    "custom-metadata",
+   "update-custom-contexts",
+   "update-custom-metadata"
+  ],
+  "list": [
    "decryption-keys",
    "gzip-in-flight",
    "gzip-local",
    "j",
    "remove-custom-contexts",
    "remove-custom-metadata",
-   "update-custom-contexts",
-   "update-custom-metadata",
    "z"
   ],
   "optional": [],

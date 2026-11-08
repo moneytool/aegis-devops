@@ -3749,8 +3749,8 @@ def test_expose_rule_on_the_service_holds():
     assert _verdict([rule], "kubectl expose deployment harmless -n prod --port=80 "
                             "--name=protected") == "BLOCK"
     intent = [i for i in from_argv("kubectl expose deploy web -n prod --port=80 "
-                                   "--overrides={}".split()) if i.resource == "service/web"][0]
-    assert "**" in intent.params["unresolved_scope"]
+                                   "--overrides={}".split()) if i.resource == "service/*"][0]
+    assert "**" in intent.params["unresolved_scope"]  # overrides can rename it (round 18)
 
 
 def test_gh_merge_delete_branch_deletes_an_unnamed_branch():
@@ -3851,3 +3851,74 @@ def test_gcloud_argdict_with_an_unread_spec_is_unresolved(command, key):
     rule = _rule("gcp", "container/cluster/*", ["create", "update"],
                  {f"{key}.HttpLoadBalancing": "x"})
     assert _verdict([rule], command) == "ESCALATE"
+
+
+
+# --- review round 18 ------------------------------------------------------------------
+
+
+def test_gh_api_input_fields_go_to_the_query_and_the_body_stays_unknown():
+    command = ["gh", "api", "-X", "PATCH", "repos/acme/prod", "--input", "body.json",
+               "-F", "delete_branch_on_merge=false"]
+    intent = from_argv(command)[0]
+    assert intent.params["api_query"] == {"delete_branch_on_merge": False}
+    assert "inputs" not in intent.params
+    rule = _rule("github", "api/repos/*", ["update"], {"inputs.delete_branch_on_merge": True})
+    assert _verdict([rule], command) == "ESCALATE"
+
+
+def test_a_prefix_mark_covers_recorded_keys_except_helms_set():
+    from aegis_core.intent import InfrastructureIntent
+    from aegis_core.store import param_unresolved
+
+    other = InfrastructureIntent(resource="x/y", action="update", provider="github",
+                                 params={"inputs": {"a": 1}, "unresolved_scope": ["inputs.*"]})
+    assert param_unresolved("inputs.a", other)
+    helm = from_argv("helm upgrade web ./c -f v.yaml --set image.tag=v1".split())[0]
+    assert not param_unresolved("set.image.tag", helm)
+    assert param_unresolved("set.image.repository", helm)
+
+
+@pytest.mark.parametrize("command,created", [
+    # --overrides can rename the new Service: any name, marked
+    ('kubectl expose deployment harmless -n prod --port=80 '
+     '--overrides={"metadata":{"name":"protected"}}', "service/*"),
+    # expose cuts the default name to 63 characters (expose.go); autoscale does not
+    ("kubectl expose deployment " + "a" * 70 + " -n prod --port=80", "service/" + "a" * 63),
+    ("kubectl autoscale deployment " + "a" * 70 + " -n prod --max=3",
+     "horizontalpodautoscaler/" + "a" * 70),
+])
+def test_created_object_names_as_kubectl_derives_them(command, created):
+    intents = from_argv(shlex.split(command))
+    made = [i for i in intents if i.resource == created]
+    assert made and made[0].metadata["namespace"] == "prod"
+    if created.endswith("/*"):
+        assert "resolved_at_runtime" in made[0].params
+
+
+def test_expose_overrides_escalate_a_rule_on_any_service_name():
+    rule = _rule("kubernetes", "service/protected", ["create"])
+    command = ('kubectl expose deployment harmless -n prod --port=80 '
+               '--overrides={"metadata":{"name":"protected"}}')
+    assert _verdict([rule], shlex.split(command)) == "ESCALATE"
+
+
+@pytest.mark.parametrize("command,key,value", [
+    # the SDK's map type wins over the reference page's list
+    ("gcloud storage buckets update gs://b --update-labels env=prod", "update-labels",
+     {"env": "prod"}),
+    ("gcloud storage buckets create gs://b --labels env=prod", "labels", {"env": "prod"}),
+])
+def test_gcloud_shape_follows_the_sdk(command, key, value):
+    assert from_argv(command.split())[0].params[key] == value
+
+
+def test_gcloud_shape_that_stays_in_doubt_is_unresolved():
+    intent = from_argv("gcloud compute firewall-rules create fw --rules tcp:22".split())[0]
+    assert "rules" in intent.params["unresolved_scope"]
+
+
+def test_gcloud_update_labels_rule_meets_the_map():
+    rule = _rule("gcp", "storage/bucket/*", ["update"], {"update-labels.env": "prod"})
+    assert _verdict([rule], "gcloud storage buckets update gs://b --update-labels env=prod") \
+        == "BLOCK"
