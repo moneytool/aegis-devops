@@ -579,15 +579,15 @@ def test_aws_refuses_what_aws_refuses(command):
     ("az vm create -n v -g rg -lwestus", "compute/vm/v", {"resource_group": "rg",
                                                          "region": "westus"}, {}),
     ("az sql db delete -sserver -n db -g rg", "sql/db/db", {"resource_group": "rg"},
-     {"s": "server"}),
+     {"server": "server"}),
     ("az ad user delete --id x", "iam/user/*", {}, {"id": "x"}),
     # a letter that only ever takes a value (or is a three-state flag) takes the rest
     ("az sql db delete -snprod -g rg -n db", "sql/db/db", {"resource_group": "rg"},
-     {"s": "nprod"}),
+     {"server": "nprod"}),
     # -c is a boolean on one command, but no reading reaches an n, g or l: m, y, c and then
     # o, which takes "ntainer"
     ("az storage container delete -cmycontainer -n x", "storage/container/x", {},
-     {"c": "mycontainer"}),
+     {"container-name": "mycontainer"}),
 ])
 def test_az_short_words(command, resource, metadata, params):
     intent = from_argv(command.split())[0]
@@ -1964,3 +1964,136 @@ def test_rules_on_writes_that_were_reads_now_block(rule, command):
 ])
 def test_wildcard_targets_escalate_every_rule_they_may_match(rule, command, verdict):
     assert _verdict([rule], command) == verdict
+
+
+# --- review round 5: a short option and its long option record the same -----------------
+
+
+def _same(short: list[str], long: list[str]) -> None:
+    def read(argv):
+        try:
+            return [(i.resource, i.action, i.params, i.metadata) for i in from_argv(argv)]
+        except ValueError:
+            return "refused"
+    assert read(short) == read(long), (short, long)
+
+
+@pytest.mark.parametrize("short,long", [
+    # kubectl 1.36: every letter and the flag it is
+    ("kubectl get pods -A", "kubectl get pods --all-namespaces"),
+    ("kubectl delete -R -f d/", "kubectl delete --recursive --filename d/"),
+    ("kubectl run x --image i -q", "kubectl run x --image i --quiet"),
+    ("kubectl exec -i -t web -- sh", "kubectl exec --stdin --tty web -- sh"),
+    ("kubectl delete pod web -i", "kubectl delete pod web --interactive"),
+    ("kubectl get pods -w", "kubectl get pods --watch"),
+    ("kubectl get pods -L app", "kubectl get pods --label-columns app"),
+    ("kubectl logs web -c c1 -f -p", "kubectl logs web --container c1 --follow --previous"),
+    ("kubectl apply -k d", "kubectl apply --kustomize d"),
+    ("kubectl delete pod -l a=b", "kubectl delete pod --selector a=b"),
+    ("kubectl delete pod web -n prod", "kubectl delete pod web --namespace prod"),
+    ("kubectl get pods -o yaml", "kubectl get pods --output yaml"),
+    ("kubectl get pods -s https://x", "kubectl get pods --server https://x"),
+    ("kubectl get pods -v 6", "kubectl get pods --v 6"),
+    ("kubectl patch deploy web -p {}", "kubectl patch deploy web --patch {}"),
+    ("kubectl create deployment web --image x -r 3",
+     "kubectl create deployment web --image x --replicas 3"),
+    # helm 4.3.1 / 3.21.1
+    ("helm upgrade api ./c -i -f v.yaml -n prod -l a=b",
+     "helm upgrade api ./c --install --values v.yaml --namespace prod --labels a=b"),
+    ("helm install -g ./c", "helm install --generate-name ./c"),
+    ("helm list -A -a -d -q -r -m 5 -f x -l a=b -o json",
+     "helm list --all-namespaces --all --date --short --reverse --max 5 --filter x "
+     "--selector a=b --output json"),
+    ("helm template api ./c -s t.yaml -a v1", "helm template api ./c --show-only t.yaml "
+     "--api-versions v1"),
+    # flux v2.10
+    ("flux get ks -A -w -l a=b", "flux get ks --all-namespaces --watch --label-selector a=b"),
+    ("flux logs -f -n prod", "flux logs --follow --namespace prod"),
+    ("flux delete ks a -s", "flux delete ks a --silent"),
+    ("flux create source git a --url u -u me -p pw",
+     "flux create source git a --url u --username me --password pw"),
+    # gcloud: from the reference pages
+    ("gcloud container clusters delete c -z us-east1-b -q",
+     "gcloud container clusters delete c --zone us-east1-b --quiet"),
+    ("gcloud storage rm -r -a -c -I gs://b/x",
+     "gcloud storage rm --recursive --all-versions --continue-on-error "
+     "--read-paths-from-stdin gs://b/x"),
+    # az: from azure-cli _params.py
+    ("az aks scale -g rg -n c -c 1", "az aks scale --resource-group rg --name c --node-count 1"),
+    ("az aks scale -g rg -n c -c1", "az aks scale -g rg -n c --node-count=1"),
+    ("az sql db delete -s srv -n db -g rg -y",
+     "az sql db delete --server srv --name db --resource-group rg --yes"),
+    # git
+    ("git push -f origin main", "git push --force origin main"),
+    ("git branch -d x", "git branch --delete x"),
+    ("git tag -a v1 -m x", "git tag --annotate v1 --message x"),
+])
+def test_short_and_long_spellings_give_the_same_intents(short, long):
+    _same(short.split(), long.split())
+
+
+def test_every_gcloud_alias_reads_as_its_flag():
+    from aegis_core.parser import _gcloud_flag_tables
+
+    for command, entry in _gcloud_flag_tables().items():
+        if command in ("_source", "root"):
+            continue
+        for alias, flag in entry.get("alias", {}).items():
+            kind = ("value" if flag in entry["value"] else "bool")
+            target = "gs://b/x" if command.startswith("storage") else "x"
+            short = f"-{alias}" if len(alias) == 1 else f"--{alias}"
+            extra_s = [short, "v"] if kind == "value" else [short]
+            extra_l = [f"--{flag}", "v"] if kind == "value" else [f"--{flag}"]
+            base = ["gcloud", *command.split(), target]
+            _same(base + extra_s, base + extra_l)
+
+
+def test_every_az_short_option_reads_as_its_long_option():
+    from aegis_core.parser import _AZ_VERBS, _az_aliases, _az_short_tables
+
+    for scope in _az_short_tables():
+        words = scope.split()
+        if scope == "_source" or not words or words[-1] not in _AZ_VERBS:
+            continue
+        for letter, option in _az_aliases(words).items():
+            if letter in "gnl":
+                continue  # scope options, tested with their own values above
+            base = ["az", *words, "-n", "x", "-g", "rg"]
+            _same(base + [f"-{letter}=v"], base + [f"--{option}=v"])
+
+
+def test_every_gh_short_flag_reads_as_its_long_flag():
+    from aegis_core.parser import _GH_COMMAND_FLAGS
+
+    for (group, sub), (bools, _values, shorts) in _GH_COMMAND_FLAGS.items():
+        if group == "api":
+            continue
+        for letter, flag in shorts.items():
+            base = ["gh", group, sub, "1", "-R", "o/r"]
+            if flag in bools:
+                _same(base + [f"-{letter}"], base + [f"--{flag}"])
+            else:
+                _same(base + [f"-{letter}", "v"], base + [f"--{flag}=v"])
+
+
+def test_every_argocd_short_flag_reads_as_its_long_flag():
+    from aegis_core.parser import _ARGOCD_SHORT_BOOL_LETTERS, _argocd_short_name
+
+    for verb in ("sync", "delete", "get", "set", "create", "list", "rollback"):
+        for letter in "HNPcflopr":
+            flag = _argocd_short_name(letter, verb)
+            base = ["argocd", "app", verb, "a"]
+            _same(base + [f"-{letter}", "v"], base + [f"--{flag}=v"])
+        for letter in _ARGOCD_SHORT_BOOL_LETTERS - {"h"}:
+            flag = _argocd_short_name(letter, verb)
+            _same(["argocd", "app", verb, "a", f"-{letter}"],
+                  ["argocd", "app", verb, "a", f"--{flag}"])
+
+
+@pytest.mark.parametrize("short,long", [
+    ("git branch -D x", "git branch --delete --force x"),
+    ("git branch -M a b", "git branch --move --force a b"),
+    ("git branch -C a b", "git branch --copy --force a b"),
+])
+def test_git_capital_letters_are_their_options_with_force(short, long):
+    _same(short.split(), long.split())

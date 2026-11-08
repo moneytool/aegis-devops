@@ -2,8 +2,9 @@
 models, with whether it takes a value, read from the gcloud reference pages
 (https://cloud.google.com/sdk/gcloud/reference/...), which list each flag as
 ``--flag=VALUE`` (a value), ``--flag[=VALUE]`` (an optional value, which argparse takes
-from the next word unless it starts with "-"), ``--flag`` or ``--[no-]flag`` (a boolean), with its short
-spellings. gcloud itself is not needed.
+from the next word unless it starts with "-"), ``--flag`` or ``--[no-]flag`` (a boolean),
+with its short spellings (``alias``: each short spelling and the flag it is). gcloud itself is not
+needed.
 
     python scripts/gen_gcloud_flags.py src/aegis_core/data/gcloud_flags.json
 
@@ -59,6 +60,7 @@ def flags(page: str) -> dict[str, list[str]]:
     bools: set[str] = set()
     values: set[str] = set()
     optional: set[str] = set()
+    alias: dict[str, str] = {}
     for match in _DT.finditer(page):
         inner = match.group(2)
         codes = [_text(c) for c in _CODE.findall(inner)]
@@ -66,6 +68,7 @@ def flags(page: str) -> dict[str, list[str]]:
             continue
         rest = _text(inner)[len(codes[0]):]
         kind = values if rest.startswith("=") else optional if rest.startswith("[=") else bools
+        long_name = None
         for spelling in [codes[0], *codes[1:]]:
             found = _NAME.fullmatch(spelling)
             if not found:
@@ -73,7 +76,12 @@ def flags(page: str) -> dict[str, list[str]]:
             kind.add(found.group(2))
             if found.group(1):
                 bools.add("no-" + found.group(2))
-    return {"bool": sorted(bools), "value": sorted(values), "optional": sorted(optional)}
+            if long_name is None:
+                long_name = found.group(2)
+            elif found.group(2) != long_name:
+                alias[found.group(2)] = long_name  # -z is --zone
+    return {"bool": sorted(bools), "value": sorted(values), "optional": sorted(optional),
+            "alias": dict(sorted(alias.items()))}
 
 
 def fetch(path: str) -> str:

@@ -928,19 +928,22 @@ def test_a_flag_value_is_not_split_as_a_short_word():
     assert _one("kubectl --context -nprod get pods").metadata == {"context": "-nprod"}
 
 
+IT = {"stdin": True, "tty": True}  # -i and -t are recorded under their long names
+
+
 @pytest.mark.parametrize("command,resource,params,metadata", [
     # harmless spellings keep their result
-    ("kubectl exec web -it -- sh", "pod/web", {"command": ["sh"]}, {}),
-    ("kubectl exec web -ti -- sh", "pod/web", {"command": ["sh"]}, {}),
-    ("kubectl exec web -i -t -- sh", "pod/web", {"command": ["sh"]}, {}),
-    ("kubectl exec -it web -- ls -la", "pod/web", {"command": ["ls", "-la"]}, {}),
-    ("kubectl run web --image=x -it", "pod/web", {"image": "x"}, {}),
+    ("kubectl exec web -it -- sh", "pod/web", {"command": ["sh"], **IT}, {}),
+    ("kubectl exec web -ti -- sh", "pod/web", {"command": ["sh"], **IT}, {}),
+    ("kubectl exec web -i -t -- sh", "pod/web", {"command": ["sh"], **IT}, {}),
+    ("kubectl exec -it web -- ls -la", "pod/web", {"command": ["ls", "-la"], **IT}, {}),
+    ("kubectl run web --image=x -it", "pod/web", {"image": "x", **IT}, {}),
     ("kubectl get pod/a -oyaml", "pod/a", {}, {}),
     ("kubectl get pod/a -ojson", "pod/a", {}, {}),
     ("kubectl get pod/a -o=json", "pod/a", {}, {}),
     ("kubectl get pod/a -o yaml", "pod/a", {}, {}),
     ("kubectl get pod/a -v9", "pod/a", {}, {}),
-    ("kubectl get pod/a -w", "pod/a", {}, {}),
+    ("kubectl get pod/a -w", "pod/a", {"watch": True}, {}),
     ("kubectl exec web -capp -- ls", "pod/web", {"container": "app", "command": ["ls"]}, {}),
     ("kubectl -nprod get pod/a", "pod/a", {}, {"namespace": "prod"}),
     ("kubectl -n=prod get pod/a", "pod/a", {}, {"namespace": "prod"}),
@@ -952,21 +955,23 @@ def test_a_flag_value_is_not_split_as_a_short_word():
     ("kubectl get pod/a -x", "pod/a", {}, {}),
     ("kubectl get pod/a -xyz", "pod/a", {}, {}),
     # read as kubectl reads them
-    ("kubectl get pod/a -wA", "pod/a", {}, {"all_namespaces": True}),
-    ("kubectl get pod/a -Aw", "pod/a", {}, {"all_namespaces": True}),
+    ("kubectl get pod/a -wA", "pod/a", {"watch": True}, {"all_namespaces": True}),
+    ("kubectl get pod/a -Aw", "pod/a", {"watch": True}, {"all_namespaces": True}),
     ("kubectl get pod/a -Aoyaml", "pod/a", {}, {"all_namespaces": True}),
     ("kubectl get pod/a -Ao yaml", "pod/a", {}, {"all_namespaces": True}),
     ("kubectl get pod/a -Alapp=x", "pod/a", {"selector": "app=x"}, {"all_namespaces": True}),
     ("kubectl get pod/a -Al app=x", "pod/a", {"selector": "app=x"}, {"all_namespaces": True}),
     ("kubectl get pod/a -l=app=x", "pod/a", {"selector": "app=x"}, {}),
-    ("kubectl logs -fp web", "pod/web", {"follow": True}, {}),
-    ("kubectl logs -pf web", "pod/web", {"follow": True}, {}),
+    ("kubectl logs -fp web", "pod/web", {"follow": True, "previous": True}, {}),
+    ("kubectl logs -pf web", "pod/web", {"follow": True, "previous": True}, {}),
     ("kubectl logs -fc app web", "pod/web", {"follow": True, "container": "app"}, {}),
     ("kubectl logs web -fcapp", "pod/web", {"follow": True, "container": "app"}, {}),
     ("kubectl logs -f=false web", "pod/web", {"follow": False}, {}),
-    ("kubectl exec -itc app web -- sh", "pod/web", {"container": "app", "command": ["sh"]}, {}),
+    ("kubectl exec -itc app web -- sh", "pod/web",
+     {"container": "app", "command": ["sh"], **IT}, {}),
     ("kubectl patch deploy/web -p{}", "deployment/web", {"patch": "{}"}, {}),
-    ("kubectl get pod/a -test.nprod", "pod/a", {"e": "st.nprod"}, {}),  # pflag skips it
+    # pflag skips the dot
+    ("kubectl get pod/a -test.nprod", "pod/a", {"tty": True, "env": "st.nprod"}, {}),
 ])
 def test_short_words(command, resource, params, metadata):
     intent = _one(command)

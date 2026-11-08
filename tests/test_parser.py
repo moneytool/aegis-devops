@@ -2700,7 +2700,7 @@ def test_aws_numeric_looking_names_stay_strings(argv, resource):
     ("kubectl get pods --show-labels -n prod", "pod/*", {"show-labels": True}),
     ("kubectl get pods -n prod --watch", "pod/*", {"watch": True}),
     ("kubectl get --watch pods -n prod", "pod/*", {"watch": True}),
-    ("kubectl get pods -n prod -w", "pod/*", {}),
+    ("kubectl get pods -n prod -w", "pod/*", {"watch": True}),
     ("kubectl get pods --all-namespaces --no-headers", "pod/*", {"no-headers": True}),
     ("kubectl get pods -A --no-headers", "pod/*", {"no-headers": True}),
     ("kubectl get pod web --ignore-not-found -n prod", "pod/web", {"ignore-not-found": True}),
@@ -3865,34 +3865,36 @@ def test_the_last_dry_run_decides_in_the_other_tools(argv, rehearsal):
     ("helm upgrade api ./c -nprod", "release/api", {"chart": "./c"}, {"namespace": "prod"}),
     ("helm upgrade api ./c -n=prod", "release/api", {"chart": "./c"}, {"namespace": "prod"}),
     ("helm -nprod upgrade api ./c", "release/api", {"chart": "./c"}, {"namespace": "prod"}),
-    ("helm status api -oyaml", "release/api", {"o": "yaml"}, {}),
-    ("helm status -oyaml api", "release/api", {"o": "yaml"}, {}),
-    ("helm status -o yaml api", "release/api", {"o": "yaml"}, {}),
+    ("helm status api -oyaml", "release/api", {"output": "yaml"}, {}),
+    ("helm status -oyaml api", "release/api", {"output": "yaml"}, {}),
+    ("helm status -o yaml api", "release/api", {"output": "yaml"}, {}),
     ("helm list -A", "release/*", {}, {"all_namespaces": True}),
-    ("helm list -aq", "release/*", {"a": True, "q": True}, {}),
-    ("helm list -l a=b", "release/*", {"l": "a=b"}, {}),
+    ("helm list -aq", "release/*", {"all": True, "short": True}, {}),
+    ("helm list -l a=b", "release/*", {"selector": "a=b"}, {}),
     # a namespace in a word
     ("helm upgrade api ./c -n dev -inprod", "release/api",
      {"install": True, "chart": "./c"}, {"namespace": "prod"}),
     ("helm upgrade api ./c -n dev -qnprod", "release/api",
-     {"q": True, "chart": "./c"}, {"namespace": "prod"}),
+     {"short": True, "chart": "./c"}, {"namespace": "prod"}),
     # a flag's value is not split
     ("helm upgrade api ./c -n dev --kube-context -nprod", "release/api", {"chart": "./c"},
      {"namespace": "dev", "context": "-nprod"}),
-    ("helm upgrade api ./c -n dev -l -nprod", "release/api", {"l": "-nprod", "chart": "./c"},
+    ("helm upgrade api ./c -n dev -l -nprod", "release/api", {"labels": "-nprod", "chart": "./c"},
      {"namespace": "dev"}),
     # flux
     ("flux get ks -A", "kustomization/*", {}, {"all_namespaces": True}),
     ("flux get ks -A a", "kustomization/a", {}, {"all_namespaces": True}),
-    ("flux get ks a -w", "kustomization/a", {"w": True}, {}),
-    ("flux get ks -Aw", "kustomization/*", {"w": True}, {"all_namespaces": True}),
-    ("flux get ks -l a=b", "kustomization/*", {"l": "a=b"}, {}),
+    ("flux get ks a -w", "kustomization/a", {"watch": True}, {}),
+    ("flux get ks -Aw", "kustomization/*", {"watch": True}, {"all_namespaces": True}),
+    ("flux get ks -l a=b", "kustomization/*", {"label_selector": "a=b"}, {}),
     ("flux get ks -nprod", "kustomization/*", {}, {"namespace": "prod"}),
     ("flux -nprod get ks", "kustomization/*", {}, {"namespace": "prod"}),
-    ("flux get ks -n dev -wnprod", "kustomization/*", {"w": True}, {"namespace": "prod"}),
-    ("flux delete ks -s a", "kustomization/a", {"s": True}, {}),
-    ("flux delete ks a -n dev -snprod", "kustomization/a", {"s": True}, {"namespace": "prod"}),
-    ("flux create source git a -u -nprod -n dev", "source-git/a", {"u": "-nprod"},
+    ("flux get ks -n dev -wnprod", "kustomization/*", {"watch": True},
+     {"namespace": "prod"}),
+    ("flux delete ks -s a", "kustomization/a", {"silent": True}, {}),
+    ("flux delete ks a -n dev -snprod", "kustomization/a", {"silent": True},
+     {"namespace": "prod"}),
+    ("flux create source git a -u -nprod -n dev", "source-git/a", {"username": "-nprod"},
      {"namespace": "dev"}),
 ])
 def test_helm_and_flux_short_words(argv, resource, params, metadata):
@@ -3905,13 +3907,13 @@ def test_helm_and_flux_short_words(argv, resource, params, metadata):
 
 def test_flux_logs_f_is_follow():
     intent = from_argv("flux logs -fnprod".split())[0]
-    assert intent.params["f"] is True
+    assert intent.params["follow"] is True
     assert intent.metadata == {"namespace": "prod"}
 
 
 def test_helm_a_takes_a_value_on_template_only():
-    assert from_argv("helm template api ./c -av1".split())[0].params["a"] == "v1"
-    assert from_argv("helm get values api -a".split())[0].params["a"] is True
+    assert from_argv("helm template api ./c -av1".split())[0].params["api_versions"] == "v1"
+    assert from_argv("helm get values api -a".split())[0].params["all"] is True
 
 
 @pytest.mark.parametrize("argv", [

@@ -1,6 +1,7 @@
 {
  "_source": "https://cloud.google.com/sdk/gcloud/reference (fetched 2026-11-07)",
  "compute disks add-iam-policy-binding": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": [
@@ -12,6 +13,7 @@
   ]
  },
  "compute disks create": {
+  "alias": {},
   "bool": [
    "confidential-compute",
    "require-csek-key-create"
@@ -55,6 +57,7 @@
   ]
  },
  "compute disks delete": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": [
@@ -63,6 +66,7 @@
   ]
  },
  "compute disks describe": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": [
@@ -71,6 +75,9 @@
   ]
  },
  "compute disks list": {
+  "alias": {
+   "r": "regexp"
+  },
   "bool": [
    "uri"
   ],
@@ -87,6 +94,7 @@
   ]
  },
  "compute disks remove-iam-policy-binding": {
+  "alias": {},
   "bool": [
    "all"
   ],
@@ -100,6 +108,7 @@
   ]
  },
  "compute disks resize": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": [
@@ -109,6 +118,7 @@
   ]
  },
  "compute disks set-iam-policy": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": [
@@ -116,6 +126,7 @@
   ]
  },
  "compute disks update": {
+  "alias": {},
   "bool": [
    "clear-architecture",
    "clear-labels"
@@ -137,6 +148,7 @@
   ]
  },
  "compute firewall-rules create": {
+  "alias": {},
   "bool": [
    "disabled",
    "enable-logging",
@@ -162,16 +174,21 @@
   ]
  },
  "compute firewall-rules delete": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": []
  },
  "compute firewall-rules describe": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": []
  },
  "compute firewall-rules list": {
+  "alias": {
+   "r": "regexp"
+  },
   "bool": [
    "uri"
   ],
@@ -186,6 +203,7 @@
   ]
  },
  "compute firewall-rules update": {
+  "alias": {},
   "bool": [
    "disabled",
    "enable-logging",
@@ -207,6 +225,7 @@
   ]
  },
  "compute instances add-iam-policy-binding": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": [
@@ -218,6 +237,7 @@
   ]
  },
  "compute instances create": {
+  "alias": {},
   "bool": [
    "async",
    "boot-disk-auto-delete",
@@ -343,6 +363,7 @@
   ]
  },
  "compute instances delete": {
+  "alias": {},
   "bool": [
    "no-graceful-shutdown"
   ],
@@ -354,6 +375,7 @@
   ]
  },
  "compute instances describe": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": [
@@ -361,6 +383,7 @@
   ]
  },
  "compute instances export": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": [
@@ -369,6 +392,7 @@
   ]
  },
  "compute instances import": {
+  "alias": {},
   "bool": [
    "async",
    "byol",
@@ -411,6 +435,9 @@
   ]
  },
  "compute instances list": {
+  "alias": {
+   "r": "regexp"
+  },
   "bool": [
    "uri"
   ],
@@ -426,6 +453,7 @@
   ]
  },
  "compute instances remove-iam-policy-binding": {
+  "alias": {},
   "bool": [
    "all"
   ],
@@ -439,6 +467,7 @@
   ]
  },
  "compute instances reset": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": [
@@ -446,6 +475,7 @@
   ]
  },
  "compute instances set-iam-policy": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": [
@@ -453,6 +483,7 @@
   ]
  },
  "compute instances start": {
+  "alias": {},
   "bool": [
    "async"
   ],
@@ -463,6 +494,7 @@
   ]
  },
  "compute instances stop": {
+  "alias": {},
   "bool": [
    "async",
    "no-graceful-shutdown"
@@ -475,6 +507,7 @@
   ]
  },
  "compute instances update": {
+  "alias": {},
   "bool": [
    "clear-labels",
    "clear-node-affinities",
@@ -512,6 +545,7 @@
   ]
  },
  "compute ssh": {
+  "alias": {},
   "bool": [
    "dry-run",
    "force-key-file-overwrite",
@@ -536,6 +570,11 @@
   ]
  },
  "container clusters create": {
+  "alias": {
+   "m": "machine-type",
+   "u": "username",
+   "z": "zone"
+  },
   "bool": [
    "async",
    "autoprovisioning-enable-insecure-kubelet-readonly-port",
@@ -774,6 +813,9 @@
   ]
  },
  "container clusters delete": {
+  "alias": {
+   "z": "zone"
+  },
   "bool": [
    "async"
   ],
@@ -786,6 +828,9 @@
   ]
  },
  "container clusters describe": {
+  "alias": {
+   "z": "zone"
+  },
   "bool": [],
   "optional": [],
   "value": [
@@ -796,6 +841,9 @@
   ]
  },
  "container clusters get-credentials": {
+  "alias": {
+   "z": "zone"
+  },
   "bool": [
    "dns-endpoint",
    "internal-ip"
@@ -809,6 +857,9 @@
   ]
  },
  "container clusters list": {
+  "alias": {
+   "z": "zone"
+  },
   "bool": [
    "uri"
   ],
@@ -825,6 +876,9 @@
   ]
  },
  "container clusters resize": {
+  "alias": {
+   "z": "zone"
+  },
   "bool": [
    "async"
   ],
@@ -840,6 +894,10 @@
   ]
  },
  "container clusters update": {
+  "alias": {
+   "u": "username",
+   "z": "zone"
+  },
   "bool": [
    "add-maintenance-exclusion-until-end-of-support",
    "async",
@@ -1043,6 +1101,9 @@
   ]
  },
  "container clusters upgrade": {
+  "alias": {
+   "z": "zone"
+  },
   "bool": [
    "async",
    "master"
@@ -1062,6 +1123,10 @@
   ]
  },
  "container node-pools create": {
+  "alias": {
+   "m": "machine-type",
+   "z": "zone"
+  },
   "bool": [
    "add-maintenance-exclusion-until-end-of-support",
    "async",
@@ -1171,6 +1236,9 @@
   ]
  },
  "container node-pools delete": {
+  "alias": {
+   "z": "zone"
+  },
   "bool": [
    "async"
   ],
@@ -1184,6 +1252,9 @@
   ]
  },
  "container node-pools describe": {
+  "alias": {
+   "z": "zone"
+  },
   "bool": [],
   "optional": [],
   "value": [
@@ -1195,6 +1266,9 @@
   ]
  },
  "container node-pools list": {
+  "alias": {
+   "z": "zone"
+  },
   "bool": [
    "uri"
   ],
@@ -1212,6 +1286,9 @@
   ]
  },
  "container node-pools rollback": {
+  "alias": {
+   "z": "zone"
+  },
   "bool": [
    "async"
   ],
@@ -1226,6 +1303,9 @@
   ]
  },
  "container node-pools update": {
+  "alias": {
+   "z": "zone"
+  },
   "bool": [
    "add-maintenance-exclusion-until-end-of-support",
    "async",
@@ -1293,6 +1373,7 @@
   ]
  },
  "functions add-iam-policy-binding": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": [
@@ -1302,6 +1383,7 @@
   ]
  },
  "functions delete": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": [
@@ -1309,6 +1391,7 @@
   ]
  },
  "functions deploy": {
+  "alias": {},
   "bool": [
    "allow-unauthenticated",
    "clear-binary-authorization",
@@ -1386,6 +1469,7 @@
   ]
  },
  "functions describe": {
+  "alias": {},
   "bool": [
    "v2"
   ],
@@ -1395,6 +1479,7 @@
   ]
  },
  "functions list": {
+  "alias": {},
   "bool": [
    "v2"
   ],
@@ -1408,6 +1493,7 @@
   ]
  },
  "functions remove-iam-policy-binding": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": [
@@ -1417,6 +1503,7 @@
   ]
  },
  "functions set-iam-policy": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": [
@@ -1424,6 +1511,7 @@
   ]
  },
  "iam service-accounts add-iam-policy-binding": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": [
@@ -1434,6 +1522,7 @@
   ]
  },
  "iam service-accounts create": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": [
@@ -1442,16 +1531,19 @@
   ]
  },
  "iam service-accounts delete": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": []
  },
  "iam service-accounts describe": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": []
  },
  "iam service-accounts list": {
+  "alias": {},
   "bool": [
    "uri"
   ],
@@ -1463,6 +1555,7 @@
   ]
  },
  "iam service-accounts remove-iam-policy-binding": {
+  "alias": {},
   "bool": [
    "all"
   ],
@@ -1475,11 +1568,13 @@
   ]
  },
  "iam service-accounts set-iam-policy": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": []
  },
  "iam service-accounts update": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": [
@@ -1488,6 +1583,7 @@
   ]
  },
  "projects add-iam-policy-binding": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": [
@@ -1498,6 +1594,7 @@
   ]
  },
  "projects create": {
+  "alias": {},
   "bool": [
    "enable-cloud-apis",
    "set-as-default"
@@ -1512,16 +1609,19 @@
   ]
  },
  "projects delete": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": []
  },
  "projects describe": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": []
  },
  "projects list": {
+  "alias": {},
   "bool": [
    "uri"
   ],
@@ -1534,6 +1634,7 @@
   ]
  },
  "projects remove-iam-policy-binding": {
+  "alias": {},
   "bool": [
    "all"
   ],
@@ -1546,11 +1647,13 @@
   ]
  },
  "projects set-iam-policy": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": []
  },
  "projects update": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": [
@@ -1558,6 +1661,7 @@
   ]
  },
  "pubsub topics add-iam-policy-binding": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": [
@@ -1566,6 +1670,7 @@
   ]
  },
  "pubsub topics create": {
+  "alias": {},
   "bool": [
    "message-storage-policy-enforce-in-transit"
   ],
@@ -1614,16 +1719,19 @@
   ]
  },
  "pubsub topics delete": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": []
  },
  "pubsub topics describe": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": []
  },
  "pubsub topics list": {
+  "alias": {},
   "bool": [
    "uri"
   ],
@@ -1636,6 +1744,7 @@
   ]
  },
  "pubsub topics remove-iam-policy-binding": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": [
@@ -1644,11 +1753,13 @@
   ]
  },
  "pubsub topics set-iam-policy": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": []
  },
  "pubsub topics update": {
+  "alias": {},
   "bool": [
    "clear-ingestion-data-source-settings",
    "clear-labels",
@@ -1703,6 +1814,10 @@
   ]
  },
  "root": {
+  "alias": {
+   "q": "quiet",
+   "v": "version"
+  },
   "bool": [
    "h",
    "help",
@@ -1729,6 +1844,7 @@
   ]
  },
  "run deploy": {
+  "alias": {},
   "bool": [
    "allow-unauthenticated",
    "async",
@@ -1850,6 +1966,7 @@
   ]
  },
  "run services add-iam-policy-binding": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": [
@@ -1861,6 +1978,7 @@
   ]
  },
  "run services delete": {
+  "alias": {},
   "bool": [
    "async",
    "no-async"
@@ -1872,6 +1990,7 @@
   ]
  },
  "run services describe": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": [
@@ -1880,6 +1999,7 @@
   ]
  },
  "run services list": {
+  "alias": {},
   "bool": [
    "uri"
   ],
@@ -1893,6 +2013,7 @@
   ]
  },
  "run services remove-iam-policy-binding": {
+  "alias": {},
   "bool": [
    "all"
   ],
@@ -1906,6 +2027,7 @@
   ]
  },
  "run services set-iam-policy": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": [
@@ -1913,6 +2035,7 @@
   ]
  },
  "run services update": {
+  "alias": {},
   "bool": [
    "async",
    "clear-binary-authorization",
@@ -2015,6 +2138,9 @@
   ]
  },
  "sql export bak": {
+  "alias": {
+   "d": "database"
+  },
   "bool": [
    "async",
    "differential-base",
@@ -2032,6 +2158,9 @@
   ]
  },
  "sql export csv": {
+  "alias": {
+   "d": "database"
+  },
   "bool": [
    "async",
    "offload"
@@ -2048,6 +2177,10 @@
   ]
  },
  "sql export sql": {
+  "alias": {
+   "d": "database",
+   "t": "table"
+  },
   "bool": [
    "async",
    "clean",
@@ -2065,6 +2198,7 @@
   ]
  },
  "sql export tde": {
+  "alias": {},
   "bool": [
    "async",
    "prompt-for-pvk-password"
@@ -2078,6 +2212,9 @@
   ]
  },
  "sql import bak": {
+  "alias": {
+   "d": "database"
+  },
   "bool": [
    "async",
    "keep-encrypted",
@@ -2100,6 +2237,9 @@
   ]
  },
  "sql import csv": {
+  "alias": {
+   "d": "database"
+  },
   "bool": [
    "async"
   ],
@@ -2117,6 +2257,9 @@
   ]
  },
  "sql import sql": {
+  "alias": {
+   "d": "database"
+  },
   "bool": [
    "async",
    "clean",
@@ -2132,6 +2275,7 @@
   ]
  },
  "sql import tde": {
+  "alias": {},
   "bool": [
    "async",
    "prompt-for-pvk-password"
@@ -2145,6 +2289,9 @@
   ]
  },
  "sql instances create": {
+  "alias": {
+   "t": "tier"
+  },
   "bool": [
    "assign-ip",
    "async",
@@ -2283,6 +2430,7 @@
   ]
  },
  "sql instances delete": {
+  "alias": {},
   "bool": [
    "async",
    "enable-final-backup"
@@ -2295,11 +2443,13 @@
   ]
  },
  "sql instances describe": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": []
  },
  "sql instances list": {
+  "alias": {},
   "bool": [
    "show-edition",
    "show-sql-network-architecture",
@@ -2315,6 +2465,7 @@
   ]
  },
  "storage buckets add-iam-policy-binding": {
+  "alias": {},
   "bool": [],
   "optional": [],
   "value": [
@@ -2325,6 +2476,15 @@
   ]
  },
  "storage buckets create": {
+  "alias": {
+   "b": "uniform-bucket-level-access",
+   "c": "default-storage-class",
+   "k": "default-encryption-key",
+   "l": "location",
+   "public-access-prevention": "pap",
+   "rpo": "recovery-point-objective",
+   "s": "default-storage-class"
+  },
   "bool": [
    "b",
    "enable-autoclass",
@@ -2362,6 +2522,9 @@
   ]
  },
  "storage buckets delete": {
+  "alias": {
+   "c": "continue-on-error"
+  },
   "bool": [
    "c",
    "continue-on-error"
@@ -2372,6 +2535,7 @@
   ]
  },
  "storage buckets describe": {
+  "alias": {},
   "bool": [
    "raw"
   ],
@@ -2381,6 +2545,7 @@
   ]
  },
  "storage buckets list": {
+  "alias": {},
   "bool": [
    "raw",
    "uri"
@@ -2395,6 +2560,7 @@
   ]
  },
  "storage buckets remove-iam-policy-binding": {
+  "alias": {},
   "bool": [
    "all"
   ],
@@ -2407,6 +2573,10 @@
   ]
  },
  "storage buckets set-iam-policy": {
+  "alias": {
+   "c": "continue-on-error",
+   "e": "etag"
+  },
   "bool": [
    "c",
    "continue-on-error"
@@ -2418,6 +2588,15 @@
   ]
  },
  "storage buckets update": {
+  "alias": {
+   "I": "read-paths-from-stdin",
+   "a": "canned-acl",
+   "c": "continue-on-error",
+   "clear-public-access-prevention": "clear-pap",
+   "predefined-acl": "canned-acl",
+   "public-access-prevention": "pap",
+   "rpo": "recovery-point-objective"
+  },
   "bool": [
    "I",
    "c",
@@ -2486,6 +2665,27 @@
   ]
  },
  "storage cp": {
+  "alias": {
+   "A": "all-versions",
+   "D": "daisy-chain",
+   "I": "read-paths-from-stdin",
+   "J": "gzip-in-flight-all",
+   "L": "manifest-path",
+   "P": "preserve-posix",
+   "R": "recursive",
+   "U": "skip-unsupported",
+   "Z": "gzip-local-all",
+   "a": "canned-acl",
+   "c": "continue-on-error",
+   "j": "gzip-in-flight",
+   "n": "no-clobber",
+   "p": "preserve-acl",
+   "predefined-acl": "canned-acl",
+   "r": "recursive",
+   "s": "storage-class",
+   "v": "print-created-message",
+   "z": "gzip-local"
+  },
   "bool": [
    "A",
    "D",
@@ -2557,6 +2757,25 @@
   ]
  },
  "storage mv": {
+  "alias": {
+   "A": "all-versions",
+   "D": "daisy-chain",
+   "I": "read-paths-from-stdin",
+   "J": "gzip-in-flight-all",
+   "L": "manifest-path",
+   "P": "preserve-posix",
+   "U": "skip-unsupported",
+   "Z": "gzip-local-all",
+   "a": "canned-acl",
+   "c": "continue-on-error",
+   "j": "gzip-in-flight",
+   "n": "no-clobber",
+   "p": "preserve-acl",
+   "predefined-acl": "canned-acl",
+   "s": "storage-class",
+   "v": "print-created-message",
+   "z": "gzip-local"
+  },
   "bool": [
    "A",
    "D",
@@ -2625,6 +2844,13 @@
   ]
  },
  "storage rm": {
+  "alias": {
+   "I": "read-paths-from-stdin",
+   "R": "recursive",
+   "a": "all-versions",
+   "c": "continue-on-error",
+   "r": "recursive"
+  },
   "bool": [
    "I",
    "R",

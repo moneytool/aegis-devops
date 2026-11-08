@@ -362,10 +362,27 @@ _KUBECTL_INT_FLAGS = {
     "max-log-requests", "min", "replicas", "retries", "revision",
     "skip-wait-for-delete-timeout", "tail", "to-revision",
 }
-# Short value flags, recorded under their long name ("-p" only on patch).
-_KUBECTL_SHORT_VALUE_NAMES = {
-    "c": "container", "L": "label-columns", "p": "patch", "r": "replicas",
+# Every short letter of kubectl 1.36 and the long flag it is (from --help on every command),
+# so a short and a long spelling record the same. Some depend on the verb: see
+# _kubectl_short_name. -h is help, an informational probe read before this.
+_KUBECTL_SHORT_NAMES = {
+    "A": "all-namespaces", "R": "recursive", "q": "quiet", "t": "tty", "w": "watch",
+    "L": "label-columns", "c": "container", "e": "env", "f": "filename", "k": "kustomize",
+    "l": "selector", "n": "namespace", "o": "output", "s": "server", "v": "v",
 }
+
+
+def _kubectl_short_name(letter: str, verb: str | None, replicas: bool) -> str | None:
+    """The long flag kubectl's ``-<letter>`` is on ``verb``, or None when it has none."""
+    if letter == "f" and verb in _KUBECTL_FOLLOW_VERBS:
+        return "follow"  # logs -f
+    if letter == "p":
+        return {"logs": "previous", "patch": "patch"}.get(verb or "")
+    if letter == "r":
+        return "replicas" if replicas else None  # create deployment -r
+    if letter == "i":
+        return "interactive" if verb == "delete" else "stdin"
+    return _KUBECTL_SHORT_NAMES.get(letter)
 
 # kubectl verbs whose short "-f" is the boolean --follow, not --filename.
 _KUBECTL_FOLLOW_VERBS = {"logs"}
@@ -705,6 +722,34 @@ def _helm_short_letters(verb: str | None) -> tuple[frozenset[str], frozenset[str
     return _HELM_SHORT_BOOL_LETTERS | {"a"}, _HELM_SHORT_VALUE_LETTERS
 
 
+def _helm_short_name(letter: str, verb: str | None) -> str | None:
+    """The long flag helm's ``-<letter>`` is on ``verb`` (helm 4.3.1 and 3.21.1 flag
+    registrations), or None when it has none here."""
+    names = {"n": "namespace", "o": "output", "m": "max", "s": "show-only",
+             "A": "all-namespaces", "d": "date", "g": "generate-name", "i": "install",
+             "q": "short", "r": "reverse"}
+    if letter == "f":
+        return "filter" if verb == "list" else "values"
+    if letter == "l":
+        return "selector" if verb == "list" else "labels"
+    if letter == "a":
+        return "api-versions" if verb == "template" else "all"
+    return names.get(letter)
+
+
+_FLUX_SHORT_NAMES = {
+    "A": "all-namespaces", "l": "label-selector", "n": "namespace", "o": "output",
+    "p": "password", "u": "username", "v": "version", "s": "silent", "w": "watch",
+}
+
+
+def _flux_short_name(letter: str, verb: str | None) -> str | None:
+    """The long flag flux's ``-<letter>`` is (flux2 v2.10 cmd/flux), or None."""
+    if letter == "f":
+        return "follow" if verb == "logs" else None
+    return _FLUX_SHORT_NAMES.get(letter)
+
+
 def _flux_short_letters(verb: str | None) -> tuple[frozenset[str], frozenset[str]]:
     """Flux's short letters: ``-f`` is only a flag on ``logs`` of the verbs parsed here."""
     if verb == "logs":
@@ -875,12 +920,17 @@ def _parse_flags(
                     n = len(tokens)
                     continue
             key, val = _split_flag(tok)
-            if key in ("n", "namespace"):
+            if not is_long:
+                # a short letter is its long flag from here on: both record the same
+                long_name = _kubectl_short_name(key, verb, replicas_short)
+                if long_name is not None:
+                    key, is_long = long_name, True
+            if key == "namespace":
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
                 metadata["namespace"] = val
-            elif key in ("A", "all-namespaces"):
+            elif key == "all-namespaces":
                 if val in _GO_FALSE_WORDS:
                     metadata.pop("all_namespaces", None)
                 else:
@@ -907,9 +957,6 @@ def _parse_flags(
                 # deprecated --dry-run=true) are rehearsals; --dry-run=none /
                 # =false is a real run.
                 _record_dry_run(params, _is_dry_run(val, truthy=_KUBECTL_DRY_RUN_WORDS))
-            elif key == "f" and verb in _KUBECTL_FOLLOW_VERBS:
-                # kubectl logs -f is --follow, a boolean.
-                params["follow"] = _bool_param(val)
             elif key in _SELECTOR_FLAGS:
                 if val is None:
                     i += 1
@@ -950,14 +997,13 @@ def _parse_flags(
             elif ((key in _KNOWN_BOOL_FLAGS and not (key == "command" and verb == "kuberc"))
                   or (key == "raw" and verb == "config")):
                 params[key] = _bool_param(val)
-            elif (key in _KUBECTL_VALUE_FLAGS or (key == "p" and verb == "patch")
-                  or (key == "r" and replicas_short) or key == "command"):
+            elif key in _KUBECTL_VALUE_FLAGS or key == "command":
                 # Always the next token, even "-1" or "--context": that is
                 # what kubectl does with it.
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
-                name = _KUBECTL_SHORT_VALUE_NAMES.get(key, key)
+                name = key
                 if name in _KUBECTL_INT_FLAGS or (name == "port" and replicas_short):
                     # create deployment's --replicas and --port are Int32, the others Int
                     # or Int64; --port is a string on expose and run
@@ -2520,9 +2566,51 @@ def _split_az_short_word(word: str) -> list[str]:
     return readings[0]
 
 
+# Every short option of az's commands and the long option it is, read from azure-cli's
+# command_modules/*/_params.py (scripts/gen_az_short_options.py; "_source" names the
+# commit). A scope applies to the commands under it; the most specific one wins.
+_AZ_SHORT_FILE = Path(__file__).parent / "data" / "az_short_options.json"
+
+
+@lru_cache(maxsize=1)
+def _az_short_tables() -> dict[str, dict[str, str]]:
+    with open(_AZ_SHORT_FILE) as f:
+        return json.load(f)
+
+
+def _az_aliases(words: list[str]) -> dict[str, str]:
+    """The short options of ``az <words>`` and the long option each is."""
+    tables = _az_short_tables()
+    aliases: dict[str, str] = {}
+    for size in range(1, len(words) + 1):
+        aliases.update(tables.get(" ".join(words[:size]), {}))
+    return aliases
+
+
+def _az_roles(aliases: dict[str, str]) -> dict[str, str]:
+    """The long options that name the target, its resource group or its location on this
+    command: ``--name``, ``--resource-group`` and ``--location``, and the option the
+    command's -n, -g or -l is when it is another spelling of one of them (``-n`` is
+    ``--account-name`` on some commands)."""
+    roles = {"name": "name", "resource-group": "resource-group", "location": "location"}
+    n, g, loc = aliases.get("n"), aliases.get("g"), aliases.get("l")
+    if n and n != "node-count":
+        roles[n] = "name"
+    if g in ("group", "resource-group-name"):
+        roles[g] = "resource-group"
+    if loc and "location" in loc:
+        roles[loc] = "location"
+    return roles
+
+
 def _parse_az_tokens(
-    tokens: list[str],
+    tokens: list[str], aliases: dict[str, str] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], list[str], str | None, list[str]]:
+    """``aliases`` (:func:`_az_aliases`) records each short option as the long option it is
+    on the command, so ``-c 1`` and ``--node-count 1`` record the same; the long option
+    that names the target, resource group or location then feeds them whichever way it is
+    spelled."""
+    roles = _az_roles(aliases) if aliases is not None else None
     metadata: dict[str, Any] = {}
     params: dict[str, Any] = {}
     positional: list[str] = []
@@ -2548,6 +2636,11 @@ def _parse_az_tokens(
                     and any(o != key and o.startswith(key) for o in _AZ_SCOPE_OPTIONS)):
                 raise ValueError(f"az: {tok} may be an abbreviation of an option that names "
                                  f"the target or its scope; write the option in full")
+            if aliases is not None and roles is not None:
+                if not tok.startswith("--"):
+                    key = aliases.get(key) or {"g": "resource-group", "n": "name",
+                                               "l": "location"}.get(key, key)
+                key = roles.get(key, key)
             if key in ("l", "location"):
                 if val is None:
                     i += 1
@@ -2708,6 +2801,9 @@ def _from_az_multi(argv: list[str]) -> list[InfrastructureIntent]:
 
     tokens = argv[1:]
     metadata, params, positional, name_value, ids_values = _parse_az_tokens(tokens)
+    # read again with the command's own short options, each recorded as its long option
+    metadata, params, positional, name_value, ids_values = _parse_az_tokens(
+        tokens, _az_aliases(positional))
 
     if not positional:
         raise ValueError(f"could not find an az verb in: {argv!r}")
@@ -2931,7 +3027,7 @@ def _gcloud_flag_tables() -> dict[str, Any]:
         return json.load(f)
 
 
-def _gcloud_flag_table(command: str) -> dict[str, frozenset[str]] | None:
+def _gcloud_flag_table(command: str) -> dict[str, Any] | None:
     """The flags of ``command`` (``compute instances update``) and gcloud's own, by kind,
     or None when the command is not in the table."""
     tables = _gcloud_flag_tables()
@@ -2939,13 +3035,15 @@ def _gcloud_flag_table(command: str) -> dict[str, frozenset[str]] | None:
     if entry is None:
         return None
     root = tables["root"]
-    return {kind: frozenset(entry.get(kind, ())) | frozenset(root.get(kind, ()))
-            for kind in ("bool", "value", "optional")}
+    table: dict[str, Any] = {kind: frozenset(entry.get(kind, ())) | frozenset(root.get(kind, ()))
+                             for kind in ("bool", "value", "optional")}
+    table["alias"] = {**root.get("alias", {}), **entry.get("alias", {})}
+    return table
 
 
 def _parse_gcloud_tokens(
     tokens: list[str], *, storage: bool = False,
-    table: dict[str, frozenset[str]] | None = None, strict: bool = False,
+    table: dict[str, Any] | None = None, strict: bool = False,
     lenient: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     """``(metadata, params, positional)``. gcloud takes no abbreviated flag (calliope
@@ -2977,6 +3075,9 @@ def _parse_gcloud_tokens(
             break
         if tok.startswith("-") and tok != "-":
             key, val = _split_flag(tok)
+            if table is not None:
+                # a short or other spelling is its flag (-z is --zone): both record the same
+                key = table["alias"].get(key, key)
             if key == "region":
                 if val is None:
                     i += 1
@@ -3323,7 +3424,6 @@ _HELM_READ_VERBS = {"history", "status", "list", "get"}
 # _helm_short_letters.
 _HELM_SHORT_VALUE_LETTERS = frozenset("flmnos")
 _HELM_SHORT_BOOL_LETTERS = frozenset("Adghiqr")
-_HELM_SHORT_BOOL_NAMES = {"i": "install", "g": "generate_name"}
 
 # Helm global options (accepted before or after the verb).
 _HELM_GLOBAL_VALUE_FLAGS = {
@@ -3425,7 +3525,13 @@ def _parse_helm_tokens(
                     n = len(tokens)
                     continue
             key, val = _split_flag(tok)
-            if key in ("n", "namespace"):
+            short_key = key
+            if not is_long:
+                # a short letter is recorded as its long flag: both spellings record the same
+                long_name = _helm_short_name(key, verb)
+                if long_name is not None:
+                    key = long_name
+            if key == "namespace":
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
@@ -3478,15 +3584,15 @@ def _parse_helm_tokens(
                 _record_all_namespaces(metadata, val)
             elif is_long and key in long_bools:
                 params[key.replace("-", "_")] = _bool_param(val)
-            elif not is_long and key in short_bools:
+            elif not is_long and short_key in short_bools:
                 # Takes no value: in "-i api ./c" the release is "api".
-                params[_HELM_SHORT_BOOL_NAMES.get(key, key)] = _bool_param(val)
-            elif not is_long and key in short_values:
+                params[key.replace("-", "_")] = _bool_param(val)
+            elif not is_long and short_key in short_values:
                 # Always the next token, whatever it looks like, as pflag reads it.
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
-                params[key] = _coerce(val)
+                params[key.replace("-", "_")] = _coerce(val)
             else:
                 # A value flag takes the next word whatever it is (#80); a flag in no
                 # table is refused unless "=value" or its place shows its reading.
@@ -4334,7 +4440,13 @@ def _parse_flux_tokens(
                     n = len(tokens)
                     continue
             key, val = _split_flag(tok)
-            if key in ("n", "namespace"):
+            short_key = key
+            if not is_long:
+                # a short letter is recorded as its long flag: both spellings record the same
+                long_name = _flux_short_name(key, verb)
+                if long_name is not None:
+                    key = long_name
+            if key == "namespace":
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
@@ -4362,15 +4474,15 @@ def _parse_flux_tokens(
                 _record_all_namespaces(metadata, val)
             elif is_long and key in _FLUX_BOOL_FLAGS:
                 params[key.replace("-", "_")] = _bool_param(val)
-            elif not is_long and key in short_bools:
+            elif not is_long and short_key in short_bools:
                 # Takes no value: in "get ks -A a" the name is "a".
-                params[key] = _bool_param(val)
-            elif not is_long and key in short_values:
+                params[key.replace("-", "_")] = _bool_param(val)
+            elif not is_long and short_key in short_values:
                 # Always the next token, whatever it looks like, as pflag reads it.
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
-                params[key] = _coerce(val)
+                params[key.replace("-", "_")] = _coerce(val)
             else:
                 # A value flag takes the next word whatever it is (#80); a flag in no
                 # table is refused unless "=value" or its place shows its reading.
@@ -4794,6 +4906,10 @@ def _git_option_params(verb: str, options: list[tuple[str, Any]]) -> dict[str, A
         if _git_last(options, "dry-run"):
             params["dry_run"] = True
     elif verb in ("branch", "tag"):
+        # -D, -M and -C are --delete, --move and --copy with --force: recorded that way
+        for letter, name in (("D", "delete"), ("M", "move"), ("C", "copy")):
+            if params.pop(letter, None) is True and name in ("move", "copy"):
+                params[name] = True
         if _git_last(options, "delete", "D"):
             params["delete"] = True
         if _git_last(options, "force", "D", "M", "C"):

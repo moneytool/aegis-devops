@@ -1,0 +1,3843 @@
+{
+"_source": "azure-cli df18ffe956abd549f98780837bb218602a60d95f command_modules/*/_params.py",
+"account": {
+"s": "subscription"
+},
+"account lock": {
+"n": "name",
+"t": "lock-type"
+},
+"account management-group": {
+"n": "name"
+},
+"account management-group create": {
+"d": "display-name",
+"p": "parent"
+},
+"account management-group hierarchy-settings create": {
+"m": "default-management-group",
+"r": "require-authorization-for-group-creation"
+},
+"account management-group hierarchy-settings update": {
+"m": "default-management-group",
+"r": "require-authorization-for-group-creation"
+},
+"account management-group show": {
+"e": "expand",
+"r": "recurse"
+},
+"account management-group update": {
+"d": "display-name",
+"p": "parent"
+},
+"acr": {
+"n": "name",
+"u": "username",
+"p": "password",
+"y": "yes",
+"t": "image",
+"f": "file"
+},
+"acr agentpool": {
+"r": "registry",
+"n": "name",
+"c": "count"
+},
+"acr artifact-streaming": {
+"t": "image"
+},
+"acr artifact-streaming operation": {
+"t": "image"
+},
+"acr build": {
+"r": "registry"
+},
+"acr cache": {
+"r": "registry",
+"n": "name",
+"c": "cred-set",
+"s": "source-repo",
+"t": "target-repo"
+},
+"acr config retention": {
+"r": "registry"
+},
+"acr config soft-delete": {
+"r": "registry"
+},
+"acr connected-registry": {
+"r": "registry",
+"n": "name",
+"p": "parent"
+},
+"acr connected-registry create": {
+"m": "mode",
+"w": "sync-window",
+"s": "sync-schedule"
+},
+"acr connected-registry update": {
+"w": "sync-window",
+"s": "sync-schedule"
+},
+"acr credential-set": {
+"r": "registry",
+"n": "name",
+"l": "login-server",
+"u": "username-id",
+"p": "password-id"
+},
+"acr import": {
+"r": "registry",
+"u": "username",
+"p": "password",
+"t": "image"
+},
+"acr login": {
+"t": "expose-token"
+},
+"acr manifest": {
+"r": "registry",
+"n": "name"
+},
+"acr manifest list-deleted-tags": {
+"n": "name"
+},
+"acr manifest restore": {
+"d": "digest",
+"f": "force",
+"n": "name"
+},
+"acr pack build": {
+"r": "registry",
+"t": "image",
+"b": "builder"
+},
+"acr private-endpoint-connection": {
+"r": "registry-name",
+"n": "name"
+},
+"acr replication": {
+"r": "registry",
+"n": "name"
+},
+"acr repository": {
+"t": "image"
+},
+"acr repository untag": {
+"t": "image"
+},
+"acr run": {
+"r": "registry",
+"f": "file"
+},
+"acr scope-map": {
+"r": "registry",
+"n": "name"
+},
+"acr task": {
+"r": "registry",
+"n": "name",
+"f": "file",
+"t": "image",
+"c": "context"
+},
+"acr task credential add": {
+"u": "username",
+"p": "password"
+},
+"acr task credential update": {
+"u": "username",
+"p": "password"
+},
+"acr taskrun": {
+"r": "registry",
+"n": "name"
+},
+"acr token": {
+"r": "registry",
+"n": "name"
+},
+"acr webhook": {
+"r": "registry",
+"n": "name"
+},
+"ad app permission list-grants": {
+"r": "show-resource-name"
+},
+"ad group": {
+"g": "group"
+},
+"ad signed-in-user": {
+"t": "type"
+},
+"ad sp create-for-rbac": {
+"n": "display-name"
+},
+"advisor configuration update": {
+"l": "low-cpu-threshold",
+"e": "exclude",
+"i": "include"
+},
+"advisor recommendation disable": {
+"n": "name",
+"d": "days"
+},
+"advisor recommendation enable": {
+"n": "name"
+},
+"advisor recommendation list": {
+"c": "category",
+"r": "refresh"
+},
+"aks": {
+"k": "kubernetes-version",
+"c": "node-count"
+},
+"aks command invoke": {
+"c": "command",
+"f": "file"
+},
+"aks command result": {
+"i": "command-id"
+},
+"aks create": {
+"p": "dns-name-prefix",
+"d": "node-osdisk-diskencryptionset-id",
+"u": "admin-username",
+"x": "no-ssh-key",
+"a": "enable-addons",
+"s": "node-vm-size",
+"m": "max-pods",
+"z": "zones",
+"y": "yes"
+},
+"aks disable-addons": {
+"a": "addons",
+"y": "yes"
+},
+"aks enable-addons": {
+"a": "addons",
+"s": "subnet-name"
+},
+"aks get-credentials": {
+"a": "admin",
+"f": "file"
+},
+"aks identity-binding create": {
+"n": "name"
+},
+"aks identity-binding delete": {
+"n": "name"
+},
+"aks identity-binding show": {
+"n": "name"
+},
+"aks install-cli": {
+"l": "kubelogin-base-src-url"
+},
+"aks maintenanceconfiguration add": {
+"n": "name"
+},
+"aks maintenanceconfiguration delete": {
+"n": "name"
+},
+"aks maintenanceconfiguration show": {
+"n": "name"
+},
+"aks maintenanceconfiguration update": {
+"n": "name"
+},
+"aks mesh upgrade complete": {
+"y": "yes"
+},
+"aks mesh upgrade rollback": {
+"y": "yes"
+},
+"aks namespace get-credentials": {
+"f": "file"
+},
+"aks nodepool": {
+"n": "nodepool-name"
+},
+"aks nodepool add": {
+"s": "node-vm-size",
+"e": "enable-cluster-autoscaler",
+"m": "max-pods",
+"z": "zones"
+},
+"aks nodepool delete": {
+"i": "ignore-pdb"
+},
+"aks nodepool snapshot create": {
+"n": "name"
+},
+"aks nodepool snapshot delete": {
+"n": "name",
+"y": "yes"
+},
+"aks nodepool snapshot show": {
+"n": "name",
+"y": "yes"
+},
+"aks nodepool snapshot update": {
+"n": "name"
+},
+"aks nodepool update": {
+"e": "enable-cluster-autoscaler",
+"d": "disable-cluster-autoscaler",
+"u": "update-cluster-autoscaler",
+"y": "yes"
+},
+"aks nodepool upgrade": {
+"y": "yes"
+},
+"aks remove-dev-spaces": {
+"y": "yes"
+},
+"aks snapshot create": {
+"n": "name"
+},
+"aks snapshot delete": {
+"n": "name",
+"y": "yes"
+},
+"aks snapshot show": {
+"n": "name",
+"y": "yes"
+},
+"aks trustedaccess rolebinding create": {
+"n": "name"
+},
+"aks trustedaccess rolebinding delete": {
+"n": "name"
+},
+"aks trustedaccess rolebinding show": {
+"n": "name"
+},
+"aks trustedaccess rolebinding update": {
+"n": "name"
+},
+"aks update": {
+"t": "assignee-principal-type",
+"e": "enable-cluster-autoscaler",
+"d": "disable-cluster-autoscaler",
+"u": "update-cluster-autoscaler",
+"y": "yes"
+},
+"aks upgrade": {
+"y": "yes"
+},
+"aks use-dev-spaces": {
+"s": "space",
+"e": "endpoint",
+"y": "yes"
+},
+"ams": {
+"n": "name"
+},
+"ams account check-name": {
+"n": "name"
+},
+"ams account encryption": {
+"a": "account-name"
+},
+"ams account sp": {
+"a": "account-name",
+"n": "name",
+"p": "password"
+},
+"ams account storage": {
+"a": "account-name",
+"n": "name"
+},
+"ams account-filter": {
+"a": "account-name",
+"n": "name"
+},
+"ams asset": {
+"a": "account-name",
+"n": "name"
+},
+"ams asset create": {
+"n": "name"
+},
+"ams asset-filter": {
+"a": "account-name",
+"n": "name"
+},
+"ams asset-track": {
+"a": "account-name"
+},
+"ams content-key-policy": {
+"a": "account-name",
+"n": "name"
+},
+"ams job": {
+"a": "account-name",
+"t": "transform-name",
+"n": "name"
+},
+"ams live-event": {
+"a": "account-name",
+"n": "name"
+},
+"ams live-output": {
+"a": "account-name",
+"n": "name"
+},
+"ams streaming-endpoint": {
+"n": "name",
+"a": "account-name"
+},
+"ams streaming-locator": {
+"a": "account-name",
+"n": "name"
+},
+"ams streaming-policy": {
+"a": "account-name",
+"n": "name"
+},
+"ams transform": {
+"a": "account-name",
+"n": "name"
+},
+"apim": {
+"n": "name"
+},
+"apim api create": {
+"n": "service-name"
+},
+"apim api delete": {
+"n": "service-name"
+},
+"apim api export": {
+"n": "service-name",
+"f": "file-path"
+},
+"apim api import": {
+"n": "service-name"
+},
+"apim api list": {
+"n": "service-name"
+},
+"apim api operation": {
+"n": "service-name",
+"p": "template-parameters"
+},
+"apim api release": {
+"n": "service-name"
+},
+"apim api revision": {
+"n": "service-name"
+},
+"apim api schema create": {
+"n": "service-name"
+},
+"apim api schema delete": {
+"n": "service-name"
+},
+"apim api schema get-etag": {
+"n": "service-name"
+},
+"apim api schema list": {
+"n": "service-name"
+},
+"apim api schema show": {
+"n": "service-name"
+},
+"apim api update": {
+"n": "service-name"
+},
+"apim api versionset": {
+"n": "service-name"
+},
+"apim backend create": {
+"n": "service-name"
+},
+"apim backend delete": {
+"n": "service-name"
+},
+"apim backend list": {
+"n": "service-name"
+},
+"apim backend show": {
+"n": "service-name"
+},
+"apim backend update": {
+"n": "service-name"
+},
+"apim create": {
+"v": "virtual-network"
+},
+"apim deletedservice purge": {
+"n": "service-name"
+},
+"apim deletedservice show": {
+"n": "service-name"
+},
+"apim graphql resolver create": {
+"n": "service-name"
+},
+"apim graphql resolver delete": {
+"n": "service-name"
+},
+"apim graphql resolver list": {
+"n": "service-name"
+},
+"apim graphql resolver policy create": {
+"n": "service-name"
+},
+"apim graphql resolver policy delete": {
+"n": "service-name"
+},
+"apim graphql resolver policy list": {
+"n": "service-name"
+},
+"apim graphql resolver policy show": {
+"n": "service-name"
+},
+"apim graphql resolver show": {
+"n": "service-name"
+},
+"apim nv": {
+"n": "service-name"
+},
+"apim product": {
+"n": "service-name",
+"s": "subscription-required"
+},
+"apim product api add": {
+"n": "service-name"
+},
+"apim product api check": {
+"n": "service-name"
+},
+"apim product api delete": {
+"n": "service-name"
+},
+"apim product api list": {
+"n": "service-name"
+},
+"apim update": {
+"v": "virtual-network"
+},
+"appconfig": {
+"n": "name",
+"y": "yes",
+"t": "top"
+},
+"appconfig create": {
+"l": "location",
+"e": "enable-public-network",
+"p": "enable-purge-protection"
+},
+"appconfig enhanced-feature-flag": {
+"n": "name"
+},
+"appconfig feature": {
+"n": "name"
+},
+"appconfig kv": {
+"n": "name"
+},
+"appconfig kv export": {
+"d": "destination",
+"r": "export-as-reference"
+},
+"appconfig kv import": {
+"s": "source"
+},
+"appconfig network-security-perimeter-configuration": {
+"s": "store-name"
+},
+"appconfig network-security-perimeter-configuration reconcile": {
+"n": "name"
+},
+"appconfig network-security-perimeter-configuration show": {
+"n": "name"
+},
+"appconfig replica": {
+"s": "store-name",
+"n": "name"
+},
+"appconfig revision list": {
+"n": "name"
+},
+"appconfig snapshot": {
+"s": "snapshot-name"
+},
+"appconfig snapshot list": {
+"s": "snapshot-name"
+},
+"appconfig update": {
+"e": "enable-public-network",
+"p": "enable-purge-protection"
+},
+"appservice ase create": {
+"n": "name",
+"k": "kind"
+},
+"appservice ase create-inbound-services": {
+"n": "name"
+},
+"appservice ase delete": {
+"n": "name"
+},
+"appservice ase list-addresses": {
+"n": "name"
+},
+"appservice ase list-plans": {
+"n": "name"
+},
+"appservice ase send-test-notification": {
+"n": "name"
+},
+"appservice ase show": {
+"n": "name"
+},
+"appservice ase update": {
+"n": "name",
+"p": "allow-new-private-endpoint-connections",
+"r": "allow-remote-debugging",
+"f": "allow-incoming-ftp-connections"
+},
+"appservice ase upgrade": {
+"n": "name"
+},
+"appservice domain create": {
+"n": "hostname",
+"c": "contact-info",
+"p": "privacy",
+"a": "auto-renew"
+},
+"appservice domain show-terms": {
+"n": "hostname"
+},
+"appservice plan": {
+"n": "name"
+},
+"appservice plan create": {
+"n": "name",
+"e": "app-service-environment",
+"z": "zone-redundant"
+},
+"appservice plan delete": {
+"n": "name"
+},
+"appservice plan identity": {
+"n": "name"
+},
+"appservice plan managed-instance install-script": {
+"n": "name"
+},
+"appservice plan managed-instance instance connect": {
+"n": "name"
+},
+"appservice plan managed-instance instance recycle": {
+"n": "name"
+},
+"appservice plan managed-instance network": {
+"n": "name"
+},
+"appservice plan managed-instance registry-adapter": {
+"n": "name"
+},
+"appservice plan managed-instance registry-adapter add": {
+"n": "name"
+},
+"appservice plan managed-instance registry-adapter remove": {
+"n": "name"
+},
+"appservice plan managed-instance storage-mount": {
+"n": "name"
+},
+"appservice plan managed-instance storage-mount add": {
+"n": "name"
+},
+"appservice plan managed-instance storage-mount remove": {
+"n": "name"
+},
+"appservice plan update": {
+"m": "max-elastic-worker-count"
+},
+"aro get-admin-kubeconfig": {
+"f": "file"
+},
+"backup container": {
+"v": "vault-name"
+},
+"backup container list": {
+"v": "vault-name"
+},
+"backup container re-register": {
+"c": "container-name"
+},
+"backup container register": {
+"v": "vault-name",
+"y": "yes"
+},
+"backup container show": {
+"n": "name"
+},
+"backup container unregister": {
+"c": "container-name"
+},
+"backup item": {
+"v": "vault-name",
+"c": "container-name"
+},
+"backup item list": {
+"v": "vault-name"
+},
+"backup item set-policy": {
+"n": "name",
+"p": "policy-name",
+"y": "yes"
+},
+"backup item show": {
+"n": "name"
+},
+"backup item source-scan-configuration set": {
+"n": "name",
+"c": "container-name"
+},
+"backup job": {
+"v": "vault-name"
+},
+"backup job list": {
+"v": "vault-name"
+},
+"backup policy": {
+"v": "vault-name"
+},
+"backup policy create": {
+"n": "name"
+},
+"backup policy get-default-for-vm": {
+"v": "vault-name"
+},
+"backup policy list": {
+"v": "vault-name"
+},
+"backup policy set": {
+"n": "name",
+"y": "yes"
+},
+"backup protectable-item": {
+"v": "vault-name",
+"c": "container-name"
+},
+"backup protectable-item show": {
+"v": "vault-name",
+"n": "name"
+},
+"backup protection": {
+"v": "vault-name",
+"p": "policy-name"
+},
+"backup protection enable-for-azurefileshare": {
+"v": "vault-name",
+"y": "yes"
+},
+"backup protection enable-for-vm": {
+"v": "vault-name"
+},
+"backup protection reconfigure": {
+"c": "container-name",
+"i": "item-name"
+},
+"backup recoveryconfig show": {
+"c": "container-name",
+"i": "item-name",
+"v": "vault-name",
+"r": "rp-name"
+},
+"backup recoverypoint": {
+"v": "vault-name",
+"c": "container-name",
+"i": "item-name"
+},
+"backup recoverypoint list": {
+"v": "vault-name",
+"c": "container-name"
+},
+"backup recoverypoint move": {
+"v": "vault-name",
+"c": "container-name",
+"n": "name"
+},
+"backup recoverypoint show": {
+"n": "name",
+"c": "container-name"
+},
+"backup recoverypoint show-log-chain": {
+"v": "vault-name",
+"c": "container-name"
+},
+"backup restore": {
+"v": "vault-name",
+"c": "container-name",
+"i": "item-name",
+"r": "rp-name"
+},
+"backup restore restore-azurewl": {
+"v": "vault-name"
+},
+"backup restore restore-disks": {
+"t": "target-resource-group"
+},
+"backup vault": {
+"n": "name"
+},
+"backup vault encryption": {
+"n": "name"
+},
+"backup vault encryption show": {
+"n": "name"
+},
+"backup vault identity assign": {
+"n": "name"
+},
+"backup vault identity remove": {
+"n": "name"
+},
+"backup vault identity show": {
+"n": "name"
+},
+"batch account": {
+"n": "name"
+},
+"batch account identity assign": {
+"n": "name"
+},
+"batch account identity remove": {
+"n": "name"
+},
+"batch account identity show": {
+"n": "name"
+},
+"batch account keys renew": {
+"n": "name"
+},
+"batch account network-profile network-rule add": {
+"n": "name"
+},
+"batch account network-profile network-rule delete": {
+"n": "name"
+},
+"batch account network-profile network-rule list": {
+"n": "name"
+},
+"batch account network-profile set": {
+"n": "name"
+},
+"batch account network-profile show": {
+"n": "name"
+},
+"batch account show": {
+"n": "name"
+},
+"batch private-endpoint-connection show": {
+"n": "name"
+},
+"batch private-link-resource show": {
+"n": "name"
+},
+"batchai": {
+"w": "workspace"
+},
+"batchai cluster": {
+"n": "name"
+},
+"batchai cluster create": {
+"f": "config-file",
+"u": "user-name",
+"k": "ssh-key",
+"p": "password",
+"i": "image",
+"s": "vm-size",
+"t": "target"
+},
+"batchai cluster file": {
+"c": "cluster",
+"w": "workspace"
+},
+"batchai cluster file list": {
+"p": "path"
+},
+"batchai cluster list": {
+"w": "workspace"
+},
+"batchai cluster node": {
+"c": "cluster",
+"w": "workspace"
+},
+"batchai cluster node exec": {
+"n": "node-id",
+"L": "address",
+"p": "password",
+"k": "ssh-private-key"
+},
+"batchai cluster resize": {
+"t": "target"
+},
+"batchai experiment": {
+"n": "name",
+"w": "workspace"
+},
+"batchai experiment list": {
+"w": "workspace"
+},
+"batchai file-server": {
+"g": "resource-group",
+"w": "workspace",
+"n": "name"
+},
+"batchai file-server create": {
+"s": "vm-size",
+"f": "config-file",
+"u": "user-name",
+"k": "ssh-key",
+"p": "password"
+},
+"batchai file-server list": {
+"w": "workspace"
+},
+"batchai job": {
+"n": "name",
+"e": "experiment"
+},
+"batchai job create": {
+"f": "config-file",
+"c": "cluster"
+},
+"batchai job file": {
+"j": "job",
+"w": "workspace",
+"e": "experiment",
+"d": "output-directory-id",
+"p": "path"
+},
+"batchai job file stream": {
+"f": "file-name"
+},
+"batchai job list": {
+"w": "workspace",
+"e": "experiment"
+},
+"batchai job node": {
+"j": "job",
+"w": "workspace",
+"e": "experiment",
+"d": "output-directory-id",
+"p": "path"
+},
+"batchai job node exec": {
+"n": "node-id",
+"L": "address",
+"p": "password",
+"k": "ssh-private-key"
+},
+"batchai workspace": {
+"n": "workspace"
+},
+"bicep build": {
+"f": "file"
+},
+"bicep build-params": {
+"f": "file"
+},
+"bicep decompile": {
+"f": "file"
+},
+"bicep decompile-params": {
+"f": "file"
+},
+"bicep format": {
+"f": "file"
+},
+"bicep generate-params": {
+"f": "file"
+},
+"bicep install": {
+"v": "version",
+"t": "target-platform"
+},
+"bicep lint": {
+"f": "file"
+},
+"bicep publish": {
+"f": "file"
+},
+"bicep restore": {
+"f": "file"
+},
+"bicep run": {
+"c": "command"
+},
+"bicep snapshot": {
+"f": "file"
+},
+"bicep upgrade": {
+"t": "target-platform"
+},
+"billing enrollment-account show": {
+"n": "name"
+},
+"billing invoice list": {
+"d": "generate-download-url"
+},
+"billing invoice show": {
+"n": "name"
+},
+"bot": {
+"n": "name"
+},
+"bot authsetting": {
+"c": "setting-name"
+},
+"bot create": {
+"d": "description",
+"e": "endpoint"
+},
+"bot directline create": {
+"s": "site-name"
+},
+"bot directline update": {
+"s": "site-name"
+},
+"bot email create": {
+"a": "email-address",
+"p": "password"
+},
+"bot kik create": {
+"u": "user-name"
+},
+"bot prepare-publish": {
+"v": "version"
+},
+"bot publish": {
+"v": "version",
+"t": "timeout"
+},
+"bot update": {
+"d": "display-name",
+"e": "endpoint"
+},
+"bot webchat create": {
+"s": "site-name"
+},
+"cache": {
+"t": "resource-type",
+"n": "name"
+},
+"capacity reservation group": {
+"n": "capacity-reservation-group"
+},
+"capacity reservation group show": {
+"i": "instance-view"
+},
+"cognitiveservices": {
+"n": "name"
+},
+"cognitiveservices agent": {
+"a": "account-name",
+"p": "project-name",
+"n": "name"
+},
+"cognitiveservices agent create": {
+"n": "name"
+},
+"cognitiveservices agent logs": {
+"a": "account-name",
+"p": "project-name",
+"n": "name"
+},
+"cognitiveservices agent logs show": {
+"t": "type",
+"f": "follow"
+},
+"config param-persist delete": {
+"y": "yes"
+},
+"configure": {
+"d": "defaults",
+"l": "list-defaults"
+},
+"consumption budget": {
+"s": "start-date",
+"e": "end-date"
+},
+"container": {
+"n": "name"
+},
+"container container-group-profile": {
+"n": "name"
+},
+"container container-group-profile create": {
+"e": "environment-variables",
+"f": "file"
+},
+"container create": {
+"e": "environment-variables",
+"f": "file"
+},
+"container export": {
+"f": "file"
+},
+"containerapp": {
+"n": "name",
+"s": "secrets"
+},
+"containerapp auth": {
+"y": "yes"
+},
+"containerapp compose create": {
+"e": "environment",
+"f": "compose-file-path"
+},
+"containerapp create": {
+"w": "workload-profile-name",
+"i": "image"
+},
+"containerapp env": {
+"n": "name",
+"d": "dapr-connection-string",
+"s": "infrastructure-subnet-resource-id",
+"i": "infrastructure-resource-group"
+},
+"containerapp env certificate create": {
+"c": "certificate-name",
+"v": "validation-method"
+},
+"containerapp env certificate delete": {
+"c": "certificate",
+"t": "thumbprint"
+},
+"containerapp env certificate list": {
+"c": "certificate",
+"t": "thumbprint",
+"m": "managed-certificates-only",
+"p": "private-key-certificates-only"
+},
+"containerapp env certificate upload": {
+"f": "certificate-file",
+"c": "certificate-name",
+"p": "password"
+},
+"containerapp env create": {
+"z": "zone-redundant",
+"w": "enable-workload-profiles"
+},
+"containerapp env dapr-component": {
+"n": "name"
+},
+"containerapp env delete": {
+"n": "name"
+},
+"containerapp env http-route-config": {
+"r": "http-route-config-name"
+},
+"containerapp env premium-ingress": {
+"n": "name",
+"w": "workload-profile-name",
+"t": "termination-grace-period"
+},
+"containerapp env show": {
+"n": "name"
+},
+"containerapp env storage": {
+"k": "azure-file-account-key",
+"f": "azure-file-share-name",
+"a": "azure-file-account-name"
+},
+"containerapp env update": {
+"d": "dapr-connection-string",
+"n": "name",
+"w": "workload-profile-name"
+},
+"containerapp env workload-profile": {
+"n": "name",
+"w": "workload-profile-name"
+},
+"containerapp exec": {
+"n": "name"
+},
+"containerapp github-action add": {
+"b": "branch",
+"i": "image"
+},
+"containerapp hostname bind": {
+"t": "thumbprint",
+"c": "certificate",
+"e": "environment",
+"v": "validation-method"
+},
+"containerapp ingress cors": {
+"r": "allowed-origins",
+"m": "allowed-methods",
+"a": "allowed-headers",
+"e": "expose-headers"
+},
+"containerapp job": {
+"n": "name",
+"w": "workload-profile-name"
+},
+"containerapp job secret": {
+"s": "secrets"
+},
+"containerapp logs show": {
+"n": "name",
+"t": "type"
+},
+"containerapp replica": {
+"n": "name"
+},
+"containerapp revision copy": {
+"i": "image",
+"w": "workload-profile-name"
+},
+"containerapp revision label": {
+"y": "no-prompt"
+},
+"containerapp secret": {
+"s": "secrets"
+},
+"containerapp ssl upload": {
+"e": "environment",
+"f": "certificate-file",
+"p": "password",
+"c": "certificate-name"
+},
+"containerapp up": {
+"i": "image",
+"w": "workload-profile-name",
+"b": "branch"
+},
+"containerapp update": {
+"i": "image",
+"w": "workload-profile-name"
+},
+"cosmosdb": {
+"d": "db-name"
+},
+"cosmosdb cassandra keyspace": {
+"a": "account-name",
+"n": "name"
+},
+"cosmosdb cassandra keyspace throughput": {
+"a": "account-name",
+"n": "name"
+},
+"cosmosdb cassandra table": {
+"a": "account-name",
+"k": "keyspace-name",
+"n": "name"
+},
+"cosmosdb cassandra table throughput": {
+"a": "account-name",
+"k": "keyspace-name",
+"n": "name"
+},
+"cosmosdb collection": {
+"c": "collection-name"
+},
+"cosmosdb create": {
+"r": "is-restore-request",
+"p": "public-network-access",
+"i": "network-acl-bypass-resource-ids"
+},
+"cosmosdb fleet": {
+"g": "resource-group",
+"n": "fleet-name"
+},
+"cosmosdb fleet create": {
+"l": "location"
+},
+"cosmosdb fleetspace": {
+"g": "resource-group",
+"n": "fleetspace-name"
+},
+"cosmosdb fleetspace account": {
+"g": "resource-group",
+"n": "fleetspace-account-name"
+},
+"cosmosdb fleetspace account create": {
+"b": "body"
+},
+"cosmosdb fleetspace create": {
+"b": "body"
+},
+"cosmosdb fleetspace update": {
+"b": "body"
+},
+"cosmosdb gremlin database": {
+"a": "account-name",
+"n": "name"
+},
+"cosmosdb gremlin database restore": {
+"a": "account-name",
+"n": "name",
+"t": "restore-timestamp"
+},
+"cosmosdb gremlin database throughput": {
+"a": "account-name",
+"n": "name"
+},
+"cosmosdb gremlin graph": {
+"a": "account-name",
+"d": "database-name",
+"n": "name",
+"p": "partition-key-path",
+"c": "conflict-resolution-policy"
+},
+"cosmosdb gremlin graph restore": {
+"a": "account-name",
+"d": "database-name",
+"n": "name",
+"t": "restore-timestamp"
+},
+"cosmosdb gremlin graph throughput": {
+"a": "account-name",
+"d": "database-name",
+"n": "name"
+},
+"cosmosdb gremlin restorable-database": {
+"l": "location",
+"i": "instance-id"
+},
+"cosmosdb gremlin restorable-graph": {
+"l": "location",
+"i": "instance-id",
+"d": "database-rid",
+"s": "start-time",
+"e": "end-time"
+},
+"cosmosdb gremlin restorable-resource": {
+"l": "location",
+"i": "instance-id",
+"r": "restore-location",
+"t": "restore-timestamp"
+},
+"cosmosdb gremlin retrieve-latest-backup-time": {
+"a": "account-name",
+"d": "database-name",
+"n": "graph-name",
+"l": "location"
+},
+"cosmosdb locations show": {
+"l": "location"
+},
+"cosmosdb mongodb collection": {
+"a": "account-name",
+"d": "database-name",
+"n": "name"
+},
+"cosmosdb mongodb collection restore": {
+"a": "account-name",
+"d": "database-name",
+"n": "name",
+"t": "restore-timestamp"
+},
+"cosmosdb mongodb collection throughput": {
+"a": "account-name",
+"d": "database-name",
+"n": "name"
+},
+"cosmosdb mongodb database": {
+"a": "account-name",
+"n": "name"
+},
+"cosmosdb mongodb database restore": {
+"a": "account-name",
+"n": "name",
+"t": "restore-timestamp"
+},
+"cosmosdb mongodb database throughput": {
+"a": "account-name",
+"n": "name"
+},
+"cosmosdb mongodb restorable-collection": {
+"l": "location",
+"i": "instance-id",
+"d": "database-rid",
+"s": "start-time",
+"e": "end-time"
+},
+"cosmosdb mongodb restorable-database": {
+"l": "location",
+"i": "instance-id"
+},
+"cosmosdb mongodb restorable-resource": {
+"l": "location",
+"i": "instance-id",
+"r": "restore-location",
+"t": "restore-timestamp"
+},
+"cosmosdb mongodb retrieve-latest-backup-time": {
+"a": "account-name",
+"d": "database-name",
+"c": "collection-name",
+"l": "location"
+},
+"cosmosdb mongodb role definition": {
+"a": "account-name",
+"i": "id",
+"b": "body"
+},
+"cosmosdb mongodb user definition": {
+"a": "account-name",
+"i": "id",
+"b": "body"
+},
+"cosmosdb private-endpoint-connection": {
+"n": "name",
+"a": "account-name"
+},
+"cosmosdb private-link-resource": {
+"a": "account-name"
+},
+"cosmosdb restorable-database-account list": {
+"l": "location",
+"n": "account-name"
+},
+"cosmosdb restorable-database-account show": {
+"l": "location",
+"i": "instance-id"
+},
+"cosmosdb restore": {
+"n": "target-database-account-name",
+"a": "account-name",
+"t": "restore-timestamp",
+"p": "public-network-access",
+"d": "disable-ttl"
+},
+"cosmosdb service": {
+"a": "account-name",
+"g": "resource-group-name",
+"k": "kind",
+"n": "name",
+"c": "count"
+},
+"cosmosdb sql container": {
+"a": "account-name",
+"d": "database-name",
+"n": "name",
+"p": "partition-key-path",
+"u": "unique-key-policy",
+"c": "conflict-resolution-policy",
+"t": "analytical-storage-ttl"
+},
+"cosmosdb sql container restore": {
+"a": "account-name",
+"d": "database-name",
+"n": "name",
+"t": "restore-timestamp"
+},
+"cosmosdb sql container throughput": {
+"a": "account-name",
+"d": "database-name",
+"n": "name"
+},
+"cosmosdb sql database": {
+"a": "account-name",
+"n": "name"
+},
+"cosmosdb sql database restore": {
+"a": "account-name",
+"n": "name",
+"t": "restore-timestamp"
+},
+"cosmosdb sql database throughput": {
+"a": "account-name",
+"n": "name"
+},
+"cosmosdb sql restorable-container": {
+"l": "location",
+"i": "instance-id",
+"d": "database-rid",
+"s": "start-time",
+"e": "end-time"
+},
+"cosmosdb sql restorable-database": {
+"l": "location",
+"i": "instance-id"
+},
+"cosmosdb sql restorable-resource": {
+"l": "location",
+"i": "instance-id",
+"r": "restore-location",
+"t": "restore-timestamp",
+"s": "start-time",
+"e": "end-time"
+},
+"cosmosdb sql retrieve-latest-backup-time": {
+"a": "account-name",
+"d": "database-name",
+"c": "container-name",
+"l": "location"
+},
+"cosmosdb sql role assignment": {
+"a": "account-name",
+"i": "role-assignment-id",
+"d": "role-definition-id",
+"n": "role-definition-name",
+"s": "scope",
+"p": "principal-id"
+},
+"cosmosdb sql role definition": {
+"a": "account-name",
+"i": "id",
+"b": "body"
+},
+"cosmosdb sql stored-procedure": {
+"a": "account-name",
+"d": "database-name",
+"c": "container-name",
+"n": "name",
+"b": "body"
+},
+"cosmosdb sql trigger": {
+"a": "account-name",
+"d": "database-name",
+"c": "container-name",
+"n": "name",
+"b": "body",
+"t": "type"
+},
+"cosmosdb sql user-defined-function": {
+"a": "account-name",
+"d": "database-name",
+"c": "container-name",
+"n": "name",
+"b": "body"
+},
+"cosmosdb table": {
+"a": "account-name",
+"n": "name"
+},
+"cosmosdb table restorable-resource": {
+"l": "location",
+"i": "instance-id",
+"r": "restore-location",
+"t": "restore-timestamp"
+},
+"cosmosdb table restorable-table": {
+"l": "location",
+"i": "instance-id",
+"s": "start-time",
+"e": "end-time"
+},
+"cosmosdb table restore": {
+"a": "account-name",
+"n": "table-name",
+"t": "restore-timestamp"
+},
+"cosmosdb table retrieve-latest-backup-time": {
+"a": "account-name",
+"n": "table-name",
+"l": "location"
+},
+"cosmosdb table throughput": {
+"a": "account-name",
+"n": "name"
+},
+"cosmosdb update": {
+"p": "public-network-access",
+"i": "network-acl-bypass-resource-ids"
+},
+"deployment": {
+"n": "name",
+"f": "template-file",
+"u": "template-uri",
+"s": "template-spec",
+"q": "query-string",
+"p": "parameters"
+},
+"deployment create": {
+"n": "name",
+"j": "handle-extended-json-format",
+"c": "confirm-with-what-if",
+"r": "what-if-result-format",
+"x": "what-if-exclude-change-types",
+"w": "what-if"
+},
+"deployment group create": {
+"n": "name",
+"j": "handle-extended-json-format",
+"c": "confirm-with-what-if",
+"r": "what-if-result-format",
+"x": "what-if-exclude-change-types",
+"w": "what-if"
+},
+"deployment group validate": {
+"n": "name",
+"j": "handle-extended-json-format"
+},
+"deployment group what-if": {
+"n": "name",
+"r": "result-format",
+"x": "exclude-change-types"
+},
+"deployment mg": {
+"m": "management-group-id"
+},
+"deployment mg create": {
+"n": "name",
+"j": "handle-extended-json-format",
+"c": "confirm-with-what-if",
+"r": "what-if-result-format",
+"x": "what-if-exclude-change-types",
+"w": "what-if"
+},
+"deployment mg validate": {
+"n": "name",
+"j": "handle-extended-json-format"
+},
+"deployment mg what-if": {
+"n": "name",
+"r": "result-format",
+"x": "exclude-change-types"
+},
+"deployment operation mg": {
+"m": "management-group-id"
+},
+"deployment sub create": {
+"n": "name",
+"j": "handle-extended-json-format",
+"c": "confirm-with-what-if",
+"r": "what-if-result-format",
+"x": "what-if-exclude-change-types",
+"w": "what-if"
+},
+"deployment sub validate": {
+"n": "name",
+"j": "handle-extended-json-format"
+},
+"deployment sub what-if": {
+"n": "name",
+"r": "result-format",
+"x": "exclude-change-types"
+},
+"deployment tenant create": {
+"n": "name",
+"j": "handle-extended-json-format",
+"c": "confirm-with-what-if",
+"r": "what-if-result-format",
+"x": "what-if-exclude-change-types",
+"w": "what-if"
+},
+"deployment tenant validate": {
+"n": "name",
+"j": "handle-extended-json-format"
+},
+"deployment tenant what-if": {
+"n": "name",
+"r": "result-format",
+"x": "exclude-change-types"
+},
+"deployment validate": {
+"n": "name",
+"j": "handle-extended-json-format"
+},
+"disk": {
+"z": "size-gb",
+"n": "name"
+},
+"dls": {
+"n": "account"
+},
+"dls account create": {
+"n": "account"
+},
+"dls account delete": {
+"n": "account"
+},
+"dls account network-rule": {
+"n": "name"
+},
+"dls account show": {
+"n": "account"
+},
+"dms": {
+"n": "name"
+},
+"dms project": {
+"n": "name"
+},
+"dms project task": {
+"n": "name"
+},
+"eventgrid domain": {
+"n": "name"
+},
+"eventgrid domain event-subscription": {
+"n": "name",
+"d": "delivery-attribute-mapping"
+},
+"eventgrid domain key": {
+"n": "name"
+},
+"eventgrid domain topic": {
+"n": "name"
+},
+"eventgrid domain topic event-subscription": {
+"n": "name",
+"d": "delivery-attribute-mapping"
+},
+"eventgrid partner destination": {
+"n": "name"
+},
+"eventgrid partner namespace": {
+"n": "name"
+},
+"eventgrid partner namespace channel": {
+"n": "name"
+},
+"eventgrid partner namespace event-channel": {
+"n": "name"
+},
+"eventgrid partner namespace show": {
+"n": "name"
+},
+"eventgrid partner registration": {
+"n": "name"
+},
+"eventgrid partner topic": {
+"n": "name"
+},
+"eventgrid partner topic event-subscription": {
+"n": "name"
+},
+"eventgrid system-topic": {
+"n": "name"
+},
+"eventgrid system-topic event-subscription": {
+"n": "name"
+},
+"eventgrid topic event-subscription": {
+"n": "name",
+"d": "delivery-attribute-mapping"
+},
+"eventhubs georecovery-alias set": {
+"a": "alias"
+},
+"eventhubs namespace network-rule-set": {
+"n": "namespace-name"
+},
+"eventhubs namespace network-rule-set ip-rule add": {
+"n": "namespace-name"
+},
+"eventhubs namespace network-rule-set ip-rule remove": {
+"n": "namespace-name"
+},
+"eventhubs namespace network-rule-set virtual-network-rule add": {
+"n": "namespace-name"
+},
+"eventhubs namespace network-rule-set virtual-network-rule remove": {
+"n": "namespace-name"
+},
+"eventhubs namespace private-endpoint-connection": {
+"n": "name"
+},
+"feature": {
+"n": "name"
+},
+"feature registration": {
+"n": "name"
+},
+"functionapp": {
+"s": "slot",
+"n": "name"
+},
+"functionapp config hostname": {
+"n": "name"
+},
+"functionapp config ssl delete": {
+"n": "name"
+},
+"functionapp config ssl list": {
+"n": "name"
+},
+"functionapp config ssl show": {
+"n": "name"
+},
+"functionapp create": {
+"f": "flexconsumption-location"
+},
+"functionapp delete": {
+"n": "name"
+},
+"functionapp deploy": {
+"n": "name"
+},
+"functionapp deployment github-actions": {
+"n": "name",
+"s": "slot",
+"b": "branch"
+},
+"functionapp deployment github-actions add": {
+"r": "runtime",
+"v": "runtime-version",
+"f": "force"
+},
+"functionapp deployment slot": {
+"n": "name"
+},
+"functionapp flex-migration start": {
+"i": "in-place"
+},
+"functionapp function": {
+"n": "name"
+},
+"functionapp function keys": {
+"s": "slot"
+},
+"functionapp keys": {
+"n": "name",
+"s": "slot"
+},
+"functionapp log deployment list": {
+"n": "name",
+"s": "slot"
+},
+"functionapp log deployment show": {
+"n": "name",
+"s": "slot"
+},
+"functionapp plan": {
+"n": "name"
+},
+"functionapp plan create": {
+"n": "name",
+"z": "zone-redundant"
+},
+"functionapp plan delete": {
+"n": "name"
+},
+"functionapp show": {
+"n": "name"
+},
+"functionapp vnet-integration": {
+"n": "name"
+},
+"group": {
+"n": "name",
+"g": "name"
+},
+"group create": {
+"n": "name",
+"g": "name"
+},
+"group delete": {
+"n": "name",
+"g": "name",
+"f": "force-deletion-types"
+},
+"group deployment": {
+"n": "name",
+"f": "template-file",
+"u": "template-uri",
+"p": "parameters"
+},
+"group deployment create": {
+"n": "name",
+"j": "handle-extended-json-format"
+},
+"group deployment validate": {
+"j": "handle-extended-json-format"
+},
+"group lock": {
+"n": "name",
+"t": "lock-type"
+},
+"hdinsight": {
+"v": "version",
+"t": "type",
+"u": "http-user",
+"p": "http-password",
+"U": "ssh-user",
+"P": "ssh-password",
+"K": "ssh-public-key",
+"c": "workernode-count",
+"y": "yes"
+},
+"hdinsight application": {
+"t": "type",
+"P": "ssh-password"
+},
+"hdinsight autoscale create": {
+"y": "yes"
+},
+"hdinsight credentials update": {
+"u": "http-user",
+"p": "http-password"
+},
+"hdinsight resize": {
+"c": "workernode-count"
+},
+"identity": {
+"n": "name"
+},
+"image": {
+"n": "name"
+},
+"image builder": {
+"i": "image-source"
+},
+"image builder customizer": {
+"t": "type",
+"e": "exit-codes"
+},
+"image create": {
+"n": "name"
+},
+"iot central app": {
+"n": "name"
+},
+"iot central app create": {
+"p": "sku",
+"s": "subdomain",
+"t": "template",
+"d": "display-name"
+},
+"iot central app identity assign": {
+"n": "name"
+},
+"iot central app identity remove": {
+"n": "name"
+},
+"iot central app identity show": {
+"n": "name"
+},
+"iot central app private-endpoint-connection": {
+"n": "name",
+"g": "resource-group"
+},
+"iot central app private-endpoint-connection delete": {
+"n": "name",
+"g": "resource-group"
+},
+"iot central app private-endpoint-connection list": {
+"g": "resource-group"
+},
+"iot central app private-endpoint-connection show": {
+"n": "name",
+"g": "resource-group"
+},
+"iot central app private-link-resource list": {
+"n": "name",
+"g": "resource-group"
+},
+"iot central app private-link-resource show": {
+"n": "name",
+"g": "resource-group"
+},
+"iot dps": {
+"n": "name"
+},
+"iot dps certificate": {
+"p": "path",
+"n": "certificate-name",
+"e": "etag"
+},
+"iot hub": {
+"n": "name",
+"e": "etag"
+},
+"iot hub certificate": {
+"p": "path",
+"n": "name"
+},
+"iot hub consumer-group": {
+"n": "name"
+},
+"iot hub message-enrichment": {
+"k": "key",
+"v": "value",
+"e": "endpoints"
+},
+"iot hub policy": {
+"n": "name"
+},
+"iot hub route": {
+"n": "route-name",
+"c": "condition",
+"e": "enabled",
+"s": "source-type"
+},
+"iot hub route test": {
+"b": "body"
+},
+"iot hub routing-endpoint": {
+"n": "endpoint-name",
+"r": "endpoint-resource-group",
+"s": "endpoint-subscription-id",
+"c": "connection-string",
+"t": "endpoint-type"
+},
+"iot hub routing-endpoint create": {
+"b": "batch-frequency",
+"w": "chunk-size"
+},
+"iot hub show-connection-string": {
+"n": "hub-name"
+},
+"keyvault": {
+"n": "name"
+},
+"keyvault certificate backup": {
+"f": "file"
+},
+"keyvault certificate create": {
+"n": "name",
+"p": "policy"
+},
+"keyvault certificate download": {
+"f": "file",
+"e": "encoding"
+},
+"keyvault certificate import": {
+"n": "name",
+"f": "file",
+"p": "policy"
+},
+"keyvault certificate pending": {
+"n": "name"
+},
+"keyvault certificate pending merge": {
+"f": "file"
+},
+"keyvault certificate restore": {
+"f": "file"
+},
+"keyvault certificate set-attributes": {
+"p": "policy"
+},
+"keyvault check-name": {
+"n": "name"
+},
+"keyvault create": {
+"n": "name"
+},
+"keyvault key backup": {
+"f": "file"
+},
+"keyvault key download": {
+"f": "file",
+"e": "encoding"
+},
+"keyvault key get-attestation": {
+"f": "file"
+},
+"keyvault key restore": {
+"f": "file",
+"u": "storage-resource-uri",
+"t": "storage-container-SAS-token",
+"n": "name"
+},
+"keyvault key rotation-policy": {
+"n": "name"
+},
+"keyvault purge": {
+"n": "name"
+},
+"keyvault recover": {
+"n": "name"
+},
+"keyvault region": {
+"r": "region-name"
+},
+"keyvault role assignment": {
+"n": "name"
+},
+"keyvault role assignment create": {
+"t": "assignee-principal-type"
+},
+"keyvault role definition": {
+"n": "name"
+},
+"keyvault secret download": {
+"e": "encoding"
+},
+"keyvault secret set": {
+"n": "name",
+"f": "file",
+"e": "encoding"
+},
+"keyvault setting": {
+"n": "name"
+},
+"keyvault show-deleted": {
+"n": "name"
+},
+"keyvault update": {
+"n": "name"
+},
+"keyvault update-hsm": {
+"e": "enable-purge-protection"
+},
+"keyvault wait-hsm": {
+"g": "resource-group"
+},
+"lab vm claim": {
+"n": "name"
+},
+"lock": {
+"n": "name",
+"t": "lock-type"
+},
+"logicapp": {
+"s": "slot",
+"n": "name"
+},
+"logicapp config appsettings list": {
+"n": "name"
+},
+"logicapp create": {
+"i": "deployment-container-image-name",
+"d": "docker-registry-server-user",
+"w": "docker-registry-server-password",
+"v": "functions-version"
+},
+"logicapp delete": {
+"n": "name"
+},
+"logicapp deployment source config-zip": {
+"t": "timeout"
+},
+"logicapp show": {
+"n": "name"
+},
+"managed-cassandra cluster create": {
+"c": "cluster-name",
+"e": "external-gossip-certificates",
+"l": "location",
+"s": "delegated-management-subnet-id",
+"i": "initial-cassandra-admin-password"
+},
+"managed-cassandra cluster deallocate": {
+"c": "cluster-name"
+},
+"managed-cassandra cluster delete": {
+"c": "cluster-name"
+},
+"managed-cassandra cluster invoke-command": {
+"c": "cluster-name"
+},
+"managed-cassandra cluster show": {
+"c": "cluster-name"
+},
+"managed-cassandra cluster start": {
+"c": "cluster-name"
+},
+"managed-cassandra cluster status": {
+"c": "cluster-name"
+},
+"managed-cassandra cluster update": {
+"c": "cluster-name",
+"e": "external-gossip-certificates"
+},
+"managed-cassandra datacenter create": {
+"c": "cluster-name",
+"d": "data-center-name",
+"n": "node-count",
+"b": "base64-encoded-cassandra-yaml-fragment",
+"l": "data-center-location",
+"s": "delegated-subnet-id",
+"k": "managed-disk-customer-key-uri",
+"p": "backup-storage-customer-key-uri",
+"z": "availability-zone"
+},
+"managed-cassandra datacenter delete": {
+"c": "cluster-name",
+"d": "data-center-name"
+},
+"managed-cassandra datacenter list": {
+"c": "cluster-name"
+},
+"managed-cassandra datacenter show": {
+"c": "cluster-name",
+"d": "data-center-name"
+},
+"managed-cassandra datacenter update": {
+"c": "cluster-name",
+"d": "data-center-name",
+"n": "node-count",
+"b": "base64-encoded-cassandra-yaml-fragment",
+"l": "data-center-location",
+"s": "delegated-subnet-id",
+"k": "managed-disk-customer-key-uri",
+"p": "backup-storage-customer-key-uri"
+},
+"managedapp": {
+"n": "name"
+},
+"managedapp create": {
+"n": "name",
+"d": "managedapp-definition-id",
+"m": "managed-rg-id"
+},
+"managedapp definition": {
+"n": "name"
+},
+"maps": {
+"n": "name"
+},
+"maps account": {
+"s": "sku"
+},
+"maps account create": {
+"l": "location"
+},
+"maps account keys": {
+"n": "name"
+},
+"monitor action-group": {
+"n": "name"
+},
+"monitor activity-log alert": {
+"n": "name"
+},
+"monitor autoscale": {
+"n": "name"
+},
+"monitor autoscale create": {
+"a": "action"
+},
+"monitor autoscale profile": {
+"n": "name",
+"r": "recurrence"
+},
+"monitor autoscale profile list-timezones": {
+"q": "search-query"
+},
+"monitor autoscale rule": {
+"n": "name"
+},
+"monitor autoscale-settings": {
+"n": "name"
+},
+"monitor clone": {
+"t": "types"
+},
+"monitor log-analytics workspace": {
+"n": "workspace-name",
+"f": "force"
+},
+"monitor log-analytics workspace linked-service": {
+"n": "name"
+},
+"monitor log-analytics workspace saved-search": {
+"n": "name",
+"q": "saved-query"
+},
+"monitor log-analytics workspace table": {
+"n": "name"
+},
+"monitor log-analytics workspace table restore create": {
+"n": "name"
+},
+"monitor log-analytics workspace table search-job create": {
+"n": "name"
+},
+"monitor metrics alert": {
+"n": "name"
+},
+"monitor metrics alert condition create": {
+"t": "type"
+},
+"monitor metrics alert create": {
+"a": "action"
+},
+"monitor metrics alert dimension create": {
+"n": "name",
+"v": "value"
+},
+"monitor trace-association": {
+"y": "yes"
+},
+"monitor trace-association create": {
+"w": "azure-monitor-workspace"
+},
+"mysql flexible-server": {
+"n": "name"
+},
+"mysql flexible-server ad-admin": {
+"s": "server-name"
+},
+"mysql flexible-server ad-admin create": {
+"u": "display-name",
+"t": "type"
+},
+"mysql flexible-server backup create": {
+"b": "backup-name"
+},
+"mysql flexible-server backup delete": {
+"n": "name",
+"b": "backup-name"
+},
+"mysql flexible-server backup list": {
+"n": "name"
+},
+"mysql flexible-server backup show": {
+"n": "name",
+"b": "backup-name"
+},
+"mysql flexible-server create": {
+"u": "admin-user",
+"p": "admin-password",
+"z": "zone",
+"d": "database-name",
+"y": "yes"
+},
+"mysql flexible-server db delete": {
+"y": "yes"
+},
+"mysql flexible-server db list": {
+"s": "server-name"
+},
+"mysql flexible-server delete": {
+"y": "yes"
+},
+"mysql flexible-server deploy setup": {
+"s": "server-name",
+"d": "database-name",
+"u": "admin-user",
+"p": "admin-password"
+},
+"mysql flexible-server detach-vnet": {
+"y": "yes"
+},
+"mysql flexible-server export create": {
+"b": "backup-name",
+"u": "sas-uri"
+},
+"mysql flexible-server firewall-rule delete": {
+"y": "yes"
+},
+"mysql flexible-server geo-restore": {
+"z": "zone",
+"y": "yes"
+},
+"mysql flexible-server gtid reset": {
+"s": "server-name",
+"y": "yes"
+},
+"mysql flexible-server identity": {
+"s": "server-name"
+},
+"mysql flexible-server identity assign": {
+"n": "identity"
+},
+"mysql flexible-server identity remove": {
+"n": "identity"
+},
+"mysql flexible-server identity show": {
+"n": "identity"
+},
+"mysql flexible-server import create": {
+"u": "admin-user",
+"p": "admin-password",
+"z": "zone",
+"y": "yes"
+},
+"mysql flexible-server import stop-replication": {
+"n": "name"
+},
+"mysql flexible-server maintenance list": {
+"s": "server-name"
+},
+"mysql flexible-server maintenance reschedule": {
+"s": "server-name",
+"m": "maintenance-name"
+},
+"mysql flexible-server maintenance show": {
+"s": "server-name",
+"m": "maintenance-name"
+},
+"mysql flexible-server mirroring disable": {
+"n": "name"
+},
+"mysql flexible-server mirroring enable": {
+"n": "name"
+},
+"mysql flexible-server parameter set": {
+"v": "value"
+},
+"mysql flexible-server replica create": {
+"z": "zone"
+},
+"mysql flexible-server replica list": {
+"n": "name"
+},
+"mysql flexible-server replica stop-replication": {
+"n": "name"
+},
+"mysql flexible-server restore": {
+"z": "zone",
+"y": "yes"
+},
+"mysql flexible-server server-logs download": {
+"s": "server-name",
+"n": "name"
+},
+"mysql flexible-server server-logs list": {
+"s": "server-name"
+},
+"mysql flexible-server show-connection-string": {
+"s": "server-name",
+"u": "admin-user",
+"p": "admin-password",
+"d": "database-name"
+},
+"mysql flexible-server update": {
+"p": "admin-password"
+},
+"mysql flexible-server upgrade": {
+"v": "version",
+"y": "yes"
+},
+"network application-gateway": {
+"n": "name"
+},
+"network application-gateway ssl-policy": {
+"n": "name"
+},
+"network application-gateway ssl-policy predefined": {
+"n": "name"
+},
+"network application-gateway url-path-map rule create": {
+"n": "name"
+},
+"network application-gateway waf-policy": {
+"n": "name"
+},
+"network cross-region-lb": {
+"n": "name"
+},
+"network ddos-custom-policy create": {
+"n": "ddos-custom-policy-name"
+},
+"network ddos-protection": {
+"n": "name"
+},
+"network dns": {
+"n": "name",
+"z": "zone-name"
+},
+"network dns record-set a": {
+"a": "ipv4-address"
+},
+"network dns record-set aaaa": {
+"a": "ipv6-address"
+},
+"network dns record-set cname": {
+"c": "cname"
+},
+"network dns record-set cname set-record": {
+"n": "record-set-name"
+},
+"network dns record-set mx": {
+"e": "exchange",
+"p": "preference"
+},
+"network dns record-set ns": {
+"d": "nsdname"
+},
+"network dns record-set ns add-record": {
+"s": "subscriptionid"
+},
+"network dns record-set ptr": {
+"d": "ptrdname"
+},
+"network dns record-set soa": {
+"t": "host",
+"e": "email",
+"x": "expire-time",
+"m": "minimum-ttl",
+"f": "refresh-time",
+"r": "retry-time",
+"s": "serial-number"
+},
+"network dns record-set srv": {
+"p": "priority",
+"w": "weight",
+"r": "port",
+"t": "target"
+},
+"network dns record-set txt": {
+"v": "value"
+},
+"network dns zone": {
+"n": "name"
+},
+"network dns zone create": {
+"p": "parent-name"
+},
+"network dns zone export": {
+"f": "file-name"
+},
+"network dns zone import": {
+"f": "file-name"
+},
+"network express-route port generate-loa": {
+"n": "name",
+"f": "file"
+},
+"network lb": {
+"n": "name"
+},
+"network nic ip-config address-pool": {
+"n": "ip-config-name"
+},
+"network nsg": {
+"n": "name"
+},
+"network nsg create": {
+"n": "name"
+},
+"network nsg rule": {
+"n": "name"
+},
+"network private-dns": {
+"n": "name",
+"z": "zone-name"
+},
+"network private-dns record-set a": {
+"a": "ipv4-address"
+},
+"network private-dns record-set aaaa": {
+"a": "ipv6-address"
+},
+"network private-dns record-set cname": {
+"c": "cname"
+},
+"network private-dns record-set cname set-record": {
+"n": "record-set-name"
+},
+"network private-dns record-set mx": {
+"e": "exchange",
+"p": "preference"
+},
+"network private-dns record-set ptr": {
+"d": "ptrdname"
+},
+"network private-dns record-set soa": {
+"t": "host",
+"e": "email",
+"x": "expire-time",
+"m": "minimum-ttl",
+"f": "refresh-time",
+"r": "retry-time",
+"s": "serial-number"
+},
+"network private-dns record-set srv": {
+"p": "priority",
+"w": "weight",
+"r": "port",
+"t": "target"
+},
+"network private-dns record-set txt": {
+"v": "value"
+},
+"network private-dns zone": {
+"n": "name"
+},
+"network private-dns zone export": {
+"f": "file-name"
+},
+"network private-dns zone import": {
+"f": "file-name"
+},
+"network private-link-service ip-configs": {
+"n": "name"
+},
+"network public-ip": {
+"n": "name",
+"z": "zone"
+},
+"network routeserver": {
+"n": "name"
+},
+"network traffic-manager endpoint": {
+"n": "name",
+"t": "type"
+},
+"network traffic-manager profile": {
+"n": "name"
+},
+"network vnet": {
+"n": "name"
+},
+"network vnet create": {
+"n": "name"
+},
+"network vnet peering": {
+"n": "name"
+},
+"network vnet subnet": {
+"n": "name"
+},
+"network vnet subnet create": {
+"n": "name"
+},
+"network vnet-gateway": {
+"n": "name"
+},
+"network vpn-connection": {
+"n": "name"
+},
+"network vpn-connection create": {
+"n": "name"
+},
+"network watcher": {
+"n": "name"
+},
+"network watcher configure": {
+"l": "locations"
+},
+"network watcher connection-monitor": {
+"n": "name"
+},
+"network watcher connection-monitor test-group": {
+"n": "name"
+},
+"network watcher flow-log": {
+"n": "name"
+},
+"network watcher troubleshooting": {
+"t": "resource-type"
+},
+"policy attestation": {
+"n": "attestation-name"
+},
+"policy metadata show": {
+"n": "name"
+},
+"policy remediation": {
+"n": "name"
+},
+"policy remediation create": {
+"a": "policy-assignment"
+},
+"private-link association create": {
+"m": "management-group-id",
+"n": "name",
+"p": "privatelink",
+"a": "public-network-access"
+},
+"private-link association delete": {
+"m": "management-group-id",
+"n": "name"
+},
+"private-link association list": {
+"m": "management-group-id"
+},
+"private-link association show": {
+"m": "management-group-id",
+"n": "name"
+},
+"provider": {
+"n": "namespace"
+},
+"provider register": {
+"m": "management-group-id",
+"c": "consent-to-permissions"
+},
+"redis": {
+"n": "name"
+},
+"redis access-policy list": {
+"n": "name"
+},
+"redis access-policy-assignment list": {
+"n": "name"
+},
+"redis firewall-rules list": {
+"n": "name"
+},
+"redis identity": {
+"n": "name"
+},
+"redis patch-schedule": {
+"n": "name"
+},
+"redis server-link": {
+"n": "name"
+},
+"relay namespace network-rule-set": {
+"n": "namespace-name"
+},
+"relay namespace network-rule-set ip-rule add": {
+"n": "namespace-name"
+},
+"relay namespace network-rule-set ip-rule remove": {
+"n": "namespace-name"
+},
+"resource": {
+"n": "name",
+"v": "latest-include-preview"
+},
+"resource create": {
+"p": "properties"
+},
+"resource list": {
+"n": "name"
+},
+"resource lock": {
+"n": "name",
+"t": "lock-type"
+},
+"resource patch": {
+"p": "properties"
+},
+"resource tag": {
+"i": "is-incremental"
+},
+"resourcemanagement private-link create": {
+"n": "name"
+},
+"resourcemanagement private-link delete": {
+"n": "name"
+},
+"resourcemanagement private-link show": {
+"n": "name"
+},
+"rest": {
+"m": "method",
+"u": "url",
+"b": "body"
+},
+"restore-point create": {
+"n": "name"
+},
+"restore-point show": {
+"n": "name"
+},
+"restore-point wait": {
+"n": "name"
+},
+"role": {
+"g": "resource-group"
+},
+"role assignment": {
+"n": "name"
+},
+"role assignment delete": {
+"y": "yes"
+},
+"role definition delete": {
+"n": "name"
+},
+"role definition list": {
+"n": "name"
+},
+"role definition show": {
+"n": "name"
+},
+"role deny-assignment": {
+"n": "name"
+},
+"role deny-assignment create": {
+"n": "name"
+},
+"role deny-assignment delete": {
+"n": "name"
+},
+"role deny-assignment show": {
+"n": "name"
+},
+"search private-endpoint-connection delete": {
+"n": "private-endpoint-connection-name"
+},
+"search private-endpoint-connection show": {
+"n": "private-endpoint-connection-name"
+},
+"search private-endpoint-connection update": {
+"n": "name"
+},
+"search query-key": {
+"n": "name"
+},
+"search shared-private-link-resource": {
+"n": "name"
+},
+"servicebus georecovery-alias set": {
+"a": "alias"
+},
+"servicebus namespace network-rule-set": {
+"n": "namespace-name"
+},
+"servicebus namespace network-rule-set ip-rule add": {
+"n": "namespace-name"
+},
+"servicebus namespace network-rule-set ip-rule remove": {
+"n": "namespace-name"
+},
+"servicebus namespace network-rule-set virtual-network-rule add": {
+"n": "namespace-name"
+},
+"servicebus namespace network-rule-set virtual-network-rule remove": {
+"n": "namespace-name"
+},
+"servicebus namespace private-endpoint-connection": {
+"n": "name"
+},
+"sf": {
+"c": "cluster-name",
+"s": "cluster-size"
+},
+"sf managed-node-type": {
+"n": "name"
+},
+"sig": {
+"r": "gallery-name",
+"i": "gallery-image-definition",
+"e": "gallery-image-version"
+},
+"sig image-definition create": {
+"f": "offer",
+"s": "sku",
+"p": "publisher"
+},
+"sig image-definition show-community": {
+"i": "gallery-image-definition"
+},
+"sig image-version create": {
+"e": "gallery-image-version"
+},
+"sig image-version show-community": {
+"i": "gallery-image-definition",
+"e": "gallery-image-version"
+},
+"sig image-version show-shared": {
+"i": "gallery-image-definition",
+"e": "gallery-image-version"
+},
+"sig image-version undelete": {
+"e": "gallery-image-version"
+},
+"signalr": {
+"n": "name"
+},
+"signalr cors add": {
+"a": "allowed-origins"
+},
+"signalr cors remove": {
+"a": "allowed-origins"
+},
+"signalr cors update": {
+"a": "allowed-origins"
+},
+"signalr create": {
+"a": "allowed-origins"
+},
+"signalr update": {
+"a": "allowed-origins"
+},
+"snapshot": {
+"z": "size-gb",
+"n": "name"
+},
+"sql": {
+"u": "usage"
+},
+"sql db": {
+"s": "server",
+"n": "name",
+"e": "tier",
+"c": "capacity",
+"f": "family"
+},
+"sql db create": {
+"y": "yes"
+},
+"sql db export": {
+"u": "admin-user",
+"p": "admin-password",
+"a": "auth-type"
+},
+"sql db geo-backup list": {
+"s": "server-name",
+"g": "resource-group"
+},
+"sql db geo-backup restore": {
+"i": "assign-identity"
+},
+"sql db geo-backup show": {
+"d": "database-name",
+"s": "server-name",
+"g": "resource-group"
+},
+"sql db import": {
+"u": "admin-user",
+"p": "admin-password",
+"a": "auth-type"
+},
+"sql db list-editions": {
+"d": "show-details",
+"a": "available",
+"e": "tier"
+},
+"sql db ltr-backup": {
+"n": "name",
+"s": "server",
+"d": "database"
+},
+"sql db ltr-backup restore": {
+"i": "assign-identity"
+},
+"sql db ltr-policy set": {
+"y": "yes"
+},
+"sql db op": {
+"d": "database",
+"n": "name"
+},
+"sql db restore": {
+"t": "time"
+},
+"sql db show-connection-string": {
+"c": "client",
+"a": "auth-type"
+},
+"sql db show-deleted": {
+"r": "restorable-dropped-database-id"
+},
+"sql db sql db tde key revalidate": {
+"s": "server",
+"d": "database"
+},
+"sql db sql db tde key revert": {
+"s": "server",
+"d": "database"
+},
+"sql db str-policy set": {
+"y": "yes"
+},
+"sql db tde": {
+"d": "database"
+},
+"sql db update": {
+"m": "maint-config-id"
+},
+"sql dw": {
+"s": "server",
+"n": "name"
+},
+"sql elastic-pool": {
+"s": "server",
+"n": "name",
+"z": "zone-redundant",
+"e": "tier",
+"c": "capacity",
+"f": "family",
+"m": "maint-config-id"
+},
+"sql elastic-pool list-editions": {
+"d": "show-details",
+"a": "available",
+"e": "tier"
+},
+"sql elastic-pool op": {
+"n": "name"
+},
+"sql failover-group": {
+"n": "name",
+"s": "server"
+},
+"sql instance-failover-group": {
+"n": "name",
+"g": "resource-group",
+"l": "location"
+},
+"sql instance-pool": {
+"n": "name",
+"e": "tier",
+"f": "family"
+},
+"sql instance-pool create": {
+"c": "capacity",
+"m": "maint-config-id"
+},
+"sql instance-pool update": {
+"e": "tier",
+"f": "family",
+"c": "capacity",
+"m": "maint-config-id"
+},
+"sql mi": {
+"n": "name",
+"e": "tier",
+"f": "family",
+"c": "capacity",
+"k": "key-id",
+"a": "user-assigned-identity-id",
+"t": "identity-type",
+"z": "zone-redundant"
+},
+"sql mi ad-admin": {
+"u": "display-name",
+"i": "object-id"
+},
+"sql mi create": {
+"u": "admin-user",
+"p": "admin-password",
+"i": "assign-identity",
+"y": "yes",
+"m": "maint-config-id"
+},
+"sql mi key": {
+"n": "name",
+"k": "kid"
+},
+"sql mi op cancel": {
+"n": "name"
+},
+"sql mi op show": {
+"n": "name"
+},
+"sql mi tde-key set": {
+"k": "kid",
+"t": "server-key-type"
+},
+"sql mi update": {
+"p": "admin-password",
+"i": "assign-identity",
+"y": "yes",
+"m": "maint-config-id",
+"z": "zone-redundant"
+},
+"sql midb": {
+"n": "name"
+},
+"sql midb copy list": {
+"g": "resource-group"
+},
+"sql midb log-replay start": {
+"a": "auto-complete"
+},
+"sql midb ltr-backup": {
+"d": "database",
+"n": "name"
+},
+"sql midb ltr-backup list": {
+"d": "database"
+},
+"sql midb move list": {
+"g": "resource-group"
+},
+"sql midb recover": {
+"r": "recoverable-database-id"
+},
+"sql midb restore": {
+"s": "source-sub",
+"t": "time"
+},
+"sql midb short-term-retention-policy set": {
+"y": "yes"
+},
+"sql recoverable-midb show": {
+"n": "database-name"
+},
+"sql server": {
+"n": "name",
+"u": "admin-user",
+"p": "admin-password",
+"i": "assign_identity",
+"e": "enable-public-network",
+"r": "restrict-outbound-network-access",
+"k": "key-id",
+"a": "user-assigned-identity-id",
+"t": "identity-type"
+},
+"sql server ad-admin": {
+"s": "server-name",
+"u": "display-name",
+"i": "object-id"
+},
+"sql server conn-policy": {
+"s": "server",
+"t": "connection-type"
+},
+"sql server create": {
+"i": "assign-identity"
+},
+"sql server deleted-server": {
+"n": "name"
+},
+"sql server dns-alias": {
+"s": "server",
+"n": "name"
+},
+"sql server firewall-rule": {
+"s": "server",
+"n": "name"
+},
+"sql server ipv6-firewall-rule": {
+"s": "server",
+"n": "name"
+},
+"sql server key": {
+"s": "server",
+"n": "name",
+"k": "kid"
+},
+"sql server outbound-firewall-rule": {
+"s": "server",
+"n": "outbound-rule-fqdn"
+},
+"sql server refresh-external-governance-status": {
+"s": "server"
+},
+"sql server tde-key": {
+"s": "server"
+},
+"sql server tde-key set": {
+"k": "kid",
+"t": "server-key-type"
+},
+"sql server vnet-rule": {
+"s": "server",
+"n": "name",
+"i": "ignore-missing-endpoint"
+},
+"sql stg create": {
+"n": "name",
+"m": "group-member"
+},
+"sql stg delete": {
+"n": "name"
+},
+"sql stg show": {
+"n": "name"
+},
+"sql virtual-cluster": {
+"n": "name"
+},
+"sql vm": {
+"n": "name",
+"i": "license-type"
+},
+"sql vm add-to-group": {
+"r": "sqlvm-group",
+"b": "bootstrap-acc-pwd",
+"p": "operator-acc-pwd",
+"s": "service-acc-pwd"
+},
+"sql vm group": {
+"n": "name",
+"i": "image-offer",
+"s": "image-sku",
+"f": "domain-fqdn",
+"p": "operator-acc",
+"e": "service-acc",
+"u": "storage-account",
+"k": "sa-key"
+},
+"sql vm group ag-listener": {
+"n": "name",
+"r": "group-name",
+"p": "port",
+"a": "ag-name",
+"i": "ip-address",
+"u": "subnet",
+"c": "public-ip",
+"b": "load-balancer",
+"e": "probe-port",
+"q": "sqlvms"
+},
+"sql vm update": {
+"y": "yes"
+},
+"staticwebapp": {
+"s": "source",
+"t": "token",
+"b": "branch",
+"n": "name"
+},
+"staticwebapp hostname set": {
+"m": "validation-method"
+},
+"storage": {
+"c": "container-name",
+"d": "directory-name",
+"s": "share-name",
+"t": "table-name"
+},
+"storage account blob-service-properties": {
+"n": "account-name"
+},
+"storage account blob-service-properties update": {
+"n": "account-name",
+"d": "default-service-version",
+"t": "enable-last-access-tracking"
+},
+"storage account check-name": {
+"n": "name"
+},
+"storage account create": {
+"n": "name",
+"t": "encryption-key-type-for-table",
+"q": "encryption-key-type-for-queue",
+"i": "require-infrastructure-encryption",
+"k": "allow-shared-key-access",
+"r": "allow-cross-tenant-replication",
+"d": "default-share-permission",
+"w": "allow-protected-append-writes",
+"u": "key-vault-user-identity-id",
+"f": "key-vault-federated-client-id"
+},
+"storage account delete": {
+"n": "name"
+},
+"storage account encryption-scope": {
+"n": "name"
+},
+"storage account encryption-scope create": {
+"s": "key-source",
+"u": "key-uri",
+"i": "require-infrastructure-encryption"
+},
+"storage account encryption-scope update": {
+"s": "key-source",
+"u": "key-uri",
+"i": "require-infrastructure-encryption"
+},
+"storage account failover": {
+"y": "yes"
+},
+"storage account file-service-properties show": {
+"n": "account-name"
+},
+"storage account file-service-properties update": {
+"n": "account-name",
+"k": "kerb-ticket-encryption"
+},
+"storage account keys list": {
+"n": "account-name"
+},
+"storage account keys renew": {
+"n": "account-name"
+},
+"storage account local-user": {
+"n": "user-name"
+},
+"storage account network-rule": {
+"n": "account-name"
+},
+"storage account or-policy": {
+"n": "account-name",
+"s": "source-account",
+"d": "destination-account",
+"p": "policy",
+"t": "min-creation-time"
+},
+"storage account or-policy rule": {
+"s": "source-container",
+"d": "destination-container",
+"r": "rule-id"
+},
+"storage account private-endpoint-connection": {
+"n": "name"
+},
+"storage account update": {
+"k": "allow-shared-key-access",
+"r": "allow-cross-tenant-replication",
+"d": "default-share-permission",
+"w": "allow-protected-append-writes",
+"y": "yes",
+"u": "key-vault-user-identity-id",
+"f": "key-vault-federated-client-id"
+},
+"storage blob": {
+"n": "name"
+},
+"storage blob copy": {
+"c": "destination-container",
+"b": "destination-blob"
+},
+"storage blob copy cancel": {
+"c": "destination-container",
+"b": "destination-blob"
+},
+"storage blob copy start": {
+"b": "destination-blob",
+"c": "destination-container",
+"r": "rehydrate-priority"
+},
+"storage blob copy start-batch": {
+"r": "rehydrate-priority"
+},
+"storage blob delete-batch": {
+"s": "source"
+},
+"storage blob download": {
+"f": "file"
+},
+"storage blob download-batch": {
+"d": "destination",
+"s": "source"
+},
+"storage blob incremental-copy start": {
+"c": "destination-container",
+"b": "destination-blob"
+},
+"storage blob lease": {
+"b": "blob-name"
+},
+"storage blob restore": {
+"r": "blob-range",
+"n": "account-name",
+"t": "time-to-restore"
+},
+"storage blob rewrite": {
+"u": "source-uri"
+},
+"storage blob set-tier": {
+"t": "type",
+"r": "rehydrate-priority"
+},
+"storage blob sync": {
+"c": "container",
+"d": "destination",
+"s": "source"
+},
+"storage blob upload": {
+"f": "file",
+"t": "type"
+},
+"storage blob upload-batch": {
+"s": "source",
+"d": "destination",
+"t": "type"
+},
+"storage container": {
+"n": "name"
+},
+"storage container create": {
+"n": "name",
+"d": "default-encryption-scope",
+"p": "prevent-encryption-scope-override"
+},
+"storage container immutability-policy": {
+"c": "container-name"
+},
+"storage container legal-hold": {
+"c": "container-name"
+},
+"storage container policy": {
+"c": "container-name",
+"n": "name"
+},
+"storage container restore": {
+"n": "name"
+},
+"storage container-rm": {
+"n": "name"
+},
+"storage container-rm create": {
+"d": "default-encryption-scope"
+},
+"storage copy": {
+"r": "recursive"
+},
+"storage directory list": {
+"s": "share-name",
+"n": "name"
+},
+"storage entity": {
+"e": "entity"
+},
+"storage file": {
+"n": "name",
+"d": "directory-name"
+},
+"storage file copy": {
+"s": "destination-share"
+},
+"storage file copy cancel": {
+"s": "destination-share"
+},
+"storage file copy start": {
+"s": "destination-share"
+},
+"storage file delete": {
+"s": "share-name"
+},
+"storage file delete-batch": {
+"s": "source"
+},
+"storage file download": {
+"s": "share-name"
+},
+"storage file download-batch": {
+"s": "source",
+"d": "destination"
+},
+"storage file exists": {
+"s": "share-name"
+},
+"storage file generate-sas": {
+"s": "share-name"
+},
+"storage file hard-link create": {
+"s": "share-name"
+},
+"storage file list": {
+"s": "share-name",
+"p": "path"
+},
+"storage file metadata show": {
+"s": "share-name"
+},
+"storage file metadata update": {
+"s": "share-name"
+},
+"storage file resize": {
+"s": "share-name"
+},
+"storage file show": {
+"s": "share-name"
+},
+"storage file symbolic-link create": {
+"s": "share-name"
+},
+"storage file symbolic-link show": {
+"s": "share-name"
+},
+"storage file update": {
+"s": "share-name"
+},
+"storage file upload": {
+"s": "share-name"
+},
+"storage file upload-batch": {
+"s": "source",
+"d": "destination"
+},
+"storage file url": {
+"s": "share-name"
+},
+"storage fs create": {
+"d": "default-encryption-scope",
+"p": "prevent-encryption-scope-override"
+},
+"storage fs directory download": {
+"f": "file-system",
+"s": "source-path",
+"d": "destination-path",
+"r": "recursive"
+},
+"storage fs directory generate-sas": {
+"f": "file-system",
+"n": "name"
+},
+"storage fs directory list": {
+"f": "file-system"
+},
+"storage fs directory move": {
+"d": "new-directory"
+},
+"storage fs directory upload": {
+"f": "file-system",
+"d": "destination-path",
+"s": "source",
+"r": "recursive"
+},
+"storage fs file download": {
+"d": "destination"
+},
+"storage fs file generate-sas": {
+"f": "file-system",
+"p": "path"
+},
+"storage fs file list": {
+"f": "file-system"
+},
+"storage fs file move": {
+"f": "file-system",
+"p": "path"
+},
+"storage fs file upload": {
+"s": "source"
+},
+"storage fs generate-sas": {
+"n": "name"
+},
+"storage queue policy": {
+"q": "queue-name",
+"n": "name"
+},
+"storage remove": {
+"c": "container-name",
+"n": "name",
+"s": "share-name",
+"p": "path",
+"r": "recursive"
+},
+"storage share": {
+"n": "name"
+},
+"storage share close-handle": {
+"n": "name"
+},
+"storage share create": {
+"n": "name"
+},
+"storage share delete": {
+"n": "name"
+},
+"storage share exists": {
+"n": "name"
+},
+"storage share generate-sas": {
+"n": "name"
+},
+"storage share list-handle": {
+"n": "name"
+},
+"storage share policy": {
+"s": "share-name",
+"n": "name"
+},
+"storage share update": {
+"n": "name"
+},
+"storage share-rm": {
+"n": "name"
+},
+"storage table create": {
+"n": "name"
+},
+"storage table policy": {
+"n": "name"
+},
+"tag": {
+"n": "name"
+},
+"ts": {
+"n": "name",
+"v": "version"
+},
+"ts create": {
+"f": "template-file",
+"l": "location",
+"d": "display-name",
+"y": "yes"
+},
+"ts delete": {
+"s": "template-spec"
+},
+"ts export": {
+"s": "template-spec"
+},
+"ts show": {
+"s": "template-spec"
+},
+"ts update": {
+"s": "template-spec",
+"f": "template-file",
+"d": "display-name"
+},
+"upgrade": {
+"y": "yes"
+},
+"vm": {
+"n": "name"
+},
+"vm application list": {
+"n": "vm-name"
+},
+"vm availability-set": {
+"n": "name"
+},
+"vm availability-set create": {
+"n": "name"
+},
+"vm create": {
+"n": "name"
+},
+"vm disk": {
+"z": "size-gb"
+},
+"vm disk detach": {
+"n": "name"
+},
+"vm extension": {
+"n": "name"
+},
+"vm extension image": {
+"l": "location",
+"p": "publisher",
+"n": "name"
+},
+"vm extension set": {
+"n": "name"
+},
+"vm host": {
+"n": "name"
+},
+"vm host create": {
+"d": "platform-fault-domain"
+},
+"vm host group": {
+"n": "name"
+},
+"vm host group create": {
+"c": "platform-fault-domain-count"
+},
+"vm image": {
+"p": "publisher",
+"f": "offer",
+"s": "sku"
+},
+"vm image show": {
+"s": "sku"
+},
+"vm list": {
+"d": "show-details"
+},
+"vm list-skus": {
+"s": "size",
+"z": "zone",
+"r": "resource-type"
+},
+"vm monitor log show": {
+"q": "analytics-query"
+},
+"vm open-port": {
+"n": "name"
+},
+"vm secret": {
+"s": "secrets"
+},
+"vm show": {
+"d": "show-details",
+"u": "include-user-data"
+},
+"vm unmanaged-disk attach": {
+"n": "name",
+"z": "size-gb"
+},
+"vm unmanaged-disk detach": {
+"n": "name"
+},
+"vm unmanaged-disk list": {
+"n": "vm-name"
+},
+"vm user": {
+"u": "username",
+"p": "password"
+},
+"vmss application list": {
+"n": "vm-name"
+},
+"vmss create": {
+"n": "name"
+},
+"vmss disk": {
+"z": "size-gb"
+},
+"vmss extension": {
+"n": "name"
+},
+"vmss extension image": {
+"l": "location",
+"p": "publisher",
+"n": "name"
+},
+"vmss lifecycle-hook-event": {
+"n": "name"
+},
+"vmss list-instances": {
+"n": "name"
+},
+"vmss show": {
+"u": "include-user-data"
+},
+"webapp": {
+"s": "slot",
+"n": "name"
+},
+"webapp browse": {
+"l": "logs"
+},
+"webapp config backup": {
+"n": "webapp-name"
+},
+"webapp config backup delete": {
+"s": "slot"
+},
+"webapp config connection-string": {
+"t": "connection-string-type",
+"g": "resource-group",
+"n": "name"
+},
+"webapp config connection-string list": {
+"n": "name"
+},
+"webapp config egress connection remove": {
+"y": "yes"
+},
+"webapp config snapshot": {
+"n": "name",
+"s": "slot"
+},
+"webapp config snapshot list": {
+"n": "name"
+},
+"webapp config ssl list": {
+"n": "name"
+},
+"webapp config storage-account": {
+"i": "custom-id",
+"t": "storage-type",
+"a": "account-name",
+"k": "access-key",
+"m": "mount-path",
+"s": "slot"
+},
+"webapp config storage-account list": {
+"n": "name"
+},
+"webapp create": {
+"n": "name",
+"i": "deployment-container-image-name",
+"c": "container-image-name",
+"r": "runtime",
+"p": "plan",
+"e": "end-to-end-encryption-enabled"
+},
+"webapp create-remote-connection": {
+"p": "port",
+"t": "timeout",
+"i": "instance"
+},
+"webapp delete": {
+"n": "name"
+},
+"webapp deleted list": {
+"n": "name",
+"s": "slot"
+},
+"webapp deleted restore": {
+"n": "name",
+"s": "slot"
+},
+"webapp deploy": {
+"n": "name"
+},
+"webapp deployment github-actions": {
+"n": "name",
+"g": "resource-group",
+"s": "slot",
+"b": "branch"
+},
+"webapp deployment github-actions add": {
+"r": "runtime",
+"f": "force"
+},
+"webapp deployment slot": {
+"n": "name"
+},
+"webapp deployment slot create": {
+"i": "deployment-container-image-name",
+"r": "container-registry-url",
+"c": "container-image-name"
+},
+"webapp exec": {
+"n": "name",
+"i": "instance",
+"s": "slot"
+},
+"webapp hybrid-connection": {
+"n": "name"
+},
+"webapp list-instances": {
+"n": "name",
+"s": "slot"
+},
+"webapp log deployment list": {
+"n": "name",
+"s": "slot"
+},
+"webapp log deployment show": {
+"n": "name",
+"s": "slot"
+},
+"webapp log startup": {
+"n": "name",
+"s": "slot"
+},
+"webapp log startup show": {
+"f": "filename"
+},
+"webapp secure-build show": {
+"n": "name",
+"s": "slot"
+},
+"webapp show": {
+"n": "name"
+},
+"webapp sitecontainers": {
+"n": "name",
+"s": "slot"
+},
+"webapp sitecontainers convert": {
+"y": "yes"
+},
+"webapp sitecontainers list": {
+"n": "name"
+},
+"webapp ssh": {
+"p": "port",
+"t": "timeout",
+"i": "instance"
+},
+"webapp traffic-routing": {
+"d": "distribution"
+},
+"webapp troubleshoot collect network-capture": {
+"n": "name",
+"s": "slot",
+"i": "instance"
+},
+"webapp troubleshoot config": {
+"n": "name",
+"s": "slot"
+},
+"webapp troubleshoot deployment": {
+"n": "name",
+"s": "slot"
+},
+"webapp troubleshoot status": {
+"n": "name",
+"s": "slot"
+},
+"webapp up": {
+"n": "name",
+"p": "plan",
+"r": "runtime",
+"b": "launch-browser",
+"e": "app-service-environment"
+},
+"webapp update": {
+"i": "minimum-elastic-instance-count",
+"w": "prewarmed-instance-count",
+"e": "end-to-end-encryption-enabled"
+},
+"webapp vnet-integration": {
+"n": "name"
+},
+"webapp webjob": {
+"w": "webjob-name"
+},
+"webapp webjob continuous list": {
+"n": "name"
+},
+"webapp webjob triggered list": {
+"n": "name"
+}
+}
