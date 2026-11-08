@@ -1,0 +1,244 @@
+aegis-devops
+Copyright 2026 Vamshidher Reddy Jannapu Reddy
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+It includes or is derived from the third-party work listed below. Each entry says
+what was taken, from which version, and under which license. The license texts that
+require reproduction (BSD-3-Clause, MIT) are given in full at the end.
+
+======================================================================
+1. Code included (copied and modified)
+======================================================================
+
+aws-cli (https://github.com/aws/aws-cli), version 2.37.4
+  File: src/aegis_core/aws_shorthand.py, from awscli/shorthand.py.
+  Copyright 2015 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+  Licensed under the Apache License, Version 2.0.
+  Modified: a file:// or fileb:// value is returned as a marker instead of being
+  read, and the back-compat visitor reads the botocore shapes recorded in
+  src/aegis_core/data/aws_cli_options.zip. The file keeps aws-cli's copyright
+  header and says what was changed.
+  aws-cli 2.37.4 ships no NOTICE file (the repository at tag 2.37.4 has only
+  LICENSE.txt), so there is no NOTICE text to carry over. Its LICENSE.txt reads:
+
+    Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+
+    Licensed under the Apache License, Version 2.0 (the "License"). You
+    may not use this file except in compliance with the License. A copy of
+    the License is located at
+
+        http://aws.amazon.com/apache2.0/
+
+    or in the "license" file accompanying this file. This file is
+    distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF
+    ANY KIND, either express or implied. See the License for the specific
+    language governing permissions and limitations under the License.
+
+======================================================================
+2. Data generated from third-party sources (src/aegis_core/data/)
+======================================================================
+
+aws_cli_options.zip
+  Option names, types and shapes from the botocore service models vendored in
+  aws-cli 2.37.4. Copyright Amazon.com, Inc. or its affiliates. Apache-2.0.
+
+az_short_options.json
+  Option names, short letters, nargs, types and converters from azure-cli
+  (https://github.com/Azure/azure-cli, commit
+  df18ffe956abd549f98780837bb218602a60d95f). Copyright (c) Microsoft Corporation.
+  MIT License (text below).
+
+gcloud_flags.json
+  Flag names and aliases from the gcloud reference pages
+  (https://cloud.google.com/sdk/gcloud/reference, fetched 2026-11-08); value types
+  from the Google Cloud SDK (mirror github.com/google-cloud-sdk-unofficial/
+  google-cloud-sdk, commit 3dfad14e7f5495f14b555f3dbc148f59f9518f72).
+  Copyright Google LLC. The SDK is licensed under the Apache License, Version 2.0.
+
+pflag_types.json
+  Flag names and pflag value types from the flag registrations of:
+    kubectl and cli-runtime 1.36 (Copyright The Kubernetes Authors, Apache-2.0)
+    Helm 4.3.1 and 3.21.1 (Copyright The Helm Authors, Apache-2.0)
+    Flux 2.10 (Copyright The Flux authors, Apache-2.0)
+    Argo CD (Copyright Argo Project authors, Apache-2.0)
+    GitHub CLI (Copyright (c) 2019 GitHub Inc., MIT License, text below)
+  None of these repositories ships a NOTICE file.
+
+kubectl_flags.json
+  Every kubectl command's flags and short letters, read from the --help of kubectl
+  v1.36.1 (Copyright The Kubernetes Authors, Apache-2.0).
+
+gh_flags.json
+  Every gh command's flags, types and short letters, from the flag registrations of
+  GitHub CLI (https://github.com/cli/cli, commit
+  736c68f674113337685e3eb1f908602a03b8f99b). Copyright (c) 2019 GitHub Inc.
+  MIT License (text below).
+
+======================================================================
+3. Logic ported (reimplemented in Python from permissively licensed code)
+======================================================================
+
+Where reading a tool exactly meant following its own algorithm, that algorithm was
+rewritten in Python from the source below. No source lines were copied. All of these
+are under the Apache License 2.0, the MIT License or the BSD-3-Clause license.
+
+Helm (https://github.com/helm/helm), pkg/strvals: --set/--set-string/--set-json
+  value parsing and typedVal. Copyright The Helm Authors. Apache-2.0.
+
+Go standard library (https://go.dev): strconv ParseInt (base 0), ParseFloat and
+  ParseBool, and time.ParseDuration. Copyright 2009 The Go Authors.
+  BSD-3-Clause (text below).
+
+spf13/pflag (https://github.com/spf13/pflag): how short-letter groups and
+  StringSlice (CSV), StringArray, StringToString and Count values are read.
+  Copyright (c) 2012 Alex Ogier, Copyright (c) 2012 The Go Authors.
+  BSD-3-Clause (text below).
+
+Google Cloud SDK, googlecloudsdk/calliope/arg_parsers.py and
+  googlecloudsdk/core/util/iso_duration.py: BinarySize, Duration (ISO 8601 and
+  gcloud's short form), Boolean, ArgList/ArgDict and the ^DELIM^ syntax.
+  Copyright Google LLC. Apache-2.0.
+
+azure-cli (https://github.com/Azure/azure-cli): validate_tags,
+  get_three_state_flag and get_enum_type. Copyright (c) Microsoft Corporation.
+  MIT License (text below).
+
+GitHub CLI (https://github.com/cli/cli): gh api -F value typing.
+  Copyright (c) 2019 GitHub Inc. MIT License (text below).
+
+======================================================================
+4. Behaviour modelled (no code ported)
+======================================================================
+
+The parser also follows behaviour of these tools: which flags exist, which value wins,
+what a command acts on. These facts were taken from each tool's documentation, from
+running the tool, and from reading its source for facts. No code from them is
+included or translated.
+
+kubectl and cli-runtime 1.36 (for example a logs container given as a second word),
+  Argo CD, Flux and Helm command arguments. Apache-2.0.
+aws-cli 2.37.4 argprocess and paramfile (when a value is JSON, shorthand or read from
+  a file). Apache-2.0.
+knack (@file and @- argument values). MIT.
+GitHub CLI commands other than the -F typing above (hosts, repositories, flags). MIT.
+git: command-line behaviour modelled from git's documentation and from running
+  git 2.52; no git source code is included or translated (its source was read only
+  to confirm facts, such as which refs a push sends).
+
+======================================================================
+License texts
+======================================================================
+
+----------------------------------------------------------------------
+BSD-3-Clause: Go standard library
+----------------------------------------------------------------------
+Copyright 2009 The Go Authors.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+   * Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+   * Redistributions in binary form must reproduce the above
+copyright notice, this list of conditions and the following disclaimer
+in the documentation and/or other materials provided with the
+distribution.
+   * Neither the name of Google LLC nor the names of its
+contributors may be used to endorse or promote products derived from
+this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+----------------------------------------------------------------------
+BSD-3-Clause: spf13/pflag
+----------------------------------------------------------------------
+Copyright (c) 2012 Alex Ogier. All rights reserved.
+Copyright (c) 2012 The Go Authors. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+   * Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+   * Redistributions in binary form must reproduce the above
+copyright notice, this list of conditions and the following disclaimer
+in the documentation and/or other materials provided with the
+distribution.
+   * Neither the name of Google Inc. nor the names of its
+contributors may be used to endorse or promote products derived from
+this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+----------------------------------------------------------------------
+MIT: GitHub CLI
+----------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2019 GitHub Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+----------------------------------------------------------------------
+MIT: azure-cli and knack
+----------------------------------------------------------------------
+MIT License
+
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE

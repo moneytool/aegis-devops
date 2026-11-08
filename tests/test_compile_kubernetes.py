@@ -451,9 +451,9 @@ def test_every_kubectl_command_is_placed():
     ("deployment/*", "delete", "exact", ["apply", "replace"]),
     ("pod/*", "delete", "exact", ["apply", "create", "debug", "drain", "replace", "run"]),
     ("pod/*", "create", "exact", ["apply", "debug", "replace", "run"]),
-    ("service/*", "create", "exact", ["apply", "expose", "replace", "run"]),
+    ("service/*", "create", "exact", ["apply", "replace", "run"]),
     ("service/*", "delete", "exact", ["apply", "replace", "run"]),
-    ("horizontalpodautoscaler/*", "create", "exact", ["apply", "autoscale", "replace"]),
+    ("horizontalpodautoscaler/*", "create", "exact", ["apply", "replace"]),
     ("role/*", "create", "exact", ["apply", "auth", "replace"]),
     ("pod/*", "exec", "exact", ["cp", "create"]),
     ("pod/*", "attach", "exact", ["create", "debug", "run"]),
@@ -502,7 +502,25 @@ def test_the_table_exercises_every_write_in_it():
     params = next(m for m in test_client_parity_table_against_the_real_parser_and_interceptor
                   .pytestmark if m.name == "parametrize").args[1]
     named = {v for _p, verb, _s, widened in params for v in [verb, *widened]}
-    assert set(KUBECTL_REQUESTS) <= named
+    # expose and autoscale are read by the client as creating their object, so a create
+    # rule on it holds there: they leave the widened lists (test below)
+    from aegis_core.compile.kubernetes import _CLIENT_CREATES
+
+    assert set(KUBECTL_REQUESTS) - set(_CLIENT_CREATES) <= named
+
+
+@pytest.mark.parametrize("pattern,spelled", [
+    ("service/*", "expose deploy web --port=80"),
+    ("horizontalpodautoscaler/*", "autoscale deploy web --max=3"),
+])
+def test_a_create_rule_holds_on_the_client_for_expose_and_autoscale(pattern, spelled):
+    rule = _rule("r", pattern, ["create"])
+    store = ConstraintStore(authority_map={"admin": {"deletion"}})
+    store.add_constraint(rule)
+    gate = AegisInterceptor(store)
+    verdicts = {gate.intercept(i).verdict for i in from_kubectl_multi(
+        ["kubectl", *spelled.split()])}
+    assert "BLOCK" in verdicts
 
 
 def test_client_parity_of_a_field_rule_matches_the_compiled_expression(tmp_path):
@@ -538,10 +556,21 @@ def test_client_parity_lists_a_verb_whose_flag_changes_the_request(tmp_path, pat
     rule = _rule("r", pattern, [verb])
     parity = _cov(_compile(tmp_path, rule), "r")["client_parity"]
     assert parity["status"] == "wider-than-client" and listed in parity["widened_verbs"]
+    if "--raw" in spelled:
+        # a raw write to a subresource names nothing the parser can match: the client
+        # refuses it (review round 14) rather than allowing it
+        with pytest.raises(ValueError):
+            from_kubectl_multi(["kubectl", *spelled.split()])
+        return
     store = ConstraintStore(authority_map={"admin": {"deletion"}})
     store.add_constraint(rule)
     gate = AegisInterceptor(store)
     intents = from_kubectl_multi(["kubectl", *spelled.split()])
+    if "--prune" in spelled:
+        # the client reads the prune as deletes of the kinds it may prune (review round 22):
+        # a delete rule on them holds there too
+        assert {gate.intercept(i).verdict for i in intents} != {"ALLOW"}
+        return
     assert {gate.intercept(i).verdict for i in intents} == {"ALLOW"}
 
 

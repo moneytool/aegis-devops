@@ -1,0 +1,3028 @@
+{
+ "_source": "pflag registrations in each tool's source: kubectl=https://github.com/kubernetes/kubectl@kubernetes-1.36.1/pkg,https://github.com/kubernetes/cli-runtime@kubernetes-1.36.1/pkg; helm=https://github.com/helm/helm@c540ca03765d86ff3a624e8b8504df86d4a79b3a/pkg; flux=https://github.com/fluxcd/flux2@v2.10.0/cmd/flux,https://github.com/kubernetes/cli-runtime@kubernetes-1.36.1/pkg; argocd=https://github.com/argoproj/argo-cd@78bb8cc74008994bbd807e7f36cf523edda764f4/cmd; gh=https://github.com/cli/cli@736c68f674113337685e3eb1f908602a03b8f99b/pkg",
+ "argocd": {
+  "account": "String",
+  "action": "String",
+  "add-gpg-key": "StringSlice",
+  "add-repo-url": "StringSlice",
+  "address": "String",
+  "all": "Bool",
+  "allow-cluster-resource": "StringArray",
+  "allow-empty": "Bool",
+  "allow-namespaced-resource": "StringArray",
+  "annotation": "StringArray",
+  "annotations": "StringArray",
+  "app-namespace": "String",
+  "application-namespaces": "StringSlice",
+  "applications": "StringSlice",
+  "applicationset-namespaces": "StringSlice",
+  "apply-out-of-sync-only": "Bool",
+  "appset-namespace": "String",
+  "argocd-cm-path": "String",
+  "argocd-context": "String",
+  "argocd-repo-server": "String",
+  "argocd-repo-server-plaintext": "Bool",
+  "argocd-repo-server-strict-tls": "Bool",
+  "argocd-secret-path": "String",
+  "async": "Bool",
+  "auth-token": "String",
+  "auto-prune": "Bool",
+  "aws-cluster-name": "String",
+  "aws-profile": "String",
+  "aws-role-arn": "String",
+  "azure-active-directory-endpoint": "String",
+  "azure-service-principal-client-id": "String",
+  "azure-service-principal-client-secret": "String",
+  "azure-service-principal-tenant-id": "String",
+  "batch": "Bool",
+  "bearer-token": "String",
+  "callback": "String",
+  "cascade": "Bool",
+  "cert-sub-type": "String",
+  "cert-type": "String",
+  "client": "Bool",
+  "client-crt": "String",
+  "client-crt-key": "String",
+  "cluster": "String",
+  "cluster-endpoint": "String",
+  "cluster-resources": "Bool",
+  "clusters": "StringSlice",
+  "config": "String",
+  "config-management-plugin": "String",
+  "container": "String",
+  "controller-name": "String",
+  "core": "Bool",
+  "current-password": "String",
+  "default-role": "String",
+  "degraded": "Bool",
+  "delete": "Bool",
+  "delete-gpg-key": "StringSlice",
+  "delete-repo-url": "StringSlice",
+  "deny-cluster-resource": "StringArray",
+  "deny-namespaced-resource": "StringArray",
+  "depth": "Int64",
+  "description": "String",
+  "dest": "StringArray",
+  "dest-name": "String",
+  "dest-namespace": "String",
+  "dest-server": "String",
+  "dest-service-accounts": "StringArray",
+  "diff-exit-code": "Int",
+  "directory-disable-extension-filter": "Bool",
+  "directory-exclude": "String",
+  "directory-include": "String",
+  "directory-recurse": "Bool",
+  "disable-compression": "Bool",
+  "dry-run": "Bool",
+  "dry-source-path": "String",
+  "dry-source-repo": "String",
+  "dry-source-revision": "String",
+  "duration": "String",
+  "enable-lfs": "Bool",
+  "enable-oci": "Bool",
+  "env": "String",
+  "exec-command": "String",
+  "exec-command-api-version": "String",
+  "exec-command-args": "StringArray",
+  "exec-command-env": "StringToString",
+  "exec-command-install-hint": "String",
+  "exit-code": "Bool",
+  "expires-in": "String",
+  "file": "mixed:String,StringArray",
+  "filter": "String",
+  "filter-fields": "StringSlice",
+  "follow": "Bool",
+  "force": "Bool",
+  "force-http-basic-auth": "Bool",
+  "from": "String",
+  "gcp-service-account-key-path": "String",
+  "generate-bearer-token": "Bool",
+  "github-app-enterprise-base-url": "String",
+  "github-app-id": "Int64",
+  "github-app-installation-id": "Int64",
+  "github-app-private-key-path": "String",
+  "gpg-key": "StringSlice",
+  "gpg-mode": "String",
+  "group": "mixed:String,StringArray",
+  "grpc-web": "Bool",
+  "grpc-web-root-path": "String",
+  "hard-refresh": "Bool",
+  "header": "StringSlice",
+  "health": "Bool",
+  "helm-api-versions": "StringArray",
+  "helm-chart": "String",
+  "helm-kube-version": "String",
+  "helm-namespace": "String",
+  "helm-pass-credentials": "Bool",
+  "helm-set": "StringArray",
+  "helm-set-file": "StringArray",
+  "helm-set-string": "StringArray",
+  "helm-skip-crds": "Bool",
+  "helm-skip-schema-validation": "Bool",
+  "helm-skip-tests": "Bool",
+  "helm-version": "String",
+  "hostname-pattern": "String",
+  "http-retry-max": "Int",
+  "hydrate-to-branch": "String",
+  "hydrated": "Bool",
+  "id": "String",
+  "ignore-missing-components": "Bool",
+  "ignore-missing-value-files": "Bool",
+  "ignore-normalizer-jq-execution-timeout": "Duration",
+  "ignore-tracking": "Bool",
+  "in-cluster": "Bool",
+  "info": "StringArray",
+  "inline": "Bool",
+  "insecure": "Bool",
+  "insecure-ignore-host-key": "Bool",
+  "insecure-oci-force-http": "Bool",
+  "insecure-skip-server-verification": "Bool",
+  "jsonnet-ext-var-code": "StringArray",
+  "jsonnet-ext-var-str": "StringArray",
+  "jsonnet-libs": "StringArray",
+  "jsonnet-tla-code": "StringArray",
+  "jsonnet-tla-str": "StringArray",
+  "k8s-client-burst": "Int",
+  "k8s-client-qps": "Float32",
+  "kind": "String",
+  "kube-context": "String",
+  "kustomize-api-versions": "StringArray",
+  "kustomize-common-annotation": "StringArray",
+  "kustomize-common-label": "StringArray",
+  "kustomize-force-common-annotation": "Bool",
+  "kustomize-force-common-label": "Bool",
+  "kustomize-image": "StringArray",
+  "kustomize-kube-version": "String",
+  "kustomize-label-include-templates": "Bool",
+  "kustomize-label-without-selector": "Bool",
+  "kustomize-namespace": "mixed:Bool,String",
+  "kustomize-replica": "StringArray",
+  "kustomize-version": "mixed:Bool,String",
+  "l": "String",
+  "label": "StringArray",
+  "list": "String",
+  "load-cluster-settings": "Bool",
+  "local": "String",
+  "local-include": "StringArray",
+  "local-repo-root": "String",
+  "logformat": "String",
+  "loglevel": "String",
+  "manual-sync": "Bool",
+  "match-case": "Bool",
+  "max-namespace-count": "Int",
+  "name": "mixed:Bool,String",
+  "nameprefix": "mixed:Bool,String",
+  "namespace": "mixed:String,StringArray",
+  "namespaces": "StringSlice",
+  "namesuffix": "mixed:Bool,String",
+  "new-password": "String",
+  "no-browser": "Bool",
+  "no-proxy": "String",
+  "o": "String",
+  "object": "String",
+  "operation": "Bool",
+  "orphan": "Bool",
+  "orphaned": "Bool",
+  "orphaned-resources": "Bool",
+  "orphaned-resources-warn": "Bool",
+  "out": "String",
+  "output": "String",
+  "override-on-conflict": "Bool",
+  "param": "StringArray",
+  "parameter": "StringArray",
+  "pass-credentials": "Bool",
+  "password": "String",
+  "patch": "String",
+  "patch-type": "String",
+  "path": "String",
+  "permission": "String",
+  "plaintext": "Bool",
+  "plugin-env": "StringArray",
+  "policy-file": "String",
+  "port": "Int",
+  "port-forward": "Bool",
+  "port-forward-namespace": "String",
+  "port-forward-redis": "Bool",
+  "preview-changes": "Bool",
+  "previous": "Bool",
+  "project": "mixed:String,StringArray",
+  "prompts-enabled": "Bool",
+  "propagation-policy": "String",
+  "proxy": "String",
+  "proxy-url": "String",
+  "prune": "Bool",
+  "quiet": "Bool",
+  "redis-compress": "String",
+  "redis-haproxy-name": "String",
+  "redis-name": "String",
+  "ref": "mixed:Bool,String",
+  "refresh": "mixed:Bool,String",
+  "release-name": "String",
+  "replace": "Bool",
+  "replicas": "Int",
+  "repo": "String",
+  "repo-server": "String",
+  "repo-server-name": "String",
+  "repo-url": "StringSlice",
+  "resource": "mixed:String,StringArray",
+  "resource-name": "String",
+  "retry-backoff-duration": "Duration",
+  "retry-backoff-factor": "Int64",
+  "retry-backoff-max-duration": "Duration",
+  "retry-limit": "Int64",
+  "retry-refresh": "Bool",
+  "revision": "String",
+  "revision-history-limit": "Int",
+  "revisions": "StringArray",
+  "role": "String",
+  "schedule": "String",
+  "scope": "String",
+  "selector": "String",
+  "self-heal": "Bool",
+  "server": "String",
+  "server-crt": "String",
+  "server-name": "String",
+  "server-proxy-url": "String",
+  "server-side": "Bool",
+  "server-side-diff": "Bool",
+  "server-side-diff-concurrency": "Int",
+  "server-side-diff-max-batch-kb": "Int",
+  "server-side-generate": "Bool",
+  "service-account": "String",
+  "service-account-namespace": "String",
+  "set-finalizer": "Bool",
+  "shard": "mixed:Int,Int64",
+  "sharding-method": "String",
+  "short": "Bool",
+  "show-managed-fields": "Bool",
+  "show-operation": "Bool",
+  "show-params": "Bool",
+  "signature-keys": "StringSlice",
+  "since-seconds": "Int64",
+  "skip-resources-with-label": "String",
+  "skip-test-tls": "Bool",
+  "sort": "String",
+  "source": "String",
+  "source-name": "String",
+  "source-names": "StringArray",
+  "source-namespaces": "StringSlice",
+  "source-position": "Int",
+  "source-positions": "Int64Slice",
+  "src": "StringArray",
+  "ssh-private-key-path": "String",
+  "sso": "Bool",
+  "sso-launch-browser": "Bool",
+  "sso-port": "Int",
+  "stop-operation": "Bool",
+  "strategy": "String",
+  "strict": "Bool",
+  "strip-status": "Bool",
+  "suspended": "Bool",
+  "sync": "Bool",
+  "sync-apply-only": "Bool",
+  "sync-dry-run": "Bool",
+  "sync-force": "Bool",
+  "sync-option": "StringArray",
+  "sync-overrun": "Bool",
+  "sync-policy": "String",
+  "sync-prune": "Bool",
+  "sync-retry-backoff-duration": "Duration",
+  "sync-retry-backoff-factor": "Int64",
+  "sync-retry-backoff-max-duration": "Duration",
+  "sync-retry-limit": "Int64",
+  "sync-retry-refresh": "Bool",
+  "sync-source-branch": "String",
+  "sync-source-path": "String",
+  "system-namespace": "String",
+  "tag-prefix": "String",
+  "tail": "Int64",
+  "time-zone": "String",
+  "timeout": "Uint",
+  "tls-client-cert-key-path": "String",
+  "tls-client-cert-path": "String",
+  "token-only": "Bool",
+  "type": "String",
+  "unixtime": "Bool",
+  "until-time": "String",
+  "upsert": "Bool",
+  "use-and-operator": "Bool",
+  "use-azure-workload-identity": "Bool",
+  "use-builtin-policy": "Bool",
+  "username": "String",
+  "validate": "Bool",
+  "values": "StringArray",
+  "values-literal": "Bool",
+  "values-literal-file": "String",
+  "verbose": "Bool",
+  "wait": "Bool",
+  "webhook-manifest-cache-warm-disabled": "Bool",
+  "yes": "Bool"
+ },
+ "argocd:aliases": {},
+ "argocd:commands": {
+  "add app": {
+   "kustomize-namespace": "String",
+   "kustomize-version": "String",
+   "nameprefix": "String",
+   "namesuffix": "String",
+   "project": "String",
+   "ref": "String"
+  },
+  "add cluster": {
+   "name": "String",
+   "namespace": "StringArray",
+   "project": "String",
+   "shard": "Int64"
+  },
+  "add policy": {
+   "resource": "String"
+  },
+  "add repo": {
+   "name": "String",
+   "project": "String"
+  },
+  "app create": {
+   "file": "String",
+   "name": "String"
+  },
+  "app delete resource": {
+   "group": "String",
+   "namespace": "String",
+   "project": "String"
+  },
+  "app diff": {
+   "refresh": "Bool"
+  },
+  "app get": {
+   "refresh": "Bool"
+  },
+  "app get resource": {
+   "group": "String",
+   "project": "String"
+  },
+  "app list": {
+   "file": "StringArray",
+   "project": "StringArray"
+  },
+  "app list resources": {
+   "project": "String"
+  },
+  "app logs": {
+   "group": "String",
+   "name": "String",
+   "namespace": "String"
+  },
+  "app patch resource": {
+   "group": "String",
+   "namespace": "String",
+   "project": "String"
+  },
+  "app resource actions list": {
+   "group": "String",
+   "namespace": "String"
+  },
+  "app resource actions run": {
+   "group": "String",
+   "namespace": "String"
+  },
+  "app set list": {
+   "project": "StringArray"
+  },
+  "app sync": {
+   "project": "StringArray",
+   "resource": "StringArray"
+  },
+  "app unset": {
+   "kustomize-namespace": "Bool",
+   "kustomize-version": "Bool",
+   "nameprefix": "Bool",
+   "namesuffix": "Bool",
+   "ref": "Bool"
+  },
+  "app wait": {
+   "resource": "StringArray"
+  },
+  "cluster set": {
+   "name": "String",
+   "namespace": "StringArray"
+  },
+  "cluster shards": {
+   "shard": "Int"
+  },
+  "cluster stats": {
+   "shard": "Int"
+  },
+  "gen app spec": {
+   "file": "String",
+   "name": "String"
+  },
+  "gen project spec": {
+   "file": "String"
+  },
+  "login": {
+   "name": "String"
+  },
+  "project add destination": {
+   "name": "Bool"
+  },
+  "project add orphaned ignore": {
+   "name": "String"
+  },
+  "project create": {
+   "file": "String"
+  },
+  "project remove orphaned ignore": {
+   "name": "String"
+  },
+  "r b a c validate": {
+   "namespace": "String"
+  },
+  "reconcile": {
+   "refresh": "Bool"
+  },
+  "repo get": {
+   "project": "String",
+   "refresh": "String"
+  },
+  "repo list": {
+   "refresh": "String"
+  },
+  "repo remove": {
+   "project": "String"
+  },
+  "update policy rule": {
+   "resource": "String"
+  },
+  "validate settings": {
+   "group": "StringArray"
+  }
+ },
+ "argocd:custom": [],
+ "argocd:shorts": {
+  "account delete token": {
+   "a": "account"
+  },
+  "account generate token": {
+   "a": "account",
+   "e": "expires-in"
+  },
+  "account get": {
+   "a": "account",
+   "o": "output"
+  },
+  "account get user info": {
+   "o": "output"
+  },
+  "account list": {
+   "o": "output"
+  },
+  "account session token": {
+   "o": "output"
+  },
+  "add app": {
+   "p": "parameter"
+  },
+  "add policy": {
+   "a": "action",
+   "o": "object",
+   "p": "permission",
+   "r": "resource"
+  },
+  "add proj": {
+   "d": "dest",
+   "s": "src"
+  },
+  "app add source": {
+   "N": "app-namespace"
+  },
+  "app confirm deletion": {
+   "N": "app-namespace"
+  },
+  "app create": {
+   "N": "app-namespace",
+   "f": "file",
+   "l": "label"
+  },
+  "app delete": {
+   "N": "app-namespace",
+   "l": "selector",
+   "p": "propagation-policy",
+   "y": "yes"
+  },
+  "app delete resource": {
+   "N": "app-namespace"
+  },
+  "app diff": {
+   "N": "app-namespace"
+  },
+  "app edit": {
+   "N": "app-namespace"
+  },
+  "app get": {
+   "N": "app-namespace",
+   "o": "output"
+  },
+  "app get resource": {
+   "N": "app-namespace",
+   "o": "output"
+  },
+  "app history": {
+   "N": "app-namespace",
+   "o": "output"
+  },
+  "app list": {
+   "N": "app-namespace",
+   "P": "path",
+   "c": "cluster",
+   "f": "file",
+   "l": "selector",
+   "o": "output",
+   "p": "project",
+   "r": "repo"
+  },
+  "app list resources": {
+   "N": "app-namespace"
+  },
+  "app logs": {
+   "N": "app-namespace",
+   "c": "container",
+   "f": "follow",
+   "m": "match-case",
+   "p": "previous"
+  },
+  "app manifests": {
+   "N": "app-namespace"
+  },
+  "app patch": {
+   "N": "app-namespace"
+  },
+  "app patch resource": {
+   "N": "app-namespace"
+  },
+  "app remove source": {
+   "N": "app-namespace"
+  },
+  "app resource actions list": {
+   "N": "app-namespace",
+   "o": "out"
+  },
+  "app resource actions run": {
+   "N": "app-namespace"
+  },
+  "app rollback": {
+   "N": "app-namespace",
+   "o": "output"
+  },
+  "app set": {
+   "N": "app-namespace"
+  },
+  "app set create": {
+   "N": "appset-namespace",
+   "o": "output"
+  },
+  "app set delete": {
+   "N": "appset-namespace",
+   "y": "yes"
+  },
+  "app set generate": {
+   "N": "appset-namespace",
+   "o": "output"
+  },
+  "app set get": {
+   "N": "appset-namespace",
+   "o": "output"
+  },
+  "app set list": {
+   "N": "appset-namespace",
+   "l": "selector",
+   "o": "output",
+   "p": "project"
+  },
+  "app sync": {
+   "N": "app-namespace",
+   "l": "selector",
+   "o": "output"
+  },
+  "app terminate op": {
+   "N": "app-namespace"
+  },
+  "app unset": {
+   "N": "app-namespace",
+   "p": "parameter"
+  },
+  "app wait": {
+   "N": "app-namespace",
+   "l": "selector",
+   "o": "output"
+  },
+  "cert list": {
+   "o": "output"
+  },
+  "cluster add": {
+   "y": "yes"
+  },
+  "cluster get": {
+   "o": "output"
+  },
+  "cluster list": {
+   "o": "output"
+  },
+  "cluster remove": {
+   "y": "yes"
+  },
+  "export": {
+   "o": "out"
+  },
+  "g p g add": {
+   "f": "from"
+  },
+  "g p g get": {
+   "o": "output"
+  },
+  "g p g list": {
+   "o": "output"
+  },
+  "gen app spec": {
+   "f": "file",
+   "i": "inline",
+   "l": "label",
+   "o": "output"
+  },
+  "gen cluster config": {
+   "o": "output"
+  },
+  "gen project spec": {
+   "f": "file",
+   "i": "inline",
+   "o": "output"
+  },
+  "gen repo spec": {
+   "o": "output"
+  },
+  "modify resource list": {
+   "l": "list"
+  },
+  "project allow list gen": {
+   "o": "out"
+  },
+  "project create": {
+   "f": "file"
+  },
+  "project get": {
+   "o": "output"
+  },
+  "project list": {
+   "o": "output"
+  },
+  "project role create token": {
+   "e": "expires-in",
+   "i": "id",
+   "t": "token-only"
+  },
+  "project role list": {
+   "o": "output"
+  },
+  "project role list tokens": {
+   "u": "unixtime"
+  },
+  "project source integrity git policies delete": {
+   "y": "yes"
+  },
+  "project source integrity git policies update": {
+   "y": "yes"
+  },
+  "project windows add window": {
+   "k": "kind"
+  },
+  "project windows list": {
+   "o": "output"
+  },
+  "r b a c can": {
+   "q": "quiet"
+  },
+  "repo creds list": {
+   "o": "output"
+  },
+  "repo get": {
+   "o": "output"
+  },
+  "repo list": {
+   "o": "output"
+  },
+  "version": {
+   "o": "output"
+  }
+ },
+ "flux": {
+  "access-key": "String",
+  "add-ignore-paths": "StringSlice",
+  "address": "String",
+  "all": "Bool",
+  "all-namespaces": "Bool",
+  "allow-insecure-http": "Bool",
+  "allow-missing-template-keys": "Bool",
+  "annotations": "StringArray",
+  "api-version": "String",
+  "app-base-url": "String",
+  "app-client-id": "String",
+  "app-id": "String",
+  "app-installation-id": "String",
+  "app-installation-owner": "String",
+  "app-private-key": "String",
+  "as": "String",
+  "as-group": "StringArray",
+  "as-uid": "String",
+  "as-user-extra": "StringArray",
+  "audience-claim": "String",
+  "author-email": "String",
+  "author-name": "String",
+  "bearer-token": "String",
+  "branch": "String",
+  "bucket-name": "String",
+  "ca-cert-file": "StringSlice",
+  "ca-crt-file": "String",
+  "ca-file": "String",
+  "cache-dir": "String",
+  "cert-file": "String",
+  "cert-ref": "String",
+  "certificate-authority": "String",
+  "channel": "String",
+  "chart": "String",
+  "chart-interval": "Duration",
+  "chart-ref": "String",
+  "chart-version": "String",
+  "checkout-branch": "String",
+  "client": "Bool",
+  "client-certificate": "String",
+  "client-key": "String",
+  "cluster": "String",
+  "cluster-domain": "String",
+  "cluster-role": "String",
+  "commit": "String",
+  "commit-message-appendix": "String",
+  "commit-template": "String",
+  "compact": "Bool",
+  "components": "StringSlice",
+  "components-extra": "StringSlice",
+  "context": "String",
+  "crds": "String",
+  "create-target-namespace": "Bool",
+  "creds": "String",
+  "debug": "Bool",
+  "decryption-provider": "String",
+  "decryption-secret": "String",
+  "depends-on": "StringSlice",
+  "deploy-token-auth": "Bool",
+  "digest": "String",
+  "digests": "Bool",
+  "disable-compression": "Bool",
+  "dry-run": "Bool",
+  "email-claim": "String",
+  "endpoint": "String",
+  "event": "StringSlice",
+  "event-severity": "String",
+  "event-source": "StringSlice",
+  "export": "Bool",
+  "extensions": "StringSlice",
+  "fetch-timeout": "Duration",
+  "field-selector": "String",
+  "filename": "StringSlice",
+  "filter-extract": "String",
+  "filter-regex": "String",
+  "filter-semver": "String",
+  "flux-namespace": "String",
+  "follow": "Bool",
+  "for": "String",
+  "force": "Bool",
+  "git-repo-namespace": "String",
+  "git-repo-path": "String",
+  "git-repo-ref": "String",
+  "gpg-key-id": "String",
+  "gpg-key-ring": "String",
+  "gpg-passphrase": "String",
+  "group": "StringSlice",
+  "health-check": "StringSlice",
+  "health-check-timeout": "Duration",
+  "hostname": "String",
+  "ignore-not-found": "Bool",
+  "ignore-paths": "StringSlice",
+  "image": "String",
+  "image-pull-secret": "String",
+  "image-ref": "String",
+  "in-memory-build": "Bool",
+  "insecure": "Bool",
+  "insecure-registry": "Bool",
+  "insecure-skip-tls-verify": "Bool",
+  "interval": "Duration",
+  "keep-namespace": "Bool",
+  "key-file": "String",
+  "kind": "String",
+  "kubeconfig": "String",
+  "kubeconfig-secret-ref": "String",
+  "kustomization-file": "String",
+  "kustomize": "String",
+  "label": "StringSlice",
+  "label-selector": "String",
+  "layer-selector": "String",
+  "level": "String",
+  "local": "Bool",
+  "local-sources": "StringToString",
+  "log-level": "String",
+  "manifests": "String",
+  "name": "String",
+  "namespace": "String",
+  "network-policy": "Bool",
+  "no-header": "Bool",
+  "ns-follows-kube-context": "Bool",
+  "oci-provider": "String",
+  "oidc-audience": "String",
+  "oidc-provider": "String",
+  "oidc-token": "String",
+  "output": "String",
+  "owner": "String",
+  "pass-credentials": "Bool",
+  "password": "String",
+  "path": "String",
+  "payload": "String",
+  "personal": "Bool",
+  "policy-change-delay": "Duration",
+  "poll-interval": "Duration",
+  "pre": "Bool",
+  "private": "Bool",
+  "private-key-file": "String",
+  "progress-bar": "Bool",
+  "provider": "String",
+  "provider-ref": "String",
+  "proxy-secret-ref": "String",
+  "prune": "Bool",
+  "push-branch": "String",
+  "read-write-key": "Bool",
+  "reconcile": "Bool",
+  "reconcile-strategy": "String",
+  "record": "Bool",
+  "recurse-submodules": "Bool",
+  "recursive": "Bool",
+  "ref-name": "String",
+  "reflect-digest": "String",
+  "region": "String",
+  "registry": "String",
+  "registry-creds": "String",
+  "release-name": "String",
+  "repository": "String",
+  "reproducible": "Bool",
+  "request-timeout": "String",
+  "reset": "Bool",
+  "resolve-symlinks": "Bool",
+  "resource": "StringSlice",
+  "retries": "Int",
+  "retry-delay": "Duration",
+  "retry-interval": "Duration",
+  "revision": "String",
+  "scan-timeout": "Duration",
+  "secret-key": "String",
+  "secret-name": "String",
+  "secret-ref": "String",
+  "select-alpha": "String",
+  "select-numeric": "String",
+  "select-semver": "String",
+  "selector": "String",
+  "server": "String",
+  "service-account": "String",
+  "show-history": "Bool",
+  "show-managed-fields": "Bool",
+  "show-source": "Bool",
+  "show-status": "Bool",
+  "show-values": "Bool",
+  "show-vars": "Bool",
+  "signing-key-secret": "String",
+  "signing-key-type": "String",
+  "silent": "Bool",
+  "since": "Duration",
+  "since-time": "String",
+  "skip-namespace": "Bool",
+  "source": "String",
+  "sparse-checkout": "StringSlice",
+  "sparse-checkout-paths": "StringSlice",
+  "ssh-ecdsa-curve": "String",
+  "ssh-hostkey-algos": "StringSlice",
+  "ssh-hostname": "String",
+  "ssh-key-algorithm": "String",
+  "ssh-rsa-bits": "Int",
+  "ssh-signing-key-file": "String",
+  "ssh-signing-passphrase": "String",
+  "ssh-signing-password": "String",
+  "ssh-signing-reuse-private-key": "Bool",
+  "status-selector": "String",
+  "storage-namespace": "String",
+  "strict": "Bool",
+  "strict-substitute": "Bool",
+  "tag": "mixed:String,StringSlice",
+  "tag-semver": "String",
+  "tail": "Int64",
+  "target-namespace": "String",
+  "team": "StringSlice",
+  "template": "String",
+  "timeout": "Duration",
+  "tls-crt-file": "String",
+  "tls-key-file": "String",
+  "tls-server-name": "String",
+  "token": "String",
+  "token-auth": "Bool",
+  "toleration-keys": "StringSlice",
+  "trust-policy-file": "String",
+  "type": "String",
+  "types": "StringSlice",
+  "url": "String",
+  "user": "String",
+  "username": "String",
+  "validation": "String",
+  "values": "StringSlice",
+  "values-from": "StringSlice",
+  "verbose": "Bool",
+  "verify-issuer": "String",
+  "verify-provider": "String",
+  "verify-secret-ref": "String",
+  "verify-subject": "String",
+  "version": "String",
+  "visibility": "String",
+  "wait": "Bool",
+  "watch": "Bool",
+  "watch-all-namespaces": "Bool",
+  "with-bearer-token": "Bool",
+  "with-credentials": "Bool",
+  "with-namespace": "StringSlice",
+  "with-service-account": "String",
+  "with-source": "Bool",
+  "yes": "Bool"
+ },
+ "flux:aliases": {},
+ "flux:commands": {
+  "bootstrap": {
+   "log-level": "String",
+   "ssh-ecdsa-curve": "String",
+   "ssh-key-algorithm": "String",
+   "ssh-rsa-bits": "Int"
+  },
+  "bootstrap b server": {
+   "path": "String"
+  },
+  "bootstrap git": {
+   "path": "String"
+  },
+  "bootstrap git hub": {
+   "path": "String"
+  },
+  "bootstrap git lab": {
+   "path": "String"
+  },
+  "bootstrap gitea": {
+   "path": "String"
+  },
+  "build artifact": {
+   "path": "String"
+  },
+  "build ks": {
+   "path": "String"
+  },
+  "create alert provider": {
+   "type": "String"
+  },
+  "create helm release": {
+   "source": "String"
+  },
+  "create ks": {
+   "path": "String",
+   "source": "String"
+  },
+  "create receiver": {
+   "type": "String"
+  },
+  "create secret git": {
+   "ssh-ecdsa-curve": "String",
+   "ssh-key-algorithm": "String",
+   "ssh-rsa-bits": "Int"
+  },
+  "create secret receiver": {
+   "type": "String"
+  },
+  "create source bucket": {
+   "provider": "String"
+  },
+  "create source chart": {
+   "source": "String",
+   "verify-provider": "String"
+  },
+  "create source git": {
+   "provider": "String",
+   "ssh-ecdsa-curve": "String",
+   "ssh-key-algorithm": "String",
+   "ssh-rsa-bits": "Int",
+   "tag": "String"
+  },
+  "create source o c i repository": {
+   "provider": "String",
+   "tag": "String",
+   "verify-provider": "String"
+  },
+  "diff artifact": {
+   "path": "String",
+   "provider": "String"
+  },
+  "diff ks": {
+   "path": "String"
+  },
+  "docgen": {
+   "path": "String"
+  },
+  "install": {
+   "log-level": "String"
+  },
+  "list artifacts": {
+   "provider": "String"
+  },
+  "migrate": {
+   "path": "String"
+  },
+  "pull artifact": {
+   "provider": "String"
+  },
+  "push artifact": {
+   "path": "String",
+   "provider": "String",
+   "source": "String"
+  },
+  "tag artifact": {
+   "provider": "String",
+   "tag": "StringSlice"
+  },
+  "trigger receiver": {
+   "type": "String"
+  }
+ },
+ "flux:custom": [
+  "crds",
+  "decryption-provider",
+  "level",
+  "log-level",
+  "path",
+  "provider",
+  "source",
+  "ssh-ecdsa-curve",
+  "ssh-key-algorithm",
+  "ssh-rsa-bits",
+  "type",
+  "verify-provider",
+  "visibility"
+ ],
+ "flux:shorts": {
+  "add": {
+   "A": "all-namespaces",
+   "R": "recursive",
+   "f": "filename",
+   "k": "kustomize",
+   "l": "selector",
+   "n": "namespace",
+   "o": "output",
+   "s": "server"
+  },
+  "bootstrap": {
+   "v": "version"
+  },
+  "bootstrap b server": {
+   "u": "username"
+  },
+  "bootstrap git": {
+   "p": "password",
+   "s": "silent",
+   "u": "username"
+  },
+  "build artifact": {
+   "o": "output",
+   "p": "path"
+  },
+  "build ks": {
+   "r": "recursive"
+  },
+  "create secret git": {
+   "p": "password",
+   "u": "username"
+  },
+  "create secret o c i": {
+   "p": "password",
+   "u": "username"
+  },
+  "create secret proxy": {
+   "p": "password",
+   "u": "username"
+  },
+  "create source git": {
+   "p": "password",
+   "s": "silent",
+   "u": "username"
+  },
+  "create source helm": {
+   "p": "password",
+   "u": "username"
+  },
+  "delete": {
+   "s": "silent"
+  },
+  "diff ks": {
+   "r": "recursive"
+  },
+  "events": {
+   "A": "all-namespaces",
+   "w": "watch"
+  },
+  "get": {
+   "A": "all-namespaces",
+   "l": "label-selector",
+   "w": "watch"
+  },
+  "init": {
+   "p": "password",
+   "u": "username"
+  },
+  "install": {
+   "v": "version"
+  },
+  "logs": {
+   "A": "all-namespaces",
+   "f": "follow"
+  },
+  "migrate": {
+   "e": "extensions",
+   "f": "path",
+   "v": "version",
+   "y": "yes"
+  },
+  "pull artifact": {
+   "o": "output"
+  },
+  "push artifact": {
+   "a": "annotations",
+   "f": "path",
+   "o": "output"
+  },
+  "stats": {
+   "A": "all-namespaces"
+  },
+  "tree artifact generator": {
+   "o": "output"
+  },
+  "tree ks": {
+   "o": "output"
+  },
+  "uninstall": {
+   "s": "silent"
+  },
+  "version": {
+   "o": "output"
+  }
+ },
+ "gh": {
+  "accept-cascading-deletion-of-private-forks": "Bool",
+  "accept-visibility-change-consequences": "Bool",
+  "actions": "Bool",
+  "active": "Bool",
+  "add": "String",
+  "add-assignee": "StringSlice",
+  "add-blocked-by": "StringSlice",
+  "add-blocking": "StringSlice",
+  "add-label": "StringSlice",
+  "add-project": "StringSlice",
+  "add-readme": "Bool",
+  "add-reviewer": "StringSlice",
+  "add-sub-issue": "StringSlice",
+  "add-topic": "StringSlice",
+  "admin": "Bool",
+  "after": "String",
+  "all": "Bool",
+  "all-interfaces": "Bool",
+  "allow-escape-sequences": "Bool",
+  "allow-hidden-dirs": "Bool",
+  "allow-write": "Bool",
+  "app": "String",
+  "approve": "Bool",
+  "archive": "String",
+  "archived": "Bool",
+  "assignee": "mixed:String,StringSlice",
+  "attempt": "Uint64",
+  "author": "String",
+  "author-date": "String",
+  "author-email": "String",
+  "author-name": "String",
+  "auto": "Bool",
+  "base": "String",
+  "blame": "Bool",
+  "blocked-by": "StringSlice",
+  "blocking": "StringSlice",
+  "body": "String",
+  "body-file": "String",
+  "branch": "String",
+  "branch-repo": "String",
+  "bundle": "String",
+  "bundle-from-oci": "Bool",
+  "cache": "Duration",
+  "category": "String",
+  "cert-identity": "String",
+  "cert-identity-regex": "String",
+  "cert-oidc-issuer": "String",
+  "checkout": "Bool",
+  "cleanup-tag": "Bool",
+  "clear": "Bool",
+  "clobber": "Bool",
+  "clone": "Bool",
+  "closed": "mixed:Bool,String",
+  "codespace": "String",
+  "color": "String",
+  "comment": "mixed:Bool,String",
+  "commenter": "String",
+  "comments": "mixed:Bool,String",
+  "commit": "String",
+  "committer": "String",
+  "committer-date": "String",
+  "committer-email": "String",
+  "committer-name": "String",
+  "compact": "Bool",
+  "config": "Bool",
+  "confirm": "Bool",
+  "conflict-status": "Bool",
+  "create-if-none": "Bool",
+  "created": "String",
+  "custom-agent": "String",
+  "custom-trusted-root": "String",
+  "date": "String",
+  "days": "Uint16",
+  "debug": "Bool",
+  "debug-file": "String",
+  "default": "Bool",
+  "default-branch-only": "Bool",
+  "default-permissions": "Bool",
+  "delete": "Bool",
+  "delete-branch": "Bool",
+  "delete-last": "Bool",
+  "deny-self-hosted-runners": "Bool",
+  "desc": "String",
+  "description": "String",
+  "detach": "Bool",
+  "devcontainer-path": "String",
+  "dir": "String",
+  "disable-auto": "Bool",
+  "disable-issues": "Bool",
+  "disable-wiki": "Bool",
+  "discussion-category": "String",
+  "display-name": "String",
+  "draft": "Bool",
+  "drafts": "Bool",
+  "dry-run": "Bool",
+  "duplicate-of": "String",
+  "edit": "Bool",
+  "edit-last": "Bool",
+  "editor": "Bool",
+  "enable-issues": "Bool",
+  "enable-wiki": "Bool",
+  "env": "String",
+  "env-file": "String",
+  "event": "String",
+  "exclude": "StringSlice",
+  "exclude-drafts": "Bool",
+  "exclude-pre-releases": "Bool",
+  "exit-status": "Bool",
+  "expand": "Bool",
+  "extension": "String",
+  "fail-fast": "Bool",
+  "fail-on-no-commits": "Bool",
+  "failed": "Bool",
+  "field": "mixed:String,StringArray",
+  "field-id": "mixed:String,StringArray",
+  "file": "String",
+  "filename": "String",
+  "files": "Bool",
+  "fill": "Bool",
+  "fill-first": "Bool",
+  "fill-verbose": "Bool",
+  "filter": "String",
+  "fix": "Bool",
+  "follow": "Bool",
+  "followers": "String",
+  "force": "Bool",
+  "fork": "Bool",
+  "fork-name": "String",
+  "forks": "String",
+  "from-file": "String",
+  "from-local": "Bool",
+  "full": "Bool",
+  "generate-notes": "Bool",
+  "gitignore": "String",
+  "good-first-issues": "String",
+  "hash": "String",
+  "head": "String",
+  "header": "StringArray",
+  "help": "Bool",
+  "help-wanted-issues": "String",
+  "homepage": "String",
+  "host": "String",
+  "hostname": "String",
+  "id": "String",
+  "idle-timeout": "Duration",
+  "include": "Bool",
+  "include-all-branches": "Bool",
+  "include-content": "Bool",
+  "include-prs": "Bool",
+  "input": "String",
+  "insecure-storage": "Bool",
+  "insiders": "Bool",
+  "interactions": "String",
+  "internal": "Bool",
+  "interval": "Int",
+  "involves": "String",
+  "issue-repo": "String",
+  "iteration-id": "String",
+  "job": "String",
+  "jq": "String",
+  "json": "mixed:Bool,StringSlice",
+  "key": "String",
+  "label": "StringSlice",
+  "language": "String",
+  "license": "mixed:String,StringSlice",
+  "limit": "Int",
+  "list": "Bool",
+  "location": "String",
+  "locked": "Bool",
+  "log": "Bool",
+  "log-failed": "Bool",
+  "machine": "String",
+  "match-head-commit": "String",
+  "mention": "String",
+  "mentions": "String",
+  "merge": "Bool",
+  "merged": "Bool",
+  "merged-at": "String",
+  "method": "String",
+  "milestone": "String",
+  "name": "mixed:String,StringArray",
+  "name-only": "Bool",
+  "no-archived": "Bool",
+  "no-assignee": "Bool",
+  "no-browser": "Bool",
+  "no-label": "Bool",
+  "no-maintainer-edit": "Bool",
+  "no-milestone": "Bool",
+  "no-project": "Bool",
+  "no-public-good": "Bool",
+  "no-refresh": "Bool",
+  "no-repos-selected": "Bool",
+  "no-store": "Bool",
+  "no-upstream": "Bool",
+  "notes": "String",
+  "notes-file": "String",
+  "notes-from-tag": "Bool",
+  "notes-start-tag": "String",
+  "number": "Float64",
+  "number-topics": "String",
+  "numeric": "Bool",
+  "org": "String",
+  "output": "String",
+  "owner": "mixed:String,StringSlice",
+  "page": "Int",
+  "paginate": "Bool",
+  "parent": "String",
+  "parents": "Bool",
+  "patch": "Bool",
+  "pattern": "StringArray",
+  "pin": "String",
+  "precompiled": "String",
+  "predicate-type": "String",
+  "prerelease": "Bool",
+  "preview": "StringSlice",
+  "private": "Bool",
+  "profile": "String",
+  "project": "mixed:String,StringSlice",
+  "project-id": "String",
+  "projects": "Bool",
+  "public": "Bool",
+  "push": "Bool",
+  "query": "String",
+  "raw": "Bool",
+  "raw-field": "StringArray",
+  "reactions": "String",
+  "readme": "String",
+  "reason": "String",
+  "rebase": "Bool",
+  "recover": "String",
+  "recurse-submodules": "Bool",
+  "recursive": "Bool",
+  "ref": "String",
+  "releases": "Bool",
+  "remote": "mixed:Bool,String",
+  "remote-name": "String",
+  "remove": "mixed:Bool,String",
+  "remove-assignee": "StringSlice",
+  "remove-blocked-by": "StringSlice",
+  "remove-blocking": "StringSlice",
+  "remove-label": "StringSlice",
+  "remove-milestone": "Bool",
+  "remove-parent": "Bool",
+  "remove-project": "StringSlice",
+  "remove-reviewer": "StringSlice",
+  "remove-scopes": "StringSlice",
+  "remove-sub-issue": "StringSlice",
+  "remove-topic": "StringSlice",
+  "remove-type": "Bool",
+  "repo": "mixed:String,StringSlice",
+  "repo-deprecated": "String",
+  "repo-owner": "String",
+  "repos": "StringSlice",
+  "request-changes": "Bool",
+  "required": "Bool",
+  "reset-scopes": "Bool",
+  "restore-version": "Int",
+  "retention-period": "Duration",
+  "review-requested": "String",
+  "reviewed-by": "String",
+  "reviewer": "StringSlice",
+  "scopes": "StringSlice",
+  "search": "String",
+  "secret": "Bool",
+  "secure-storage": "Bool",
+  "server-port": "Int",
+  "settings": "Bool",
+  "shell": "Bool",
+  "show-token": "Bool",
+  "signer-digest": "String",
+  "signer-repo": "String",
+  "signer-workflow": "String",
+  "silent": "Bool",
+  "single-column": "Bool",
+  "single-select-option-id": "String",
+  "single-select-options": "StringSlice",
+  "size": "String",
+  "skip-existing": "Bool",
+  "skip-ssh-key": "Bool",
+  "slurp": "Bool",
+  "source": "mixed:Bool,String",
+  "source-digest": "String",
+  "source-owner": "String",
+  "source-ref": "String",
+  "squash": "Bool",
+  "stars": "String",
+  "static": "Bool",
+  "status": "Bool",
+  "stdio": "Bool",
+  "subject": "String",
+  "succeed-on-no-caches": "Bool",
+  "tag": "String",
+  "target": "String",
+  "target-owner": "String",
+  "team": "String",
+  "team-mentions": "String",
+  "template": "String",
+  "text": "String",
+  "title": "String",
+  "topic": "StringSlice",
+  "tree": "String",
+  "tuf-root": "String",
+  "tuf-url": "String",
+  "type": "String",
+  "undo": "Bool",
+  "unpin": "Bool",
+  "unset": "Bool",
+  "updated": "String",
+  "upstream": "Bool",
+  "upstream-remote-name": "String",
+  "url": "String",
+  "user": "mixed:Bool,String",
+  "value": "String",
+  "verbose": "Bool",
+  "verify-only": "Bool",
+  "verify-tag": "Bool",
+  "version": "mixed:Bool,Int",
+  "view": "Bool",
+  "watch": "Bool",
+  "web": "Bool",
+  "wiki": "Bool",
+  "with-token": "Bool",
+  "workflow": "String",
+  "worktree": "String",
+  "yaml": "Bool",
+  "yes": "Bool"
+ },
+ "gh:aliases": {
+  "codespace": {
+   "displayName": "display-name"
+  },
+  "gpg-key delete": {
+   "confirm": "yes"
+  },
+  "issue delete": {
+   "confirm": "yes"
+  },
+  "label": {
+   "confirm": "yes"
+  },
+  "repo archive": {
+   "confirm": "yes"
+  },
+  "repo delete": {
+   "confirm": "yes"
+  },
+  "repo rename": {
+   "confirm": "yes"
+  },
+  "repo unarchive": {
+   "confirm": "yes"
+  },
+  "ssh-key delete": {
+   "confirm": "yes"
+  }
+ },
+ "gh:commands": {
+  "add json flag": {
+   "json": "StringSlice"
+  },
+  "api": {
+   "field": "StringArray"
+  },
+  "attestation download": {
+   "owner": "String",
+   "repo": "String"
+  },
+  "attestation verify": {
+   "owner": "String",
+   "repo": "String"
+  },
+  "auth logout": {
+   "user": "String"
+  },
+  "auth switch": {
+   "user": "String"
+  },
+  "auth token": {
+   "user": "String"
+  },
+  "codespace": {
+   "repo": "String",
+   "user": "String"
+  },
+  "copilot": {
+   "remove": "Bool"
+  },
+  "discussion view": {
+   "comments": "Bool"
+  },
+  "enable repo override": {
+   "repo": "String"
+  },
+  "extension": {
+   "license": "StringSlice",
+   "owner": "StringSlice"
+  },
+  "gist edit": {
+   "remove": "String"
+  },
+  "issue artifact": {
+   "name": "String",
+   "version": "Int"
+  },
+  "issue close": {
+   "comment": "String"
+  },
+  "issue create": {
+   "assignee": "StringSlice",
+   "project": "StringSlice"
+  },
+  "issue develop": {
+   "name": "String"
+  },
+  "issue list": {
+   "assignee": "String"
+  },
+  "issue reopen": {
+   "comment": "String"
+  },
+  "issue view": {
+   "comments": "Bool"
+  },
+  "label": {
+   "name": "String"
+  },
+  "pr close": {
+   "comment": "String"
+  },
+  "pr create": {
+   "assignee": "StringSlice",
+   "project": "StringSlice"
+  },
+  "pr list": {
+   "assignee": "String"
+  },
+  "pr reopen": {
+   "comment": "String"
+  },
+  "pr review": {
+   "comment": "Bool"
+  },
+  "pr view": {
+   "comments": "Bool"
+  },
+  "project close": {
+   "owner": "String"
+  },
+  "project create": {
+   "owner": "String"
+  },
+  "project delete": {
+   "owner": "String"
+  },
+  "project edit": {
+   "owner": "String"
+  },
+  "project field-create": {
+   "name": "String",
+   "owner": "String"
+  },
+  "project field-list": {
+   "owner": "String"
+  },
+  "project item-add": {
+   "owner": "String"
+  },
+  "project item-archive": {
+   "owner": "String"
+  },
+  "project item-create": {
+   "owner": "String"
+  },
+  "project item-delete": {
+   "owner": "String"
+  },
+  "project item-edit": {
+   "field": "String",
+   "field-id": "String",
+   "owner": "String"
+  },
+  "project item-list": {
+   "field": "StringArray",
+   "field-id": "StringArray",
+   "owner": "String"
+  },
+  "project link": {
+   "owner": "String",
+   "repo": "String"
+  },
+  "project list": {
+   "closed": "Bool",
+   "owner": "String"
+  },
+  "project mark-template": {
+   "owner": "String"
+  },
+  "project unlink": {
+   "owner": "String",
+   "repo": "String"
+  },
+  "project view": {
+   "owner": "String"
+  },
+  "repo create": {
+   "license": "String",
+   "remote": "String",
+   "source": "String"
+  },
+  "repo fork": {
+   "remote": "Bool"
+  },
+  "repo list": {
+   "source": "Bool"
+  },
+  "repo sync": {
+   "source": "String"
+  },
+  "root": {
+   "version": "Bool"
+  },
+  "run download": {
+   "name": "StringArray"
+  },
+  "run list": {
+   "user": "String"
+  },
+  "search code": {
+   "owner": "StringSlice",
+   "repo": "StringSlice"
+  },
+  "search commits": {
+   "owner": "StringSlice",
+   "repo": "StringSlice"
+  },
+  "search issues": {
+   "assignee": "String",
+   "closed": "String",
+   "comments": "String",
+   "owner": "StringSlice",
+   "project": "String",
+   "repo": "StringSlice"
+  },
+  "search prs": {
+   "assignee": "String",
+   "closed": "String",
+   "comments": "String",
+   "owner": "StringSlice",
+   "project": "String",
+   "repo": "StringSlice"
+  },
+  "search repos": {
+   "license": "StringSlice",
+   "owner": "StringSlice"
+  },
+  "secret delete": {
+   "user": "Bool"
+  },
+  "secret list": {
+   "user": "Bool"
+  },
+  "secret set": {
+   "user": "Bool"
+  },
+  "skills search": {
+   "owner": "String"
+  },
+  "workflow run": {
+   "field": "StringArray",
+   "json": "Bool"
+  }
+ },
+ "gh:custom": [
+  "retention-period"
+ ],
+ "gh:shorts": {
+  "accessibility": {
+   "w": "web"
+  },
+  "add format": {
+   "q": "jq",
+   "t": "template"
+  },
+  "agent-task create": {
+   "F": "from-file",
+   "a": "custom-agent",
+   "b": "base"
+  },
+  "agent-task list": {
+   "L": "limit",
+   "w": "web"
+  },
+  "agent-task view": {
+   "w": "web"
+  },
+  "alias set": {
+   "s": "shell"
+  },
+  "api": {
+   "F": "field",
+   "H": "header",
+   "X": "method",
+   "f": "raw-field",
+   "i": "include",
+   "p": "preview",
+   "q": "jq",
+   "t": "template"
+  },
+  "attestation download": {
+   "L": "limit",
+   "R": "repo",
+   "o": "owner"
+  },
+  "attestation verify": {
+   "L": "limit",
+   "R": "repo",
+   "b": "bundle",
+   "i": "cert-identity-regex",
+   "o": "owner"
+  },
+  "auth login": {
+   "h": "hostname",
+   "s": "scopes",
+   "w": "web"
+  },
+  "auth logout": {
+   "h": "hostname",
+   "u": "user"
+  },
+  "auth refresh": {
+   "h": "hostname",
+   "r": "remove-scopes",
+   "s": "scopes"
+  },
+  "auth setupgit": {
+   "f": "force",
+   "h": "hostname"
+  },
+  "auth status": {
+   "a": "active",
+   "h": "hostname",
+   "t": "show-token"
+  },
+  "auth switch": {
+   "h": "hostname",
+   "u": "user"
+  },
+  "auth token": {
+   "h": "hostname",
+   "u": "user"
+  },
+  "browse": {
+   "a": "actions",
+   "b": "branch",
+   "c": "commit",
+   "n": "no-browser",
+   "p": "projects",
+   "r": "releases",
+   "s": "settings",
+   "w": "wiki"
+  },
+  "cache delete": {
+   "a": "all",
+   "r": "ref"
+  },
+  "cache list": {
+   "L": "limit",
+   "k": "key",
+   "r": "ref"
+  },
+  "codespace": {
+   "L": "limit",
+   "R": "repo",
+   "b": "branch",
+   "c": "codespace",
+   "d": "debug",
+   "e": "expand",
+   "f": "file",
+   "l": "location",
+   "m": "machine",
+   "o": "org",
+   "p": "profile",
+   "r": "recursive",
+   "s": "status",
+   "u": "user",
+   "w": "web"
+  },
+  "config get": {
+   "h": "host"
+  },
+  "config list": {
+   "h": "host"
+  },
+  "config set": {
+   "h": "host"
+  },
+  "discussion comment": {
+   "F": "body-file",
+   "b": "body"
+  },
+  "discussion create": {
+   "F": "body-file",
+   "b": "body",
+   "c": "category",
+   "l": "label",
+   "t": "title"
+  },
+  "discussion edit": {
+   "F": "body-file",
+   "b": "body",
+   "c": "category",
+   "t": "title"
+  },
+  "discussion list": {
+   "A": "author",
+   "L": "limit",
+   "S": "search",
+   "c": "category",
+   "l": "label",
+   "w": "web"
+  },
+  "discussion view": {
+   "L": "limit",
+   "c": "comments",
+   "w": "web"
+  },
+  "enable repo override": {
+   "R": "repo"
+  },
+  "extension": {
+   "L": "limit",
+   "s": "single-column",
+   "w": "web"
+  },
+  "gist create": {
+   "d": "desc",
+   "f": "filename",
+   "p": "public",
+   "w": "web"
+  },
+  "gist edit": {
+   "a": "add",
+   "d": "desc",
+   "f": "filename",
+   "r": "remove"
+  },
+  "gist list": {
+   "L": "limit"
+  },
+  "gist view": {
+   "f": "filename",
+   "r": "raw",
+   "w": "web"
+  },
+  "gpg-key add": {
+   "t": "title"
+  },
+  "gpg-key delete": {
+   "y": "yes"
+  },
+  "issue argparsetest": {
+   "x": "help"
+  },
+  "issue artifact": {
+   "D": "dir",
+   "F": "body-file",
+   "L": "limit",
+   "O": "output",
+   "b": "body",
+   "w": "web"
+  },
+  "issue close": {
+   "c": "comment"
+  },
+  "issue comment": {
+   "F": "body-file",
+   "b": "body",
+   "e": "editor",
+   "w": "web"
+  },
+  "issue create": {
+   "F": "body-file",
+   "T": "template",
+   "a": "assignee",
+   "b": "body",
+   "e": "editor",
+   "l": "label",
+   "m": "milestone",
+   "p": "project",
+   "t": "title",
+   "w": "web"
+  },
+  "issue develop": {
+   "b": "base",
+   "c": "checkout",
+   "i": "issue-repo",
+   "l": "list",
+   "n": "name"
+  },
+  "issue edit": {
+   "F": "body-file",
+   "b": "body",
+   "m": "milestone",
+   "t": "title"
+  },
+  "issue list": {
+   "A": "author",
+   "L": "limit",
+   "S": "search",
+   "a": "assignee",
+   "l": "label",
+   "m": "milestone",
+   "w": "web"
+  },
+  "issue lock": {
+   "r": "reason"
+  },
+  "issue reopen": {
+   "c": "comment"
+  },
+  "issue view": {
+   "c": "comments",
+   "w": "web"
+  },
+  "label": {
+   "L": "limit",
+   "S": "search",
+   "c": "color",
+   "d": "description",
+   "f": "force",
+   "n": "name",
+   "w": "web"
+  },
+  "org list": {
+   "L": "limit"
+  },
+  "pr checkout": {
+   "b": "branch",
+   "f": "force"
+  },
+  "pr checks": {
+   "i": "interval",
+   "w": "web"
+  },
+  "pr close": {
+   "c": "comment",
+   "d": "delete-branch"
+  },
+  "pr comment": {
+   "F": "body-file",
+   "b": "body",
+   "e": "editor",
+   "w": "web"
+  },
+  "pr create": {
+   "B": "base",
+   "F": "body-file",
+   "H": "head",
+   "T": "template",
+   "a": "assignee",
+   "b": "body",
+   "d": "draft",
+   "e": "editor",
+   "f": "fill",
+   "l": "label",
+   "m": "milestone",
+   "p": "project",
+   "r": "reviewer",
+   "t": "title",
+   "w": "web"
+  },
+  "pr diff": {
+   "e": "exclude",
+   "w": "web"
+  },
+  "pr edit": {
+   "B": "base",
+   "F": "body-file",
+   "b": "body",
+   "m": "milestone",
+   "t": "title"
+  },
+  "pr list": {
+   "A": "author",
+   "B": "base",
+   "H": "head",
+   "L": "limit",
+   "S": "search",
+   "a": "assignee",
+   "l": "label",
+   "w": "web"
+  },
+  "pr merge": {
+   "A": "author-email",
+   "F": "body-file",
+   "b": "body",
+   "d": "delete-branch",
+   "m": "merge",
+   "r": "rebase",
+   "s": "squash",
+   "t": "subject"
+  },
+  "pr reopen": {
+   "c": "comment"
+  },
+  "pr revert": {
+   "F": "body-file",
+   "b": "body",
+   "d": "draft",
+   "t": "title"
+  },
+  "pr review": {
+   "F": "body-file",
+   "a": "approve",
+   "b": "body",
+   "c": "comment",
+   "r": "request-changes"
+  },
+  "pr status": {
+   "c": "conflict-status"
+  },
+  "pr view": {
+   "c": "comments",
+   "w": "web"
+  },
+  "project edit": {
+   "d": "description"
+  },
+  "project field-list": {
+   "L": "limit"
+  },
+  "project item-list": {
+   "L": "limit"
+  },
+  "project link": {
+   "R": "repo",
+   "T": "team"
+  },
+  "project list": {
+   "L": "limit",
+   "w": "web"
+  },
+  "project unlink": {
+   "R": "repo",
+   "T": "team"
+  },
+  "project view": {
+   "w": "web"
+  },
+  "release create": {
+   "F": "notes-file",
+   "d": "draft",
+   "n": "notes",
+   "p": "prerelease",
+   "t": "title"
+  },
+  "release delete": {
+   "y": "yes"
+  },
+  "release delete-asset": {
+   "y": "yes"
+  },
+  "release download": {
+   "A": "archive",
+   "D": "dir",
+   "O": "output",
+   "p": "pattern"
+  },
+  "release edit": {
+   "F": "notes-file"
+  },
+  "release list": {
+   "L": "limit"
+  },
+  "release view": {
+   "w": "web"
+  },
+  "repo archive": {
+   "y": "yes"
+  },
+  "repo autolink": {
+   "n": "numeric",
+   "w": "web"
+  },
+  "repo clone": {
+   "u": "upstream-remote-name"
+  },
+  "repo create": {
+   "c": "clone",
+   "d": "description",
+   "g": "gitignore",
+   "h": "homepage",
+   "l": "license",
+   "p": "template",
+   "r": "remote",
+   "s": "source",
+   "t": "team",
+   "y": "confirm"
+  },
+  "repo credits": {
+   "s": "static"
+  },
+  "repo deploy-key": {
+   "t": "title",
+   "w": "allow-write"
+  },
+  "repo license": {
+   "w": "web"
+  },
+  "repo list": {
+   "L": "limit",
+   "l": "language"
+  },
+  "repo read-file": {
+   "o": "output"
+  },
+  "repo rename": {
+   "y": "yes"
+  },
+  "repo setdefault": {
+   "u": "unset",
+   "v": "view"
+  },
+  "repo sync": {
+   "b": "branch",
+   "s": "source"
+  },
+  "repo unarchive": {
+   "y": "yes"
+  },
+  "repo view": {
+   "b": "branch",
+   "w": "web"
+  },
+  "ruleset check": {
+   "w": "web"
+  },
+  "ruleset list": {
+   "L": "limit",
+   "o": "org",
+   "p": "parents",
+   "w": "web"
+  },
+  "ruleset view": {
+   "o": "org",
+   "p": "parents",
+   "w": "web"
+  },
+  "run download": {
+   "D": "dir",
+   "n": "name",
+   "p": "pattern"
+  },
+  "run list": {
+   "L": "limit",
+   "a": "all",
+   "b": "branch",
+   "c": "commit",
+   "e": "event",
+   "u": "user",
+   "w": "workflow"
+  },
+  "run rerun": {
+   "d": "debug",
+   "j": "job"
+  },
+  "run view": {
+   "a": "attempt",
+   "j": "job",
+   "v": "verbose",
+   "w": "web"
+  },
+  "run watch": {
+   "i": "interval"
+  },
+  "search code": {
+   "L": "limit",
+   "R": "repo",
+   "w": "web"
+  },
+  "search commits": {
+   "L": "limit",
+   "R": "repo",
+   "w": "web"
+  },
+  "search issues": {
+   "L": "limit",
+   "R": "repo",
+   "w": "web"
+  },
+  "search prs": {
+   "B": "base",
+   "H": "head",
+   "L": "limit",
+   "R": "repo",
+   "w": "web"
+  },
+  "search repos": {
+   "L": "limit",
+   "w": "web"
+  },
+  "secret delete": {
+   "e": "env",
+   "o": "org",
+   "u": "user"
+  },
+  "secret list": {
+   "e": "env",
+   "o": "org",
+   "u": "user"
+  },
+  "secret set": {
+   "b": "body",
+   "e": "env",
+   "f": "env-file",
+   "o": "org",
+   "r": "repos",
+   "u": "user"
+  },
+  "skills install": {
+   "f": "force"
+  },
+  "skills search": {
+   "L": "limit"
+  },
+  "ssh-key add": {
+   "t": "title"
+  },
+  "ssh-key delete": {
+   "y": "yes"
+  },
+  "status": {
+   "e": "exclude",
+   "o": "org"
+  },
+  "variable delete": {
+   "e": "env",
+   "o": "org"
+  },
+  "variable get": {
+   "e": "env",
+   "o": "org"
+  },
+  "variable list": {
+   "e": "env",
+   "o": "org"
+  },
+  "variable set": {
+   "b": "body",
+   "e": "env",
+   "f": "env-file",
+   "o": "org",
+   "r": "repos"
+  },
+  "workflow list": {
+   "L": "limit",
+   "a": "all"
+  },
+  "workflow run": {
+   "F": "field",
+   "f": "raw-field",
+   "r": "ref"
+  },
+  "workflow view": {
+   "r": "ref",
+   "w": "web",
+   "y": "yaml"
+  }
+ },
+ "helm": {
+  "all": "Bool",
+  "all-namespaces": "Bool",
+  "allow-deprecated-repos": "Bool",
+  "api-versions": "StringSlice",
+  "app-version": "String",
+  "atomic": "Bool",
+  "burst-limit": "Int",
+  "ca-file": "String",
+  "cascade": "String",
+  "cert-file": "String",
+  "chart": "String",
+  "chart-api-version": "String",
+  "cleanup-on-fail": "Bool",
+  "color": "String",
+  "colour": "String",
+  "content-cache": "String",
+  "create-namespace": "Bool",
+  "date": "Bool",
+  "debug": "Bool",
+  "dependency-update": "Bool",
+  "deployed": "Bool",
+  "description": "String",
+  "destination": "String",
+  "devel": "Bool",
+  "dir": "String",
+  "disable-openapi-validation": "Bool",
+  "dry-run": "mixed:Bool,String",
+  "elapsed": "Duration",
+  "enable-dns": "Bool",
+  "endpoint": "String",
+  "error": "String",
+  "fail-on-no-result": "Bool",
+  "failed": "Bool",
+  "filter": "mixed:String,StringSlice",
+  "force": "Bool",
+  "force-conflicts": "Bool",
+  "force-replace": "Bool",
+  "force-update": "Bool",
+  "generate-headers": "Bool",
+  "generate-name": "Bool",
+  "gvk": "String",
+  "hide-notes": "Bool",
+  "hide-secret": "Bool",
+  "history-max": "Int",
+  "ignore-not-found": "Bool",
+  "include-crds": "Bool",
+  "insecure": "Bool",
+  "insecure-skip-tls-verify": "Bool",
+  "install": "Bool",
+  "is-upgrade": "Bool",
+  "json": "Bool",
+  "jsonpath": "String",
+  "keep-history": "Bool",
+  "key": "String",
+  "key-file": "String",
+  "keyring": "String",
+  "kind": "String",
+  "kube-apiserver": "String",
+  "kube-as-group": "StringArray",
+  "kube-as-user": "String",
+  "kube-ca-file": "String",
+  "kube-context": "String",
+  "kube-insecure-skip-tls-verify": "Bool",
+  "kube-tls-server-name": "String",
+  "kube-token": "String",
+  "kube-version": "String",
+  "kubeconfig": "String",
+  "labels": "StringToString",
+  "list-repo-url": "Bool",
+  "logs": "Bool",
+  "max": "Int",
+  "max-col-width": "Uint",
+  "merge": "String",
+  "name": "String",
+  "name-template": "String",
+  "namespace": "String",
+  "no-descriptions": "Bool",
+  "no-headers": "Bool",
+  "no-hooks": "Bool",
+  "offset": "Int",
+  "output": "String",
+  "output-dir": "String",
+  "pass-credentials": "Bool",
+  "passphrase-file": "String",
+  "password": "String",
+  "password-stdin": "Bool",
+  "pending": "Bool",
+  "plain-http": "Bool",
+  "post-renderer": "String",
+  "post-renderer-args": "StringArray",
+  "prov": "Bool",
+  "qps": "Float32",
+  "quiet": "Bool",
+  "regexp": "Bool",
+  "registry-config": "String",
+  "release-name": "Bool",
+  "render-subchart-notes": "Bool",
+  "replace": "Bool",
+  "repo": "String",
+  "repository-cache": "String",
+  "repository-config": "String",
+  "reset-then-reuse-values": "Bool",
+  "reset-values": "Bool",
+  "resource": "String",
+  "retryable": "Bool",
+  "reuse-values": "Bool",
+  "reverse": "Bool",
+  "revision": "Int",
+  "rollback-on-failure": "Bool",
+  "rule": "String",
+  "selector": "String",
+  "server-side": "mixed:Bool,String",
+  "set": "StringArray",
+  "set-file": "StringArray",
+  "set-json": "StringArray",
+  "set-literal": "StringArray",
+  "set-string": "StringArray",
+  "short": "Bool",
+  "show-only": "StringArray",
+  "show-rollback-revision": "Bool",
+  "sign": "Bool",
+  "skip-crds": "Bool",
+  "skip-refresh": "Bool",
+  "skip-schema-validation": "Bool",
+  "skip-tests": "Bool",
+  "starter": "String",
+  "strict": "Bool",
+  "superseded": "Bool",
+  "take-ownership": "Bool",
+  "template": "String",
+  "time-format": "String",
+  "timeout": "Duration",
+  "type": "String",
+  "uninstalled": "Bool",
+  "uninstalling": "Bool",
+  "untar": "Bool",
+  "untardir": "String",
+  "url": "String",
+  "username": "String",
+  "validate": "Bool",
+  "values": "StringSlice",
+  "verify": "Bool",
+  "version": "String",
+  "versions": "Bool",
+  "wait": "HelmWait",
+  "wait-for-jobs": "Bool",
+  "with-subcharts": "Bool"
+ },
+ "helm:aliases": {
+  "add": {
+   "colour": "color"
+  },
+  "add install": {
+   "atomic": "rollback-on-failure",
+   "force": "force-replace"
+  },
+  "rollback": {
+   "force": "force-replace"
+  },
+  "upgrade": {
+   "atomic": "rollback-on-failure",
+   "force": "force-replace"
+  }
+ },
+ "helm:commands": {
+  "add dry run flag": {
+   "dry-run": "String"
+  },
+  "add install": {
+   "server-side": "Bool"
+  },
+  "list": {
+   "filter": "String"
+  },
+  "release test": {
+   "filter": "StringSlice"
+  },
+  "rollback": {
+   "server-side": "String"
+  },
+  "template": {
+   "dry-run": "String"
+  },
+  "uninstall": {
+   "dry-run": "Bool"
+  },
+  "upgrade": {
+   "server-side": "String"
+  }
+ },
+ "helm:custom": [
+  "output",
+  "post-renderer",
+  "post-renderer-args",
+  "wait"
+ ],
+ "helm:shorts": {
+  "add": {
+   "n": "namespace"
+  },
+  "add install": {
+   "g": "generate-name",
+   "l": "labels"
+  },
+  "add value": {
+   "f": "values"
+  },
+  "bind output flag": {
+   "o": "output"
+  },
+  "create": {
+   "p": "starter"
+  },
+  "get values": {
+   "a": "all"
+  },
+  "list": {
+   "A": "all-namespaces",
+   "d": "date",
+   "f": "filter",
+   "l": "selector",
+   "m": "max",
+   "q": "short",
+   "r": "reverse"
+  },
+  "package": {
+   "d": "destination",
+   "u": "dependency-update"
+  },
+  "plugin package": {
+   "d": "destination"
+  },
+  "pull": {
+   "d": "destination"
+  },
+  "registry login": {
+   "p": "password",
+   "u": "username"
+  },
+  "search repo": {
+   "l": "versions",
+   "r": "regexp"
+  },
+  "template": {
+   "a": "api-versions",
+   "s": "show-only"
+  },
+  "upgrade": {
+   "i": "install",
+   "l": "labels"
+  }
+ },
+ "kubectl": {
+  "accept-hosts": "String",
+  "accept-paths": "String",
+  "address": "mixed:String,StringSlice",
+  "aggregation-rule": "StringToString",
+  "all": "Bool",
+  "all-containers": "Bool",
+  "all-namespaces": "Bool",
+  "all-pods": "Bool",
+  "allow-missing-template-keys": "Bool",
+  "allowlist-entry": "StringArray",
+  "annotation": "StringArray",
+  "annotations": "StringArray",
+  "api-group": "String",
+  "api-prefix": "String",
+  "api-version": "String",
+  "append-hash": "Bool",
+  "append-server-path": "Bool",
+  "appendarg": "StringArray",
+  "applyset": "String",
+  "arguments-only": "Bool",
+  "as": "String",
+  "as-group": "StringArray",
+  "as-uid": "String",
+  "as-user-extra": "StringArray",
+  "attach": "Bool",
+  "audience": "StringArray",
+  "auth-provider": "String",
+  "bound-object-kind": "String",
+  "bound-object-name": "String",
+  "bound-object-uid": "String",
+  "cache-dir": "String",
+  "cached": "Bool",
+  "cascade": "String",
+  "categories": "StringSlice",
+  "cert": "String",
+  "certificate-authority": "String",
+  "chunk-size": "Int64",
+  "class": "String",
+  "client": "Bool",
+  "client-certificate": "String",
+  "client-key": "String",
+  "cluster": "String",
+  "cluster-ip": "String",
+  "clusterip": "String",
+  "clusterrole": "String",
+  "command": "mixed:Bool,String",
+  "concurrency": "Int",
+  "container": "String",
+  "containers": "mixed:Bool,String",
+  "context": "String",
+  "copy-to": "String",
+  "cpu": "String",
+  "cpu-percent": "Int32",
+  "create-annotation": "Bool",
+  "current": "Bool",
+  "current-replicas": "Int",
+  "custom": "String",
+  "default-backend": "String",
+  "delete-emptydir-data": "Bool",
+  "description": "String",
+  "detach-keys": "String",
+  "disable-compression": "Bool",
+  "disable-eviction": "Bool",
+  "disable-filter": "Bool",
+  "docker-email": "String",
+  "docker-password": "String",
+  "docker-server": "String",
+  "docker-username": "String",
+  "dry-run": "String",
+  "duration": "Duration",
+  "edit": "Bool",
+  "env": "mixed:StringArray,StringToString",
+  "exec-api-version": "String",
+  "exec-command": "String",
+  "exec-interactive-mode": "String",
+  "expose": "Bool",
+  "external-ip": "String",
+  "external-name": "String",
+  "field-manager": "String",
+  "field-selector": "String",
+  "filename": "StringSlice",
+  "flatten": "Bool",
+  "follow": "Bool",
+  "for": "mixed:String,StringArray",
+  "force": "Bool",
+  "force-conflicts": "Bool",
+  "from": "String",
+  "from-env-file": "StringSlice",
+  "from-file": "StringSlice",
+  "from-literal": "StringArray",
+  "global-default": "Bool",
+  "grace-period": "Int",
+  "group": "StringArray",
+  "hard": "String",
+  "ignore-daemonsets": "Bool",
+  "ignore-errors": "Bool",
+  "ignore-not-found": "Bool",
+  "image": "mixed:String,StringSlice",
+  "image-pull-policy": "String",
+  "insecure-skip-tls-verify": "Bool",
+  "insecure-skip-tls-verify-backend": "Bool",
+  "interactive": "Bool",
+  "keep-annotations": "Bool",
+  "keep-init-containers": "Bool",
+  "keep-labels": "Bool",
+  "keep-liveness": "Bool",
+  "keep-readiness": "Bool",
+  "keep-startup": "Bool",
+  "keepalive": "Duration",
+  "key": "String",
+  "keys": "StringSlice",
+  "kubeconfig": "String",
+  "kustomize": "String",
+  "label-columns": "StringSlice",
+  "labels": "String",
+  "leave-stdin-open": "Bool",
+  "limit-bytes": "Int64",
+  "limits": "String",
+  "list": "Bool",
+  "load-balancer-ip": "String",
+  "local": "Bool",
+  "match-server-version": "Bool",
+  "max": "Int32",
+  "max-log-requests": "Int",
+  "max-unavailable": "String",
+  "memory": "String",
+  "min": "Int32",
+  "min-available": "String",
+  "minify": "Bool",
+  "name": "String",
+  "name-only": "Bool",
+  "namespace": "String",
+  "namespaced": "Bool",
+  "namespaces": "StringSlice",
+  "no-headers": "Bool",
+  "no-preserve": "Bool",
+  "node-port": "Int",
+  "non-resource-url": "StringSlice",
+  "now": "Bool",
+  "openapi-patch": "Bool",
+  "option": "StringArray",
+  "output": "String",
+  "output-directory": "String",
+  "output-patch": "Bool",
+  "output-watch-events": "Bool",
+  "overrides": "String",
+  "overwrite": "Bool",
+  "password": "String",
+  "patch": "String",
+  "patch-file": "String",
+  "pod-running-timeout": "Duration",
+  "pod-selector": "String",
+  "policy": "String",
+  "port": "mixed:Int,Int32,String",
+  "preemption-policy": "String",
+  "prefix": "mixed:Bool,String",
+  "prependarg": "StringArray",
+  "previous": "Bool",
+  "privileged": "Bool",
+  "profile": "String",
+  "profile-output": "String",
+  "protocol": "String",
+  "prune": "Bool",
+  "prune-allowlist": "StringArray",
+  "quiet": "Bool",
+  "raw": "mixed:Bool,String",
+  "record": "Bool",
+  "recursive": "Bool",
+  "reject-methods": "String",
+  "reject-paths": "String",
+  "remove-extra-permissions": "Bool",
+  "remove-extra-subjects": "Bool",
+  "replace": "Bool",
+  "replicas": "mixed:Int,Int32",
+  "request-timeout": "String",
+  "requests": "String",
+  "resolve": "Bool",
+  "resource": "StringSlice",
+  "resource-name": "StringArray",
+  "resource-version": "String",
+  "restart": "String",
+  "retries": "Int",
+  "revision": "Int64",
+  "rm": "Bool",
+  "role": "String",
+  "rule": "StringArray",
+  "same-node": "Bool",
+  "save-config": "Bool",
+  "schedule": "String",
+  "scopes": "String",
+  "section": "String",
+  "selector": "String",
+  "server": "String",
+  "server-print": "Bool",
+  "server-side": "Bool",
+  "serviceaccount": "StringArray",
+  "session-affinity": "String",
+  "set-image": "StringToString",
+  "share-processes": "Bool",
+  "show-capacity": "Bool",
+  "show-events": "Bool",
+  "show-kind": "Bool",
+  "show-labels": "Bool",
+  "show-managed-fields": "Bool",
+  "show-secrets": "Bool",
+  "show-swap": "Bool",
+  "since": "Duration",
+  "since-time": "String",
+  "skip-wait-for-delete-timeout": "Int",
+  "sort-by": "String",
+  "stdin": "Bool",
+  "subresource": "String",
+  "sum": "Bool",
+  "tail": "Int64",
+  "target": "String",
+  "target-port": "String",
+  "tcp": "StringSlice",
+  "template": "String",
+  "timeout": "Duration",
+  "timestamps": "Bool",
+  "tls-server-name": "String",
+  "to-revision": "Int64",
+  "token": "String",
+  "tty": "Bool",
+  "type": "String",
+  "types": "StringSlice",
+  "unix-socket": "String",
+  "use-protocol-buffers": "Bool",
+  "user": "mixed:String,StringArray",
+  "username": "String",
+  "validate": "String",
+  "value": "Int32",
+  "verb": "StringSlice",
+  "verbs": "StringSlice",
+  "wait": "Bool",
+  "warnings-as-errors": "Bool",
+  "watch": "Bool",
+  "watch-only": "Bool",
+  "windows-line-endings": "Bool",
+  "www": "String",
+  "www-prefix": "String"
+ },
+ "kubectl:aliases": {},
+ "kubectl:commands": {
+  "add": {
+   "env": "StringToString",
+   "for": "mixed:String,StringArray",
+   "image": "String",
+   "port": "String",
+   "prefix": "Bool",
+   "raw": "String",
+   "user": "String"
+  },
+  "add run": {
+   "command": "Bool",
+   "env": "StringArray",
+   "image": "String",
+   "port": "String"
+  },
+  "config view": {
+   "raw": "Bool"
+  },
+  "create": {
+   "raw": "String"
+  },
+  "create cluster role binding": {
+   "user": "StringArray"
+  },
+  "create cron job": {
+   "image": "String"
+  },
+  "create deployment": {
+   "image": "StringSlice",
+   "port": "Int32",
+   "replicas": "Int32"
+  },
+  "create job": {
+   "image": "String"
+  },
+  "create role binding": {
+   "user": "StringArray"
+  },
+  "env": {
+   "containers": "String",
+   "env": "StringArray",
+   "prefix": "String"
+  },
+  "get": {
+   "raw": "String"
+  },
+  "kube r c set": {
+   "command": "String"
+  },
+  "port forward": {
+   "address": "StringSlice"
+  },
+  "proxy": {
+   "address": "String",
+   "port": "Int"
+  },
+  "replace": {
+   "raw": "String"
+  },
+  "resources": {
+   "containers": "String"
+  },
+  "scale": {
+   "replicas": "Int"
+  },
+  "subject": {
+   "user": "StringArray"
+  },
+  "top pod": {
+   "containers": "Bool"
+  }
+ },
+ "kubectl:custom": [
+  "aggregation-rule",
+  "auth-provider",
+  "exec-api-version",
+  "exec-command",
+  "exec-interactive-mode"
+ ],
+ "kubectl:shorts": {
+  "add": {
+   "A": "all-namespaces",
+   "L": "label-columns",
+   "R": "recursive",
+   "c": "container",
+   "f": "filename",
+   "i": "stdin",
+   "k": "kustomize",
+   "l": "selector",
+   "n": "namespace",
+   "o": "output",
+   "p": "previous",
+   "q": "quiet",
+   "s": "server",
+   "t": "tty",
+   "w": "watch"
+  },
+  "add container var": {
+   "c": "container"
+  },
+  "add filename option": {
+   "R": "recursive"
+  },
+  "add json filename flag": {
+   "f": "filename"
+  },
+  "add kustomize flag": {
+   "k": "kustomize"
+  },
+  "add label selector flag var": {
+   "l": "selector"
+  },
+  "add run": {
+   "i": "stdin",
+   "l": "labels",
+   "q": "quiet",
+   "t": "tty"
+  },
+  "apply view last applied": {
+   "o": "output"
+  },
+  "attach": {
+   "i": "stdin",
+   "q": "quiet",
+   "t": "tty"
+  },
+  "can i": {
+   "A": "all-namespaces",
+   "q": "quiet"
+  },
+  "cluster info dump": {
+   "A": "all-namespaces"
+  },
+  "config get contexts": {
+   "o": "output"
+  },
+  "create deployment": {
+   "r": "replicas"
+  },
+  "env": {
+   "c": "containers",
+   "e": "env"
+  },
+  "exec": {
+   "i": "stdin",
+   "q": "quiet",
+   "t": "tty"
+  },
+  "get": {
+   "A": "all-namespaces",
+   "w": "watch"
+  },
+  "label": {
+   "A": "all-namespaces"
+  },
+  "patch": {
+   "p": "patch"
+  },
+  "proxy": {
+   "P": "www-prefix",
+   "p": "port",
+   "u": "unix-socket",
+   "w": "www"
+  },
+  "resources": {
+   "c": "containers"
+  },
+  "rollout status": {
+   "w": "watch"
+  },
+  "top pod": {
+   "A": "all-namespaces"
+  },
+  "version": {
+   "o": "output"
+  }
+ }
+}

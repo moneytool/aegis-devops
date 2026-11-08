@@ -38,6 +38,7 @@ target is. Never enabled by default.
 
 import fnmatch
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -45,7 +46,7 @@ from typing import Any
 
 import yaml
 
-from aegis_core.intent import InfrastructureIntent
+from aegis_core.intent import InfrastructureIntent, canonical_key
 from aegis_core.signing import check_signature
 
 
@@ -77,7 +78,9 @@ class EnvironmentMap:
             ("profile", self.aws_profiles),
             ("account", self.aws_accounts),
             ("project", self.gcp_projects),
+            ("project_number", self.gcp_projects),
             ("subscription", self.azure_subscriptions),
+            ("subscription_name", self.azure_subscriptions),
             ("resource_group", self.azure_resource_groups),
             ("repo", self.github_repos),
             ("workspace", self.terraform_workspaces),
@@ -291,6 +294,35 @@ def kubeconfig_context_namespace(
     return ns if isinstance(ns, str) and ns else "default"
 
 
+_DNS1123_LABEL = re.compile(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?")
+
+
+def flux_default_namespace(
+    intent: InfrastructureIntent, environ: Mapping[str, str], home: str | Path | None = None,
+    kubeconfig: str | None = None,
+) -> str | None:
+    """The namespace flux uses when no ``-n`` is given (flux2 main.go): the kubeconfig
+    context's own namespace when ``--ns-follows-kube-context`` or
+    ``$FLUX_NS_FOLLOWS_KUBE_CONTEXT`` is set and the context names one, else
+    ``$FLUX_SYSTEM_NAMESPACE`` when it is a valid DNS label, else ``flux-system``. None
+    when flux would follow a context that cannot be read."""
+    follows = (intent.params.get("ns_follows_kube_context") is True
+               or bool(environ.get("FLUX_NS_FOLLOWS_KUBE_CONTEXT", ""))
+               or intent.params.get("namespace_follows_kubeconfig") is True)
+    if follows:
+        context = intent.metadata.get("context")
+        loaded = _load_kubeconfig(environ, home, kubeconfig)
+        if loaded is None or not isinstance(context, str) or context not in loaded[2]:
+            return None
+        ns = loaded[2][context].get("namespace")
+        if isinstance(ns, str) and ns:
+            return ns
+    from_env = environ.get("FLUX_SYSTEM_NAMESPACE", "")
+    if from_env and len(from_env) <= 63 and _DNS1123_LABEL.fullmatch(from_env):
+        return from_env
+    return "flux-system"
+
+
 def resolve_current_context(
     intent: InfrastructureIntent,
     environ: Mapping[str, str] | None = None,
@@ -301,7 +333,8 @@ def resolve_current_context(
 
     * kubernetes/helm/flux: ``context`` (and ``cluster``) from the
       kubeconfig's ``current-context``; ``kubeconfig`` from ``$KUBECONFIG``;
-      helm ``namespace`` from ``$HELM_NAMESPACE``; then, for kubernetes and
+      helm ``namespace`` from ``$HELM_NAMESPACE``; flux ``namespace`` as flux picks it
+      (:func:`flux_default_namespace`); then, for kubernetes and
       helm, a still-missing ``namespace`` from the context's ``namespace``
       (``default`` when it sets none, as kubectl does) -- never for a
       cluster-scoped kind, with ``-A``, or for a manifest that was not read.
@@ -310,7 +343,8 @@ def resolve_current_context(
       ``$AWS_DEFAULT_REGION`` / ``$AWS_REGION``;
     * gcp: ``project`` from ``$CLOUDSDK_CORE_PROJECT``;
     * azure: ``subscription`` from ``$AZURE_SUBSCRIPTION_ID``;
-    * argocd: ``server`` from ``$ARGOCD_SERVER``.
+    * argocd: ``server`` from ``$ARGOCD_SERVER``;
+    * github: ``repo`` from ``$GH_REPO`` (``[HOST/]OWNER/REPO``).
 
     Only keys that are absent from ``metadata`` are filled (an explicit
     ``--context`` always wins), and the keys that were filled are listed
@@ -324,6 +358,16 @@ def resolve_current_context(
         if value and key not in md:
             md[key] = value
             filled.append(key)
+            # a key the configuration fills is no longer unresolved: the parser marked it
+            # only because the argv did not give it
+            marks = intent.params.get("unresolved_scope")
+            if isinstance(marks, list):
+                kept = [m for m in marks
+                        if not (isinstance(m, str) and canonical_key(m) == canonical_key(key))]
+                if kept:
+                    intent.params["unresolved_scope"] = kept
+                else:
+                    intent.params.pop("unresolved_scope", None)
 
     provider = intent.provider
     if provider in _KUBE_PROVIDERS:
@@ -332,11 +376,14 @@ def resolve_current_context(
         if "context" not in md:
             path, current, cluster = kubeconfig_current_context(environ, home, explicit)
             fill("context", current)
-            fill("cluster", cluster)
+            if "server" not in md:  # --server sends the request elsewhere
+                fill("cluster", cluster)
             if current and not explicit and environ.get("KUBECONFIG", "").strip():
                 fill("kubeconfig", path)
         if provider == "helm":
             fill("namespace", environ.get("HELM_NAMESPACE"))
+        if provider == "flux" and "namespace" not in md:
+            fill("namespace", flux_default_namespace(intent, environ, home, explicit))
         # The context's namespace is only a default: objects in a manifest
         # Aegis did not read may name their own, so it is not filled there
         # (review of #38) and the namespace stays unresolved.
@@ -351,13 +398,23 @@ def resolve_current_context(
                                                                explicit))
     elif provider == "aws":
         fill("profile", environ.get("AWS_PROFILE"))
-        fill("region", environ.get("AWS_DEFAULT_REGION") or environ.get("AWS_REGION"))
+        # an endpoint override (--endpoint-url, $AWS_ENDPOINT_URL, $AWS_ENDPOINT_URL_<SVC>)
+        # sends the request elsewhere: the region stays unresolved, as the parser left it
+        if "endpoint_url" not in md and not any(
+                k.startswith("AWS_ENDPOINT_URL") and v for k, v in environ.items()):
+            fill("region", environ.get("AWS_DEFAULT_REGION") or environ.get("AWS_REGION"))
     elif provider == "gcp":
-        fill("project", environ.get("CLOUDSDK_CORE_PROJECT"))
+        if "project_number" not in md:  # the argv named a project, by number
+            fill("project", environ.get("CLOUDSDK_CORE_PROJECT"))
     elif provider == "azure":
-        fill("subscription", environ.get("AZURE_SUBSCRIPTION_ID"))
+        if "subscription_name" not in md:  # the argv named a subscription, by name
+            fill("subscription", environ.get("AZURE_SUBSCRIPTION_ID"))
     elif provider == "argocd":
         fill("server", environ.get("ARGOCD_SERVER"))
+    elif provider == "github":
+        # gh's own variable for the repository it acts on when -R is not given
+        repo = environ.get("GH_REPO", "")
+        fill("repo", repo.split("/", 1)[1] if repo.count("/") == 2 else repo)
 
     if filled:
         md["resolved_from_environment"] = filled

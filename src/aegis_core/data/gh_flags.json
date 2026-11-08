@@ -1,0 +1,6043 @@
+{
+ "_source": "https://github.com/cli/cli@736c68f674113337685e3eb1f908602a03b8f99b flag registrations (pkg/cmd, pkg/cmdutil, internal)",
+ "accessibility": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "actions": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "agent-task": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "agent-task create": {
+  "base": [
+   "string",
+   "b"
+  ],
+  "custom-agent": [
+   "string",
+   "a"
+  ],
+  "follow": [
+   "bool",
+   ""
+  ],
+  "from-file": [
+   "string",
+   "F"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "agent-task list": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "limit": [
+   "int",
+   "L"
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "agent-task view": {
+  "follow": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "log": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "alias": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "alias delete": {
+  "all": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "alias imports import": {
+  "clobber": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "alias list": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "alias set": {
+  "clobber": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "shell": [
+   "bool",
+   "s"
+  ]
+ },
+ "api": {
+  "allow-escape-sequences": [
+   "bool",
+   ""
+  ],
+  "cache": [
+   "duration",
+   ""
+  ],
+  "field": [
+   "stringArray",
+   "F"
+  ],
+  "header": [
+   "stringArray",
+   "H"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "hostname": [
+   "string",
+   ""
+  ],
+  "include": [
+   "bool",
+   "i"
+  ],
+  "input": [
+   "string",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "method": [
+   "string",
+   "X"
+  ],
+  "paginate": [
+   "bool",
+   ""
+  ],
+  "preview": [
+   "stringSlice",
+   "p"
+  ],
+  "raw-field": [
+   "stringArray",
+   "f"
+  ],
+  "silent": [
+   "bool",
+   ""
+  ],
+  "slurp": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "verbose": [
+   "bool",
+   ""
+  ]
+ },
+ "attestation": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "attestation download": {
+  "digest-alg": [
+   "string",
+   "d"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "hostname": [
+   "string",
+   ""
+  ],
+  "limit": [
+   "int",
+   "L"
+  ],
+  "owner": [
+   "string",
+   "o"
+  ],
+  "predicate-type": [
+   "string",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "attestation inspect": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "hostname": [
+   "string",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "template": [
+   "string",
+   "t"
+  ]
+ },
+ "attestation trustedroot trusted-root": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "hostname": [
+   "string",
+   ""
+  ],
+  "tuf-root": [
+   "string",
+   ""
+  ],
+  "tuf-url": [
+   "string",
+   ""
+  ],
+  "verify-only": [
+   "bool",
+   ""
+  ]
+ },
+ "attestation verify": {
+  "bundle": [
+   "string",
+   "b"
+  ],
+  "bundle-from-oci": [
+   "bool",
+   ""
+  ],
+  "cert-identity": [
+   "string",
+   ""
+  ],
+  "cert-identity-regex": [
+   "string",
+   "i"
+  ],
+  "cert-oidc-issuer": [
+   "string",
+   ""
+  ],
+  "custom-trusted-root": [
+   "string",
+   ""
+  ],
+  "deny-self-hosted-runners": [
+   "bool",
+   ""
+  ],
+  "digest-alg": [
+   "string",
+   "d"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "hostname": [
+   "string",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "limit": [
+   "int",
+   "L"
+  ],
+  "no-public-good": [
+   "bool",
+   ""
+  ],
+  "owner": [
+   "string",
+   "o"
+  ],
+  "predicate-type": [
+   "string",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "signer-digest": [
+   "string",
+   ""
+  ],
+  "signer-repo": [
+   "string",
+   ""
+  ],
+  "signer-workflow": [
+   "string",
+   ""
+  ],
+  "source-digest": [
+   "string",
+   ""
+  ],
+  "source-ref": [
+   "string",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ]
+ },
+ "auth": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "auth gitcredential git-credential": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "auth login": {
+  "clipboard": [
+   "bool",
+   "c"
+  ],
+  "expiring": [
+   "bool",
+   ""
+  ],
+  "git-protocol": [
+   "string",
+   "p"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "hostname": [
+   "string",
+   "h"
+  ],
+  "insecure-storage": [
+   "bool",
+   ""
+  ],
+  "scopes": [
+   "stringSlice",
+   "s"
+  ],
+  "secure-storage": [
+   "bool",
+   ""
+  ],
+  "skip-ssh-key": [
+   "bool",
+   ""
+  ],
+  "web": [
+   "bool",
+   "w"
+  ],
+  "with-token": [
+   "bool",
+   ""
+  ]
+ },
+ "auth logout": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "hostname": [
+   "string",
+   "h"
+  ],
+  "user": [
+   "string",
+   "u"
+  ]
+ },
+ "auth refresh": {
+  "clipboard": [
+   "bool",
+   "c"
+  ],
+  "expiring": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "hostname": [
+   "string",
+   "h"
+  ],
+  "insecure-storage": [
+   "bool",
+   ""
+  ],
+  "remove-scopes": [
+   "stringSlice",
+   "r"
+  ],
+  "reset-scopes": [
+   "bool",
+   ""
+  ],
+  "scopes": [
+   "stringSlice",
+   "s"
+  ],
+  "secure-storage": [
+   "bool",
+   ""
+  ]
+ },
+ "auth setupgit setup-git": {
+  "force": [
+   "bool",
+   "f"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "hostname": [
+   "string",
+   "h"
+  ]
+ },
+ "auth status": {
+  "active": [
+   "bool",
+   "a"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "hostname": [
+   "string",
+   "h"
+  ],
+  "jq": [
+   "string",
+   ""
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "no-refresh": [
+   "bool",
+   ""
+  ],
+  "show-token": [
+   "bool",
+   "t"
+  ],
+  "template": [
+   "string",
+   ""
+  ]
+ },
+ "auth switch": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "hostname": [
+   "string",
+   "h"
+  ],
+  "user": [
+   "string",
+   "u"
+  ]
+ },
+ "auth token": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "hostname": [
+   "string",
+   "h"
+  ],
+  "no-refresh": [
+   "bool",
+   ""
+  ],
+  "secure-storage": [
+   "bool",
+   ""
+  ],
+  "user": [
+   "string",
+   "u"
+  ]
+ },
+ "browse": {
+  "actions": [
+   "bool",
+   "a"
+  ],
+  "blame": [
+   "bool",
+   ""
+  ],
+  "branch": [
+   "string",
+   "b"
+  ],
+  "commit": [
+   "string",
+   "c"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "no-browser": [
+   "bool",
+   "n"
+  ],
+  "projects": [
+   "bool",
+   "p"
+  ],
+  "releases": [
+   "bool",
+   "r"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "settings": [
+   "bool",
+   "s"
+  ],
+  "wiki": [
+   "bool",
+   "w"
+  ]
+ },
+ "cache": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "cache delete": {
+  "all": [
+   "bool",
+   "a"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "ref": [
+   "string",
+   "r"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "succeed-on-no-caches": [
+   "bool",
+   ""
+  ]
+ },
+ "cache list": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "key": [
+   "string",
+   "k"
+  ],
+  "limit": [
+   "int",
+   "L"
+  ],
+  "order": [
+   "string",
+   "O"
+  ],
+  "ref": [
+   "string",
+   "r"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "sort": [
+   "string",
+   "S"
+  ],
+  "template": [
+   "string",
+   "t"
+  ]
+ },
+ "codespace": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "codespace code": {
+  "codespace": [
+   "string",
+   "c"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "insiders": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "repo-owner": [
+   "string",
+   ""
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "codespace create": {
+  "branch": [
+   "string",
+   "b"
+  ],
+  "default-permissions": [
+   "bool",
+   ""
+  ],
+  "devcontainer-path": [
+   "string",
+   ""
+  ],
+  "display-name": [
+   "string",
+   "d"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "idle-timeout": [
+   "duration",
+   ""
+  ],
+  "location": [
+   "string",
+   "l"
+  ],
+  "machine": [
+   "string",
+   "m"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "repo-deprecated": [
+   "string",
+   "r"
+  ],
+  "retention-period": [
+   "value:opts",
+   ""
+  ],
+  "status": [
+   "bool",
+   "s"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "codespace delete": {
+  "all": [
+   "bool",
+   ""
+  ],
+  "codespace": [
+   "string",
+   "c"
+  ],
+  "force": [
+   "bool",
+   "f"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "org": [
+   "string",
+   "o"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "repo-deprecated": [
+   "string",
+   "r"
+  ],
+  "repo-owner": [
+   "string",
+   ""
+  ],
+  "user": [
+   "string",
+   "u"
+  ]
+ },
+ "codespace edit": {
+  "codespace": [
+   "string",
+   "c"
+  ],
+  "display-name": [
+   "string",
+   "d"
+  ],
+  "displayName": [
+   "string",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "machine": [
+   "string",
+   "m"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "repo-owner": [
+   "string",
+   ""
+  ]
+ },
+ "codespace jupyter": {
+  "codespace": [
+   "string",
+   "c"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "repo-owner": [
+   "string",
+   ""
+  ]
+ },
+ "codespace list": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "limit": [
+   "int",
+   "L"
+  ],
+  "org": [
+   "string",
+   "o"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "repo-deprecated": [
+   "string",
+   "r"
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "user": [
+   "string",
+   "u"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "codespace logs": {
+  "codespace": [
+   "string",
+   "c"
+  ],
+  "follow": [
+   "bool",
+   "f"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "repo-owner": [
+   "string",
+   ""
+  ]
+ },
+ "codespace ports": {
+  "all-interfaces": [
+   "bool",
+   ""
+  ],
+  "codespace": [
+   "string",
+   "c"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "repo-owner": [
+   "string",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ]
+ },
+ "codespace rebuild": {
+  "codespace": [
+   "string",
+   "c"
+  ],
+  "full": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "repo-owner": [
+   "string",
+   ""
+  ]
+ },
+ "codespace select": {
+  "codespace": [
+   "string",
+   "c"
+  ],
+  "file": [
+   "string",
+   "f"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "repo-owner": [
+   "string",
+   ""
+  ]
+ },
+ "codespace ssh": {
+  "codespace": [
+   "string",
+   "c"
+  ],
+  "config": [
+   "bool",
+   ""
+  ],
+  "debug": [
+   "bool",
+   "d"
+  ],
+  "debug-file": [
+   "string",
+   ""
+  ],
+  "expand": [
+   "bool",
+   "e"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "profile": [
+   "string",
+   "p"
+  ],
+  "recursive": [
+   "bool",
+   "r"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "repo-owner": [
+   "string",
+   ""
+  ],
+  "server-port": [
+   "int",
+   ""
+  ],
+  "stdio": [
+   "bool",
+   ""
+  ]
+ },
+ "codespace stop": {
+  "codespace": [
+   "string",
+   "c"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "org": [
+   "string",
+   "o"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "repo-owner": [
+   "string",
+   ""
+  ],
+  "user": [
+   "string",
+   "u"
+  ]
+ },
+ "codespace view": {
+  "codespace": [
+   "string",
+   "c"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "repo-owner": [
+   "string",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ]
+ },
+ "completion": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "shell": [
+   "string",
+   "s"
+  ]
+ },
+ "config": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "config clear-cache": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "config get": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "host": [
+   "string",
+   "h"
+  ]
+ },
+ "config list": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "host": [
+   "string",
+   "h"
+  ]
+ },
+ "config set": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "host": [
+   "string",
+   "h"
+  ]
+ },
+ "copilot": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "remove": [
+   "bool",
+   ""
+  ]
+ },
+ "discussion": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "discussion comment": {
+  "body": [
+   "string",
+   "b"
+  ],
+  "body-file": [
+   "string",
+   "F"
+  ],
+  "delete": [
+   "bool",
+   ""
+  ],
+  "edit": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "yes": [
+   "bool",
+   ""
+  ]
+ },
+ "discussion create": {
+  "body": [
+   "string",
+   "b"
+  ],
+  "body-file": [
+   "string",
+   "F"
+  ],
+  "category": [
+   "string",
+   "c"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "label": [
+   "stringSlice",
+   "l"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "title": [
+   "string",
+   "t"
+  ]
+ },
+ "discussion edit": {
+  "add-label": [
+   "stringSlice",
+   ""
+  ],
+  "body": [
+   "string",
+   "b"
+  ],
+  "body-file": [
+   "string",
+   "F"
+  ],
+  "category": [
+   "string",
+   "c"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "remove-label": [
+   "stringSlice",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "title": [
+   "string",
+   "t"
+  ]
+ },
+ "discussion list": {
+  "after": [
+   "string",
+   ""
+  ],
+  "answered": [
+   "bool",
+   ""
+  ],
+  "author": [
+   "string",
+   "A"
+  ],
+  "category": [
+   "string",
+   "c"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "label": [
+   "stringSlice",
+   "l"
+  ],
+  "limit": [
+   "int",
+   "L"
+  ],
+  "order": [
+   "string",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "search": [
+   "string",
+   "S"
+  ],
+  "sort": [
+   "string",
+   ""
+  ],
+  "state": [
+   "string",
+   "s"
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "discussion view": {
+  "after": [
+   "string",
+   ""
+  ],
+  "comments": [
+   "bool",
+   "c"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "limit": [
+   "int",
+   "L"
+  ],
+  "order": [
+   "string",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "extension": {
+  "all": [
+   "bool",
+   ""
+  ],
+  "debug": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "bool",
+   ""
+  ],
+  "force": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "license": [
+   "stringSlice",
+   ""
+  ],
+  "limit": [
+   "int",
+   "L"
+  ],
+  "order": [
+   "string",
+   ""
+  ],
+  "owner": [
+   "stringSlice",
+   ""
+  ],
+  "pin": [
+   "string",
+   ""
+  ],
+  "precompiled": [
+   "string",
+   ""
+  ],
+  "single-column": [
+   "bool",
+   "s"
+  ],
+  "sort": [
+   "string",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "gist": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "gist clone": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "gist create": {
+  "desc": [
+   "string",
+   "d"
+  ],
+  "filename": [
+   "string",
+   "f"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "public": [
+   "bool",
+   "p"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "gist delete": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "yes": [
+   "bool",
+   ""
+  ]
+ },
+ "gist edit": {
+  "add": [
+   "string",
+   "a"
+  ],
+  "desc": [
+   "string",
+   "d"
+  ],
+  "filename": [
+   "string",
+   "f"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "remove": [
+   "string",
+   "r"
+  ]
+ },
+ "gist list": {
+  "filter": [
+   "string",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "include-content": [
+   "bool",
+   ""
+  ],
+  "limit": [
+   "int",
+   "L"
+  ],
+  "public": [
+   "bool",
+   ""
+  ],
+  "secret": [
+   "bool",
+   ""
+  ]
+ },
+ "gist rename": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "gist view": {
+  "allow-escape-sequences": [
+   "bool",
+   ""
+  ],
+  "filename": [
+   "string",
+   "f"
+  ],
+  "files": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "raw": [
+   "bool",
+   "r"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "gpg-key": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "gpg-key add": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "title": [
+   "string",
+   "t"
+  ]
+ },
+ "gpg-key delete": {
+  "confirm": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "yes": [
+   "bool",
+   "y"
+  ]
+ },
+ "gpg-key list": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "issue": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "issue artifact": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "issue artifact create": {
+  "attach": [
+   "stringArray",
+   ""
+  ],
+  "body": [
+   "string",
+   "b"
+  ],
+  "body-file": [
+   "string",
+   "F"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "name": [
+   "string",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "type": [
+   "string",
+   ""
+  ]
+ },
+ "issue artifact delete": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "yes": [
+   "bool",
+   ""
+  ]
+ },
+ "issue artifact download": {
+  "clobber": [
+   "bool",
+   ""
+  ],
+  "dir": [
+   "string",
+   "D"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "output": [
+   "string",
+   "O"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "skip-existing": [
+   "bool",
+   ""
+  ],
+  "version": [
+   "int",
+   ""
+  ]
+ },
+ "issue artifact edit": {
+  "attach": [
+   "stringArray",
+   ""
+  ],
+  "body": [
+   "string",
+   "b"
+  ],
+  "body-file": [
+   "string",
+   "F"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "name": [
+   "string",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "restore-version": [
+   "int",
+   ""
+  ]
+ },
+ "issue artifact list": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "limit": [
+   "int",
+   "L"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "type": [
+   "string",
+   ""
+  ]
+ },
+ "issue artifact view": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "version": [
+   "int",
+   ""
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "issue close": {
+  "comment": [
+   "string",
+   "c"
+  ],
+  "duplicate-of": [
+   "string",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "reason": [
+   "string",
+   "r"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "issue comment": {
+  "attach": [
+   "stringArray",
+   ""
+  ],
+  "body": [
+   "string",
+   "b"
+  ],
+  "body-file": [
+   "string",
+   "F"
+  ],
+  "create-if-none": [
+   "bool",
+   ""
+  ],
+  "delete-last": [
+   "bool",
+   ""
+  ],
+  "edit-last": [
+   "bool",
+   ""
+  ],
+  "editor": [
+   "bool",
+   "e"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ],
+  "yes": [
+   "bool",
+   ""
+  ]
+ },
+ "issue create": {
+  "assignee": [
+   "stringSlice",
+   "a"
+  ],
+  "attach": [
+   "stringArray",
+   ""
+  ],
+  "blocked-by": [
+   "stringSlice",
+   ""
+  ],
+  "blocking": [
+   "stringSlice",
+   ""
+  ],
+  "body": [
+   "string",
+   "b"
+  ],
+  "body-file": [
+   "string",
+   "F"
+  ],
+  "editor": [
+   "bool",
+   "e"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "label": [
+   "stringSlice",
+   "l"
+  ],
+  "milestone": [
+   "string",
+   "m"
+  ],
+  "parent": [
+   "string",
+   ""
+  ],
+  "project": [
+   "stringSlice",
+   "p"
+  ],
+  "recover": [
+   "string",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "template": [
+   "string",
+   "T"
+  ],
+  "title": [
+   "string",
+   "t"
+  ],
+  "type": [
+   "string",
+   ""
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "issue delete": {
+  "confirm": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "yes": [
+   "bool",
+   ""
+  ]
+ },
+ "issue develop": {
+  "base": [
+   "string",
+   "b"
+  ],
+  "branch-repo": [
+   "string",
+   ""
+  ],
+  "checkout": [
+   "bool",
+   "c"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "issue-repo": [
+   "string",
+   "i"
+  ],
+  "list": [
+   "bool",
+   "l"
+  ],
+  "name": [
+   "string",
+   "n"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "worktree": [
+   "string",
+   ""
+  ]
+ },
+ "issue edit": {
+  "add-assignee": [
+   "stringSlice",
+   ""
+  ],
+  "add-blocked-by": [
+   "stringSlice",
+   ""
+  ],
+  "add-blocking": [
+   "stringSlice",
+   ""
+  ],
+  "add-label": [
+   "stringSlice",
+   ""
+  ],
+  "add-project": [
+   "stringSlice",
+   ""
+  ],
+  "add-sub-issue": [
+   "stringSlice",
+   ""
+  ],
+  "attach": [
+   "stringArray",
+   ""
+  ],
+  "body": [
+   "string",
+   "b"
+  ],
+  "body-file": [
+   "string",
+   "F"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "milestone": [
+   "string",
+   "m"
+  ],
+  "parent": [
+   "string",
+   ""
+  ],
+  "remove-assignee": [
+   "stringSlice",
+   ""
+  ],
+  "remove-blocked-by": [
+   "stringSlice",
+   ""
+  ],
+  "remove-blocking": [
+   "stringSlice",
+   ""
+  ],
+  "remove-label": [
+   "stringSlice",
+   ""
+  ],
+  "remove-milestone": [
+   "bool",
+   ""
+  ],
+  "remove-parent": [
+   "bool",
+   ""
+  ],
+  "remove-project": [
+   "stringSlice",
+   ""
+  ],
+  "remove-sub-issue": [
+   "stringSlice",
+   ""
+  ],
+  "remove-type": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "title": [
+   "string",
+   "t"
+  ],
+  "type": [
+   "string",
+   ""
+  ]
+ },
+ "issue list": {
+  "app": [
+   "string",
+   ""
+  ],
+  "assignee": [
+   "string",
+   "a"
+  ],
+  "author": [
+   "string",
+   "A"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "label": [
+   "stringSlice",
+   "l"
+  ],
+  "limit": [
+   "int",
+   "L"
+  ],
+  "mention": [
+   "string",
+   ""
+  ],
+  "milestone": [
+   "string",
+   "m"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "search": [
+   "string",
+   "S"
+  ],
+  "state": [
+   "string",
+   "s"
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "type": [
+   "string",
+   ""
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "issue lock": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "reason": [
+   "string",
+   "r"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "issue pin": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "issue reopen": {
+  "comment": [
+   "string",
+   "c"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "issue status": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "template": [
+   "string",
+   "t"
+  ]
+ },
+ "issue transfer": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "issue unpin": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "issue view": {
+  "comments": [
+   "bool",
+   "c"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "label": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "label clone": {
+  "force": [
+   "bool",
+   "f"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "label create": {
+  "color": [
+   "string",
+   "c"
+  ],
+  "description": [
+   "string",
+   "d"
+  ],
+  "force": [
+   "bool",
+   "f"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "label delete": {
+  "confirm": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "yes": [
+   "bool",
+   ""
+  ]
+ },
+ "label edit": {
+  "color": [
+   "string",
+   "c"
+  ],
+  "description": [
+   "string",
+   "d"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "name": [
+   "string",
+   "n"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "label list": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "limit": [
+   "int",
+   "L"
+  ],
+  "order": [
+   "string",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "search": [
+   "string",
+   "S"
+  ],
+  "sort": [
+   "string",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "licenses": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "org": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "org list": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "limit": [
+   "int",
+   "L"
+  ]
+ },
+ "pr": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "pr checkout": {
+  "branch": [
+   "string",
+   "b"
+  ],
+  "detach": [
+   "bool",
+   ""
+  ],
+  "force": [
+   "bool",
+   "f"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "recurse-submodules": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "worktree": [
+   "string",
+   ""
+  ]
+ },
+ "pr checks": {
+  "fail-fast": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "interval": [
+   "int",
+   "i"
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "required": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "watch": [
+   "bool",
+   ""
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "pr close": {
+  "comment": [
+   "string",
+   "c"
+  ],
+  "delete-branch": [
+   "bool",
+   "d"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "pr comment": {
+  "attach": [
+   "stringArray",
+   ""
+  ],
+  "body": [
+   "string",
+   "b"
+  ],
+  "body-file": [
+   "string",
+   "F"
+  ],
+  "create-if-none": [
+   "bool",
+   ""
+  ],
+  "delete-last": [
+   "bool",
+   ""
+  ],
+  "edit-last": [
+   "bool",
+   ""
+  ],
+  "editor": [
+   "bool",
+   "e"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ],
+  "yes": [
+   "bool",
+   ""
+  ]
+ },
+ "pr create": {
+  "assignee": [
+   "stringSlice",
+   "a"
+  ],
+  "attach": [
+   "stringArray",
+   ""
+  ],
+  "base": [
+   "string",
+   "B"
+  ],
+  "body": [
+   "string",
+   "b"
+  ],
+  "body-file": [
+   "string",
+   "F"
+  ],
+  "draft": [
+   "bool",
+   "d"
+  ],
+  "dry-run": [
+   "bool",
+   ""
+  ],
+  "editor": [
+   "bool",
+   "e"
+  ],
+  "fill": [
+   "bool",
+   "f"
+  ],
+  "fill-first": [
+   "bool",
+   ""
+  ],
+  "fill-verbose": [
+   "bool",
+   ""
+  ],
+  "head": [
+   "string",
+   "H"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "label": [
+   "stringSlice",
+   "l"
+  ],
+  "milestone": [
+   "string",
+   "m"
+  ],
+  "no-maintainer-edit": [
+   "bool",
+   ""
+  ],
+  "project": [
+   "stringSlice",
+   "p"
+  ],
+  "recover": [
+   "string",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "reviewer": [
+   "stringSlice",
+   "r"
+  ],
+  "template": [
+   "string",
+   "T"
+  ],
+  "title": [
+   "string",
+   "t"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "pr diff": {
+  "allow-escape-sequences": [
+   "bool",
+   ""
+  ],
+  "color": [
+   "string",
+   ""
+  ],
+  "exclude": [
+   "stringSlice",
+   "e"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "name-only": [
+   "bool",
+   ""
+  ],
+  "patch": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "pr edit": {
+  "add-assignee": [
+   "stringSlice",
+   ""
+  ],
+  "add-label": [
+   "stringSlice",
+   ""
+  ],
+  "add-project": [
+   "stringSlice",
+   ""
+  ],
+  "add-reviewer": [
+   "stringSlice",
+   ""
+  ],
+  "attach": [
+   "stringArray",
+   ""
+  ],
+  "base": [
+   "string",
+   "B"
+  ],
+  "body": [
+   "string",
+   "b"
+  ],
+  "body-file": [
+   "string",
+   "F"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "milestone": [
+   "string",
+   "m"
+  ],
+  "remove-assignee": [
+   "stringSlice",
+   ""
+  ],
+  "remove-label": [
+   "stringSlice",
+   ""
+  ],
+  "remove-milestone": [
+   "bool",
+   ""
+  ],
+  "remove-project": [
+   "stringSlice",
+   ""
+  ],
+  "remove-reviewer": [
+   "stringSlice",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "title": [
+   "string",
+   "t"
+  ]
+ },
+ "pr list": {
+  "app": [
+   "string",
+   ""
+  ],
+  "assignee": [
+   "string",
+   "a"
+  ],
+  "author": [
+   "string",
+   "A"
+  ],
+  "base": [
+   "string",
+   "B"
+  ],
+  "draft": [
+   "bool",
+   "d"
+  ],
+  "head": [
+   "string",
+   "H"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "label": [
+   "stringSlice",
+   "l"
+  ],
+  "limit": [
+   "int",
+   "L"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "search": [
+   "string",
+   "S"
+  ],
+  "state": [
+   "string",
+   "s"
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "pr merge": {
+  "admin": [
+   "bool",
+   ""
+  ],
+  "author-email": [
+   "string",
+   "A"
+  ],
+  "auto": [
+   "bool",
+   ""
+  ],
+  "body": [
+   "string",
+   "b"
+  ],
+  "body-file": [
+   "string",
+   "F"
+  ],
+  "delete-branch": [
+   "bool",
+   "d"
+  ],
+  "disable-auto": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "match-head-commit": [
+   "string",
+   ""
+  ],
+  "merge": [
+   "bool",
+   "m"
+  ],
+  "rebase": [
+   "bool",
+   "r"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "squash": [
+   "bool",
+   "s"
+  ],
+  "subject": [
+   "string",
+   "t"
+  ]
+ },
+ "pr ready": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "undo": [
+   "bool",
+   ""
+  ]
+ },
+ "pr reopen": {
+  "comment": [
+   "string",
+   "c"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "pr revert": {
+  "body": [
+   "string",
+   "b"
+  ],
+  "body-file": [
+   "string",
+   "F"
+  ],
+  "draft": [
+   "bool",
+   "d"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "title": [
+   "string",
+   "t"
+  ]
+ },
+ "pr review": {
+  "approve": [
+   "bool",
+   "a"
+  ],
+  "body": [
+   "string",
+   "b"
+  ],
+  "body-file": [
+   "string",
+   "F"
+  ],
+  "comment": [
+   "bool",
+   "c"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "request-changes": [
+   "bool",
+   "r"
+  ]
+ },
+ "pr status": {
+  "conflict-status": [
+   "bool",
+   "c"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "template": [
+   "string",
+   "t"
+  ]
+ },
+ "pr update-branch": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "rebase": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "pr view": {
+  "comments": [
+   "bool",
+   "c"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "preview": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "preview prompter": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "project": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "project close": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "owner": [
+   "string",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "undo": [
+   "bool",
+   ""
+  ]
+ },
+ "project copy": {
+  "drafts": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "source-owner": [
+   "string",
+   ""
+  ],
+  "target-owner": [
+   "string",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "title": [
+   "string",
+   ""
+  ]
+ },
+ "project create": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "owner": [
+   "string",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "title": [
+   "string",
+   ""
+  ]
+ },
+ "project delete": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "owner": [
+   "string",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ]
+ },
+ "project edit": {
+  "description": [
+   "string",
+   "d"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "owner": [
+   "string",
+   ""
+  ],
+  "readme": [
+   "string",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "title": [
+   "string",
+   ""
+  ],
+  "visibility": [
+   "string",
+   ""
+  ]
+ },
+ "project field-create": {
+  "data-type": [
+   "string",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "name": [
+   "string",
+   ""
+  ],
+  "owner": [
+   "string",
+   ""
+  ],
+  "single-select-options": [
+   "stringSlice",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ]
+ },
+ "project field-delete": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "id": [
+   "string",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "template": [
+   "string",
+   "t"
+  ]
+ },
+ "project field-list": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "limit": [
+   "int",
+   "L"
+  ],
+  "owner": [
+   "string",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ]
+ },
+ "project item-add": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "owner": [
+   "string",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "url": [
+   "string",
+   ""
+  ]
+ },
+ "project item-archive": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "id": [
+   "string",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "owner": [
+   "string",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "undo": [
+   "bool",
+   ""
+  ]
+ },
+ "project item-create": {
+  "body": [
+   "string",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "owner": [
+   "string",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "title": [
+   "string",
+   ""
+  ]
+ },
+ "project item-delete": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "id": [
+   "string",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "owner": [
+   "string",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ]
+ },
+ "project item-edit": {
+  "body": [
+   "string",
+   ""
+  ],
+  "clear": [
+   "bool",
+   ""
+  ],
+  "date": [
+   "string",
+   ""
+  ],
+  "field": [
+   "string",
+   ""
+  ],
+  "field-id": [
+   "string",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "id": [
+   "string",
+   ""
+  ],
+  "iteration-id": [
+   "string",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "number": [
+   "float64",
+   ""
+  ],
+  "owner": [
+   "string",
+   ""
+  ],
+  "project-id": [
+   "string",
+   ""
+  ],
+  "single-select-option-id": [
+   "string",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "text": [
+   "string",
+   ""
+  ],
+  "title": [
+   "string",
+   ""
+  ],
+  "url": [
+   "string",
+   ""
+  ],
+  "value": [
+   "string",
+   ""
+  ]
+ },
+ "project item-list": {
+  "field": [
+   "stringArray",
+   ""
+  ],
+  "field-id": [
+   "stringArray",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "limit": [
+   "int",
+   "L"
+  ],
+  "owner": [
+   "string",
+   ""
+  ],
+  "query": [
+   "string",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ]
+ },
+ "project link": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "owner": [
+   "string",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "team": [
+   "string",
+   "T"
+  ]
+ },
+ "project list": {
+  "closed": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "limit": [
+   "int",
+   "L"
+  ],
+  "owner": [
+   "string",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "project mark-template": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "owner": [
+   "string",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "undo": [
+   "bool",
+   ""
+  ]
+ },
+ "project unlink": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "owner": [
+   "string",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "team": [
+   "string",
+   "T"
+  ]
+ },
+ "project view": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "owner": [
+   "string",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "release": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "release create": {
+  "discussion-category": [
+   "string",
+   ""
+  ],
+  "draft": [
+   "bool",
+   "d"
+  ],
+  "fail-on-no-commits": [
+   "bool",
+   ""
+  ],
+  "generate-notes": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "latest": [
+   "bool",
+   ""
+  ],
+  "notes": [
+   "string",
+   "n"
+  ],
+  "notes-file": [
+   "string",
+   "F"
+  ],
+  "notes-from-tag": [
+   "bool",
+   ""
+  ],
+  "notes-start-tag": [
+   "string",
+   ""
+  ],
+  "prerelease": [
+   "bool",
+   "p"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "target": [
+   "string",
+   ""
+  ],
+  "title": [
+   "string",
+   "t"
+  ],
+  "verify-tag": [
+   "bool",
+   ""
+  ]
+ },
+ "release delete": {
+  "cleanup-tag": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "yes": [
+   "bool",
+   "y"
+  ]
+ },
+ "release delete-asset": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "yes": [
+   "bool",
+   "y"
+  ]
+ },
+ "release download": {
+  "allow-escape-sequences": [
+   "bool",
+   ""
+  ],
+  "archive": [
+   "string",
+   "A"
+  ],
+  "clobber": [
+   "bool",
+   ""
+  ],
+  "dir": [
+   "string",
+   "D"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "output": [
+   "string",
+   "O"
+  ],
+  "pattern": [
+   "stringArray",
+   "p"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "skip-existing": [
+   "bool",
+   ""
+  ]
+ },
+ "release edit": {
+  "discussion-category": [
+   "string",
+   ""
+  ],
+  "draft": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "latest": [
+   "bool",
+   ""
+  ],
+  "notes": [
+   "string",
+   "n"
+  ],
+  "notes-file": [
+   "string",
+   "F"
+  ],
+  "prerelease": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "tag": [
+   "string",
+   ""
+  ],
+  "target": [
+   "string",
+   ""
+  ],
+  "title": [
+   "string",
+   "t"
+  ],
+  "verify-tag": [
+   "bool",
+   ""
+  ]
+ },
+ "release list": {
+  "exclude-drafts": [
+   "bool",
+   ""
+  ],
+  "exclude-pre-releases": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "limit": [
+   "int",
+   "L"
+  ],
+  "order": [
+   "string",
+   "O"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "template": [
+   "string",
+   "t"
+  ]
+ },
+ "release upload": {
+  "clobber": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "release verify": {
+  "custom-trusted-root": [
+   "string",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "template": [
+   "string",
+   "t"
+  ]
+ },
+ "release verify-asset": {
+  "custom-trusted-root": [
+   "string",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "template": [
+   "string",
+   "t"
+  ]
+ },
+ "release view": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "repo": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "repo archive": {
+  "confirm": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "yes": [
+   "bool",
+   "y"
+  ]
+ },
+ "repo autolink": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "repo autolink create": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "numeric": [
+   "bool",
+   "n"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "repo autolink delete": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "yes": [
+   "bool",
+   ""
+  ]
+ },
+ "repo autolink list": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "repo autolink view": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "template": [
+   "string",
+   "t"
+  ]
+ },
+ "repo clone": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "no-upstream": [
+   "bool",
+   ""
+  ],
+  "upstream-remote-name": [
+   "string",
+   "u"
+  ]
+ },
+ "repo create": {
+  "add-readme": [
+   "bool",
+   ""
+  ],
+  "clone": [
+   "bool",
+   "c"
+  ],
+  "confirm": [
+   "bool",
+   "y"
+  ],
+  "description": [
+   "string",
+   "d"
+  ],
+  "disable-issues": [
+   "bool",
+   ""
+  ],
+  "disable-wiki": [
+   "bool",
+   ""
+  ],
+  "enable-issues": [
+   "bool",
+   ""
+  ],
+  "enable-wiki": [
+   "bool",
+   ""
+  ],
+  "gitignore": [
+   "string",
+   "g"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "homepage": [
+   "string",
+   "h"
+  ],
+  "include-all-branches": [
+   "bool",
+   ""
+  ],
+  "internal": [
+   "bool",
+   ""
+  ],
+  "license": [
+   "string",
+   "l"
+  ],
+  "private": [
+   "bool",
+   ""
+  ],
+  "public": [
+   "bool",
+   ""
+  ],
+  "push": [
+   "bool",
+   ""
+  ],
+  "remote": [
+   "string",
+   "r"
+  ],
+  "source": [
+   "string",
+   "s"
+  ],
+  "team": [
+   "string",
+   "t"
+  ],
+  "template": [
+   "string",
+   "p"
+  ]
+ },
+ "repo credits": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "static": [
+   "bool",
+   "s"
+  ]
+ },
+ "repo delete": {
+  "accept-cascading-deletion-of-private-forks": [
+   "bool",
+   ""
+  ],
+  "confirm": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "yes": [
+   "bool",
+   ""
+  ]
+ },
+ "repo deploy-key": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "repo deploy-key add": {
+  "allow-write": [
+   "bool",
+   "w"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "title": [
+   "string",
+   "t"
+  ]
+ },
+ "repo deploy-key delete": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "repo deploy-key list": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "template": [
+   "string",
+   "t"
+  ]
+ },
+ "repo edit": {
+  "accept-visibility-change-consequences": [
+   "bool",
+   ""
+  ],
+  "add-topic": [
+   "stringSlice",
+   ""
+  ],
+  "allow-forking": [
+   "bool",
+   ""
+  ],
+  "allow-update-branch": [
+   "bool",
+   ""
+  ],
+  "default-branch": [
+   "string",
+   ""
+  ],
+  "delete-branch-on-merge": [
+   "bool",
+   ""
+  ],
+  "description": [
+   "string",
+   "d"
+  ],
+  "enable-advanced-security": [
+   "bool",
+   ""
+  ],
+  "enable-auto-merge": [
+   "bool",
+   ""
+  ],
+  "enable-discussions": [
+   "bool",
+   ""
+  ],
+  "enable-issues": [
+   "bool",
+   ""
+  ],
+  "enable-merge-commit": [
+   "bool",
+   ""
+  ],
+  "enable-projects": [
+   "bool",
+   ""
+  ],
+  "enable-rebase-merge": [
+   "bool",
+   ""
+  ],
+  "enable-secret-scanning": [
+   "bool",
+   ""
+  ],
+  "enable-secret-scanning-push-protection": [
+   "bool",
+   ""
+  ],
+  "enable-squash-merge": [
+   "bool",
+   ""
+  ],
+  "enable-wiki": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "homepage": [
+   "string",
+   "h"
+  ],
+  "remove-topic": [
+   "stringSlice",
+   ""
+  ],
+  "squash-merge-commit-message": [
+   "string",
+   ""
+  ],
+  "template": [
+   "bool",
+   ""
+  ],
+  "visibility": [
+   "string",
+   ""
+  ]
+ },
+ "repo fork": {
+  "clone": [
+   "bool",
+   ""
+  ],
+  "default-branch-only": [
+   "bool",
+   ""
+  ],
+  "fork-name": [
+   "string",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "org": [
+   "string",
+   ""
+  ],
+  "remote": [
+   "bool",
+   ""
+  ],
+  "remote-name": [
+   "string",
+   ""
+  ]
+ },
+ "repo gitignore": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "repo gitignore list": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "repo gitignore view": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "repo license": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "repo license list": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "repo license view": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "repo list": {
+  "archived": [
+   "bool",
+   ""
+  ],
+  "fork": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "language": [
+   "string",
+   "l"
+  ],
+  "limit": [
+   "int",
+   "L"
+  ],
+  "no-archived": [
+   "bool",
+   ""
+  ],
+  "private": [
+   "bool",
+   ""
+  ],
+  "public": [
+   "bool",
+   ""
+  ],
+  "source": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "topic": [
+   "stringSlice",
+   ""
+  ],
+  "visibility": [
+   "string",
+   ""
+  ]
+ },
+ "repo read-dir": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "ref": [
+   "string",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "template": [
+   "string",
+   "t"
+  ]
+ },
+ "repo read-file": {
+  "allow-escape-sequences": [
+   "bool",
+   ""
+  ],
+  "clobber": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "output": [
+   "string",
+   "o"
+  ],
+  "ref": [
+   "string",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "template": [
+   "string",
+   "t"
+  ]
+ },
+ "repo rename": {
+  "confirm": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "yes": [
+   "bool",
+   "y"
+  ]
+ },
+ "repo setdefault set-default": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "unset": [
+   "bool",
+   "u"
+  ],
+  "view": [
+   "bool",
+   "v"
+  ]
+ },
+ "repo sync": {
+  "branch": [
+   "string",
+   "b"
+  ],
+  "force": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "source": [
+   "string",
+   "s"
+  ]
+ },
+ "repo unarchive": {
+  "confirm": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "yes": [
+   "bool",
+   "y"
+  ]
+ },
+ "repo view": {
+  "branch": [
+   "string",
+   "b"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "root": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "version": [
+   "bool",
+   ""
+  ]
+ },
+ "ruleset": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "ruleset check": {
+  "default": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "ruleset list": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "limit": [
+   "int",
+   "L"
+  ],
+  "org": [
+   "string",
+   "o"
+  ],
+  "parents": [
+   "bool",
+   "p"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "ruleset view": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "org": [
+   "string",
+   "o"
+  ],
+  "parents": [
+   "bool",
+   "p"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "run": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "run cancel": {
+  "force": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "run delete": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "run download": {
+  "dir": [
+   "string",
+   "D"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "name": [
+   "stringArray",
+   "n"
+  ],
+  "pattern": [
+   "stringArray",
+   "p"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "run list": {
+  "all": [
+   "bool",
+   "a"
+  ],
+  "branch": [
+   "string",
+   "b"
+  ],
+  "commit": [
+   "string",
+   "c"
+  ],
+  "created": [
+   "string",
+   ""
+  ],
+  "event": [
+   "string",
+   "e"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "limit": [
+   "int",
+   "L"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "status": [
+   "string",
+   "s"
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "user": [
+   "string",
+   "u"
+  ],
+  "workflow": [
+   "string",
+   "w"
+  ]
+ },
+ "run rerun": {
+  "debug": [
+   "bool",
+   "d"
+  ],
+  "failed": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "job": [
+   "string",
+   "j"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "run view": {
+  "attempt": [
+   "uint64",
+   "a"
+  ],
+  "exit-status": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "job": [
+   "string",
+   "j"
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "log": [
+   "bool",
+   ""
+  ],
+  "log-failed": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "verbose": [
+   "bool",
+   "v"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "run watch": {
+  "compact": [
+   "bool",
+   ""
+  ],
+  "exit-status": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "interval": [
+   "int",
+   "i"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "search": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "search code": {
+  "extension": [
+   "string",
+   ""
+  ],
+  "filename": [
+   "string",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "language": [
+   "string",
+   ""
+  ],
+  "limit": [
+   "int",
+   "L"
+  ],
+  "match": [
+   "stringSlice",
+   ""
+  ],
+  "owner": [
+   "stringSlice",
+   ""
+  ],
+  "repo": [
+   "stringSlice",
+   "R"
+  ],
+  "size": [
+   "string",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "search commits": {
+  "author": [
+   "string",
+   ""
+  ],
+  "author-date": [
+   "string",
+   ""
+  ],
+  "author-email": [
+   "string",
+   ""
+  ],
+  "author-name": [
+   "string",
+   ""
+  ],
+  "committer": [
+   "string",
+   ""
+  ],
+  "committer-date": [
+   "string",
+   ""
+  ],
+  "committer-email": [
+   "string",
+   ""
+  ],
+  "committer-name": [
+   "string",
+   ""
+  ],
+  "hash": [
+   "string",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "limit": [
+   "int",
+   "L"
+  ],
+  "merge": [
+   "bool",
+   ""
+  ],
+  "order": [
+   "string",
+   ""
+  ],
+  "owner": [
+   "stringSlice",
+   ""
+  ],
+  "parent": [
+   "string",
+   ""
+  ],
+  "repo": [
+   "stringSlice",
+   "R"
+  ],
+  "sort": [
+   "string",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "tree": [
+   "string",
+   ""
+  ],
+  "visibility": [
+   "stringSlice",
+   ""
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "search issues": {
+  "app": [
+   "string",
+   ""
+  ],
+  "archived": [
+   "bool",
+   ""
+  ],
+  "assignee": [
+   "string",
+   ""
+  ],
+  "author": [
+   "string",
+   ""
+  ],
+  "closed": [
+   "string",
+   ""
+  ],
+  "commenter": [
+   "string",
+   ""
+  ],
+  "comments": [
+   "string",
+   ""
+  ],
+  "created": [
+   "string",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "include-prs": [
+   "bool",
+   ""
+  ],
+  "interactions": [
+   "string",
+   ""
+  ],
+  "involves": [
+   "string",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "label": [
+   "stringSlice",
+   ""
+  ],
+  "language": [
+   "string",
+   ""
+  ],
+  "limit": [
+   "int",
+   "L"
+  ],
+  "locked": [
+   "bool",
+   ""
+  ],
+  "match": [
+   "stringSlice",
+   ""
+  ],
+  "mentions": [
+   "string",
+   ""
+  ],
+  "milestone": [
+   "string",
+   ""
+  ],
+  "no-assignee": [
+   "bool",
+   ""
+  ],
+  "no-label": [
+   "bool",
+   ""
+  ],
+  "no-milestone": [
+   "bool",
+   ""
+  ],
+  "no-project": [
+   "bool",
+   ""
+  ],
+  "order": [
+   "string",
+   ""
+  ],
+  "owner": [
+   "stringSlice",
+   ""
+  ],
+  "project": [
+   "string",
+   ""
+  ],
+  "reactions": [
+   "string",
+   ""
+  ],
+  "repo": [
+   "stringSlice",
+   "R"
+  ],
+  "search-type": [
+   "string",
+   ""
+  ],
+  "sort": [
+   "string",
+   ""
+  ],
+  "state": [
+   "string",
+   ""
+  ],
+  "team-mentions": [
+   "string",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "updated": [
+   "string",
+   ""
+  ],
+  "visibility": [
+   "stringSlice",
+   ""
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "search prs": {
+  "app": [
+   "string",
+   ""
+  ],
+  "archived": [
+   "bool",
+   ""
+  ],
+  "assignee": [
+   "string",
+   ""
+  ],
+  "author": [
+   "string",
+   ""
+  ],
+  "base": [
+   "string",
+   "B"
+  ],
+  "checks": [
+   "string",
+   ""
+  ],
+  "closed": [
+   "string",
+   ""
+  ],
+  "commenter": [
+   "string",
+   ""
+  ],
+  "comments": [
+   "string",
+   ""
+  ],
+  "created": [
+   "string",
+   ""
+  ],
+  "draft": [
+   "bool",
+   ""
+  ],
+  "head": [
+   "string",
+   "H"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "interactions": [
+   "string",
+   ""
+  ],
+  "involves": [
+   "string",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "label": [
+   "stringSlice",
+   ""
+  ],
+  "language": [
+   "string",
+   ""
+  ],
+  "limit": [
+   "int",
+   "L"
+  ],
+  "locked": [
+   "bool",
+   ""
+  ],
+  "match": [
+   "stringSlice",
+   ""
+  ],
+  "mentions": [
+   "string",
+   ""
+  ],
+  "merged": [
+   "bool",
+   ""
+  ],
+  "merged-at": [
+   "string",
+   ""
+  ],
+  "milestone": [
+   "string",
+   ""
+  ],
+  "no-assignee": [
+   "bool",
+   ""
+  ],
+  "no-label": [
+   "bool",
+   ""
+  ],
+  "no-milestone": [
+   "bool",
+   ""
+  ],
+  "no-project": [
+   "bool",
+   ""
+  ],
+  "order": [
+   "string",
+   ""
+  ],
+  "owner": [
+   "stringSlice",
+   ""
+  ],
+  "project": [
+   "string",
+   ""
+  ],
+  "reactions": [
+   "string",
+   ""
+  ],
+  "repo": [
+   "stringSlice",
+   "R"
+  ],
+  "review": [
+   "string",
+   ""
+  ],
+  "review-requested": [
+   "string",
+   ""
+  ],
+  "reviewed-by": [
+   "string",
+   ""
+  ],
+  "sort": [
+   "string",
+   ""
+  ],
+  "state": [
+   "string",
+   ""
+  ],
+  "team-mentions": [
+   "string",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "updated": [
+   "string",
+   ""
+  ],
+  "visibility": [
+   "stringSlice",
+   ""
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "search repos": {
+  "archived": [
+   "bool",
+   ""
+  ],
+  "created": [
+   "string",
+   ""
+  ],
+  "followers": [
+   "string",
+   ""
+  ],
+  "forks": [
+   "string",
+   ""
+  ],
+  "good-first-issues": [
+   "string",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "help-wanted-issues": [
+   "string",
+   ""
+  ],
+  "include-forks": [
+   "string",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "language": [
+   "string",
+   ""
+  ],
+  "license": [
+   "stringSlice",
+   ""
+  ],
+  "limit": [
+   "int",
+   "L"
+  ],
+  "match": [
+   "stringSlice",
+   ""
+  ],
+  "number-topics": [
+   "string",
+   ""
+  ],
+  "order": [
+   "string",
+   ""
+  ],
+  "owner": [
+   "stringSlice",
+   ""
+  ],
+  "size": [
+   "string",
+   ""
+  ],
+  "sort": [
+   "string",
+   ""
+  ],
+  "stars": [
+   "string",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "topic": [
+   "stringSlice",
+   ""
+  ],
+  "updated": [
+   "string",
+   ""
+  ],
+  "visibility": [
+   "stringSlice",
+   ""
+  ],
+  "web": [
+   "bool",
+   "w"
+  ]
+ },
+ "secret": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "secret delete": {
+  "app": [
+   "string",
+   "a"
+  ],
+  "env": [
+   "string",
+   "e"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "org": [
+   "string",
+   "o"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "user": [
+   "bool",
+   "u"
+  ]
+ },
+ "secret list": {
+  "app": [
+   "string",
+   "a"
+  ],
+  "env": [
+   "string",
+   "e"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "org": [
+   "string",
+   "o"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "template": [
+   "string",
+   "t"
+  ],
+  "user": [
+   "bool",
+   "u"
+  ]
+ },
+ "secret set": {
+  "app": [
+   "string",
+   "a"
+  ],
+  "body": [
+   "string",
+   "b"
+  ],
+  "env": [
+   "string",
+   "e"
+  ],
+  "env-file": [
+   "string",
+   "f"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "no-repos-selected": [
+   "bool",
+   ""
+  ],
+  "no-store": [
+   "bool",
+   ""
+  ],
+  "org": [
+   "string",
+   "o"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "repos": [
+   "stringSlice",
+   "r"
+  ],
+  "user": [
+   "bool",
+   "u"
+  ],
+  "visibility": [
+   "string",
+   "v"
+  ]
+ },
+ "send-telemetry": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "skills install": {
+  "agent": [
+   "string",
+   ""
+  ],
+  "all": [
+   "bool",
+   ""
+  ],
+  "allow-hidden-dirs": [
+   "bool",
+   ""
+  ],
+  "dir": [
+   "string",
+   ""
+  ],
+  "force": [
+   "bool",
+   "f"
+  ],
+  "from-local": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "pin": [
+   "string",
+   ""
+  ],
+  "scope": [
+   "string",
+   ""
+  ],
+  "upstream": [
+   "bool",
+   ""
+  ]
+ },
+ "skills list": {
+  "agent": [
+   "string",
+   ""
+  ],
+  "dir": [
+   "string",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "scope": [
+   "string",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ]
+ },
+ "skills preview": {
+  "allow-hidden-dirs": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "skills publish": {
+  "dry-run": [
+   "bool",
+   ""
+  ],
+  "fix": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "tag": [
+   "string",
+   ""
+  ]
+ },
+ "skills search": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "limit": [
+   "int",
+   "L"
+  ],
+  "owner": [
+   "string",
+   ""
+  ],
+  "page": [
+   "int",
+   ""
+  ],
+  "template": [
+   "string",
+   "t"
+  ]
+ },
+ "skills skill": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "skills update": {
+  "all": [
+   "bool",
+   ""
+  ],
+  "dir": [
+   "string",
+   ""
+  ],
+  "dry-run": [
+   "bool",
+   ""
+  ],
+  "force": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "unpin": [
+   "bool",
+   ""
+  ]
+ },
+ "ssh-key": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "ssh-key add": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "title": [
+   "string",
+   "t"
+  ],
+  "type": [
+   "string",
+   ""
+  ]
+ },
+ "ssh-key delete": {
+  "confirm": [
+   "bool",
+   ""
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "yes": [
+   "bool",
+   "y"
+  ]
+ },
+ "ssh-key list": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "status": {
+  "exclude": [
+   "stringSlice",
+   "e"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "org": [
+   "string",
+   "o"
+  ]
+ },
+ "variable": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "variable delete": {
+  "env": [
+   "string",
+   "e"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "org": [
+   "string",
+   "o"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "variable get": {
+  "env": [
+   "string",
+   "e"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "org": [
+   "string",
+   "o"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "template": [
+   "string",
+   "t"
+  ]
+ },
+ "variable list": {
+  "env": [
+   "string",
+   "e"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "org": [
+   "string",
+   "o"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "template": [
+   "string",
+   "t"
+  ]
+ },
+ "variable set": {
+  "body": [
+   "string",
+   "b"
+  ],
+  "env": [
+   "string",
+   "e"
+  ],
+  "env-file": [
+   "string",
+   "f"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "org": [
+   "string",
+   "o"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "repos": [
+   "stringSlice",
+   "r"
+  ],
+  "visibility": [
+   "string",
+   "v"
+  ]
+ },
+ "version": {
+  "help": [
+   "bool",
+   ""
+  ]
+ },
+ "workflow": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "workflow disable": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "workflow enable": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "workflow list": {
+  "all": [
+   "bool",
+   "a"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "jq": [
+   "string",
+   "q"
+  ],
+  "json": [
+   "stringSlice",
+   ""
+  ],
+  "limit": [
+   "int",
+   "L"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "template": [
+   "string",
+   "t"
+  ]
+ },
+ "workflow run": {
+  "field": [
+   "stringArray",
+   "F"
+  ],
+  "help": [
+   "bool",
+   ""
+  ],
+  "json": [
+   "bool",
+   ""
+  ],
+  "raw-field": [
+   "stringArray",
+   "f"
+  ],
+  "ref": [
+   "string",
+   "r"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ]
+ },
+ "workflow view": {
+  "help": [
+   "bool",
+   ""
+  ],
+  "ref": [
+   "string",
+   "r"
+  ],
+  "repo": [
+   "string",
+   "R"
+  ],
+  "web": [
+   "bool",
+   "w"
+  ],
+  "yaml": [
+   "bool",
+   "y"
+  ]
+ }
+}

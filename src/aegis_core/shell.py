@@ -3034,7 +3034,30 @@ _ENV_METADATA_KEYS = {
     "AWS_REGION": "region",
     "CLOUDSDK_CORE_PROJECT": "project",
     "HELM_NAMESPACE": "namespace",
+    "HELM_KUBECONTEXT": "context",
+    "GH_REPO": "repo",
+    "AZURE_DEFAULTS_GROUP": "resource_group",
+    "AZURE_DEFAULTS_LOCATION": "region",
+    "ARGOCD_SERVER": "server",
 }
+
+# Which tool reads each variable, in the order of precedence (AWS_REGION before
+# AWS_DEFAULT_REGION): a variable another tool reads says nothing about this one
+# (kubectl ignores $HELM_NAMESPACE).
+_ENV_METADATA_BY_PROVIDER = {
+    "kubernetes": ("KUBECONFIG",),
+    "helm": ("KUBECONFIG", "HELM_NAMESPACE", "HELM_KUBECONTEXT"),
+    "flux": ("KUBECONFIG",),
+    "aws": ("AWS_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION"),
+    "gcp": ("CLOUDSDK_CORE_PROJECT",),
+    "github": ("GH_REPO",),
+    "azure": ("AZURE_DEFAULTS_GROUP", "AZURE_DEFAULTS_LOCATION"),
+    "argocd": ("ARGOCD_SERVER",),
+}
+# Variables that add flags or defaults from elsewhere: argocd reads more flags from
+# $ARGOCD_OPTS, and kubectl's kuberc ($KUBERC, unless "off") can set default flags for
+# any command. Set in front of the command, they are refused.
+_ENV_EXTRA_FLAGS = {"argocd": ("ARGOCD_OPTS",), "kubernetes": ("KUBERC",)}
 
 
 _FIND_EXEC_FLAGS = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
@@ -3119,10 +3142,27 @@ def _annotate(
     metadata: dict[str, Any] = intent.metadata
     if env:
         metadata["env_assignments"] = dict(env)
-        for var, value in env.items():
-            key = _ENV_METADATA_KEYS.get(var)
-            if key is not None and key not in metadata:
-                metadata[key] = value
+        for var in _ENV_EXTRA_FLAGS.get(intent.provider, ()):
+            if var in env and not (var == "KUBERC" and env[var] == "off"):
+                raise ShellRejected(f"{var} adds flags the hook cannot see", var)
+        for var in _ENV_METADATA_BY_PROVIDER.get(intent.provider, ()):
+            key = _ENV_METADATA_KEYS[var]
+            if var in env and key not in metadata:
+                from aegis_core.parser import _gh_set_repo, lift_config_mark
+
+                if var == "GH_REPO":
+                    _gh_set_repo(metadata, env[var])
+                else:
+                    metadata[key] = env[var]
+                # the value is now known: a mark set only because the argv left it to the
+                # configuration no longer applies (a mark for another reason stays)
+                for given in {key, *(("github_host",) if var == "GH_REPO" else ())}:
+                    if given in metadata:
+                        lift_config_mark(intent, given)
+        if intent.provider == "flux" and env.get("FLUX_NS_FOLLOWS_KUBE_CONTEXT"):
+            # flux takes the namespace from the kubeconfig context when no -n is given;
+            # resolve_current_context reads this (the namespace stays unresolved anyway)
+            intent.params["namespace_follows_kubeconfig"] = True
     if wrappers:
         metadata["wrappers"] = list(wrappers)
     if simple.redirects:

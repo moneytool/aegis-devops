@@ -2,6 +2,15 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+def canonical_key(key: str) -> str:
+    """The one form two scope keys are compared in: ``-`` and ``_`` are the same
+    character in every segment (``dry-run`` / ``dry_run``, ``set.replica_count`` /
+    ``set.replica-count``). The store's matching and its unresolved marks, and the
+    parser's configuration marks, all go through this function, so they can never
+    disagree about whether two spellings name the same key."""
+    return key.replace("_", "-")
+
+
 @dataclass
 class InfrastructureIntent:
     """
@@ -31,6 +40,10 @@ class InfrastructureIntent:
         type_name = self.metadata.get("type_name")
         if isinstance(type_name, str) and type_name and type_name != self.resource:
             aliases.append(type_name)
+        # other spellings of the same resource a parser found (an ARN's plain name)
+        for alias in self.metadata.get("resource_aliases") or ():
+            if isinstance(alias, str) and alias not in aliases:
+                aliases.append(alias)
         return aliases
 
     def to_dict(self) -> dict[str, Any]:

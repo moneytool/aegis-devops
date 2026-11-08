@@ -14,6 +14,7 @@ from aegis_core.parser import (
     from_gcloud,
     from_gh,
     from_git,
+    from_git_multi,
     from_helm,
     from_kubectl,
     from_kubectl_multi,
@@ -34,7 +35,7 @@ def test_from_kubectl_scale_with_namespace_flag():
     assert intent.resource == "deployment/x"
     assert intent.action == "scale"
     assert intent.provider == "kubernetes"
-    assert intent.params == {"replicas": 5}
+    assert intent.params == {"replicas": 5, "value_types": {"replicas": "int"}}
     assert intent.metadata == {"namespace": "prod"}
 
 
@@ -119,9 +120,10 @@ def test_from_kubectl_context_and_cluster():
     assert intent.metadata == {"context": "staging", "cluster": "eu"}
 
 
-def test_from_kubectl_discards_output_and_server_and_records_kubeconfig():
+def test_from_kubectl_discards_output_and_records_server_and_kubeconfig():
     """--kubeconfig is recorded: it decides which file the context and
-    namespace come from under --resolve-current-context (review of #38)."""
+    namespace come from under --resolve-current-context (review of #38). --server
+    is recorded too: it overrides the context's cluster (review round 13)."""
     intent = from_kubectl(
         [
             "kubectl",
@@ -136,7 +138,7 @@ def test_from_kubectl_discards_output_and_server_and_records_kubeconfig():
         ]
     )
     assert intent.params == {}
-    assert intent.metadata == {"kubeconfig": "/tmp/kc"}
+    assert intent.metadata == {"kubeconfig": "/tmp/kc", "server": "https://x"}
 
 
 # --- kubectl: resource form normalisation -----------------------------------
@@ -202,12 +204,12 @@ def test_from_kubectl_multiple_boolean_flags():
 
 def test_from_kubectl_replicas_space_separated():
     intent = from_kubectl(["kubectl", "scale", "deployment/x", "--replicas", "5"])
-    assert intent.params == {"replicas": 5}
+    assert intent.params == {"replicas": 5, "value_types": {"replicas": "int"}}
 
 
 def test_from_kubectl_replicas_equals_form():
     intent = from_kubectl(["kubectl", "scale", "deployment/x", "--replicas=5"])
-    assert intent.params == {"replicas": 5}
+    assert intent.params == {"replicas": 5, "value_types": {"replicas": "int"}}
 
 
 # --- kubectl: apply/create/replace/delete via manifest -----------------------
@@ -657,7 +659,7 @@ def test_from_gcloud_container_clusters_resize_maps_to_scale():
     )
     assert intent.action == "scale"
     assert intent.resource == "container/cluster/prod"
-    assert intent.params["num-nodes"] == 5
+    assert intent.params["num-nodes"] == 5  # the SDK declares it an int
 
 
 def test_from_gcloud_sql_instances_delete():
@@ -747,7 +749,10 @@ def test_from_argv_dispatches_aws_by_basename():
 
 def test_from_argv_dispatches_az():
     intents = from_argv(["az", "vm", "start", "-g", "rg1", "-n", "vm1"])
-    assert intents == [from_az(["az", "vm", "start", "-g", "rg1", "-n", "vm1"])]
+    expected = from_az(["az", "vm", "start", "-g", "rg1", "-n", "vm1"])
+    # from_argv also marks what az takes from its configuration (subscription, location)
+    assert [i.resource for i in intents] == [expected.resource]
+    assert intents[0].params["unresolved_scope"] == ["subscription", "region"]
 
 
 def test_from_argv_dispatches_gcloud_and_gsutil():
@@ -834,7 +839,7 @@ def test_from_aws_no_dry_run_does_not_set_dry_run():
     assert "dry_run" not in intent.params
 
 
-@pytest.mark.parametrize("flag", ["--what-if", "--dry-run"])
+@pytest.mark.parametrize("flag", ["--what-if"])  # az has no --dry-run on this command
 def test_from_az_what_if_and_dry_run_set_dry_run_true(flag):
     intent = from_az(
         ["az", "deployment", "group", "create", "--resource-group", "rg1", flag]
@@ -933,9 +938,9 @@ def test_from_helm_bool_flags_and_set_and_values():
          "--atomic", "--wait", "--create-namespace"]
     )
     assert intent.params["values_files"] == ["values.yaml"]
-    assert intent.params["set"] == {"image.tag": "v2"}
+    assert intent.params["set"] == {"image": {"tag": "v2"}}
     assert intent.params["atomic"] is True
-    assert intent.params["wait"] is True
+    assert intent.params["wait"] == "watcher"  # helm 4 waitValue; unresolved for helm 3
     assert intent.params["create_namespace"] is True
 
 
@@ -992,13 +997,25 @@ def test_from_argocd_dry_run_flag():
 
 def test_from_argocd_project_metadata_and_discarded_flags():
     intent = from_argocd(
-        ["argocd", "app", "sync", "prod-web", "--project", "platform",
+        ["argocd", "app", "create", "prod-web", "--project", "platform",
          "--server", "argocd.internal", "--grpc-web", "--auth-token", "secret"]
     )
-    assert intent.metadata == {"project": "platform"}
+    # the server is where the app lives, as --resolve-current-context's $ARGOCD_SERVER
+    assert intent.metadata == {"project": "platform", "server": "argocd.internal"}
     assert "server" not in intent.params
     assert "auth_token" not in intent.params
     assert "grpc_web" not in intent.params
+
+
+def test_argocd_sync_with_a_project_also_syncs_every_app_in_it():
+    # argo-cd app.go: sync lists the project's apps and syncs them with the ones named
+    intents = from_argocd_multi(
+        ["argocd", "app", "sync", "prod-web", "--project", "platform", "--grpc-web"])
+    assert [i.resource for i in intents] == ["app/prod-web", "app/*"]
+    # --project picks the added apps; the app named keeps its own (unknown) project
+    assert intents[0].metadata == {}
+    assert intents[1].metadata == {"project": "platform"}
+    assert intents[1].params["resolved_at_runtime"] == {"from": "app/*", "kinds": ["app"]}
 
 
 def test_from_argocd_actions_run():
@@ -1069,8 +1086,10 @@ def test_from_flux_export_sets_dry_run():
     assert intent.params["dry_run"] is True
 
 
-def test_from_flux_dry_run_flag():
-    intent = from_flux(["flux", "reconcile", "kustomization", "podinfo", "--dry-run"])
+def test_from_flux_create_export_is_a_rehearsal():
+    # flux reconcile has no --dry-run; create --export only prints the object
+    intent = from_flux(["flux", "create", "kustomization", "podinfo",
+                        "--source=GitRepository/podinfo", "--path=./kustomize", "--export"])
     assert intent.params["dry_run"] is True
 
 
@@ -1173,15 +1192,20 @@ def test_from_git_rebase_reset_hard_amend_are_rewrite():
 
 def test_from_git_read_verbs():
     for argv in (
-        ["git", "checkout", "main"],
-        ["git", "switch", "main"],
         ["git", "log"],
         ["git", "status"],
         ["git", "diff"],
-        ["git", "fetch"],
-        ["git", "pull"],
     ):
         assert from_git(argv).action == "read"
+    # commands that change the local repository are never reads: the verb is the action
+    for argv in (
+        ["git", "checkout", "main"],
+        ["git", "switch", "main"],
+        ["git", "fetch"],
+    ):
+        assert from_git(argv).action == argv[1]
+    # a pull, and the rebase pull.rebase in a config file may make of it (review round 21)
+    assert [i.action for i in from_git_multi(["git", "pull"])] == ["pull", "rewrite"]
 
 
 def test_from_git_raw_action_preserved():
@@ -1371,7 +1395,7 @@ GLOBAL_FLAG_PLACEMENTS = [
         "argocd-globals-between-app-and-subcommand",
         from_argv,
         ["argocd", "app", "--server", "argo.example", "sync", "prod-web", "--prune"],
-        ["argocd", "app", "sync", "prod-web", "--prune"],
+        ["argocd", "app", "sync", "prod-web", "--prune", "--server", "argo.example"],
     ),
     (
         "flux-namespace-context-kubeconfig-timeout-verbose",
@@ -1445,7 +1469,11 @@ def test_kubectl_identity_flags_before_verb_land_in_metadata():
 def test_git_launcher_options_are_not_recorded_in_params():
     intent = from_git(["git", "-C", "/repo", "--no-pager", "push", "-f", "origin", "main"])
     assert intent.resource == "ref/main"
-    assert intent.params == {"force": True, "raw_action": "push"}
+    # a short name may be a tag, as only git knows when it runs
+    assert intent.params == {"force": True, "raw_action": "push",
+                             "possible_resources": ["tag/main"],
+                             "resolved_at_runtime": {"from": "ref/main", "kinds": ["ref"],
+                                                     "destination": True}}
 
 
 def test_helm_kube_context_before_verb_lands_in_metadata():
@@ -1510,7 +1538,7 @@ def test_kubectl_glued_manifest_and_kustomize_flags():
 
 def test_kubectl_scale_with_glued_namespace_keeps_replicas():
     intent = from_kubectl(["kubectl", "scale", "deployment/api-server", "--replicas=5", "-nprod"])
-    assert intent.params == {"replicas": 5}
+    assert intent.params == {"replicas": 5, "value_types": {"replicas": "int"}}
     assert intent.metadata == {"namespace": "prod"}
 
 
@@ -1621,6 +1649,9 @@ def test_helm_debug_flag_does_not_swallow_the_release_name():
 
 # --- REVIEW-4 T1.5: boolean coercion; --dry-run=false is not a dry run ----------
 # (argv, params key): "<flag>=false" (or =no / =0) must never set the boolean.
+# flux reconcile has no --dry-run; create --export is the flux rehearsal
+FLUX_CREATE = ["flux", "create", "kustomization", "x", "--source=GitRepository/x", "--path=./k"]
+
 FALSE_FLAG_CASES = [
     (["kubectl", "delete", "pod/x", "--force=false"], "force"),
     (["kubectl", "delete", "pod/x", "--wait=no"], "wait"),
@@ -1630,8 +1661,8 @@ FALSE_FLAG_CASES = [
     (["aws", "ec2", "terminate-instances", "--instance-ids", "i-1", "--dry-run=false"], "dry_run"),
     (["az", "vm", "delete", "-n", "x", "-g", "rg", "--yes=false"], "yes"),
     (["az", "vm", "delete", "-n", "x", "-g", "rg", "--no-wait=0"], "no-wait"),
-    (["az", "vm", "delete", "-n", "x", "-g", "rg", "--what-if=false"], "dry_run"),
-    (["az", "vm", "delete", "-n", "x", "-g", "rg", "--dry-run=false"], "dry_run"),
+    (["az", "deployment", "group", "create", "-n", "x", "-g", "rg", "--what-if=false"],
+     "dry_run"),
     (["gcloud", "compute", "instances", "delete", "x", "--quiet=false"], "quiet"),
     (["gcloud", "compute", "instances", "delete", "x", "--async=false"], "async"),
     (["gcloud", "compute", "instances", "delete", "x", "--dry-run=false"], "dry_run"),
@@ -1643,12 +1674,13 @@ FALSE_FLAG_CASES = [
     (["argocd", "app", "sync", "x", "--prune=false"], "prune"),
     (["argocd", "app", "sync", "x", "--force=no"], "force"),
     (["argocd", "app", "sync", "x", "--dry-run=false"], "dry_run"),
-    (["flux", "reconcile", "kustomization", "x", "--dry-run=false"], "dry_run"),
-    (["flux", "get", "kustomization", "x", "--export=false"], "export"),
-    (["flux", "get", "kustomization", "x", "--export=false"], "dry_run"),
+    ([*FLUX_CREATE, "--export=false"], "export"),
+    ([*FLUX_CREATE, "--export=false"], "dry_run"),
+    ([*FLUX_CREATE, "--export", "--export=false"], "dry_run"),
     (["gh", "pr", "merge", "1", "--admin=false"], "admin"),
     (["gh", "pr", "merge", "1", "--delete-branch=false"], "delete_branch"),
-    (["git", "push", "origin", "main", "--dry-run=false"], "dry_run"),
+    # git's --dry-run takes no value (git refuses --dry-run=false); --no-dry-run is the off
+    (["git", "push", "origin", "main", "--dry-run", "--no-dry-run"], "dry_run"),
 ]
 
 
@@ -1673,8 +1705,8 @@ TRUE_FLAG_CASES = [
     (["argocd", "app", "sync", "x", "--prune=true"], "prune"),
     (["argocd", "app", "sync", "x", "--prune=TRUE"], "prune"),
     (["argocd", "app", "sync", "x", "--prune"], "prune"),
-    (["flux", "get", "kustomization", "x", "--export=true"], "export"),
-    (["flux", "get", "kustomization", "x", "--export=true"], "dry_run"),
+    ([*FLUX_CREATE, "--export=true"], "export"),
+    ([*FLUX_CREATE, "--export=true"], "dry_run"),
     (["gh", "pr", "merge", "1", "--admin=true"], "admin"),
 ]
 
@@ -1694,7 +1726,7 @@ DRY_RUN_TRUTHY_CASES = [
     ["kubectl", "delete", "pod/x", "--dry-run"],
     ["aws", "ec2", "terminate-instances", "--instance-ids", "i-1", "--dry-run"],
     ["aws", "ec2", "terminate-instances", "--instance-ids", "i-1", "--dry-run=true"],
-    ["az", "vm", "delete", "-n", "x", "-g", "rg", "--what-if=true"],
+    ["az", "deployment", "group", "create", "-n", "x", "-g", "rg", "--what-if=true"],
     ["gcloud", "compute", "instances", "delete", "x", "--dry-run=yes"],
     ["helm", "upgrade", "x", "./c", "--dry-run"],
     ["helm", "upgrade", "x", "./c", "--dry-run=client"],
@@ -1702,8 +1734,8 @@ DRY_RUN_TRUTHY_CASES = [
     ["helm", "upgrade", "x", "./c", "--dry-run=true"],
     ["argocd", "app", "sync", "x", "--dry-run"],
     ["argocd", "app", "sync", "x", "--dry-run=true"],
-    ["flux", "reconcile", "kustomization", "x", "--dry-run"],
-    ["flux", "reconcile", "kustomization", "x", "--dry-run=1"],
+    [*FLUX_CREATE, "--export"],
+    [*FLUX_CREATE, "--export=1"],
     ["git", "push", "-n", "origin", "main"],
 ]
 
@@ -1745,7 +1777,7 @@ def test_bool_flag_helper_semantics():
         and _coerce_bool("0") is False
     )
     assert _coerce_bool("orphan") is None
-    assert _bool_param(None) is True and _bool_param("false") is False and _bool_param("7") == 7
+    assert _bool_param(None) is True and _bool_param("false") is False and _bool_param("7") == "7"
     assert (
         _is_dry_run(None)
         and _is_dry_run("true")
@@ -1763,7 +1795,7 @@ def test_git_push_force_without_refspec_marks_unknown_target():
         ["git", "push", "--force", "origin"],
         ["git", "push", "--mirror", "origin"],
     ):
-        intent = from_git(argv)
+        intent = from_git_multi(argv)[0]  # --mirror also deletes: a second intent
         assert intent.resource == "ref/*", argv
         assert intent.action == "push"
         assert intent.params["force"] is True
@@ -1786,10 +1818,15 @@ def test_git_push_with_refspec_has_no_unknown_target():
 
 
 def test_git_push_mirror_does_not_swallow_the_remote_and_implies_force():
-    intent = from_git(["git", "push", "--mirror", "origin"])
-    assert intent.metadata == {"remote": "origin"}
-    assert intent.params["mirror"] is True
-    assert intent.params["force"] is True
+    push, _tags, delete, tag_delete, _submodules = from_git_multi(
+        ["git", "push", "--mirror", "origin"])
+    assert (tag_delete.resource, tag_delete.action) == ("tag/*", "delete")
+    assert push.metadata == {"remote": "origin"}
+    assert push.params["mirror"] is True
+    assert push.params["force"] is True
+    # --mirror also deletes every remote ref with no local one
+    assert (delete.resource, delete.action) == ("ref/*", "delete")
+    assert delete.params["unknown_target"] is True
 
 
 def test_git_push_all_is_unknown_target():
@@ -1924,7 +1961,8 @@ def test_aws_iam_reads_and_plain_creates_are_not_privilege_grants():
     assert "privilege" not in create.params
 
 
-ARM = "/subscriptions/sub-1/resourceGroups/rg-1/providers"
+SUB = "0b1f6471-1bf0-4dda-aec3-000000000001"
+ARM = f"/subscriptions/{SUB}/resourceGroups/rg-1/providers"
 
 
 @pytest.mark.parametrize(
@@ -1953,7 +1991,7 @@ def test_az_ids_arm_path_maps_to_named_form_resource(arm_type, expected):
     assert intent.provider == "azure"
     assert intent.action == "delete"
     assert intent.resource == expected
-    assert intent.metadata["subscription"] == "sub-1"
+    assert intent.metadata["subscription"] == SUB
     assert intent.metadata["resource_group"] == "rg-1"
     assert intent.metadata["arm_id"] == f"{ARM}/{arm_type}"
 
@@ -1970,7 +2008,7 @@ def test_az_ids_matches_the_named_flag_form():
         ]
     )
     by_name = from_az(
-        ["az", "aks", "delete", "-n", "c1", "-g", "rg-1", "--subscription", "sub-1", "--yes"]
+        ["az", "aks", "delete", "-n", "c1", "-g", "rg-1", "--subscription", SUB, "--yes"]
     )
     assert by_ids.resource == by_name.resource == "aks/cluster/c1"
     assert by_ids.action == by_name.action == "delete"
@@ -2002,7 +2040,7 @@ def test_az_multiple_ids_yield_one_intent_each_and_single_form_rejects():
         "deallocate",
         "--ids",
         f"{ARM}/Microsoft.Compute/virtualMachines/a",
-        "/subscriptions/sub-1/resourceGroups/rg-2/providers/Microsoft.Compute/virtualMachines/b",
+        f"/subscriptions/{SUB}/resourceGroups/rg-2/providers/Microsoft.Compute/virtualMachines/b",
         "--no-wait",
     ]
     intents = from_az_multi(argv)
@@ -2014,7 +2052,7 @@ def test_az_multiple_ids_yield_one_intent_each_and_single_form_rejects():
     assert [i.resource for i in from_argv(argv)] == ["compute/vm/a", "compute/vm/b"]
 
 
-def test_az_ids_equals_form_and_explicit_flags_win_over_arm_metadata():
+def test_az_ids_equals_form_and_the_id_wins_over_explicit_flags():
     intent = from_az(
         [
             "az",
@@ -2026,7 +2064,10 @@ def test_az_ids_equals_form_and_explicit_flags_win_over_arm_metadata():
         ]
     )
     assert intent.resource == "compute/vm/a"
-    assert intent.metadata["subscription"] == "other"
+    # az ignores --subscription with --ids: the ID's subscription is used (azure-cli
+    # core commands/arm.py parse_ids_arguments)
+    assert intent.metadata["subscription"] == SUB
+    assert "subscription_name" not in intent.metadata
 
 
 @pytest.mark.parametrize(
@@ -2127,7 +2168,9 @@ def test_gh_api_workflow_dispatch_matches_gh_workflow_run():
     assert (via_api.resource, via_api.action) == (via_porcelain.resource, via_porcelain.action)
     assert via_api.metadata["repo"] == via_porcelain.metadata["repo"] == "o/r"
     assert via_api.metadata["ref"] == via_porcelain.metadata["ref"] == "main"
-    assert via_api.params["inputs"] == {"ref": "main", "inputs[env]": "prod"}
+    # gh api builds the nested body gh sends; its inputs are the porcelain's inputs
+    assert via_api.params["body"] == {"ref": "main", "inputs": {"env": "prod"}}
+    assert via_api.params["inputs"] == via_porcelain.params["inputs"] == {"env": "prod"}
 
 
 def test_gh_api_unrouted_paths_and_methods_keep_the_generic_api_resource():
@@ -2141,10 +2184,12 @@ def test_gh_api_unrouted_paths_and_methods_keep_the_generic_api_resource():
     assert user.resource == "api/user" and "repo" not in user.metadata
 
 
-def test_gh_api_explicit_repo_flag_wins_over_the_path():
-    intent = from_gh(["gh", "api", "-R", "a/b", "-X", "DELETE", "repos/o/r"])
-    assert intent.metadata["repo"] == "a/b"
-    assert intent.resource == "repo/o/r"
+@pytest.mark.parametrize("flag", [["-R", "a/b"], ["--repo", "a/b"], ["--repo=a/b"]])
+def test_gh_api_has_no_repo_flag(flag):
+    # gh api never calls EnableRepoOverride, so gh refuses -R/--repo (review round 13; this
+    # test used to say -R won over the path)
+    with pytest.raises(ValueError):
+        from_gh(["gh", "api", *flag, "-X", "DELETE", "repos/o/r"])
 
 
 # --- REVIEW-4 T1.6: terraform address aliases, region resolution, plan digest -----
@@ -2435,11 +2480,15 @@ def test_from_helm_set_splits_comma_separated_pairs():
     assert intent.params["set"] == {"a": 1, "b": 2}
 
 
-def test_from_helm_set_keeps_bracketed_and_quoted_commas_intact():
+def test_from_helm_set_reads_a_list_and_an_escaped_comma():
+    # helm's strvals: {a,b,c} is a list, and a comma is kept only when escaped (quotes
+    # are not special: helm refuses 's="x,y"', since 'y"' has no value)
     intent = from_helm(
-        ["helm", "install", "api", "./chart", "--set", 'list={a,b,c},s="x,y",c=3']
+        ["helm", "install", "api", "./chart", "--set", r"list={a,b,c},s=x\,y,c=3"]
     )
-    assert intent.params["set"] == {"list": "{a,b,c}", "s": '"x,y"', "c": 3}
+    assert intent.params["set"] == {"list": ["a", "b", "c"], "s": "x,y", "c": 3}
+    with pytest.raises(ValueError):
+        from_helm(["helm", "install", "api", "./chart", "--set", 's="x,y"'])
 
 
 def test_from_helm_set_string_does_not_coerce_values():
@@ -2464,14 +2513,17 @@ def test_from_helm_set_file_and_set_json_are_recorded_raw():
     )
     assert intent.params["set_file"] == ["cert=./cert.pem"]
     assert intent.params["set_json"] == ['labels={"team":"x"}']
-    assert "set" not in intent.params
+    # --set-json is read as JSON; --set-file's value is a file nobody read
+    assert intent.params["set"] == {"labels": {"team": "x"}}
+    assert intent.params["unresolved_scope"] == ["set.cert"]
 
 
-def test_from_helm_nested_dotted_set_key_is_kept_as_a_single_string_key():
+def test_from_helm_nested_dotted_set_key_is_a_nested_map():
+    # the shape helm gives the chart, which a dotted scope key (set.image.tag) walks
     intent = from_helm(
         ["helm", "upgrade", "api", "./chart", "--set", "image.tag=v2,replicaCount=0"]
     )
-    assert intent.params["set"] == {"image.tag": "v2", "replicaCount": 0}
+    assert intent.params["set"] == {"image": {"tag": "v2"}, "replicaCount": 0}
 
 
 def test_helm_set_replica_count_zero_expressible_as_a_scope_rule():
@@ -2659,7 +2711,7 @@ def test_aws_numeric_looking_names_stay_strings(argv, resource):
     ("kubectl get pods --show-labels -n prod", "pod/*", {"show-labels": True}),
     ("kubectl get pods -n prod --watch", "pod/*", {"watch": True}),
     ("kubectl get --watch pods -n prod", "pod/*", {"watch": True}),
-    ("kubectl get pods -n prod -w", "pod/*", {}),
+    ("kubectl get pods -n prod -w", "pod/*", {"watch": True}),
     ("kubectl get pods --all-namespaces --no-headers", "pod/*", {"no-headers": True}),
     ("kubectl get pods -A --no-headers", "pod/*", {"no-headers": True}),
     ("kubectl get pod web --ignore-not-found -n prod", "pod/web", {"ignore-not-found": True}),
@@ -2726,10 +2778,10 @@ def test_kubectl_value_flags_take_the_next_token_even_a_dash_one(argv, resources
 @pytest.mark.parametrize("argv, key, value", [
     ("kubectl delete pod web --grace-period -1", "grace-period", -1),
     ("kubectl logs api-0 --tail -1", "tail", -1),
-    ("kubectl logs api-0 --since -5m", "since", "-5m"),
+    ("kubectl logs api-0 --since -5m", "since", -300),  # a Duration, in seconds
     ("kubectl logs api-0 -c app", "container", "app"),
     ("kubectl logs api-0 -capp", "container", "app"),
-    ("kubectl get pods -L app", "label-columns", "app"),
+    ("kubectl get pods -L app", "label-columns", ["app"]),  # a StringSlice
     ("kubectl patch deploy x -p {}", "patch", "{}"),
 ])
 def test_kubectl_value_flag_values_are_kept(argv, key, value):
@@ -2986,11 +3038,18 @@ def test_gh_extension_exec_help_is_still_blocked_by_an_extension_rule():
     "kubectl get --raw /api/v1/namespaces/prod/secrets",
     "kubectl get --raw=/api/v1/namespaces/prod/secrets",
 ])
-def test_kubectl_get_raw_is_still_refused(argv):
-    """A raw URI path can read any kind (secrets included), which no
-    kind-based rule would match, so it stays a parse error (fail closed)."""
-    with pytest.raises(ValueError, match="could not find a target resource"):
-        from_kubectl_multi(argv.split())
+def test_kubectl_get_raw_reads_the_kind_its_path_names(argv):
+    """A raw URI path can read any kind (secrets included): the kind and namespace are
+    read from the path (review round 14), so a kind-based rule meets it."""
+    intents = from_kubectl_multi(argv.split())
+    assert [(i.resource, i.action) for i in intents] == [("secret/*", "get")]
+    assert intents[0].metadata["namespace"] == "prod"
+
+
+def test_kubectl_get_raw_of_a_path_naming_no_kind_is_still_refused():
+    """A path that names no kind stays a parse error (fail closed)."""
+    with pytest.raises(ValueError, match="not one resource or collection"):
+        from_kubectl_multi("kubectl get --raw /apis".split())
 
 
 @pytest.mark.parametrize("argv", [
@@ -3082,18 +3141,19 @@ _API_EXTENSIONS = [
     ("kubectl scale all --all --replicas=0", "scale", {"all": True, "replicas": 0}),
     ("kubectl set image all *=x --all", "set-image", {"all": True, "images": {"*": "x"}}),
     ("kubectl rollout restart all", "rollout-restart", {}),
-    ("kubectl wait all --all --for=condition=x", "wait", {"all": True, "for": "condition=x"}),
+    ("kubectl wait all --all --for=condition=x", "wait", {"all": True, "for": ["condition=x"]}),
 ])
 def test_the_category_all_is_one_intent_per_kind(command, action, extra):
     intents = from_kubectl_multi(command.split())
     assert [i.resource for i in intents] == ["all/*", *_ALL]
     assert {i.action for i in intents} == {action}
-    marked = {k: v for k, v in intents[0].params.items() if k != "resolved_at_runtime"}
+    marked = {k: v for k, v in intents[0].params.items()
+              if k not in ("resolved_at_runtime", "value_types")}
     assert marked == extra
     assert intents[0].params["resolved_at_runtime"] == {
         "from": "all", "kinds": [r.removesuffix("/*") for r in _ALL], "custom_kinds": True}
     for intent in intents[1:]:
-        assert intent.params == extra
+        assert {k: v for k, v in intent.params.items() if k != "value_types"} == extra
 
 
 @pytest.mark.parametrize("command,targets", [
@@ -3144,7 +3204,7 @@ def test_label_and_annotate_operands_are_not_names(command, key, changed, remove
     ("kubectl rollout undo all --to-revision 1", ["all/*", *_ALL]),
     ("kubectl rollout status all --timeout 2s", ["all/*", *_ALL]),
     ("kubectl rollout history all --revision 1", ["all/*", *_ALL]),
-    ("kubectl autoscale all --max 2", ["all/*", *_ALL]),
+    ("kubectl autoscale all --max 2", ["all/*", *_ALL, "horizontalpodautoscaler/*"]),
     ("kubectl patch all -p {}", ["all/*", *_ALL]),
     ("kubectl patch all --patch {}", ["all/*", *_ALL]),
     ("kubectl delete all --all --grace-period 0", ["all/*", *_ALL]),
@@ -3246,8 +3306,6 @@ def _open_marker(kind: str) -> dict:
     ("kubectl delete deployments", "deployment"),
     ("kubectl label deploy a=b", "deployment"),
     ("kubectl patch deploy -p {}", "deployment"),
-    ("kubectl autoscale deploy --max=2", "deployment"),
-    ("kubectl expose deploy --port=80", "deployment"),
 ])
 def test_a_kind_with_no_name_is_marked_and_stays_one_intent(command, kind):
     """One intent, so a plan's batch counts do not grow."""
@@ -3277,17 +3335,12 @@ def test_a_category_keeps_its_own_mark_and_its_kinds_need_none():
     ("kubectl delete deploy web", "deployment/web"),
     ("kubectl delete deploy/web", "deployment/web"),
     ("kubectl get pod web", "pod/web"),
-    # kubectl refuses these (checked on kind): the name is all there is to decide on
-    ("kubectl delete deploy web -l a=b", "deployment/web"),
+    # kubectl refuses this (checked on kind): the name is all there is to decide on
     ("kubectl delete deploy/web --all", "deployment/web"),
-    ("kubectl get deploy/web -l a=b", "deployment/web"),
-    ("kubectl rollout restart deploy/web -l a=b", "deployment/web"),
     # --all with a name acts on the name only (checked on kind)
     ("kubectl label deploy/web a=b --all", "deployment/web"),
     ("kubectl scale deploy/web --replicas=1 --all", "deployment/web"),
     ("kubectl annotate deploy/web a=b --all", "deployment/web"),
-    # --selector here is the new service's
-    ("kubectl expose deploy web --port=80 --selector=x=y", "deployment/web"),
     ("kubectl cordon n1", "node/n1"),
     ("kubectl drain n1 --pod-selector=a=b", "node/n1"),
 ])
@@ -3313,13 +3366,33 @@ def test_taint_with_a_name_alone_stays_that_name():
         assert [i.resource for i in from_kubectl_multi(command.split())] == ["node/n1"]
 
 
-@pytest.mark.parametrize("command", [
-    "kubectl cordon -l zone=a", "kubectl uncordon -l zone=a", "kubectl drain -l zone=a",
-    "kubectl logs -l app=web", "kubectl exec -l app=web -- ls",
-])
+@pytest.mark.parametrize("command", ["kubectl exec -l app=web -- ls", "kubectl attach -l a=b"])
 def test_a_selector_on_a_verb_that_names_its_target_stays_refused(command):
-    with pytest.raises(ValueError, match="target resource"):
+    # exec and attach have no --selector (no -l): kubectl refuses them too
+    with pytest.raises(ValueError):
         from_kubectl_multi(command.split())
+
+
+@pytest.mark.parametrize("command,resource,params,metadata", [
+    # checked on kubectl 1.36 against a local stub server: the pods or nodes it listed
+    ("kubectl logs -l app=web", "pod/*", {"selector": "app=web"}, {}),
+    ("kubectl logs -fl app=web -n dev", "pod/*", {"selector": "app=web", "follow": True},
+     {"namespace": "dev"}),
+    ("kubectl logs -lapp=web -c app --namespace=prod", "pod/*",
+     {"selector": "app=web", "container": "app"}, {"namespace": "prod"}),
+    ("kubectl logs --selector app=web --all-containers", "pod/*",
+     {"selector": "app=web", "all-containers": True}, {}),
+    ("kubectl cordon -l zone=a", "node/*", {"selector": "zone=a"}, {}),
+    ("kubectl uncordon -l zone=a", "node/*", {"selector": "zone=a"}, {}),
+    ("kubectl drain -l zone=a --ignore-daemonsets", "node/*",
+     {"selector": "zone=a", "ignore-daemonsets": True}, {}),
+])
+def test_a_selector_is_the_target_where_kubectl_takes_one(command, resource, params, metadata):
+    intents = from_kubectl_multi(command.split())
+    assert [i.resource for i in intents] == [resource]
+    kind = resource.partition("/")[0]
+    assert intents[0].params == {**params, "resolved_at_runtime": _open_marker(kind)}
+    assert intents[0].metadata == metadata
 
 
 @pytest.mark.parametrize("command", ["kubectl run web --image=x", "kubectl debug web --image=x"])
@@ -3378,7 +3451,7 @@ def test_run_keeps_its_params_on_every_intent():
     intents = from_kubectl_multi(command.split())
     assert [i.resource for i in intents] == ["pod/001", "001/*"]
     for intent in intents:
-        assert intent.params == {"image": 1, "dry_run": True, "command": ["sleep", "1"]}
+        assert intent.params == {"image": "001", "dry_run": True, "command": ["sleep", "1"]}
 
 
 @pytest.mark.parametrize("command", [
@@ -3461,7 +3534,7 @@ def test_run_expose_keeps_the_namespace_on_every_intent(command):
 def test_run_expose_keeps_its_params_on_every_intent():
     command = "kubectl run web --image=x --expose --port=80 --dry-run=client -- sleep 1"
     for intent in from_kubectl_multi(command.split()):
-        assert intent.params == {"image": "x", "expose": True, "port": 80, "dry_run": True,
+        assert intent.params == {"image": "x", "expose": True, "port": "80", "dry_run": True,
                                  "command": ["sleep", "1"]}
         assert "resolved_at_runtime" not in intent.params
 
@@ -3535,7 +3608,7 @@ def test_debug_names_pods(command, targets):
 def test_debug_copy_to_is_raw_in_the_target_and_as_before_in_params():
     intents = from_kubectl_multi("kubectl debug web --copy-to=001 --image=x".split())
     assert "pod/001" in [i.resource for i in intents]
-    assert all(i.params["copy-to"] == 1 for i in intents)
+    assert all(i.params["copy-to"] == "001" for i in intents)  # a String flag: its text
 
 
 def test_the_last_copy_to_wins_as_in_params():
@@ -3646,8 +3719,11 @@ def test_only_describe_type_name_is_a_prefix(command):
     ("kubectl rollout restart deploy a -- b", ["deployment/a", "deployment/b"]),
     ("kubectl set image deploy a -- b x=y", ["deployment/a", "deployment/b"]),
     ("kubectl taint node a -- b x=y:NoSchedule", ["node/a", "node/b"]),
-    ("kubectl expose deploy a -- b", ["deployment/a", "deployment/b"]),
-    ("kubectl autoscale deploy a -- b", ["deployment/a", "deployment/b"]),
+    ("kubectl expose deploy a -- b", ["deployment/a", "deployment/b", "service/a",
+                                      "service/b"]),
+    ("kubectl autoscale deploy a -- b", ["deployment/a", "deployment/b",
+                                         "horizontalpodautoscaler/a",
+                                         "horizontalpodautoscaler/b"]),
     ("kubectl cordon a -- b", ["node/a", "node/b"]),
     ("kubectl uncordon a -- b", ["node/a", "node/b"]),
     ("kubectl drain a -- b", ["node/a", "node/b"]),
@@ -3741,8 +3817,6 @@ def test_describe_with_two_names_takes_them_exactly():
      {"from": "widgets/foo", "kinds": ["widgets"], "name": "foo", "custom_kinds": True}),
     ("kubectl scale wd/foo --replicas=1", "wd/foo",
      {"from": "wd/foo", "kinds": ["wd"], "name": "foo", "custom_kinds": True}),
-    ("kubectl autoscale widgets foo --max=3", "widgets/foo",
-     {"from": "widgets/foo", "kinds": ["widgets"], "name": "foo", "custom_kinds": True}),
 ])
 def test_a_kind_outside_the_table_may_be_any_custom_kind(command, resource, marker):
     intent = from_kubectl(command.split())
@@ -3804,59 +3878,65 @@ def test_the_last_dry_run_decides_in_the_other_tools(argv, rehearsal):
     ("helm upgrade api ./c -nprod", "release/api", {"chart": "./c"}, {"namespace": "prod"}),
     ("helm upgrade api ./c -n=prod", "release/api", {"chart": "./c"}, {"namespace": "prod"}),
     ("helm -nprod upgrade api ./c", "release/api", {"chart": "./c"}, {"namespace": "prod"}),
-    ("helm status api -oyaml", "release/api", {"o": "yaml"}, {}),
-    ("helm status -oyaml api", "release/api", {"o": "yaml"}, {}),
-    ("helm status -o yaml api", "release/api", {"o": "yaml"}, {}),
-    ("helm list -A", "release/*", {"A": True}, {}),
-    ("helm list -aq", "release/*", {"a": True, "q": True}, {}),
-    ("helm list -l a=b", "release/*", {"l": "a=b"}, {}),
+    ("helm status api -oyaml", "release/api", {"output": "yaml"}, {}),
+    ("helm status -oyaml api", "release/api", {"output": "yaml"}, {}),
+    ("helm status -o yaml api", "release/api", {"output": "yaml"}, {}),
+    ("helm list -A", "release/*", {}, {"all_namespaces": True}),
+    ("helm list -aq", "release/*", {"all": True, "short": True}, {}),
+    ("helm list -l a=b", "release/*", {"selector": "a=b"}, {}),
     # a namespace in a word
     ("helm upgrade api ./c -n dev -inprod", "release/api",
      {"install": True, "chart": "./c"}, {"namespace": "prod"}),
     ("helm upgrade api ./c -n dev -qnprod", "release/api",
-     {"q": True, "chart": "./c"}, {"namespace": "prod"}),
+     {"short": True, "chart": "./c"}, {"namespace": "prod"}),
     # a flag's value is not split
     ("helm upgrade api ./c -n dev --kube-context -nprod", "release/api", {"chart": "./c"},
      {"namespace": "dev", "context": "-nprod"}),
-    ("helm upgrade api ./c -n dev -l -nprod", "release/api", {"l": "-nprod", "chart": "./c"},
+    ("helm upgrade api ./c -n dev --description -nprod", "release/api",
+     {"description": "-nprod", "chart": "./c"},
      {"namespace": "dev"}),
     # flux
-    ("flux get ks -A", "kustomization/*", {"A": True}, {}),
-    ("flux get ks -A a", "kustomization/a", {"A": True}, {}),
-    ("flux get ks a -w", "kustomization/a", {"w": True}, {}),
-    ("flux get ks -Aw", "kustomization/*", {"A": True, "w": True}, {}),
-    ("flux get ks -l a=b", "kustomization/*", {"l": "a=b"}, {}),
+    ("flux get ks -A", "kustomization/*", {}, {"all_namespaces": True}),
+    ("flux get ks -A a", "kustomization/a", {}, {"all_namespaces": True}),
+    ("flux get ks a -w", "kustomization/a", {"watch": True}, {}),
+    ("flux get ks -Aw", "kustomization/*", {"watch": True}, {"all_namespaces": True}),
+    ("flux get ks -l a=b", "kustomization/*", {"label_selector": "a=b"}, {}),
     ("flux get ks -nprod", "kustomization/*", {}, {"namespace": "prod"}),
     ("flux -nprod get ks", "kustomization/*", {}, {"namespace": "prod"}),
-    ("flux get ks -n dev -wnprod", "kustomization/*", {"w": True}, {"namespace": "prod"}),
-    ("flux delete ks -s a", "kustomization/a", {"s": True}, {}),
-    ("flux delete ks a -n dev -snprod", "kustomization/a", {"s": True}, {"namespace": "prod"}),
-    ("flux create source git a -u -nprod -n dev", "source-git/a", {"u": "-nprod"},
+    ("flux get ks -n dev -wnprod", "kustomization/*", {"watch": True},
+     {"namespace": "prod"}),
+    ("flux delete ks -s a", "kustomization/a", {"silent": True}, {}),
+    ("flux delete ks a -n dev -snprod", "kustomization/a", {"silent": True},
+     {"namespace": "prod"}),
+    ("flux create source git a -u -nprod -n dev", "source-git/a", {"username": "-nprod"},
      {"namespace": "dev"}),
 ])
 def test_helm_and_flux_short_words(argv, resource, params, metadata):
     intent = from_argv(argv.split())[0]
     assert intent.resource == resource
-    assert {k: v for k, v in intent.params.items() if k != "raw_action"} == params
+    assert {k: v for k, v in intent.params.items()
+            if k not in ("raw_action", "unresolved_scope", "config_unresolved",
+                         "resolved_at_runtime")} == params
     assert intent.metadata == metadata
+    # a list of every object is marked: which objects, only the tool knows
+    assert ("resolved_at_runtime" in intent.params) == resource.endswith("/*")
 
 
 def test_flux_logs_f_is_follow():
     intent = from_argv("flux logs -fnprod".split())[0]
-    assert intent.params["f"] is True
+    assert intent.params["follow"] is True
     assert intent.metadata == {"namespace": "prod"}
 
 
 def test_helm_a_takes_a_value_on_template_only():
-    assert from_argv("helm template api ./c -av1".split())[0].params["a"] == "v1"
-    assert from_argv("helm get values api -a".split())[0].params["a"] is True
+    assert from_argv("helm template api ./c -av1".split())[0].params["api_versions"] == ["v1"]
+    assert from_argv("helm get values api -a".split())[0].params["all"] is True
 
 
 @pytest.mark.parametrize("argv", [
     "helm upgrade api ./c -xnprod",
     "helm upgrade api ./c -xA",
     "helm -inprod upgrade api ./c",
-    "helm install -g ./c",  # there is no release name to read
     "helm upgrade api ./c -in",
     "flux reconcile ks a -n dev -qnprod",  # flux has no -q
     "flux get ks -xnprod",
@@ -3866,3 +3946,29 @@ def test_helm_a_takes_a_value_on_template_only():
 def test_refused_helm_and_flux_short_words(argv):
     with pytest.raises(ValueError):
         from_argv(argv.split())
+
+
+@pytest.mark.parametrize("command", [
+    # a name and a selector: kubectl refuses them (kubectl 1.36: "selectors and the all
+    # flag cannot be used when passing resource/name arguments"), and so does the parser
+    "kubectl delete deploy web -l a=b",
+    "kubectl get deploy/web -l a=b",
+    "kubectl rollout restart deploy/web -l a=b",
+])
+def test_a_name_with_a_selector_is_refused(command):
+    with pytest.raises(ValueError):
+        from_argv(command.split())
+
+
+@pytest.mark.parametrize("command,source,created", [
+    # expose and autoscale also create an object: the source's own intent stays as it was
+    ("kubectl autoscale deploy --max=2", "deployment/*", "horizontalpodautoscaler/*"),
+    ("kubectl expose deploy --port=80", "deployment/*", "service/*"),
+    ("kubectl expose deploy web --port=80 --selector=x=y", "deployment/web", "service/web"),
+    ("kubectl autoscale widgets foo --max=3", "widgets/foo", "horizontalpodautoscaler/foo"),
+])
+def test_expose_and_autoscale_keep_the_source_and_add_the_new_object(command, source, created):
+    intents = from_kubectl_multi(command.split())
+    assert [i.resource for i in intents] == [source, created]
+    assert ("resolved_at_runtime" in intents[0].params) is source.endswith("/*") or \
+        source == "widgets/foo"

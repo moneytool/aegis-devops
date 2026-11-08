@@ -8,6 +8,802 @@ behaviour.
 
 ## [Unreleased]
 
+Every parser reads flags the way its tool does: a flag that takes a value takes the next word
+whatever it looks like, and a flag the parser cannot place, or a short letter whose meaning on
+the command it does not know, is refused instead of guessed or recorded as written (#80).
+Values are applied in the tool's own order, and words after `--` are read as the tool reads
+them.
+What a command takes from outside its argv -- a configuration file, the environment, a file a
+value is read from, values reused from an earlier run -- is marked unresolved, so a rule it
+could affect escalates, or the command is refused, and a value recorded for a key that is
+marked unresolved never decides it; an empty value for such a key counts as not given, and so
+does a value the tool fills in when it runs (gh's `{branch}`, git's `@{u}`); so is an ID the tool looks up from a name
+when it runs (an az subscription or location by name, a gcloud project by number). One value
+written several ways (a negated boolean, a URL or a number, a host-qualified name, an ARN, an
+abbreviated option (aws and az, as argparse resolves it), a short option or its long one, a literal or a nested key, `-` or `_`,
+a qualified or a flagged namespace) meets a rule written any of those ways, on every
+subcommand, and so does a mark that leaves it unresolved. A value decoded from JSON or YAML
+is the value the tool sends (helm's JSON numbers are float64, aws reads YAML 1.2). A target the tool expands when it runs (a list, a selector, `--all`, a
+wildcard bucket, a recursive path, a file or stdin of objects) is marked, every `kind/*`
+target in one place for every parser, so a rule on anything
+it may reach escalates, and a selection's scope is never copied onto the targets named beside
+it.
+No command is read as a read unless it is one of the commands audited as only reading; any
+other, an unknown one included, is refused or keeps its own verb as its action. Commands that
+act on several objects are one intent per object, which can raise a plan rule's count
+(`max_intents`) or change a `ratio`.
+
+What the hook cannot see and does not mark: a helm chart's own default values (`set.*` is what
+the command line, files and reuse can set, not what the chart ships); kubectl's kuberc and an
+argocd `$ARGOCD_OPTS` set in the environment rather than in front of the command; aliases a
+tool reads from its own configuration (`aws` cli aliases, `gh alias`, `git` aliases); and the
+key a KMS alias or the secret a Secrets Manager name stands for, which are marked rather than
+resolved. The aws option table is aws-cli 2.37.4's, so an option or command added later is
+refused until the table is regenerated; the gcloud flag table covers the commands the parser
+names resources for, and other gcloud commands, and alpha and beta, keep the rule that an
+unknown long flag before a word is refused (an unknown long flag at the end is kept by its
+name). git verbs without an option table leave every param unresolved when given an option.
+
+### Fixed
+- A scope key marked unresolved could still match a rule definitively when its recorded value
+  happened to equal the rule's, so the rule BLOCKed instead of escalating: `kubectl run web
+  --image=blocked --overrides '{...}'` against a rule on `image: blocked` was BLOCK, though the
+  override can replace the image. An unresolved key (exact, prefix, descendant or alias mark)
+  now never matches definitively; the rule escalates whether the recorded value equals the
+  rule's or not. A recursive storage key still decides for the literal key the command names
+  (`gsutil mv gs://b/logs` moves `logs` itself). Found in review of #82.
+- A scope key marked unresolved because the argv left it to the configuration stayed marked
+  when an inline or exported variable gave it, so `AWS_REGION=us-east-1 aws ec2
+  terminate-instances …` escalated a BLOCK on `region: us-east-1` that `--region us-east-1`
+  denies (the same for `AWS_PROFILE`, and every variable the hook reads into a scope key). The
+  variable now lifts that mark; a mark set for another reason, such as `--endpoint-url`
+  leaving the region unknown, stays. Found in review of #82.
+- helm and flux read a long flag with no entry in the parser as a flag with no value, so the
+  word after it was read as flags: `helm upgrade api ./c -n prod --description -ndev` was read
+  as namespace `dev`, and helm runs it in `prod` with the description `-ndev` (#80). `flux create
+  source git a -n prod --url -ndev` was read as `dev` the same way. Both tools now have tables
+  of every long flag that takes a value and every one that does not, read from their source
+  (helm 4.3.1 and 3.21.1, flux2 v2.10.0), so these read as `prod`. helm's `--server-side` takes a
+  value on `upgrade` and `rollback` and none on `install`, as in helm 4. Neither tool was run.
+
+  A flag in no table is now refused unless it carries `=value` or is the last word, on kubectl,
+  helm, flux and argocd alike: if it takes a value the next word is that value, and if it does
+  not the next word is a flag, a name or an operand, so either guess can misread the namespace
+  or the target. Before, kubectl took a following word as the value, so `kubectl delete pod
+  --new-bool web` was a delete of every pod, and helm and flux did the same, so `helm upgrade
+  --no-hooks api ./c` was `release/./c`. kubectl's tables now hold every flag of kubectl 1.36
+  (from `--help` on every command), which also reads flags that were refused before, such as
+  `kubectl config set-context --current --namespace=prod`. A short flag in no table is refused
+  the same way unless it is last.
+- argocd ignored bundled short flags: `argocd app sync a -qnprod` recorded a flag called
+  `qnprod`. Short words are now read letter by letter, as for kubectl, helm and flux, from the
+  letters argocd's `app` commands have (argo-cd v3.6.1 and main, from source, not run), so
+  `-qnprod` is refused, since argocd has no `-q`, and `-yl team=x` is `--yes --selector
+  team=x`. argocd's long flags are in tables too.
+- `argocd app sync a -l team=x` and `argocd app sync a --project prod` sync every app the
+  selector or project picks besides `a`, and `argocd app delete a -l team=x` deletes the apps
+  the selector picks. Only `app/a` was read. Each is now an `app/*` intent, marked, so a rule on
+  one app escalates, and `sync -l` or `--project` with no app named is read instead of refused.
+  `--dry-run` is a rehearsal only on `app sync`, the one verb that has it (from source).
+- `kubectl logs -l app=x` and `kubectl logs -fl app=x` were refused, though kubectl reads the
+  logs of every pod the selector matches. They are now `pod/*` with the selector, marked, in
+  the namespace given, as other selector verbs are, and so are `cordon`, `uncordon` and `drain
+  -l` (`node/*`). Checked on kubectl 1.36 against a local stub API server: it listed the pods or
+  nodes by the selector in that namespace. `logs` has no `-A`, and kubectl refuses it there.
+- `kubectl create deployment -r0xf` and `--replicas=0xf` were recorded as the text `0xf`.
+  pflag reads integers with base 0, so kubectl creates 15 replicas, and `kubectl scale
+  --replicas=0x0` scales to 0, which a rule on `replicas: 0` did not see. Every kubectl integer
+  flag is now read as Go's `strconv.ParseInt(s, 0, …)` reads it (`0x`, `0o`, `0b`, a leading `0`
+  for octal, `_` between digits), and a number kubectl refuses (`08`, `1e3`, out of range,
+  `-rnprod`) is refused. Each spelling in the tests was run with `kubectl create deployment
+  --dry-run=client`.
+- helm uninstalls every release it is given, so `helm uninstall web payments` was read as
+  `release/web` only. It is now one intent per release, and `from_helm` raises on two, as
+  `from_kubectl` does (use `from_helm_multi`). Words after `--` were taken as a flag's value,
+  and are now releases, as pflag reads them: `helm uninstall a -- -nprod` uninstalls a release
+  called `-nprod` in the default namespace. `helm install ./c --generate-name` (or `-g`, or
+  `--name-template`) was read as a release called `./c`; helm names the release when it runs,
+  so it is now `release/*`, marked. `--set`, `--set-string` and `--set-literal` are merged in
+  helm's order, whatever their order on the line, and `-f a.yaml,b.yaml` is two files.
+- flux `suspend`, `resume`, `reconcile`, `delete` and `export` take every name they are given,
+  and only the first was read: `flux suspend ks web payments` missed `payments`. flux 2.10 also
+  takes `TYPE/NAME` words and plural or short type names (`flux suspend ks/a ks/b`, `flux
+  reconcile kustomizations a`, `gitrepo/a`), which were refused or read as a kind called
+  `ks/a`. All of these are now one intent per object, and `from_flux` raises on two (use
+  `from_flux_multi`). The kinds under `image`, `artifact` and
+  `secret` were read as a kind called `image` named `repository`: `flux reconcile image
+  repository a` is now `image-repository/a`. `flux suspend <kind> --all` is `<kind>/*`, marked,
+  and `flux reconcile ks a --with-source` also reaches the kinds of source it can reference.
+  `flux reconcile ... --dry-run` was read as a rehearsal, and flux has no `--dry-run` on any verb
+  the parser reads, so it no longer is. From flux2 v2.10 source; flux was not run.
+- git read options with its own guesses. Options of `push`, `branch`, `tag`, `rebase`, `reset`
+  and `commit` now come from git 2.52's `-h` and completion lists and are read as git's
+  parse-options reads them, which was run against a local bare repository: `git push -fu origin
+  main` was not a force push (the word `-fu` was a flag of its own, and `origin` its value),
+  `git push --force-w origin main` and `git commit --amen` were missed (git takes an unambiguous
+  prefix), `git commit -n --amend` was read as a rehearsal (`-n` is `--no-verify` on commit; it
+  is `--dry-run` only on push), and `git push --dry-run --no-dry origin x` was a rehearsal, and
+  git pushes. An option git refuses is refused. `git push origin safe +main` force-pushes `main`
+  and was read as `ref/safe` only: every refspec is now an intent, a pattern refspec
+  (`refs/heads/*`) reaches refs the argv does not name, and so do `--tags` and `--prune`. `git
+  branch -D a b` and `git tag -d a b` name every branch or tag, `git rebase <upstream> <branch>`
+  also rewrites `<branch>`, and `git filter-repo` rewrites every ref (`history/*`, marked).
+  `from_git` raises on two targets (use `from_git_multi`).
+- aws-cli's argparse takes an unambiguous prefix of an option, and the parser did not: `aws ec2
+  terminate-instances --instance-ids i-1 --regio us-west-1` runs in `us-west-1` and was read with
+  no region, `aws iam delete-role --role prod-admin` deletes `prod-admin` and was `iam/role/*`,
+  and `--instance-id i-1 i-2` terminates both. Global options are now matched as aws matches
+  them, over the whole line (`--reg`, and `--re` even on `s3 rm`), a prefix of a flag that names
+  the target fills a target no full flag names, and a prefix of `--no-dry-run` ends the
+  rehearsal. `aws s3 cp s3://staging/x s3://prod/x` was read as a write to `staging` only: every
+  `s3://` path is now an intent, `mv` also deletes its source, and `sync --delete` deletes in the
+  destination. The s3 commands' own options are read (`--recursive` takes no value, so `aws s3
+  rm --recursive s3://b` is no longer refused, and `--dryrun` rehearses). A target given only in
+  `--cli-input-json` or `--cli-input-yaml` was `*`, which a rule on one name never met; it is now
+  marked. Words after `--` are refused, as aws refuses them. Each case was run with aws-cli 2.37
+  against a closed local port, reading the request it built.
+- az: `-nprod-vm`, `-n=prod-vm` and `-ynprod-vm` were read with no name (argparse reads them as
+  `-n prod-vm`), so a rule on the VM missed. They are now read as argparse reads them. A prefix of
+  `--name`, `--resource-group`, `--location`, `--subscription` or `--ids` (`--resource-gr rg`) is
+  refused, since argparse takes it and what it stands for depends on the command. Other short
+  words are read from the letters azure-cli's command modules define (every `_params.py`): a
+  letter that is only ever a value option takes the rest of the word (`-cmycontainer`,
+  `-snprod`), and a word is refused only when a letter that is a plain boolean on some command
+  makes another reading set a different name, resource group or location (`-dnprod`), or when
+  no az command has the first letter (`-Anprod`). From azure-cli and knack source; az was not
+  run.
+- gcloud read only the first name: `gcloud compute instances delete web-1 prod-1` missed
+  `prod-1`. Every name is now an intent. A `--no-` flag is a boolean and no longer takes the name
+  after it as its value (`delete --no-graceful-shutdown prod-1`). Any other flag the parser has
+  no entry for, followed by a word, is refused: the word is its value if it takes one and a name
+  if it is a boolean, so `delete web-1 --graceful prod-1` could hide `prod-1`. gcloud's source
+  tree (and its per-command flag types) is not on GitHub to read, so the parser keeps a table of
+  flags the gcloud reference shows taking a value (`--machine-type`, `--keep-disks`, the global
+  ones, ...), and any other must be written `--flag=value` or last. Words after `--` (`compute ssh vm -- …`)
+  are kept as `passthrough`, not names. `gcloud sql import sql prod-db …` was `sql/sql`, and is
+  `sql/instance/prod-db`. `gcloud storage rm --recursive gs://a gs://b` and `gsutil -m rm -r
+  gs://b` were refused or read one bucket; both now read their own booleans and every `gs://`
+  path, and `mv` also deletes its source. gcloud takes no abbreviated flag (calliope turns them
+  off, read in its source), which needed no change. `from_gcloud` raises on two targets (use
+  `from_gcloud_multi`). The booleans of `gcloud storage` and gsutil's option letters come from
+  their documentation, not their source, and neither gcloud nor gsutil was run: a letter or
+  flag missing from those tables is refused (gsutil) or may still take the next word (gcloud
+  storage, though never a `gs://` path).
+- aws: a full target flag and an abbreviation of the same flag were read as the full one only.
+  argparse reads both as that flag and keeps the last, so `aws iam delete-role --role-name a
+  --role b` deletes `b`, read as `a`. Every spelling's value is now a target (`iam/role/a` and
+  `iam/role/b`), on the target and id flags, `--instance-ids`, and s3api's `--bucket` and
+  `--key`. Run with aws-cli 2.37.
+- A flux command with no `-n` was read as having no namespace, and a namespace-scoped rule then
+  did not apply. flux uses `flux-system`, or `$FLUX_SYSTEM_NAMESPACE`, or with
+  `--ns-follows-kube-context` or `$FLUX_NS_FOLLOWS_KUBE_CONTEXT` the kubeconfig context's
+  namespace, and the argv shows none of these variables. The namespace is now unresolved, as for
+  kubectl and helm, so such a rule escalates with `namespace-unresolved`, and
+  `--resolve-current-context` fills the namespace flux would pick (flux2 main.go). An inline
+  `FLUX_NS_FOLLOWS_KUBE_CONTEXT=1` is recorded on the intent.
+- `git branch -m old new`, `-M`, `-c`, `-C` and `git branch -f main HEAD~3` were reads. A rename
+  now creates the new name and deletes the old one (with one name, the current branch,
+  `branch/*` marked), a copy creates the new name, and `-M`, `-C`, `--force` and `-f` also
+  delete the branch they overwrite, so `git branch -M feature main` meets a rule against
+  deleting `branch/main`. Run with git 2.52.
+- helm `--set-json` was recorded raw, so `--set-json replicaCount=0` never met a rule scoped on
+  `set.replicaCount`. It is now read as JSON and merged into `set` in helm's order. Every
+  `--set` kind is read by a port of helm's `pkg/strvals` into one nested map, the shape helm
+  gives the chart: `--set-json 'securityContext={"privileged":true}'` had become the literal
+  key `securityContext.privileged`, which a rule on `set.securityContext.privileged` (a walk of
+  nested maps) did not find, so a BLOCK allowed it. `--set image.tag=v2` is now
+  `{"image": {"tag": "v2"}}` where it was the key `image.tag`. Lists (`{a,b}`, `x[1]=y`),
+  escapes (`a\,b`), helm's typing (`1.5` and `010` stay text, `null` is null), the order
+  (`--set-json` first, a later scalar replacing a map) and a map under a scalar, which helm
+  refuses, all follow helm; quotes are not special to helm, so `--set s="x,y"` is refused as
+  helm refuses it. The store's dotted lookup also finds a key with dots in it at any level
+  (`labels.app.kubernetes.io/name`). A key set by
+  `--set-file`, or left to a values file (`-f`) or `--reuse-values`, comes from a file nobody
+  read, so a rule scoped on it escalates with `set.<key>-unresolved`. The chart's own defaults
+  are still not read: `set.*` is what the command line sets.
+- `kubectl create deployment --port=0x50` was the text `0x50`; kubectl reads that flag with base
+  0, so it is 80, and `--port=080` is refused, as kubectl refuses it (run on kubectl 1.36). On
+  `expose` and `run` `--port` is a string kubectl reads with `Atoi`, which the parser already
+  matched.
+- aws read a prefix only for global options and target flags. Every option of each `aws s3`
+  command is now matched exactly or by its one unambiguous prefix, from aws-cli 2.37's tables:
+  `aws s3 sync ./empty s3://prod --del` was a put with a param `del`, and aws deletes in the
+  destination; `--dryr` is `--dryrun`, `--rec` is `--recursive`, and an ambiguous or unknown
+  prefix is refused as aws refuses it. A prefix of `--dry-run` of three letters or more
+  (`aws ec2 terminate-instances ... --dry`) is the rehearsal, except on the seven operations
+  botocore gives another `dry-*` option. Run with aws-cli 2.37.
+- `gh api <path> -f k=v` (or `-F`, `--field`, `--raw-field`, `--input`) without `-X` was read
+  as a GET; gh sends POST then, so `gh api repos/o/r/actions/workflows/deploy.yml/dispatches -f
+  ref=main` is now `workflow/deploy.yml` / `run`, as with `-X POST`. `{owner}`, `{repo}` and
+  `{branch}` (or `:owner` ...) in an api path are filled by gh from the current repository and
+  are no longer read as names. Without `-R` gh acts on the current directory's repository or
+  `$GH_REPO`, so `repo` is now unresolved and a repository-scoped rule escalates with
+  `repo-unresolved`; `--resolve-current-context` fills it from `$GH_REPO`. From cli/cli
+  v2.103 source.
+- `git push origin main --follow-tags` (and `-c push.followTags`, unless `--no-follow-tags`)
+  also pushes the annotated tags reachable from what is pushed, and now adds an unresolved
+  `ref/*` push, as `--tags` does. `git push origin HEAD` (or `@`) pushes the current branch and
+  `git push origin :` every matching branch; both were read as named refs (`:` as a delete of
+  nothing) and are now unresolved `ref/*`. `--mirror` and `-c remote.<name>.mirror=true` also
+  delete every remote ref with no local one, now a `ref/*` delete beside the force push.
+- `gcloud storage mv` and `gsutil mv` with several sources deleted only the first; every
+  `gs://` source is now a delete, and so is the source of `gsutil cp -M`, which moves. With
+  `-I` / `--read-paths-from-stdin`, `rm` and a move also reach `storage/bucket/*`, marked.
+  `rsync` with deletes stays refused.
+- gcloud: the space form of common create commands is read again (`gcloud container clusters
+  create --enable-autoscaling demo --zone ...` was refused). The boolean flags of the commands
+  that change something most often (container clusters and node pools, compute instances, sql
+  instances, run deploy, functions deploy) and more value flags are listed, from the gcloud
+  reference. `gcloud run deploy SVC` is `run/service/SVC` (it was `run/SVC`).
+- A literal dotted helm key (`--set 'securityContext\.privileged=false'`) beside the nested
+  value of the same path (`securityContext.privileged=true`) hid the nested one, so a BLOCK
+  allowed it. The store now reads every value a scope key reaches and matches if any does. A
+  scope key also matches its `-`/`_` twin and a boolean's negated spelling (`no-verify-ssl` is
+  `verify-ssl` negated), and `repo`, `resource_group` and `subscription` compare without case.
+- `helm upgrade` with no values on the command line reuses the release's previous values, and
+  so does `--reuse-values` or `--reset-then-reuse-values` for every key it does not set (helm
+  3.21.1 and 4.3.1 Upgrade.reuseValues); `--reset-values`, checked first, turns that off.
+  `helm rollback` puts back an earlier revision's values. Those are now `set.*`, unresolved.
+- `-A` / `--all-namespaces` on flux and helm was a param, so `flux get kustomizations -A -n
+  dev` met a prod rule as `dev`. It is now `metadata.all_namespaces`, as on kubectl, and the
+  last spelling decides.
+- Scope a tool takes from its configuration or environment when the argv does not give it was
+  read as absent, so a rule scoped on it did not apply: kubeconfig context and cluster, aws
+  region and profile, gcloud project and region (the active configuration, `--configuration`,
+  `$CLOUDSDK_*`), az subscription, resource group and location (`az account`, `az config`),
+  argocd server, project and the Application's namespace, git's push remote, and gh's
+  repository. Each is now in `params.unresolved_scope` when missing, and a rule scoped on it
+  escalates; `--resolve-current-context` fills what the environment says.
+- gh: `gh pr merge https://github.com/o/r/pull/42` was `pr/https://...`. A pull request or
+  issue by `#42`, `OWNER/REPO#42` or URL is `pr/42` (or `issue/42`) with that repository; a
+  branch or no selector is `pr/*`, marked. `issue delete`/`close` and `run cancel`/`delete`/
+  `rerun` were reads and now delete, stop or run. A workflow by display name or ID is marked.
+  `-R` in `HOST/OWNER/REPO`, URL or `git@` form is `owner/repo`; another host than github.com
+  is `host/owner/repo` with `github_host`, so a github.com rule never matches it. Secret and
+  variable names are upper-cased, as GitHub stores them. `-F k=@file`, `--input`, workflow run
+  `--json` and a workflow run without `-r` leave the values they decide unresolved.
+- git: `push.followTags` in any config file can make `git push origin main` send tags. Every
+  push now adds `tag/*`, marked, unless `--no-follow-tags` or `-c push.followTags=false`, so a
+  rule on `tag/...` escalates and one on `ref/main` does not; an explicit `refs/tags/X` is also
+  `tag/X`. With no refspec, push.default, `remote.*.push` (a `+` forces) and `remote.*.mirror`
+  decide what is sent: `force` is unresolved and a possible delete of `ref/*` is marked. A
+  remote given as a URL leaves `remote` unresolved; `--repo` is the remote when none is given.
+  `--no-x` is `x: false`, and `--no-verify` / `commit -n` is `verify: false`.
+- gcloud `--no-deletion-protection` recorded `no-deletion-protection: true` beside
+  `--deletion-protection=false`'s `deletion_protection: false`; both are now
+  `deletion_protection: false`, the last spelling winning. `--flags-file` (more flags from a
+  YAML file, `--project` too) is refused. A resource by URI or path is its plain name in the
+  URI's project, zone and region.
+- aws `--no-x` is `x: false` (`--no-verify-ssl` is `verify_ssl: false`). An ARN keeps the
+  resource and adds its plain name as an alias, with the ARN's account and region, so a rule
+  on the name matches; a target from `file://`/`fileb://`, a KMS alias and a Secrets Manager
+  secret by ARN are marked. az: a name, resource group, location, subscription or `--ids` given
+  as `@file` is refused. argocd `NAMESPACE/NAME` is `app/NAME` with `app_namespace`, as `-N`
+  is, and `--server` is recorded.
+- An inline `HELM_NAMESPACE=prod` was the namespace of any command, kubectl's too. Inline
+  variables now set only the scope of the tool that reads them, in its precedence, with
+  `HELM_KUBECONTEXT`, `GH_REPO`, `AZURE_DEFAULTS_GROUP`/`_LOCATION` and `ARGOCD_SERVER` added;
+  `ARGOCD_OPTS` and `KUBERC` (unless `off`) in front of the command are refused. terraform
+  `-chdir` is one path (`./infra`, `infra/` and `infra` are `workspace/infra`).
+- terraform and tofu `apply -destroy=true` (and `-destroy=T`) were refused as needing a plan, and
+  `-destroy -destroy=false` was read as a destroy. Go's flag package reads the last `-destroy`,
+  with `strconv.ParseBool`, and so does the parser now; `-auto-approve=true` and
+  `--auto-approve` set `auto_approve`. `-destroy=T` and `-destroy=yes` were run with terraform in
+  an empty directory.
+- gh read an unlisted boolean as taking the next word, which was often the target: `gh pr
+  merge -s 42` was a merge of `pr/*` (`42` taken as the value of `-s`), `gh repo delete --yes
+  owner/repo` was `repo/*`, and `gh api -XDELETE repos/o/r` was a read of `api/*`. `-r` was read
+  as `--ref` on every command, and on `pr merge` it is `--rebase`. The commands that change
+  something (`pr merge`, `pr close`, `repo delete`, `release create`/`delete`, `secret
+  set`/`delete`, `variable set`, `workflow run`, `api`) now have tables of their flags from
+  cli/cli v2.103 source (not run), read as pflag reads them, and a flag in no table is refused
+  as on the other pflag tools.
+- An unresolved mark was compared with a rule's key letter for letter, while matching treats
+  `-` and `_` as one: `helm upgrade api ./c --set-file replica-count=r.txt` left
+  `set.replica-count` unknown, and a rule on `set.replica_count: 0` allowed it. One function
+  (`canonical_key`) now decides key equality for matching, at every level of a nested key, for
+  the unresolved marks (with a boolean's negated side) and for the configuration marks, so
+  that command escalates, as does argocd's `app_namespace` against `app-namespace`.
+- `flux reconcile ks app -n dev --with-source` gave the source intents namespace `dev`, but a
+  source reference may name its own namespace (reconcile_with_source.go). The source intents
+  now cover every namespace, so a rule scoped to `prod` escalates. The other intents derived
+  from a parent were checked: kubectl's `exec deploy/x` pod and `run --expose` service live in
+  the parent's namespace, argocd's selector picks have their namespace unresolved unless
+  `--app-namespace` is given, and gh and git targets keep the repository and remote they act on.
+- git: `git push origin tag v1` is `refs/tags/v1` (builtin/push.c), and was read as two
+  refspecs, `tag` and `v1`. A deleted tag (`git push --delete origin refs/tags/v1`, `git push
+  origin :refs/tags/v1`, `--delete ... tag v1`) was `tag/v1` with action `push`; it is now a
+  delete. `--mirror` and `--prune` also delete `tag/*`, `--mirror` sends every tag even with
+  `--no-follow-tags`, and a push that only deletes sends none. A short name (`git push origin
+  v1.2.0`) is a tag when the local or remote ref of that name is one, which only git knows: the
+  intent now carries `tag/v1.2.0` as a possible resource, so a rule on it escalates. `--delete`
+  with a `:` in a name, with no name, or with `--tags`/`--all`/`--mirror`, and `tag` with no name,
+  are refused as git refuses them. Run on git 2.52 against a local bare remote.
+- aws read an abbreviated option under the abbreviation: `aws autoscaling set-desired-capacity
+  --desired-cap 0` recorded `desired-cap`, so a rule on `desired_capacity: 0` allowed it. Every
+  option of every aws command is now resolved as argparse resolves it, against the operation's
+  full option list read from aws-cli 2.37.4's own parsers (`src/aegis_core/data/
+  aws_cli_options.zip`, written by `scripts/gen_aws_cli_options.py`), and recorded under its
+  full name; each option takes the words aws gives it, a negative number included. An
+  ambiguous or unknown option, a single-dash word, or a command aws-cli does not have is
+  refused. An abbreviation and the full option it stands for were both kept as targets
+  (`--role-name a --role b`); the last one is now the target, as in aws.
+- aws `--cli-input-json '{"DesiredCapacity":0}'` and `--cli-input-yaml` were not read, and
+  `set-desired-capacity` returned before the input target was marked. Inline input is now read
+  into the options it stands for, by the operation's member names, before the command line,
+  which overrides it as in aws, for every operation; a member the operation does not have, two
+  inputs, or input that is not a mapping is refused, and an abbreviated `--cli-input-j` is
+  ignored, as aws ignores it. Input in a `file://` file leaves every option the command line
+  does not give unresolved (and the target marked), and so does any option whose value is read
+  from `file://` or `fileb://`. Each case was run with aws 2.37 against a closed local port.
+- gcloud gave every resource path the last path's project and zone: `gcloud compute instances
+  delete projects/p1/.../a projects/p2/.../b` was two deletes in `p2`. Each path now keeps its
+  own. A project given by number is `project_number`, with `project` unresolved and not filled
+  from `$CLOUDSDK_CORE_PROJECT`, so a rule on a project ID escalates; an environment map entry
+  matches either.
+- gcloud refused `gcloud compute instances update --clear-labels web`, its boolean tables being
+  hand-made and partial. Every flag of each command the parser names resources for (compute
+  instances, disks and firewall rules, container clusters and node pools, sql instances,
+  import and export, storage buckets and `cp`/`mv`/`rm`, functions, run, iam service accounts,
+  projects, pubsub topics) is now read from its gcloud reference page
+  (`src/aegis_core/data/gcloud_flags.json`, written by `scripts/gen_gcloud_flags.py`, which
+  records the date): a boolean, a value, or an optional value, which takes the next word. A
+  flag such a command does not have is refused, as gcloud refuses it. gcloud was not run.
+- az `--subscription Production` recorded `subscription: Production`, where a rule may name the
+  subscription ID, and `--location "East US"` recorded `region: East US`, which az turns into
+  `eastus` from the subscription's location list when it runs (core commands/parameters.py).
+  A subscription that is not a GUID is now `subscription_name` and a location with a space is
+  `location_display_name`; `subscription` and `region` are then unresolved and not filled from
+  the environment. Locations compare without case, as resource groups and subscriptions do.
+  With `--ids`, az takes the subscription and resource group of each ID and ignores
+  `--subscription` and `-g` (core commands/arm.py); the flags used to win. From azure-cli
+  source; az was not run.
+- `argocd app actions run prod/payments restart` returned before the qualified name was split,
+  so it was `app/prod/payments` and a rule on `payments` in `prod` allowed it, while `payments
+  -N prod` was blocked. argocd now splits `NAMESPACE/NAME` once, over every intent of every
+  subcommand, and az normalizes a subscription name and a location display name once over
+  every intent, an `--ids` path included (an ID with a subscription name was recorded as the
+  subscription). aws `s3` commands also mark options read from `file://`. From source.
+- Several commands that change something were read as reads. `git tag -f v1 HEAD` and `git
+  tag v1` were reads of `tag/v1`; they create it, and `-f` also updates it, forced. `git branch
+  side` creates `branch/side`; `-u`, `--unset-upstream` and `--edit-description` update the
+  branch. Every git command other than push, branch, tag and the history rewrites was a read
+  of `history/*`, `commit`, `pull`, `clean`, `stash`, `config x y` and `update-ref`
+  included: only the commands git documents as reading (status, log, diff, show, the list
+  forms of branch, tag, remote, stash, config ...) are reads now, and any other takes its
+  verb as its action. gh's `release edit`, `pr edit`, `repo edit`, `issue edit` and every
+  subcommand not listed were reads; gh's actions now come from one table checked against
+  the gh manual (edit is `update`, comment and review `update`, reopen `start`, fork
+  `create`, ...), and a command not in it is never a read. `argocd app get --refresh` and
+  `--hard-refresh` patch the Application and are updates. `gcloud compute ssh` was a read of
+  `compute/vm`: it is `exec` on `compute/instance`. `export` (gcloud sql export, aws
+  `export-*`) writes the data out and is no longer a read. The verbs every tool reads as
+  reads are pinned in a test, so a new one cannot default to read; an unknown verb is
+  refused on aws, az, gcloud, helm, flux and argocd, and keeps its name on kubectl, git and
+  gh. From each tool's documentation; not run.
+- `gcloud storage rm 'gs://prod-*/secret'` and the same with gsutil were recorded as the
+  bucket `prod-*`, and a rule on `prod-logs` allowed them: both tools expand `*`, `**`, `?`
+  and `[...]` in a bucket name when they run. Such an intent is now marked with the pattern's
+  literal prefix, so a rule on any bucket the pattern may match escalates, and a rule whose
+  names cannot start with that prefix does not. A wildcard in the object, `-r`/`--recursive`,
+  and aws `s3 --recursive` or `sync` (whose keys `--include`/`--exclude` pick) leave the key
+  unresolved. The other tools were checked: kubectl `-l` and `--all`, argocd `-l`, git
+  pattern refspecs and flux `--all` were already marked; kubectl, helm, argocd, az, aws and
+  git names are not expanded by the tools. From gcloud and gsutil documentation; not run.
+- helm `--set-json quota=9007199254740993` kept the exact integer, but helm decodes JSON
+  with Go's encoding/json into float64, so the chart gets 9007199254740992. `--set-json`
+  numbers are now decoded as Go decodes them (an integral value is compared as an int), and
+  NaN, Infinity and numbers out of float64's range are refused. Every other decode path was
+  checked: aws `--cli-input-json` keeps exact integers, as botocore does, and
+  `--cli-input-yaml` is now read as aws-cli v2's YAML 1.2 reads it (`yes` is a string, `010`
+  ten, `0o10` eight; it was read as YAML 1.1, so `yes` was true and `010` eight); `gh api -F`
+  types fields as gh does (true, false, null, an int64), and `-f`, and every `gh workflow
+  run` input, are strings (all were coerced to numbers before). kubectl `-p` patches, argocd
+  `-p` parameters and flux values are kept as text. Checked: aws by running aws 2.37
+  against a closed local port; helm and gh from source.
+- `git branch --no-column -f prod HEAD~1` was read as a list, because `--column` was present
+  though false. List mode now follows builtin/branch.c and builtin/tag.c (git 2.52): `--list`
+  by its value, no name and no other action, the `--contains`, `--no-contains`, `--merged`,
+  `--no-merged` and `--points-at` filters, and on tag `-n` with any count; `--column`,
+  `--sort`, `--format` and `-v` only shape a list. `--show-current` is a read and `git branch
+  -a`/`-r` with a name is refused. The other parsers were checked for a flag read by its
+  presence rather than its value. Run on git 2.52.
+- `gh issue edit 23 34 --add-label bug` kept only `issue/23`: gh edits every issue given. Each
+  gh command's argument count is now checked against its cobra Args (cli v2.103 source); a
+  count gh refuses is refused, and `issue edit`, the one command that takes several, is one
+  intent per issue, each with its own repository.
+- Short options were recorded under their letter: `az aks scale -c 1` was `c: 1` where
+  `--node-count 1` was `node-count: 1`, and `gcloud container clusters delete c -z
+  us-east1-b` was refused, `-z` being `--zone`. Every short option of every tool is now
+  recorded as its long option, and the long option is what feeds metadata: kubectl (`-w`
+  watch, `-i` stdin or interactive, `-p` previous or patch, ...), helm (`-q` short, `-l`
+  labels or selector, `-a` all or api-versions, ...), flux (`-s` silent, `-u` username, ...),
+  gcloud (each reference page's short spellings), az (every `_params.py` of azure-cli,
+  `src/aegis_core/data/az_short_options.json`, written by `scripts/gen_az_short_options.py`;
+  where a command's `-n`, `-g` or `-l` is another option, such as `--account-name`, that
+  option names the target, group or location in either spelling) and git (`-D`, `-M`, `-C`
+  are `--delete`, `--move`, `--copy` with `--force`). argocd and gh already were. Tests check
+  that the short and long spellings give the same intents for every alias in the tables.
+  From each tool's source or reference pages; not run.
+- `argocd app create decoy --file - --upsert` was `app/decoy`, but argocd reads the
+  Applications from the file, a URL or stdin and ignores the name: the target is now `app/*`,
+  marked, with every field the line does not give unresolved. The other inputs that decide
+  targets were checked: kubectl `-f -` is a manifest nobody read, helm `-f -` leaves `set.*`
+  unresolved, `gh --input -` its fields, aws `file:///dev/stdin` every option, and gcloud
+  `--flags-file` is refused; az values read from `@file` or `@-` are now unresolved. From
+  source.
+- `argocd app sync payments --project dev` gave `app/payments` the project `dev`, though
+  `--project` only picks more apps to sync: the app named keeps its own (unknown) project, and
+  only the added selection has `project: dev` (and `-l` the selector). kubectl refuses a name
+  beside a selector, and now so does the parser (checked on kubectl 1.36); kubectl `run` and
+  `expose -l` is `--labels`. flux `--all` with names acts on the names only, as before.
+- `gh workflow run ... -F environment=prod -f environment=dev` was `dev`, the last on the
+  line, but gh reads every `-f` first and every `-F` after (cli v2.103 run.go and
+  api/fields.go), so `prod` wins. gh api now also builds nested keys and arrays (`a[b]=1`,
+  `a[]=1`) and refuses a key set twice, as gh does, and a dispatch body's inputs are the
+  porcelain's `inputs`. kubectl `run --overrides` patches the object after every flag, so
+  every key and the name are now unresolved (a `**` mark). helm's set order and aws's command
+  line over its input were already applied.
+- az short options in scopes built with `.format()`, `+`, f-strings or loop variables were
+  missed, and fell back to the letter: `az storage fs file delete -f fs -p prod` recorded `f`
+  and `p`. The generator now reads those scopes (1363 in all), and a short letter with no
+  entry for the command is refused, on az and on kubectl, helm, flux, argocd, gh and gcloud
+  alike. knack's `-y` (`--yes`) is one of az's own. git verbs without an option table no
+  longer record options as written (`git fetch -n` was read as a dry run): any option leaves
+  every param unresolved, and `filter-branch`'s refs are marked.
+- `gcloud compute instances delete safe -- prod` kept `prod` as a command to pass on, but
+  argparse reads it as a positional: both are targets now. Only `ssh` takes a command after
+  `--`; on a command outside the flag table `--` is refused. kubectl, helm, flux, argocd, gh
+  and git read the words after `--` as arguments, and aws and az refuse them, as before.
+- `argocd app create decoy --file - --project dev --upsert` kept `project: dev` beside the
+  mark that every key is unresolved, and the store let the recorded value decide, so a rule
+  on `project: prod` allowed it; argocd does not apply `--project` to apps read from stdin.
+  The parser no longer records the line's project or app namespace for apps from a file, and
+  the store no longer lets any recorded value, in metadata or params, decide a key marked
+  unresolved (by name, `*` or `**`, through `canonical_key`): the rule escalates. A key
+  `--resolve-current-context` fills is unmarked as it is filled. aws input from a file now
+  marks exactly the options the command line does not give, which it overrides.
+- `argocd app create -f application.yaml` was refused for want of a name: a file of
+  Applications needs none, and is now `app/*`, marked. `gh secret set DECOY --env-file -`
+  and `gh variable set DECOY -f .env` set every name in the dotenv input and ignore the one
+  on the line: `secret/*` / `variable/*`, marked; `gh secret set` with no `--body` reads the
+  value from stdin, which is unresolved. kubectl `-f`, helm and flux have no file that stands
+  for a target's name; az `@file` values are unresolved (round 6). From source.
+- `gcloud storage buckets delete gs://prod` was `storage/bucket/gs://prod`. A `gs://` URI is
+  the bucket (and its object the `key`) on every gcloud storage command, as on `storage rm`,
+  wildcards marked the same way. `--read-paths-from-stdin` / `-I` on any storage command adds
+  `storage/bucket/*`. Every `kind/*` target, from any parser, now carries the runtime mark,
+  added in one place (`mark_unknown_names`), so no command can leave one unmarked:
+  `gcloud storage buckets update --read-paths-from-stdin` was an unmarked `storage/bucket/*`
+  (ALLOW against a rule on one bucket), and a list such as `kubectl get pods` is marked now
+  too. The other URI spellings were checked: aws `s3://` and s3api `--bucket` already meet,
+  az IDs and gh URLs are names already, and helm `oci://` and flux `--url` are not targets.
+- `kubectl delete pod api --namespace=` recorded the namespace `""` as given, but client-go
+  ignores an empty override and uses the context's. An empty value for any scope a tool takes
+  from its configuration (`--namespace=`, `-n ""`, `--context=`, `--cluster=`,
+  `--kube-context=`, argocd `--server=`, aws `--region ""` and `--profile ""`, gcloud
+  `--project=` and `--zone=`, az `--subscription ""` and `-g ""`) is now removed in one place
+  (`mark_config_scope`), so the key is unresolved as if it were not given. gh refuses `-R ""`.
+- `gh api ... -F 'ref={branch}'` recorded the text `{branch}`: gh fills `{owner}`, `{repo}` and
+  `{branch}` (and `:owner`, ...) in `-F` values from the current repository when it runs
+  (fields.go). Such a field is now unresolved, and so is the `ref` taken from it. git's own
+  substitutions were checked too: `git push origin @{u}` (`@{push}`, `@{-1}`, `-`) pushes a
+  ref only git knows, now an unknown target, and `git branch -d -` or `@{-1}` is
+  `branch/*`, marked. helm, kubectl and az substitute nothing in targets.
+- az recorded an abbreviated long option under the abbreviation: `--node-c 1` was `node-c`.
+  knack inherits argparse's allow_abbrev, so every az long option is now resolved by unique
+  prefix against the command's full option list, and one that is neither an exact option
+  nor a unique prefix of one is refused. The generator (`az_short_options.json`) reads each
+  command's options from `_params.py` (its helper functions too), from the function the
+  command runs (a custom function without `**kwargs` gives exactly its options, spelled as
+  `_params.py` spells them), from AAZ command classes and from generic update commands;
+  storage's data-plane account options are added. A command whose options are all known uses
+  only its own, so an option declared for a parent group does not apply to it; for any
+  other the group's options are included, and a prefix ambiguous among them is refused. A
+  test parses 35 everyday commands from the az reference written with full option names.
+  aws already resolved prefixes; gcloud disables them and gsutil uses getopt. `az aks
+  upgrade` is now read (an update) instead of refused.
+- `gcloud storage cp /tmp/secret gs://prod/backup/` recorded the key `backup/`, but the object
+  written is `backup/secret`. A copy or move into a folder (a destination ending in `/`, or a
+  bucket alone) now writes the prefix plus the source's base name, on gcloud storage, gsutil
+  and aws s3 alike. Where the object depends on what the tool finds when it runs, the key is
+  unresolved: several sources, `-r`/`--recursive`, paths from stdin, and on gcloud and gsutil
+  a destination without the slash, which they treat as a folder when objects under it exist
+  (aws never does). `az storage blob upload` is not a modelled command and is refused.
+- Siblings of earlier fixes. `argocd app delete -l team=payments -N dev` gave the selection
+  namespace `dev`, but delete lists the selector's apps in every namespace
+  (getAppNamesBySelector) and deletes each by its qualified name: the selection's
+  `app_namespace` is unresolved now (sync's list does take `-N`). `git branch -f '@{-1}'`
+  and `git branch -m '@{-1}' new` recorded `branch/@{-1}`: every git name operand now goes
+  through one helper, so a name git resolves (`@{-1}`, `-`, `HEAD`) is `kind/*`, marked, on
+  branch create, reset, rename, copy and upstream, tag and push; `rebase`, `reset --hard`
+  and `commit --amend` also reach the current branch (`history/*`, marked).
+  `gcloud storage rm gs://prod/secret#123456789` (and gsutil, and a copy's source) kept
+  `#123456789` in the key: it is the object's generation, now a `generation` param, with
+  the key `secret`. `gcloud compute instances delete web --project acme-prod` left the zone
+  unmarked: gcloud zone and account, aws account, the kubeconfig user (now recorded from
+  `--user`) and gh's host joined the table of scopes taken from the configuration, so every
+  one of them is unresolved when absent. `docs/dev/parser-audit.md` lists every class of
+  finding from the review rounds against every tool, and `tests/test_parser_audit.py` checks
+  each cell that applies. From source; not run.
+- `argocd app sync a --resource x --resource y` kept only `y`, and helm `--history-max 0x0`
+  was recorded as text. Every flag of kubectl, helm, flux, argocd and gh is now read by the
+  pflag type its registration gives it (`src/aegis_core/data/pflag_types.json`, written by
+  `scripts/gen_pflag_types.py` from each tool's source, with the type each command gives a
+  flag whose type differs between commands): a StringArray accumulates every value, a
+  StringSlice every value split as CSV, an Int is read with base 0, a Duration with
+  time.ParseDuration and recorded in seconds (`--timeout 5m` and `300s` are both 300), a
+  Float with ParseFloat, a StringToString as a map, a Count counts; what pflag refuses is
+  refused. The store meets a rule against each value of a repeated flag, and reads a rule's
+  value for a typed flag with the same normalizer the parser used (`normalize_typed`,
+  matched through `canonical_key`): a rule `timeout: "5m"` (or `"300s"`, `"5m0s"`, `300`)
+  blocks `--timeout 300s`, `history-max: "0x0"` meets 0, `install: "0"` meets
+  `--install=false`, and `labels: "a=1,b=2"` meets the same map. A rule value the flag's
+  type cannot hold (`timeout: "soon"`) is neither a match nor a miss: the rule escalates, as
+  for any value the store cannot decide (scope values are not typed when a rule is loaded,
+  so it is not rejected then). Booleans now read Go's spellings (`1`, `t`, `0`, `f`) on both
+  sides. From source.
+- `git -c remote.origin.push=+refs/heads/safe:refs/heads/prod push origin safe` was a push to
+  `ref/safe`: git maps a refspec with no destination through `remote.<name>.push` (with its
+  `+`) or push.default's upstream, from any config file (push.c refspec_append_mapped). A
+  source-only refspec's destination is now unknown (the source stays `ref/<source>`), and a
+  `-c remote.<name>.push` on the line is applied as git applies it, force included. This
+  means a rule on any other ref now escalates for `git push origin <branch>`: only
+  `src:dst` names the destination. From source.
+- az refused `--tags owner=ops env=prod`, `--set a=1 b=2` and `--zones 1 2 3`. Each az option's
+  `nargs` (`+`, `*`, `?`) or `action='append'` is now read from `_params.py`, the argument
+  types (`tags_type`, `zones_type`) and AAZ list and dict arguments, with the generic update's
+  `--set/--add/--remove`, and the option takes every word up to the next option, as argparse
+  does; the everyday az sample gained six multi-value commands, all parsed. aws list
+  parameters already took every word. gcloud ArgList and ArgDict values (`--tags a,b`,
+  `--labels k=v,k2=v2`, and the `^X^` delimiter) are now a list or a map, so a rule on
+  `labels.env` meets them. From source and the gcloud reference.
+- Values were typed by how they look: `aws s3api delete-object --key 001` was the key `1`
+  and the target `s3/object/production/1`, and gcloud `--description 001` the number 1. A
+  value is now typed only by the type the tool declares for it, and otherwise kept exactly as
+  written: aws by its botocore shape (integer and long with int(), float and double with
+  float(), list members by their type; the option table now records each shape), az by a
+  declared `type=int`/`float`, gcloud as text (its reference pages declare no number types)
+  with ArgList and ArgDict split, the pflag tools by their registered types, git as text,
+  helm and argocd rollback revisions as Go's Atoi. helm `--set` (strvals typedVal) and gh
+  `-F` keep their own typing, which the tools declare. Every site is listed in
+  `docs/dev/parser-audit.md` (C27). A target built from a value uses its exact text.
+- helm 4's `--wait` is a custom pflag value: bare `--wait` is `watcher`, `--wait=false` is
+  `hookOnly` (flags.go waitValue.Set), and it was read as a boolean. It is now read as helm
+  4 reads it, and because helm 3 reads it as a boolean and which helm runs is not on the
+  line, `wait` is also unresolved, so a rule on it escalates. The pflag generator now lists
+  every custom value of kubectl, helm, flux, argocd and gh, resolves each by what its Set()
+  does, and fails on one it does not know. Slice and map types register their element type
+  (an argocd `--source-positions` Int64Slice), and the store normalizes each element of a
+  rule's value; a test checks every type in the table has a normalization. gcloud's
+  `^DELIM^` escaping takes a delimiter of any length (`^--^env=prod--team=x`). From source.
+- `kubectl create secret generic settings` was two targets, `secret/generic` and
+  `secret/settings`: the subcommand word of `create secret|service <type>` is no longer a
+  name. With `--append-hash` kubectl names the object `settings-<hash of its data>`, from
+  files it reads when it runs: the target is now `secret/settings-*`, marked with that
+  prefix (configmaps too). aws `--generate-cli-skeleton` calls nothing and is a rehearsal.
+- aws `--instance-ids '["i-1"]'` was refused, and `--tags Key=a,Value=b` kept as text.
+  Structure, map and list values are now decoded as aws-cli's argprocess does: JSON when the
+  value (or a list's one value) starts with `[` or `{`, aws-cli's shorthand syntax
+  otherwise (its parser, vendored from aws-cli 2.37.4 as `aegis_core/aws_shorthand.py`,
+  Apache-2.0), typed by the botocore shapes, which the option table now records; a member a
+  shape does not have, or a value aws cannot decode, is refused. Targets come from the
+  decoded values. Run with aws 2.37.
+- az `--tags env=prod` stayed a list, though az's `tags_type` validator makes it a map.
+  Each az argument's converter is now read from `_params.py` and applied: `tags_type` (a
+  map, a bare key an empty value), `get_three_state_flag` (a boolean), `get_enum_type` (a
+  declared choice, matched without case; another value refused). A value whose argument
+  has another validator, not ported, is unresolved. From azure-cli source.
+- gcloud `--num-nodes 03` stayed `"03"`, the reference pages carrying no types. Each value
+  flag's type is now read from the SDK source mirror
+  (github.com/google-cloud-sdk-unofficial/google-cloud-sdk, its commit recorded in
+  `gcloud_flags.json`): int and BoundedInt, float, ArgBoolean, BinarySize (in bytes:
+  `10GB`, `10240MB` and a bare `10` are equal), Duration (in seconds, gcloud's ISO
+  parser) and ArgList element types, ported from calliope's arg_parsers; the store reads a
+  rule's value the same way. A type that cannot be read statically leaves the value
+  unresolved. From the SDK source; gcloud was not run.
+- Tests that used `flux reconcile ... --dry-run`, `flux get ... --export` and `git push
+  --dry-run=false`, which the tools refuse, now use commands the tools accept (`flux create ...
+  --export`, `git push --dry-run --no-dry-run`).
+- `kubectl logs web secret -c public` reads container `secret`: kubectl takes a second word
+  as the container over `-c` (logs.go Complete). It was read as `public`. A third word is
+  refused, as kubectl refuses it. From kubectl 1.36 source.
+- `gh api --hostname staging.example https://api.github.com/repos/acme/prod/...` acts on
+  github.com's `acme/prod`: an absolute URL names the host and the repository whatever
+  `--hostname` says. `gh api` has no `-R`/`--repo` and gh refuses it; the parser read it as
+  the repository over the path's, and now refuses it too. Another host is a GitHub Enterprise Server, so
+  `https://ghe.corp/api/v3/repos/acme/prod/...` is `ghe.corp/acme/prod` and no longer meets a
+  rule on github.com's `acme/prod`.
+- kubectl `--server`/`-s`, helm `--kube-apiserver` and flux `--server` send the request to
+  that URL, whatever cluster the context or `--cluster` names. The URL is recorded as `server`
+  and the cluster is unresolved; `resolve_current_context` no longer fills it from the
+  kubeconfig then. aws `--endpoint-url` (and `$AWS_ENDPOINT_URL`, `$AWS_ENDPOINT_URL_<SVC>`
+  when filling from the environment) leaves account and region unresolved, since the endpoint
+  need not be the region's.
+- az `--tags @tags.txt` was converted as the literal tag `@tags.txt` before the `@file` check,
+  and a rule on `tags.env` did not escalate. A value az reads from a file or stdin is now
+  found first, the key and every key nested in it (`tags.*`) are unresolved, and only literal
+  values are converted. az also loads an `@file` after the first `=` of a value
+  (`--tags env=@.git`), and every spelling (`--tags=@f`) goes through the same check. aws reads `file://` before JSON or shorthand on a list option too
+  (`--tags file://t.json` was refused as bad shorthand), marking the key and its nested keys,
+  and kubectl `create configmap|secret --from-file`/`--from-env-file` leave `data` and
+  `data.*` unresolved.
+- `kubectl delete pod harmless -n dev --raw=/api/v1/namespaces/prod/pods/protected` deletes
+  `prod`'s `protected`: kubectl sends one DELETE to the raw path and ignores the other words,
+  `-n` and `--dry-run`. It was read as a delete of `harmless` in `dev`. kubectl `get`,
+  `create`, `replace` and `delete --raw` (the verbs that have it; apply has none and is
+  refused) now read the target, namespace and collection from the path; a subresource, a
+  non-resource path, a query or an escaped, empty or dot segment is refused, and create and
+  replace need exactly one `-f`. `kubectl get --raw` of a kind's path is now read as a read
+  of that kind instead of refused. From kubectl 1.36 source. `az rest` stays refused.
+- `aws s3 cp --metadata classification=secret` stayed text, so a rule on
+  `metadata.classification` did not meet it. The options of the high-level `aws s3` commands
+  now come from aws-cli 2.37.4's own s3 argument tables (generated, not written by hand) and
+  are read as aws-cli reads them: `--metadata` a map from shorthand or JSON, `--page-size` and
+  `--progress-frequency` integers, choices checked exactly (`--sse AES` is refused), a bare
+  `--sse` or `--request-payer` its default, `--include`/`--exclude` an ordered `filters` list
+  (before, only the last was kept), `mb --tags` a map, and a store-true option given a value
+  refused.
+  `--expires` and the `--content-*` and `--sse-*` values are plain strings in aws-cli and stay
+  text. Checked against aws 2.37.4.
+- `gcloud compute instances create --metadata-from-file enable-oslogin=oslogin.txt` sets
+  `metadata.enable-oslogin` to the file's contents, which are not read; a rule on it did not
+  escalate. Every gcloud flag named `*-from-file` or `*-file`, or typed as file contents in the
+  SDK source, now leaves the setting it fills unresolved (`metadata.<key>` for each key given,
+  `labels.*` for `--labels-file`, the env vars for `--env-vars-file`). The gcloud table's types
+  were refreshed from the same SDK commit with `--types-only`, which keeps the flag lists.
+- `kubectl delete --raw /api/v1/namespaces/prod` did not get the namespace cascade that
+  `kubectl delete namespace prod` gets, so a `*/*` rule on namespace `prod` allowed it. A raw
+  path's target now goes through the same expansions as a target named by words, and the flags
+  kubectl does not send with `--raw` (`--cascade`, `--grace-period`, `--force`, `--all`, `-l`,
+  `--dry-run`) are dropped; `--raw` on a category such as `all` is refused.
+- `gh api 'repos/acme/prod#ignored' -X DELETE` kept `#ignored` in the target. URL and path
+  targets are now read as the tool's HTTP client sends them: gh drops the fragment, keeps the
+  query apart, and the server decodes the path (`pr%6Fd` is `prod`); a trailing slash is
+  dropped; `//`, `.` or `..` segments, an escaped slash and a scheme other than http(s) are
+  refused. gh repository, pull request and issue URLs, gcloud resource URIs and az `--ids`
+  are read the same way (az refuses `#`, `?` and `%` in an ID, which the request URL would
+  read).
+- `gcloud run deploy --container app --image forbidden --container sidecar --image safe` was
+  read as image `safe` only. Flags after each `--container` now belong to that container
+  (`containers.<name>.image`), the plain key holds every container's value, so a rule on
+  `image` meets any container, and gcloud's misplacements (a container flag before the first
+  `--container`, another flag inside one) are refused. A rule on a key of a repeated group
+  now meets each group (`create-disk.image`, `network-interface.network`).
+- `helm upgrade -f values.yaml --set 'hosts[0]=safe'` keeps the file's other hosts (helm sets
+  one list index into the file's list), but `set.hosts` was read as `[safe]` and known. With
+  values files, reused values or a rollback, every list a `--set` writes an index into and
+  every map it writes a nested key into is now unresolved as a whole; a value set whole (a
+  scalar, a `{a,b}` list) stays known.
+- `git push -o a -o b` kept only `b`. git options given several times now keep every value:
+  push `-o`/`--push-option` and `--force-with-lease`, commit and tag `-m` and `--trailer`,
+  branch and tag filters and `--sort`, rebase `-x` and `-X`.
+- `gsutil mv gs://prod/oldprefix gs://archive/newprefix` moves everything under the prefix
+  (a move is recursive without `-r`, in gsutil and in gcloud storage), but only the key
+  `oldprefix` was read. A recursive or wildcard key is now a prefix: a rule on a key that may
+  start with it escalates, and a rule on an unrelated key no longer does (gsutil, gcloud
+  storage, aws s3 `--recursive` and sync, before every key escalated). The destination of a
+  recursive move or copy is a prefix too.
+- `gh pr create -t Fix -b Desc` and `gh pr edit 42 -t Fix` were refused: gh's short letters
+  came from a hand table of a few commands. Every gh command's flags and letters now come
+  from cli/cli's own registrations (`gh_flags.json`, generated), `-R` only where gh registers
+  it. helm's per-command letters come from its registrations too (`helm pull -d` is
+  `--destination`), and `helm repo add|update|remove|list` and `helm pull` are read (the
+  local repository list and a chart download). Everyday gh, helm, flux, argocd and kubectl
+  commands written with short flags parse, and flux and argocd letters are checked against
+  the generated registrations.
+- kubectl's short letters and its boolean and value flags now come from `kubectl <command>
+  --help` of every command (`kubectl_flags.json`, generated), each command with its own
+  letters: a letter the command does not have is refused, as kubectl refuses it (`kubectl
+  exec -A`, `kubectl create deployment -q` were read before), and a short word from `-test.`
+  is ignored, as pflag ignores it (it was read as `-t -e st...`).
+- `kubectl expose deployment harmless --name=protected` creates the Service `protected`, but
+  only `deployment/harmless` was read. expose now also yields a Service create intent and
+  autoscale a HorizontalPodAutoscaler one (named by `--name` or after the source, in its
+  namespace; `--overrides` leaves every key unresolved), create token a ServiceAccount one,
+  and `gh pr merge --delete-branch` a delete of the head branch, marked, since the argv does
+  not name it.
+- `gh pr merge --merge --squash --squash=false` was read as a squash. gh's method now comes
+  from each flag's final value, and flags gh allows only one of (`--merge`/`--rebase`/
+  `--squash`, `--auto`/`--disable-auto`/`--admin`, repo create's visibility) are refused
+  together. helm `--atomic` and `--rollback-on-failure` leave `wait` unresolved, since they
+  turn waiting on.
+- `gcloud run deploy --args forbidden --args safe` kept only `safe`. Each gcloud flag's
+  argparse action is now read from the SDK and applied: UpdateAction keeps every value (and
+  refuses a repeated one), `append` keeps each, StoreOnceAction refuses a repeat, and a plain
+  store keeps the last (a repeated map flag was a list before).
+- `gcloud ... --accelerator type=nvidia-tesla-t4,count=01` kept `count` as `01`. ArgDict members
+  are now typed by the SDK's spec, on the rule side too, and a member the spec does not
+  declare, or a missing required one, is refused. Where the spec is not read statically
+  (`container clusters create --addons`, `update --update-addons`), the flag and every member
+  are unresolved.
+- A prefix mark (`inputs.*`, `tags.*`, `data.*`) spared every key the command recorded under
+  it, an exception meant only for helm's `set.*`. `gh api -X PATCH repos/acme/prod --input
+  body.json -F delete_branch_on_merge=false` was read as setting it to `false`, but gh sends the
+  file as the body and moves the fields into the URL query, so the file's value applies. A
+  prefix mark now covers recorded keys too, except helm's `set.*` for keys `--set` replaced
+  outright, and gh api's fields with `--input` are recorded as `api_query`.
+- `kubectl expose --overrides='{"metadata":{"name":"protected"}}'` can rename the new Service:
+  with `--overrides` the Service is now `service/*`, marked. expose's default name is the
+  source's cut to 63 characters, as kubectl cuts it.
+- gcloud storage `--update-labels env=prod` was read as a list, because the reference page and
+  the SDK disagreed on its shape. The SDK's map or list type now wins, a shape still in doubt
+  is unresolved (compute firewall-rules `--rules`), and the generator fails on a disagreement
+  left without a resolution (32 flags disagreed; 30 follow the SDK now).
+- `helm upgrade --reset-values --set config.public=safe --set-file config.secret=/dev/null`
+  recorded `set.config` as `{public: safe}`, and a rule comparing `set.config` whole was
+  decided on it. A key with any unresolved key under it is now unresolved when a rule compares
+  it, or any key above it, whole, for every tool.
+- `aws iam delete-role --role-name protected` did not meet a rule on `role-name`: the flag
+  named the target and was not kept. A flag that names the target is now in params too (aws
+  target and id flags, az `--name` and the name of an `--ids` path), and a rule written with
+  `location`, `kube-context` or `kube-apiserver` meets the scope key those are recorded under
+  (`region`, `context`, `server`). docs/constraints.md describes the one mechanism.
+- `git push --exec=X --receive-pack=Y` kept both: they are one option. Several names of one
+  option are now one key, the values in order, every name holding it: git (`--exec`, `--with`,
+  `--without`), az (each options_list's long names, generated; a one-string options_list was
+  read as none before, which gave 197 commands wrong long options), aws (argrename's hidden
+  aliases), helm 4 (`--force`, `--atomic`, `--colour`) and gh (`--confirm`), generated from the
+  registrations.
+- `helm uninstall web -n prod --kube-as-user admin` impersonates `admin`, but the flag was
+  dropped. No flag is dropped now: each is recorded, or is one of a tool's documented no-effect
+  flags (output format, verbosity, colour, rate limits, help). helm, flux and kubectl
+  impersonation is one structure with one `impersonate` intent per identity; auth, TLS,
+  endpoint and kubeconfig flags of kubectl, helm, flux, argocd and aws are recorded (a token's
+  value as `[secret]`); gsutil's `-h` headers (`x-goog-meta-*` as `metadata.*`), `-u` and `-i`
+  are recorded and `-o` leaves every key unresolved; gcloud `--impersonate-service-account`
+  and gsutil `-i` are an impersonate intent on the service account. A test checks every flag
+  of every generated table, on every command of the gh, az, aws and gcloud tables (over 230,000
+  flag uses); it found az options that are another command's `-n`, `-g` or `-l` (`--service-name`)
+  read as the name but not kept under their own names, and aws s3control `--bucket`, hidden
+  aliases and autoscaling `--auto-scaling-group-name` not kept; all are now.
+- aws `modify-instance-attribute --instance-id i-1` was recorded under `instance-ids`; each flag
+  now keeps its own name.
+- aws `modify-instance-attribute --disable-api-termination` was refused: aws-cli turns that
+  `{"Value": bool}` structure into `--x`/`--no-x` switches. They are now generated from aws-cli
+  and read as aws reads them. Everyday aws commands parse.
+- az `--ids` with no ID after it and flux `--dry-run` (which flux refuses) were accepted; both
+  are refused now, as the tools refuse them.
+- `argocd app create dev/protected -N prod` creates the app in `prod`: create sets `-N` over the
+  qualified name, the other way round from every other verb. And `argocd app create decoy
+  ignored --name protected` creates `protected`: one word is the name, with none or several
+  `--name` is. Both are now read per verb from argocd's source, and verbs that take exactly
+  one app refuse more. helm's argument counts now come from each command's cobra validator
+  (generated), so `helm upgrade a ./c extra` and `helm status a b` are refused, and `helm pull`
+  takes several charts.
+- `git rebase --update-refs main feature` also rewrites other branches, and rebase.updateRefs
+  in a config file can turn it on: every rebase now also rewrites `history/*`, marked, unless
+  `--no-update-refs`. A pull may be a rebase (pull.rebase), and a push may push submodules
+  (push.recurseSubmodules): both are now marked unless the command line says otherwise.
+- gh commands that change more than they name: `pr close -d` deletes the head branch,
+  `issue transfer` creates the issue in the target repository (the second argument gh reads,
+  whatever flags come before it), `release delete --cleanup-tag`
+  deletes the tag, `label clone` writes the destination's labels, `repo rename` takes the new
+  name, and `cache delete` names the cache or every cache.
+- `az group update --tags env=safe --set tags.env=prod` ends with `env=prod`: az's generic
+  update applies `--set`, `--add` and `--remove` after the typed arguments, in order, as
+  argparse resolved them (an abbreviation such as `--se` included). A tags path writes the tags
+  map; any other path leaves that property unresolved. gcloud's `--update-labels`,
+  `--remove-labels` and `--clear-labels` are combined as gcloud combines them.
+- `kubectl apply -f desired.yaml --prune -l app=web -n prod` also deletes the objects it applied
+  before that the selector matches and the manifest no longer has: a delete rule on one of them
+  was allowed. A prune is now a delete of each kind it may prune (`--prune-allowlist`, or
+  kubectl's default kinds), marked, with the namespace unresolved; `--prune --applyset`, whose
+  members only the cluster knows, and `--prune` without `-l` or `--all`, which kubectl refuses,
+  are refused.
+
+### Added
+- A `NOTICE` file at the repository root lists the third-party code and data in the package
+  and the logic ported from other projects, with their copyright notices and the license
+  texts that require it: aws-cli's shorthand parser (which keeps aws-cli's copyright header,
+  followed by a note of what was changed), the botocore, azure-cli, Google Cloud SDK and pflag
+  registration data, and logic ported from permissively licensed code (Helm strvals, Go
+  strconv and time, pflag, gcloud calliope, azure-cli, GitHub CLI). Behaviour taken from
+  documentation or from running a tool (kubectl, aws-cli, knack, git) is listed separately:
+  no git code is included or translated. It ships in the sdist and wheel (`license-files`).
+  The generated `pflag_types.json` records its sources as upstream repository and tag or
+  commit, and its generator refuses to write a local path.
+
 ## [1.3.4] — 2026-11-07
 
 kubectl, helm and flux flag spellings are read as the tools read them: a repeated `--dry-run`,

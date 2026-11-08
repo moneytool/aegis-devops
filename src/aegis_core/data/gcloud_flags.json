@@ -1,0 +1,4862 @@
+{
+ "_source": "https://cloud.google.com/sdk/gcloud/reference (fetched 2026-11-08); value types from github.com/google-cloud-sdk-unofficial/google-cloud-sdk 3dfad14e7f5495f14b555f3dbc148f59f9518f72",
+ "compute disks add-iam-policy-binding": {
+  "actions": {
+   "zone": "unresolved"
+  },
+  "alias": {},
+  "bool": [],
+  "dict": [
+   "condition"
+  ],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "role": "unresolved"
+  },
+  "value": [
+   "condition",
+   "condition-from-file",
+   "member",
+   "role",
+   "zone"
+  ]
+ },
+ "compute disks create": {
+  "actions": {
+   "labels": "unresolved",
+   "region": "unresolved",
+   "resource-manager-tags": "unresolved",
+   "zone": "unresolved"
+  },
+  "alias": {},
+  "bool": [
+   "confidential-compute",
+   "require-csek-key-create"
+  ],
+  "dict": [
+   "labels",
+   "resource-manager-tags"
+  ],
+  "list": [
+   "guest-os-features",
+   "licenses",
+   "replica-zones",
+   "resource-policies"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "labels": "dict",
+   "licenses": "list:str",
+   "provisioned-iops": "int",
+   "provisioned-throughput": "int",
+   "replica-zones": "list:str",
+   "resource-manager-tags": "dict",
+   "resource-policies": "list:str",
+   "size": "unresolved",
+   "type": "unresolved"
+  },
+  "value": [
+   "access-mode",
+   "architecture",
+   "csek-key-file",
+   "description",
+   "guest-os-features",
+   "image",
+   "image-family",
+   "image-family-scope",
+   "image-project",
+   "kms-key",
+   "kms-keyring",
+   "kms-location",
+   "kms-project",
+   "labels",
+   "licenses",
+   "primary-disk",
+   "primary-disk-project",
+   "primary-disk-region",
+   "primary-disk-zone",
+   "provisioned-iops",
+   "provisioned-throughput",
+   "region",
+   "replica-zones",
+   "resource-manager-tags",
+   "resource-policies",
+   "size",
+   "source-disk",
+   "source-disk-region",
+   "source-disk-zone",
+   "source-instant-snapshot",
+   "source-snapshot",
+   "storage-pool",
+   "type",
+   "zone"
+  ]
+ },
+ "compute disks delete": {
+  "actions": {
+   "region": "unresolved",
+   "zone": "unresolved"
+  },
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "region",
+   "zone"
+  ]
+ },
+ "compute disks describe": {
+  "actions": {
+   "region": "unresolved",
+   "zone": "unresolved"
+  },
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "region",
+   "zone"
+  ]
+ },
+ "compute disks list": {
+  "actions": {},
+  "alias": {
+   "r": "regexp"
+  },
+  "bool": [
+   "uri"
+  ],
+  "dict": [],
+  "list": [
+   "regions",
+   "sort-by",
+   "zones"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "limit": "unresolved",
+   "regions": "list:str",
+   "zones": "list:str"
+  },
+  "value": [
+   "filter",
+   "limit",
+   "page-size",
+   "r",
+   "regexp",
+   "regions",
+   "sort-by",
+   "zones"
+  ]
+ },
+ "compute disks remove-iam-policy-binding": {
+  "actions": {
+   "zone": "unresolved"
+  },
+  "alias": {},
+  "bool": [
+   "all"
+  ],
+  "dict": [
+   "condition"
+  ],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "role": "unresolved"
+  },
+  "value": [
+   "condition",
+   "condition-from-file",
+   "member",
+   "role",
+   "zone"
+  ]
+ },
+ "compute disks resize": {
+  "actions": {
+   "region": "unresolved",
+   "zone": "unresolved"
+  },
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "size": "unresolved"
+  },
+  "value": [
+   "region",
+   "size",
+   "zone"
+  ]
+ },
+ "compute disks set-iam-policy": {
+  "actions": {
+   "zone": "unresolved"
+  },
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "zone"
+  ]
+ },
+ "compute disks update": {
+  "actions": {
+   "append-licenses": "update",
+   "region": "unresolved",
+   "remove-licenses": "update",
+   "replace-license": "update",
+   "zone": "unresolved"
+  },
+  "alias": {},
+  "bool": [
+   "clear-architecture",
+   "clear-labels"
+  ],
+  "dict": [
+   "update-labels"
+  ],
+  "list": [
+   "append-licenses",
+   "remove-labels",
+   "remove-licenses",
+   "replace-license"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "append-licenses": "list:str",
+   "provisioned-iops": "int",
+   "provisioned-throughput": "int",
+   "remove-licenses": "list:str",
+   "replace-license": "list:str",
+   "size": "unresolved"
+  },
+  "value": [
+   "access-mode",
+   "append-licenses",
+   "provisioned-iops",
+   "provisioned-throughput",
+   "region",
+   "remove-labels",
+   "remove-licenses",
+   "replace-license",
+   "size",
+   "update-architecture",
+   "update-labels",
+   "zone"
+  ]
+ },
+ "compute firewall-rules create": {
+  "actions": {
+   "network": "unresolved",
+   "resource-manager-tags": "unresolved"
+  },
+  "alias": {},
+  "bool": [
+   "disabled",
+   "enable-logging",
+   "no-enable-logging"
+  ],
+  "dict": [
+   "resource-manager-tags"
+  ],
+  "list": [
+   "allow",
+   "destination-ranges",
+   "rules",
+   "source-ranges",
+   "source-service-accounts",
+   "source-tags",
+   "target-service-accounts",
+   "target-tags"
+  ],
+  "optional": [],
+  "shape_unresolved": [
+   "rules"
+  ],
+  "specs": {},
+  "types": {
+   "action": "unresolved",
+   "direction": "unresolved",
+   "priority": "unresolved",
+   "resource-manager-tags": "dict",
+   "target-service-accounts": "list:str"
+  },
+  "value": [
+   "action",
+   "allow",
+   "description",
+   "destination-ranges",
+   "direction",
+   "logging-metadata",
+   "network",
+   "priority",
+   "resource-manager-tags",
+   "rules",
+   "source-ranges",
+   "source-service-accounts",
+   "source-tags",
+   "target-service-accounts",
+   "target-tags"
+  ]
+ },
+ "compute firewall-rules delete": {
+  "actions": {},
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": []
+ },
+ "compute firewall-rules describe": {
+  "actions": {},
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": []
+ },
+ "compute firewall-rules list": {
+  "actions": {},
+  "alias": {
+   "r": "regexp"
+  },
+  "bool": [
+   "uri"
+  ],
+  "dict": [],
+  "list": [
+   "sort-by"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "limit": "unresolved"
+  },
+  "value": [
+   "filter",
+   "limit",
+   "page-size",
+   "r",
+   "regexp",
+   "sort-by"
+  ]
+ },
+ "compute firewall-rules update": {
+  "actions": {},
+  "alias": {},
+  "bool": [
+   "disabled",
+   "enable-logging",
+   "no-enable-logging"
+  ],
+  "dict": [],
+  "list": [
+   "allow",
+   "destination-ranges",
+   "rules",
+   "source-ranges",
+   "source-service-accounts",
+   "source-tags",
+   "target-service-accounts",
+   "target-tags"
+  ],
+  "optional": [],
+  "shape_unresolved": [
+   "rules"
+  ],
+  "specs": {},
+  "types": {
+   "priority": "unresolved",
+   "target-service-accounts": "list:str"
+  },
+  "value": [
+   "allow",
+   "description",
+   "destination-ranges",
+   "logging-metadata",
+   "priority",
+   "rules",
+   "source-ranges",
+   "source-service-accounts",
+   "source-tags",
+   "target-service-accounts",
+   "target-tags"
+  ]
+ },
+ "compute instances add-iam-policy-binding": {
+  "actions": {
+   "zone": "unresolved"
+  },
+  "alias": {},
+  "bool": [],
+  "dict": [
+   "condition"
+  ],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "role": "unresolved"
+  },
+  "value": [
+   "condition",
+   "condition-from-file",
+   "member",
+   "role",
+   "zone"
+  ]
+ },
+ "compute instances create": {
+  "actions": {
+   "address": "unresolved",
+   "create-disk": "append",
+   "disk": "unresolved",
+   "labels": "unresolved",
+   "local-ssd": "append",
+   "maintenance-policy": "unresolved",
+   "metadata": "once",
+   "network": "unresolved",
+   "network-interface": "append",
+   "network-performance-configs": "append",
+   "resource-manager-tags": "unresolved",
+   "subnet": "unresolved",
+   "zone": "unresolved"
+  },
+  "alias": {},
+  "bool": [
+   "async",
+   "boot-disk-auto-delete",
+   "can-ip-forward",
+   "confidential-compute",
+   "custom-extensions",
+   "deletion-protection",
+   "enable-display-device",
+   "enable-nested-virtualization",
+   "enable-uefi-networking",
+   "erase-windows-vss-signature",
+   "expose-host-topology",
+   "graceful-shutdown",
+   "identity-certificate",
+   "no-address",
+   "no-enable-nested-virtualization",
+   "no-enable-uefi-networking",
+   "no-expose-host-topology",
+   "no-identity-certificate",
+   "no-public-ptr",
+   "no-public-ptr-domain",
+   "no-scopes",
+   "no-service-account",
+   "no-skip-guest-os-shutdown",
+   "preemptible",
+   "public-ptr",
+   "require-csek-key-create",
+   "restart-on-failure",
+   "shielded-integrity-monitoring",
+   "shielded-secure-boot",
+   "shielded-vtpm",
+   "skip-guest-os-shutdown"
+  ],
+  "dict": [
+   "accelerator",
+   "create-disk",
+   "disk",
+   "labels",
+   "local-ssd",
+   "metadata",
+   "metadata-from-file",
+   "network-interface",
+   "network-performance-configs",
+   "resource-manager-tags"
+  ],
+  "list": [
+   "resource-policies",
+   "scopes",
+   "tags"
+  ],
+  "optional": [],
+  "specs": {
+   "accelerator": {
+    "key_only": false,
+    "members": {
+     "count": "int",
+     "type": null
+    },
+    "required": []
+   },
+   "create-disk": {
+    "key_only": false,
+    "members": {
+     "architecture": null,
+     "auto-delete": "bool",
+     "boot": "bool",
+     "confidential-compute": "bool",
+     "description": null,
+     "device-name": null,
+     "disk-resource-policy": "list:str",
+     "image": null,
+     "image-csek-key-file": null,
+     "image-family": null,
+     "image-project": null,
+     "interface": null,
+     "kms-key": null,
+     "kms-key-service-account": null,
+     "kms-keyring": null,
+     "kms-location": null,
+     "kms-project": null,
+     "labels": "list:str",
+     "mode": null,
+     "multi-writer": "bool",
+     "name": null,
+     "on-update-action": null,
+     "provisioned-iops": "int",
+     "provisioned-throughput": "int",
+     "replica-zones": "list:str",
+     "size": "size:G",
+     "source-instant-snapshot": null,
+     "source-snapshot": null,
+     "source-snapshot-csek-key-file": null,
+     "source-snapshot-region": null,
+     "storage-pool": null,
+     "type": null
+    },
+    "required": []
+   },
+   "disk": {
+    "key_only": false,
+    "members": {
+     "auto-delete": "bool",
+     "boot": "bool",
+     "count": "int",
+     "device-name": null,
+     "force-attach": "bool",
+     "interface": null,
+     "mode": null,
+     "name": null,
+     "scope": null,
+     "size": "unresolved",
+     "type": "unresolved"
+    },
+    "required": []
+   },
+   "local-ssd": {
+    "key_only": false,
+    "members": {
+     "device-name": null,
+     "interface": "unresolved",
+     "size": "size:G"
+    },
+    "required": []
+   },
+   "network-interface": {
+    "key_only": true,
+    "members": {
+     "address": null,
+     "aliases": null,
+     "dns64-eligible": "unresolved",
+     "enable-vpc-scoped-dns": "unresolved",
+     "external-ipv6-address": null,
+     "external-ipv6-prefix-length": "int",
+     "igmp-query": "unresolved",
+     "internal-ipv6-address": null,
+     "internal-ipv6-prefix-length": "int",
+     "ipv6-address": null,
+     "ipv6-aliases": null,
+     "ipv6-network-tier": "unresolved",
+     "ipv6-prefix-length": "int",
+     "ipv6-public-ptr-domain": null,
+     "nat64-eligible": "unresolved",
+     "network": null,
+     "network-attachment": null,
+     "network-tier": "unresolved",
+     "nic-type": "unresolved",
+     "no-address": "unresolved",
+     "private-network-ip": null,
+     "queue-count": "int",
+     "service-class-id": null,
+     "stack-type": "unresolved",
+     "subnet": null,
+     "vlan": "int"
+    },
+    "required": []
+   },
+   "network-performance-configs": {
+    "key_only": false,
+    "members": {
+     "external-ip-egress-bandwidth-tier": null,
+     "total-egress-bandwidth-tier": null
+    },
+    "required": []
+   }
+  },
+  "types": {
+   "accelerator": "dict",
+   "availability-domain": "int",
+   "boot-disk-provisioned-iops": "int",
+   "boot-disk-provisioned-throughput": "int",
+   "boot-disk-size": "size:G",
+   "create-disk": "dict",
+   "custom-cpu": "unresolved",
+   "custom-memory": "size:G",
+   "discard-local-ssds-at-termination-timestamp": "bool",
+   "disk": "dict",
+   "external-ipv6-address": "unresolved",
+   "external-ipv6-prefix-length": "int",
+   "graceful-shutdown-max-duration": "duration:s",
+   "host-error-timeout-seconds": "duration:s",
+   "identity-type": "unresolved",
+   "instance-termination-action": "unresolved",
+   "internal-ipv6-address": "unresolved",
+   "internal-ipv6-prefix-length": "int",
+   "ipv6-network-tier": "unresolved",
+   "labels": "dict",
+   "local-ssd": "dict",
+   "local-ssd-recovery-timeout": "duration:h",
+   "maintenance-policy": "unresolved",
+   "max-run-duration": "duration:s",
+   "metadata": "dict",
+   "network-interface": "dict",
+   "network-performance-configs": "dict",
+   "network-tier": "unresolved",
+   "node-affinity-file": "file",
+   "preemption-notice-duration": "duration:s",
+   "provisioning-model": "unresolved",
+   "request-valid-for-duration": "duration:s",
+   "resource-manager-tags": "dict",
+   "resource-policies": "list:str",
+   "scopes": "list:str",
+   "stack-type": "unresolved",
+   "tags": "list:str",
+   "termination-time": "unresolved",
+   "threads-per-core": "int",
+   "visible-core-count": "int"
+  },
+  "value": [
+   "accelerator",
+   "address",
+   "availability-domain",
+   "boot-disk-device-name",
+   "boot-disk-interface",
+   "boot-disk-kms-key",
+   "boot-disk-kms-keyring",
+   "boot-disk-kms-location",
+   "boot-disk-kms-project",
+   "boot-disk-provisioned-iops",
+   "boot-disk-provisioned-throughput",
+   "boot-disk-size",
+   "boot-disk-type",
+   "confidential-compute-type",
+   "create-disk",
+   "csek-key-file",
+   "custom-cpu",
+   "custom-memory",
+   "custom-vm-type",
+   "description",
+   "discard-local-ssds-at-termination-timestamp",
+   "disk",
+   "external-ipv6-address",
+   "external-ipv6-prefix-length",
+   "graceful-shutdown-max-duration",
+   "host-error-timeout-seconds",
+   "hostname",
+   "identity",
+   "identity-type",
+   "image",
+   "image-family",
+   "image-family-scope",
+   "image-project",
+   "instance-kms-key",
+   "instance-kms-keyring",
+   "instance-kms-location",
+   "instance-kms-project",
+   "instance-termination-action",
+   "internal-ipv6-address",
+   "internal-ipv6-prefix-length",
+   "ipv6-network-tier",
+   "ipv6-public-ptr-domain",
+   "key-revocation-action-type",
+   "labels",
+   "local-ssd",
+   "local-ssd-encryption-mode",
+   "local-ssd-recovery-timeout",
+   "machine-type",
+   "maintenance-policy",
+   "max-run-duration",
+   "metadata",
+   "metadata-from-file",
+   "min-cpu-platform",
+   "min-node-cpu",
+   "network",
+   "network-interface",
+   "network-performance-configs",
+   "network-tier",
+   "node",
+   "node-affinity-file",
+   "node-group",
+   "node-project",
+   "performance-monitoring-unit",
+   "preemption-notice-duration",
+   "private-ipv6-google-access-type",
+   "private-network-ip",
+   "provisioning-model",
+   "public-ptr-domain",
+   "request-valid-for-duration",
+   "reservation",
+   "reservation-affinity",
+   "resource-manager-tags",
+   "resource-policies",
+   "scopes",
+   "service-account",
+   "source-instance-template",
+   "source-machine-image",
+   "source-machine-image-csek-key-file",
+   "source-snapshot",
+   "stack-type",
+   "subnet",
+   "tags",
+   "termination-time",
+   "threads-per-core",
+   "turbo-mode",
+   "visible-core-count",
+   "zone"
+  ]
+ },
+ "compute instances delete": {
+  "actions": {
+   "zone": "unresolved"
+  },
+  "alias": {},
+  "bool": [
+   "no-graceful-shutdown"
+  ],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "delete-disks",
+   "keep-disks",
+   "zone"
+  ]
+ },
+ "compute instances describe": {
+  "actions": {
+   "zone": "unresolved"
+  },
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "zone"
+  ]
+ },
+ "compute instances export": {
+  "actions": {
+   "zone": "unresolved"
+  },
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "destination",
+   "zone"
+  ]
+ },
+ "compute instances import": {
+  "actions": {
+   "labels": "unresolved",
+   "network": "unresolved",
+   "subnet": "unresolved",
+   "zone": "unresolved"
+  },
+  "alias": {},
+  "bool": [
+   "async",
+   "byol",
+   "can-ip-forward",
+   "custom-extensions",
+   "deletion-protection",
+   "guest-environment",
+   "no-address",
+   "no-scopes",
+   "no-service-account",
+   "restart-on-failure"
+  ],
+  "dict": [
+   "labels"
+  ],
+  "list": [
+   "guest-os-features",
+   "scopes",
+   "tags"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "custom-cpu": "unresolved",
+   "custom-memory": "size:G",
+   "labels": "dict",
+   "network-tier": "unresolved",
+   "node-affinity-file": "file",
+   "scopes": "list:str",
+   "tags": "list:str",
+   "timeout": "unresolved"
+  },
+  "value": [
+   "cloudbuild-service-account",
+   "compute-service-account",
+   "custom-cpu",
+   "custom-memory",
+   "custom-vm-type",
+   "description",
+   "guest-os-features",
+   "hostname",
+   "labels",
+   "log-location",
+   "machine-type",
+   "network",
+   "network-tier",
+   "node",
+   "node-affinity-file",
+   "node-group",
+   "os",
+   "private-network-ip",
+   "scopes",
+   "service-account",
+   "source-uri",
+   "subnet",
+   "tags",
+   "timeout",
+   "zone"
+  ]
+ },
+ "compute instances list": {
+  "actions": {},
+  "alias": {
+   "r": "regexp"
+  },
+  "bool": [
+   "uri"
+  ],
+  "dict": [],
+  "list": [
+   "sort-by",
+   "zones"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "limit": "unresolved",
+   "zones": "list:str"
+  },
+  "value": [
+   "filter",
+   "limit",
+   "page-size",
+   "r",
+   "regexp",
+   "sort-by",
+   "zones"
+  ]
+ },
+ "compute instances remove-iam-policy-binding": {
+  "actions": {
+   "zone": "unresolved"
+  },
+  "alias": {},
+  "bool": [
+   "all"
+  ],
+  "dict": [
+   "condition"
+  ],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "role": "unresolved"
+  },
+  "value": [
+   "condition",
+   "condition-from-file",
+   "member",
+   "role",
+   "zone"
+  ]
+ },
+ "compute instances reset": {
+  "actions": {
+   "zone": "unresolved"
+  },
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "zone"
+  ]
+ },
+ "compute instances set-iam-policy": {
+  "actions": {
+   "zone": "unresolved"
+  },
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "zone"
+  ]
+ },
+ "compute instances start": {
+  "actions": {
+   "zone": "unresolved"
+  },
+  "alias": {},
+  "bool": [
+   "async"
+  ],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "csek-key-file",
+   "zone"
+  ]
+ },
+ "compute instances stop": {
+  "actions": {
+   "zone": "unresolved"
+  },
+  "alias": {},
+  "bool": [
+   "async",
+   "no-graceful-shutdown"
+  ],
+  "dict": [],
+  "list": [],
+  "optional": [
+   "discard-local-ssd"
+  ],
+  "specs": {},
+  "types": {},
+  "value": [
+   "zone"
+  ]
+ },
+ "compute instances update": {
+  "actions": {
+   "zone": "unresolved"
+  },
+  "alias": {},
+  "bool": [
+   "clear-labels",
+   "clear-node-affinities",
+   "deletion-protection",
+   "enable-display-device",
+   "expose-host-topology",
+   "graceful-shutdown",
+   "identity-certificate",
+   "no-deletion-protection",
+   "no-enable-display-device",
+   "no-expose-host-topology",
+   "no-graceful-shutdown",
+   "no-identity-certificate",
+   "no-shielded-integrity-monitoring",
+   "no-shielded-secure-boot",
+   "no-shielded-vtpm",
+   "shielded-integrity-monitoring",
+   "shielded-learn-integrity-policy",
+   "shielded-secure-boot",
+   "shielded-vtpm"
+  ],
+  "dict": [
+   "update-labels"
+  ],
+  "list": [
+   "remove-labels"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "graceful-shutdown-max-duration": "duration:s",
+   "identity-type": "unresolved",
+   "node-affinity-file": "file"
+  },
+  "value": [
+   "graceful-shutdown-max-duration",
+   "identity",
+   "identity-type",
+   "min-cpu-platform",
+   "most-disruptive-allowed-action",
+   "node",
+   "node-affinity-file",
+   "node-group",
+   "remove-labels",
+   "update-labels",
+   "zone"
+  ]
+ },
+ "compute ssh": {
+  "actions": {
+   "network": "unresolved",
+   "region": "unresolved",
+   "ssh-flag": "append",
+   "zone": "unresolved"
+  },
+  "alias": {},
+  "bool": [
+   "dry-run",
+   "force-key-file-overwrite",
+   "internal-ip",
+   "plain",
+   "troubleshoot",
+   "tunnel-through-iap"
+  ],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "ssh-key-expiration": "unresolved",
+   "ssh-key-expire-after": "duration:s"
+  },
+  "value": [
+   "command",
+   "container",
+   "dest-group",
+   "network",
+   "region",
+   "ssh-flag",
+   "ssh-key-expiration",
+   "ssh-key-expire-after",
+   "ssh-key-file",
+   "strict-host-key-checking",
+   "zone"
+  ]
+ },
+ "container clusters create": {
+  "actions": {
+   "additional-zones": "unresolved",
+   "image": "unresolved",
+   "metadata": "once",
+   "network-performance-configs": "append",
+   "zone": "unresolved"
+  },
+  "alias": {
+   "m": "machine-type",
+   "u": "username",
+   "z": "zone"
+  },
+  "bool": [
+   "async",
+   "autoprovisioning-enable-insecure-kubelet-readonly-port",
+   "disable-additive-vpc-scope",
+   "disable-dataplane-v2-flow-observability",
+   "disable-dataplane-v2-metrics",
+   "disable-default-snat",
+   "disable-l4-lb-firewall-reconciliation",
+   "disable-multi-nic-lustre",
+   "disable-pod-snapshots",
+   "enable-agent-sandbox",
+   "enable-ambient-networking",
+   "enable-authorized-networks-on-private-endpoint",
+   "enable-auto-ipam",
+   "enable-autoprovisioning",
+   "enable-autoprovisioning-autorepair",
+   "enable-autoprovisioning-autoupgrade",
+   "enable-autoprovisioning-blue-green-upgrade",
+   "enable-autoprovisioning-surge-upgrade",
+   "enable-autorepair",
+   "enable-autoscaling",
+   "enable-autoupgrade",
+   "enable-basic-auth",
+   "enable-binauthz",
+   "enable-cilium-clusterwide-network-policy",
+   "enable-cloud-logging",
+   "enable-cloud-monitoring",
+   "enable-cloud-run-alpha",
+   "enable-confidential-nodes",
+   "enable-confidential-storage",
+   "enable-cost-allocation",
+   "enable-dataplane-v2",
+   "enable-dataplane-v2-flow-observability",
+   "enable-dataplane-v2-metrics",
+   "enable-default-compute-class",
+   "enable-dns-access",
+   "enable-fleet",
+   "enable-fqdn-network-policy",
+   "enable-google-cloud-access",
+   "enable-gvnic",
+   "enable-identity-service",
+   "enable-image-streaming",
+   "enable-insecure-binding-system-authenticated",
+   "enable-insecure-binding-system-unauthenticated",
+   "enable-insecure-kubelet-readonly-port",
+   "enable-intra-node-visibility",
+   "enable-ip-access",
+   "enable-ip-alias",
+   "enable-k8s-certs-via-dns",
+   "enable-k8s-tokens-via-dns",
+   "enable-kernel-module-signature-enforcement",
+   "enable-kubernetes-alpha",
+   "enable-l4-ilb-subsetting",
+   "enable-legacy-authorization",
+   "enable-legacy-lustre-port",
+   "enable-managed-prometheus",
+   "enable-master-authorized-networks",
+   "enable-master-global-access",
+   "enable-multi-networking",
+   "enable-nested-virtualization",
+   "enable-network-egress-metering",
+   "enable-network-policy",
+   "enable-pod-snapshots",
+   "enable-private-endpoint",
+   "enable-private-nodes",
+   "enable-ray-cluster-logging",
+   "enable-ray-cluster-monitoring",
+   "enable-resource-consumption-metering",
+   "enable-secret-manager",
+   "enable-secret-manager-rotation",
+   "enable-secret-sync",
+   "enable-secret-sync-rotation",
+   "enable-service-externalips",
+   "enable-shielded-nodes",
+   "enable-slice-controller",
+   "enable-stackdriver-kubernetes",
+   "enable-vertical-pod-autoscaling",
+   "issue-client-certificate",
+   "preemptible",
+   "shielded-integrity-monitoring",
+   "shielded-secure-boot",
+   "spot"
+  ],
+  "dict": [
+   "accelerator",
+   "addons",
+   "autoprovisioning-resource-manager-tags",
+   "autoprovisioning-standard-rollout-policy",
+   "cloud-run-config",
+   "create-subnetwork",
+   "ephemeral-storage-local-ssd",
+   "labels",
+   "local-nvme-ssd-block",
+   "max-accelerator",
+   "metadata",
+   "metadata-from-file",
+   "min-accelerator",
+   "network-performance-configs",
+   "node-labels",
+   "node-taints",
+   "notification-config",
+   "resource-manager-tags"
+  ],
+  "list": [
+   "additional-zones",
+   "alpha-cluster-feature-gates",
+   "autopilot-privileged-admission",
+   "autoprovisioning-locations",
+   "autoprovisioning-network-tags",
+   "autoprovisioning-scopes",
+   "enable-kubernetes-unstable-apis",
+   "logging",
+   "master-authorized-networks",
+   "monitoring",
+   "node-locations",
+   "patch-update",
+   "scopes",
+   "service-account-signing-keys",
+   "service-account-verification-keys",
+   "storage-pools",
+   "tags"
+  ],
+  "optional": [
+   "ephemeral-storage-local-ssd",
+   "local-nvme-ssd-block"
+  ],
+  "specs": {
+   "accelerator": {
+    "key_only": false,
+    "members": {
+     "count": "int",
+     "gpu-driver-version": null,
+     "gpu-partition-size": null,
+     "gpu-sharing-strategy": null,
+     "max-shared-clients-per-gpu": "int",
+     "max-time-shared-clients-per-gpu": "int",
+     "type": null
+    },
+    "required": [
+     "type"
+    ]
+   },
+   "addons": "unresolved",
+   "autoprovisioning-standard-rollout-policy": {
+    "key_only": false,
+    "members": {
+     "batch-node-count": "int",
+     "batch-percent": "float",
+     "batch-soak-duration": null
+    },
+    "required": []
+   },
+   "ephemeral-storage-local-ssd": {
+    "key_only": false,
+    "members": {
+     "capacity": "size:GB",
+     "count": "int"
+    },
+    "required": []
+   },
+   "local-nvme-ssd-block": {
+    "key_only": false,
+    "members": {
+     "count": "int"
+    },
+    "required": []
+   },
+   "max-accelerator": {
+    "key_only": false,
+    "members": {
+     "count": "int",
+     "type": null
+    },
+    "required": [
+     "count",
+     "type"
+    ]
+   },
+   "min-accelerator": {
+    "key_only": false,
+    "members": {
+     "count": "int",
+     "type": null
+    },
+    "required": [
+     "count",
+     "type"
+    ]
+   },
+   "network-performance-configs": {
+    "key_only": false,
+    "members": {
+     "total-egress-bandwidth-tier": null
+    },
+    "required": []
+   },
+   "notification-config": {
+    "key_only": false,
+    "members": {
+     "filter": null,
+     "pubsub": null,
+     "pubsub-topic": null
+    },
+    "required": [
+     "pubsub"
+    ]
+   }
+  },
+  "types": {
+   "accelerator": "dict",
+   "additional-zones": "list:str",
+   "addons": "dict",
+   "alpha-cluster-feature-gates": "list:str",
+   "autopilot-privileged-admission": "list:str",
+   "autopilot-workload-policies": "unresolved",
+   "autoprovisioning-config-file": "file",
+   "autoprovisioning-locations": "list:str",
+   "autoprovisioning-max-surge-upgrade": "int",
+   "autoprovisioning-max-unavailable-upgrade": "int",
+   "autoprovisioning-network-tags": "list:str",
+   "autoprovisioning-resource-manager-tags": "dict",
+   "autoprovisioning-scopes": "list:str",
+   "autoprovisioning-standard-rollout-policy": "dict",
+   "binauthz-evaluation-mode": "unresolved",
+   "boot-disk-provisioned-iops": "int",
+   "boot-disk-provisioned-throughput": "int",
+   "containerd-config-from-file": "file",
+   "create-subnetwork": "dict",
+   "data-cache-count": "int",
+   "database-encryption-key": "unresolved",
+   "default-max-pods-per-node": "int",
+   "disk-size": "size:G",
+   "enable-kubernetes-unstable-apis": "list:str",
+   "fleet-project": "unresolved",
+   "labels": "dict",
+   "local-ssd-count": "int",
+   "logging": "list:str",
+   "maintenance-window": "unresolved",
+   "maintenance-window-duration": "duration:s",
+   "maintenance-window-end": "unresolved",
+   "maintenance-window-start": "unresolved",
+   "master-authorized-networks": "list:str",
+   "max-accelerator": "dict",
+   "max-cpu": "int",
+   "max-memory": "int",
+   "max-nodes": "int",
+   "max-nodes-per-pool": "int",
+   "max-pods-per-node": "int",
+   "max-surge-upgrade": "int",
+   "max-unavailable-upgrade": "int",
+   "metadata": "dict",
+   "metadata-from-file": "dict",
+   "min-accelerator": "dict",
+   "min-cpu": "int",
+   "min-memory": "int",
+   "min-nodes": "int",
+   "monitoring": "list:str",
+   "network-performance-configs": "dict",
+   "node-labels": "dict",
+   "node-locations": "list:str",
+   "node-taints": "dict",
+   "notification-config": "dict",
+   "num-nodes": "int",
+   "patch-update": "list:str",
+   "resource-manager-tags": "dict",
+   "scopes": "list:str",
+   "service-account-signing-keys": "list:str",
+   "service-account-verification-keys": "list:str",
+   "storage-pools": "list:str",
+   "system-config-from-file": "file",
+   "tags": "list:str",
+   "threads-per-core": "int",
+   "total-max-nodes": "int",
+   "total-min-nodes": "int",
+   "wiz-sensor-api-key-secret-uri": "unresolved",
+   "wiz-sensor-proxy-secret-uri": "unresolved",
+   "wiz-sensor-registry-secret-uri": "unresolved",
+   "workload-metadata": "unresolved"
+  },
+  "value": [
+   "accelerator",
+   "additional-zones",
+   "additive-vpc-scope-dns-domain",
+   "addons",
+   "aggregation-ca",
+   "alpha-cluster-feature-gates",
+   "anonymous-authentication-config",
+   "auto-monitoring-scope",
+   "autopilot-general-profile",
+   "autopilot-privileged-admission",
+   "autopilot-workload-policies",
+   "autoprovisioning-config-file",
+   "autoprovisioning-image-type",
+   "autoprovisioning-locations",
+   "autoprovisioning-max-surge-upgrade",
+   "autoprovisioning-max-unavailable-upgrade",
+   "autoprovisioning-min-cpu-platform",
+   "autoprovisioning-network-tags",
+   "autoprovisioning-node-pool-soak-duration",
+   "autoprovisioning-resource-manager-tags",
+   "autoprovisioning-scopes",
+   "autoprovisioning-service-account",
+   "autoprovisioning-standard-rollout-policy",
+   "autoscaling-profile",
+   "binauthz-evaluation-mode",
+   "boot-disk-kms-key",
+   "boot-disk-provisioned-iops",
+   "boot-disk-provisioned-throughput",
+   "cloud-run-config",
+   "cluster-ca",
+   "cluster-dns",
+   "cluster-dns-domain",
+   "cluster-dns-scope",
+   "cluster-ipv4-cidr",
+   "cluster-secondary-range-name",
+   "cluster-version",
+   "confidential-node-type",
+   "containerd-config-from-file",
+   "control-plane-disk-encryption-key",
+   "control-plane-egress",
+   "create-subnetwork",
+   "data-cache-count",
+   "database-encryption-key",
+   "dataplane-optimization-mode",
+   "dataplane-v2-observability-mode",
+   "default-max-pods-per-node",
+   "disk-size",
+   "disk-type",
+   "enable-kubernetes-unstable-apis",
+   "etcd-api-ca",
+   "etcd-peer-ca",
+   "fleet-project",
+   "gateway-api",
+   "gkeops-etcd-backup-encryption-key",
+   "hpa-profile",
+   "image",
+   "image-project",
+   "image-type",
+   "in-transit-encryption",
+   "ipv6-access-type",
+   "labels",
+   "local-ssd-count",
+   "location",
+   "location-policy",
+   "logging",
+   "logging-variant",
+   "m",
+   "machine-type",
+   "maintenance-minor-version-disruption-interval",
+   "maintenance-patch-version-disruption-interval",
+   "maintenance-window",
+   "maintenance-window-duration",
+   "maintenance-window-end",
+   "maintenance-window-recurrence",
+   "maintenance-window-start",
+   "managed-otel-scope",
+   "master-authorized-networks",
+   "master-ipv4-cidr",
+   "max-accelerator",
+   "max-cpu",
+   "max-memory",
+   "max-nodes",
+   "max-nodes-per-pool",
+   "max-pods-per-node",
+   "max-surge-upgrade",
+   "max-unavailable-upgrade",
+   "membership-type",
+   "metadata",
+   "metadata-from-file",
+   "min-accelerator",
+   "min-cpu",
+   "min-cpu-platform",
+   "min-memory",
+   "min-nodes",
+   "monitoring",
+   "network",
+   "network-performance-configs",
+   "node-architecture-taint-behavior",
+   "node-creation-mode",
+   "node-labels",
+   "node-locations",
+   "node-taints",
+   "node-version",
+   "notification-config",
+   "num-nodes",
+   "password",
+   "patch-update",
+   "performance-monitoring-unit",
+   "placement-policy",
+   "placement-type",
+   "private-endpoint-subnetwork",
+   "private-ipv6-google-access-type",
+   "region",
+   "release-channel",
+   "reservation",
+   "reservation-affinity",
+   "resource-manager-tags",
+   "resource-usage-bigquery-dataset",
+   "scopes",
+   "secret-manager-rotation-interval",
+   "secret-sync-rotation-interval",
+   "security-group",
+   "security-posture",
+   "service-account",
+   "service-account-signing-keys",
+   "service-account-verification-keys",
+   "services-ipv4-cidr",
+   "services-secondary-range-name",
+   "stack-type",
+   "storage-pools",
+   "subnetwork",
+   "system-config-from-file",
+   "tags",
+   "threads-per-core",
+   "tier",
+   "total-max-nodes",
+   "total-min-nodes",
+   "u",
+   "username",
+   "wiz-sensor-api-key-secret-uri",
+   "wiz-sensor-proxy-secret-uri",
+   "wiz-sensor-registry-secret-uri",
+   "workload-metadata",
+   "workload-pool",
+   "workload-vulnerability-scanning",
+   "z",
+   "zone"
+  ]
+ },
+ "container clusters delete": {
+  "actions": {
+   "zone": "unresolved"
+  },
+  "alias": {
+   "z": "zone"
+  },
+  "bool": [
+   "async"
+  ],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "location",
+   "region",
+   "z",
+   "zone"
+  ]
+ },
+ "container clusters describe": {
+  "actions": {
+   "zone": "unresolved"
+  },
+  "alias": {
+   "z": "zone"
+  },
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "location",
+   "region",
+   "z",
+   "zone"
+  ]
+ },
+ "container clusters get-credentials": {
+  "actions": {
+   "zone": "unresolved"
+  },
+  "alias": {
+   "z": "zone"
+  },
+  "bool": [
+   "dns-endpoint",
+   "internal-ip"
+  ],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "location",
+   "region",
+   "z",
+   "zone"
+  ]
+ },
+ "container clusters list": {
+  "actions": {
+   "zone": "unresolved"
+  },
+  "alias": {
+   "z": "zone"
+  },
+  "bool": [
+   "uri"
+  ],
+  "dict": [],
+  "list": [
+   "sort-by"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "filter",
+   "limit",
+   "location",
+   "page-size",
+   "region",
+   "sort-by",
+   "z",
+   "zone"
+  ]
+ },
+ "container clusters resize": {
+  "actions": {
+   "zone": "unresolved"
+  },
+  "alias": {
+   "z": "zone"
+  },
+  "bool": [
+   "async"
+  ],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "num-nodes": "int",
+   "size": "int"
+  },
+  "value": [
+   "location",
+   "node-pool",
+   "num-nodes",
+   "region",
+   "size",
+   "z",
+   "zone"
+  ]
+ },
+ "container clusters update": {
+  "actions": {
+   "additional-ip-ranges": "append",
+   "network-performance-configs": "append",
+   "remove-additional-ip-ranges": "append",
+   "zone": "unresolved"
+  },
+  "alias": {
+   "u": "username",
+   "z": "zone"
+  },
+  "bool": [
+   "add-maintenance-exclusion-until-end-of-support",
+   "async",
+   "autoprovisioning-enable-insecure-kubelet-readonly-port",
+   "clear-fleet-project",
+   "clear-maintenance-minor-version-disruption-interval",
+   "clear-maintenance-patch-version-disruption-interval",
+   "clear-maintenance-window",
+   "clear-resource-usage-bigquery-dataset",
+   "complete-credential-rotation",
+   "complete-ip-rotation",
+   "disable-additive-vpc-scope",
+   "disable-auto-ipam",
+   "disable-database-encryption",
+   "disable-dataplane-v2-flow-observability",
+   "disable-dataplane-v2-metrics",
+   "disable-default-snat",
+   "disable-l4-lb-firewall-reconciliation",
+   "disable-managed-prometheus",
+   "disable-multi-nic-lustre",
+   "disable-pod-snapshots",
+   "disable-workload-identity",
+   "enable-agent-sandbox",
+   "enable-ambient-networking",
+   "enable-authorized-networks-on-private-endpoint",
+   "enable-auto-ipam",
+   "enable-autopilot-compatibility-auditing",
+   "enable-autoprovisioning",
+   "enable-autoprovisioning-autorepair",
+   "enable-autoprovisioning-autoupgrade",
+   "enable-autoprovisioning-blue-green-upgrade",
+   "enable-autoprovisioning-surge-upgrade",
+   "enable-autoscaling",
+   "enable-basic-auth",
+   "enable-binauthz",
+   "enable-cilium-clusterwide-network-policy",
+   "enable-cost-allocation",
+   "enable-dataplane-v2",
+   "enable-dataplane-v2-flow-observability",
+   "enable-dataplane-v2-metrics",
+   "enable-default-compute-class",
+   "enable-dns-access",
+   "enable-fleet",
+   "enable-fqdn-network-policy",
+   "enable-google-cloud-access",
+   "enable-identity-service",
+   "enable-image-streaming",
+   "enable-insecure-binding-system-authenticated",
+   "enable-insecure-binding-system-unauthenticated",
+   "enable-insecure-kubelet-readonly-port",
+   "enable-intra-node-visibility",
+   "enable-ip-access",
+   "enable-k8s-certs-via-dns",
+   "enable-k8s-tokens-via-dns",
+   "enable-kernel-module-signature-enforcement",
+   "enable-l4-ilb-subsetting",
+   "enable-l4-lb-firewall-reconciliation",
+   "enable-legacy-authorization",
+   "enable-legacy-lustre-port",
+   "enable-managed-prometheus",
+   "enable-master-authorized-networks",
+   "enable-master-global-access",
+   "enable-multi-networking",
+   "enable-network-egress-metering",
+   "enable-network-policy",
+   "enable-pod-snapshots",
+   "enable-private-endpoint",
+   "enable-private-nodes",
+   "enable-ray-cluster-logging",
+   "enable-ray-cluster-monitoring",
+   "enable-resource-consumption-metering",
+   "enable-secret-manager",
+   "enable-secret-manager-rotation",
+   "enable-secret-sync",
+   "enable-secret-sync-rotation",
+   "enable-service-externalips",
+   "enable-shielded-nodes",
+   "enable-slice-controller",
+   "enable-stackdriver-kubernetes",
+   "enable-vertical-pod-autoscaling",
+   "generate-password",
+   "no-enable-ambient-networking",
+   "no-enable-autopilot-compatibility-auditing",
+   "no-enable-cilium-clusterwide-network-policy",
+   "no-enable-dataplane-v2",
+   "no-enable-ray-cluster-logging",
+   "no-enable-ray-cluster-monitoring",
+   "no-enable-secret-manager",
+   "no-enable-secret-manager-rotation",
+   "no-enable-secret-sync",
+   "no-enable-secret-sync-rotation",
+   "set-password",
+   "start-credential-rotation",
+   "start-ip-rotation",
+   "unset-membership-type"
+  ],
+  "dict": [
+   "additional-ip-ranges",
+   "autoprovisioning-resource-manager-tags",
+   "autoprovisioning-standard-rollout-policy",
+   "cloud-run-config",
+   "max-accelerator",
+   "min-accelerator",
+   "network-performance-configs",
+   "notification-config",
+   "remove-additional-ip-ranges",
+   "update-addons",
+   "update-labels"
+  ],
+  "list": [
+   "additional-pod-ipv4-ranges",
+   "autopilot-privileged-admission",
+   "autoprovisioning-locations",
+   "autoprovisioning-network-tags",
+   "autoprovisioning-scopes",
+   "enable-kubernetes-unstable-apis",
+   "logging",
+   "master-authorized-networks",
+   "monitoring",
+   "node-locations",
+   "patch-update",
+   "remove-additional-pod-ipv4-ranges",
+   "remove-labels"
+  ],
+  "optional": [],
+  "specs": {
+   "additional-ip-ranges": {
+    "key_only": false,
+    "members": {
+     "pod-ipv4-range": null,
+     "subnetwork": null
+    },
+    "required": [
+     "pod-ipv4-range",
+     "subnetwork"
+    ]
+   },
+   "autoprovisioning-standard-rollout-policy": {
+    "key_only": false,
+    "members": {
+     "batch-node-count": "int",
+     "batch-percent": "float",
+     "batch-soak-duration": null
+    },
+    "required": []
+   },
+   "max-accelerator": {
+    "key_only": false,
+    "members": {
+     "count": "int",
+     "type": null
+    },
+    "required": [
+     "count",
+     "type"
+    ]
+   },
+   "min-accelerator": {
+    "key_only": false,
+    "members": {
+     "count": "int",
+     "type": null
+    },
+    "required": [
+     "count",
+     "type"
+    ]
+   },
+   "network-performance-configs": {
+    "key_only": false,
+    "members": {
+     "total-egress-bandwidth-tier": null
+    },
+    "required": []
+   },
+   "notification-config": {
+    "key_only": false,
+    "members": {
+     "filter": null,
+     "pubsub": null,
+     "pubsub-topic": null
+    },
+    "required": [
+     "pubsub"
+    ]
+   },
+   "remove-additional-ip-ranges": {
+    "key_only": false,
+    "members": {
+     "pod-ipv4-range": null,
+     "subnetwork": null
+    },
+    "required": [
+     "subnetwork"
+    ]
+   },
+   "update-addons": "unresolved"
+  },
+  "types": {
+   "add-maintenance-exclusion-end": "unresolved",
+   "add-maintenance-exclusion-start": "unresolved",
+   "additional-ip-ranges": "dict",
+   "additional-pod-ipv4-ranges": "list:str",
+   "autopilot-privileged-admission": "list:str",
+   "autopilot-workload-policies": "unresolved",
+   "autoprovisioning-config-file": "file",
+   "autoprovisioning-locations": "list:str",
+   "autoprovisioning-max-surge-upgrade": "int",
+   "autoprovisioning-max-unavailable-upgrade": "int",
+   "autoprovisioning-network-tags": "list:str",
+   "autoprovisioning-resource-manager-tags": "dict",
+   "autoprovisioning-scopes": "list:str",
+   "autoprovisioning-standard-rollout-policy": "dict",
+   "binauthz-evaluation-mode": "unresolved",
+   "containerd-config-from-file": "file",
+   "database-encryption-key": "unresolved",
+   "enable-kubernetes-unstable-apis": "list:str",
+   "fleet-project": "unresolved",
+   "logging": "list:str",
+   "maintenance-window": "unresolved",
+   "maintenance-window-duration": "duration:s",
+   "maintenance-window-end": "unresolved",
+   "maintenance-window-start": "unresolved",
+   "master-authorized-networks": "list:str",
+   "max-accelerator": "dict",
+   "max-cpu": "int",
+   "max-memory": "int",
+   "max-nodes": "int",
+   "min-accelerator": "dict",
+   "min-cpu": "int",
+   "min-memory": "int",
+   "min-nodes": "int",
+   "monitoring": "list:str",
+   "network-performance-configs": "dict",
+   "node-locations": "list:str",
+   "notification-config": "dict",
+   "patch-update": "list:str",
+   "remove-additional-ip-ranges": "dict",
+   "remove-additional-pod-ipv4-ranges": "list:str",
+   "remove-autopilot-workload-policies": "unresolved",
+   "remove-labels": "list:str",
+   "remove-workload-policies": "unresolved",
+   "total-max-nodes": "int",
+   "total-min-nodes": "int",
+   "update-addons": "dict",
+   "update-labels": "dict",
+   "wiz-sensor-api-key-secret-uri": "unresolved",
+   "wiz-sensor-proxy-secret-uri": "unresolved",
+   "wiz-sensor-registry-secret-uri": "unresolved",
+   "workload-policies": "unresolved"
+  },
+  "value": [
+   "add-maintenance-exclusion-end",
+   "add-maintenance-exclusion-name",
+   "add-maintenance-exclusion-scope",
+   "add-maintenance-exclusion-start",
+   "additional-ip-ranges",
+   "additional-pod-ipv4-ranges",
+   "additive-vpc-scope-dns-domain",
+   "anonymous-authentication-config",
+   "auto-monitoring-scope",
+   "autopilot-general-profile",
+   "autopilot-privileged-admission",
+   "autopilot-workload-policies",
+   "autoprovisioning-cgroup-mode",
+   "autoprovisioning-config-file",
+   "autoprovisioning-image-type",
+   "autoprovisioning-locations",
+   "autoprovisioning-max-surge-upgrade",
+   "autoprovisioning-max-unavailable-upgrade",
+   "autoprovisioning-min-cpu-platform",
+   "autoprovisioning-network-tags",
+   "autoprovisioning-node-pool-soak-duration",
+   "autoprovisioning-resource-manager-tags",
+   "autoprovisioning-scopes",
+   "autoprovisioning-service-account",
+   "autoprovisioning-standard-rollout-policy",
+   "autoscaling-profile",
+   "binauthz-evaluation-mode",
+   "cloud-run-config",
+   "cluster-dns",
+   "cluster-dns-domain",
+   "cluster-dns-scope",
+   "containerd-config-from-file",
+   "control-plane-egress",
+   "database-encryption-key",
+   "dataplane-v2-observability-mode",
+   "enable-kubernetes-unstable-apis",
+   "fleet-project",
+   "gateway-api",
+   "hpa-profile",
+   "in-transit-encryption",
+   "location",
+   "location-policy",
+   "logging",
+   "logging-service",
+   "logging-variant",
+   "maintenance-minor-version-disruption-interval",
+   "maintenance-patch-version-disruption-interval",
+   "maintenance-window",
+   "maintenance-window-duration",
+   "maintenance-window-end",
+   "maintenance-window-recurrence",
+   "maintenance-window-start",
+   "managed-otel-scope",
+   "master-authorized-networks",
+   "max-accelerator",
+   "max-cpu",
+   "max-memory",
+   "max-nodes",
+   "membership-type",
+   "min-accelerator",
+   "min-cpu",
+   "min-memory",
+   "min-nodes",
+   "monitoring",
+   "monitoring-service",
+   "network-performance-configs",
+   "node-creation-mode",
+   "node-locations",
+   "node-pool",
+   "notification-config",
+   "password",
+   "patch-update",
+   "private-ipv6-google-access-type",
+   "region",
+   "release-channel",
+   "remove-additional-ip-ranges",
+   "remove-additional-pod-ipv4-ranges",
+   "remove-autopilot-workload-policies",
+   "remove-labels",
+   "remove-maintenance-exclusion",
+   "remove-workload-policies",
+   "resource-usage-bigquery-dataset",
+   "secret-manager-rotation-interval",
+   "secret-sync-rotation-interval",
+   "security-group",
+   "security-posture",
+   "stack-type",
+   "tier",
+   "total-max-nodes",
+   "total-min-nodes",
+   "u",
+   "update-addons",
+   "update-labels",
+   "username",
+   "wiz-sensor-api-key-secret-uri",
+   "wiz-sensor-proxy-secret-uri",
+   "wiz-sensor-registry-secret-uri",
+   "workload-policies",
+   "workload-pool",
+   "workload-vulnerability-scanning",
+   "z",
+   "zone"
+  ]
+ },
+ "container clusters upgrade": {
+  "actions": {
+   "image": "unresolved",
+   "zone": "unresolved"
+  },
+  "alias": {
+   "z": "zone"
+  },
+  "bool": [
+   "async",
+   "master"
+  ],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "control-plane-soak-duration": "duration:s"
+  },
+  "value": [
+   "cluster-version",
+   "control-plane-soak-duration",
+   "image",
+   "image-project",
+   "image-type",
+   "location",
+   "node-pool",
+   "region",
+   "z",
+   "zone"
+  ]
+ },
+ "container node-pools create": {
+  "actions": {
+   "additional-node-network": "append",
+   "additional-pod-network": "append",
+   "cluster": "unresolved",
+   "image": "unresolved",
+   "metadata": "once",
+   "network-performance-configs": "append",
+   "secondary-boot-disk": "append",
+   "zone": "unresolved"
+  },
+  "alias": {
+   "m": "machine-type",
+   "z": "zone"
+  },
+  "bool": [
+   "add-maintenance-exclusion-until-end-of-support",
+   "async",
+   "enable-autoprovisioning",
+   "enable-autorepair",
+   "enable-autoscaling",
+   "enable-autoupgrade",
+   "enable-best-effort-provision",
+   "enable-blue-green-upgrade",
+   "enable-confidential-nodes",
+   "enable-confidential-storage",
+   "enable-gvnic",
+   "enable-image-streaming",
+   "enable-insecure-kubelet-readonly-port",
+   "enable-kernel-module-signature-enforcement",
+   "enable-nested-virtualization",
+   "enable-private-nodes",
+   "enable-queued-provisioning",
+   "enable-surge-upgrade",
+   "flex-start",
+   "preemptible",
+   "respect-pdb-during-node-pool-deletion",
+   "shielded-integrity-monitoring",
+   "shielded-secure-boot",
+   "spot"
+  ],
+  "dict": [
+   "accelerator",
+   "additional-node-network",
+   "additional-pod-network",
+   "autoscaled-rollout-policy",
+   "create-pod-ipv4-range",
+   "ephemeral-storage-local-ssd",
+   "labels",
+   "local-nvme-ssd-block",
+   "metadata",
+   "metadata-from-file",
+   "network-performance-configs",
+   "node-labels",
+   "node-taints",
+   "opportunistic-maintenance",
+   "resource-manager-tags",
+   "sandbox",
+   "secondary-boot-disk",
+   "standard-rollout-policy"
+  ],
+  "list": [
+   "node-locations",
+   "scopes",
+   "storage-pools",
+   "tags"
+  ],
+  "optional": [
+   "ephemeral-storage-local-ssd",
+   "local-nvme-ssd-block"
+  ],
+  "specs": {
+   "accelerator": {
+    "key_only": false,
+    "members": {
+     "count": "int",
+     "gpu-driver-version": null,
+     "gpu-partition-size": null,
+     "gpu-sharing-strategy": null,
+     "max-shared-clients-per-gpu": "int",
+     "max-time-shared-clients-per-gpu": "int",
+     "type": null
+    },
+    "required": [
+     "type"
+    ]
+   },
+   "additional-node-network": {
+    "key_only": false,
+    "members": {
+     "network": null,
+     "stack-type": "unresolved",
+     "subnetwork": null
+    },
+    "required": [
+     "network",
+     "subnetwork"
+    ]
+   },
+   "additional-pod-network": {
+    "key_only": false,
+    "members": {
+     "max-pods-per-node": "int",
+     "pod-ipv4-range": null,
+     "subnetwork": null
+    },
+    "required": [
+     "pod-ipv4-range"
+    ]
+   },
+   "autoscaled-rollout-policy": {
+    "key_only": false,
+    "members": {
+     "wait-for-drain-duration": null
+    },
+    "required": []
+   },
+   "ephemeral-storage-local-ssd": {
+    "key_only": false,
+    "members": {
+     "capacity": "size:GB",
+     "count": "int"
+    },
+    "required": []
+   },
+   "local-nvme-ssd-block": {
+    "key_only": false,
+    "members": {
+     "count": "int"
+    },
+    "required": []
+   },
+   "network-performance-configs": {
+    "key_only": false,
+    "members": {
+     "total-egress-bandwidth-tier": null
+    },
+    "required": []
+   },
+   "opportunistic-maintenance": {
+    "key_only": false,
+    "members": {
+     "min-nodes": "int",
+     "node-idle-time": null,
+     "window": null
+    },
+    "required": [
+     "min-nodes",
+     "node-idle-time",
+     "window"
+    ]
+   },
+   "sandbox": {
+    "key_only": false,
+    "members": {
+     "type": "unresolved"
+    },
+    "required": [
+     "type"
+    ]
+   },
+   "secondary-boot-disk": {
+    "key_only": false,
+    "members": {
+     "disk-image": null,
+     "mode": null
+    },
+    "required": [
+     "disk-image"
+    ]
+   },
+   "standard-rollout-policy": {
+    "key_only": false,
+    "members": {
+     "batch-node-count": "int",
+     "batch-percent": "float",
+     "batch-soak-duration": null
+    },
+    "required": []
+   }
+  },
+  "types": {
+   "accelerator": "dict",
+   "additional-node-network": "dict",
+   "additional-pod-network": "dict",
+   "autoscaled-rollout-policy": "dict",
+   "boot-disk-provisioned-iops": "int",
+   "boot-disk-provisioned-throughput": "int",
+   "containerd-config-from-file": "file",
+   "create-pod-ipv4-range": "dict",
+   "data-cache-count": "int",
+   "disk-size": "size:G",
+   "labels": "dict",
+   "local-ssd-count": "int",
+   "max-nodes": "int",
+   "max-pods-per-node": "int",
+   "max-surge-upgrade": "int",
+   "max-unavailable-upgrade": "int",
+   "metadata": "dict",
+   "metadata-from-file": "dict",
+   "min-nodes": "int",
+   "min-provision-nodes": "int",
+   "network-performance-configs": "dict",
+   "node-labels": "dict",
+   "node-locations": "list:str",
+   "node-taints": "dict",
+   "num-nodes": "int",
+   "opportunistic-maintenance": "dict",
+   "resource-manager-tags": "dict",
+   "sandbox": "dict",
+   "scopes": "list:str",
+   "secondary-boot-disk": "dict",
+   "sole-tenant-min-node-cpus": "int",
+   "sole-tenant-node-affinity-file": "file",
+   "standard-rollout-policy": "dict",
+   "storage-pools": "list:str",
+   "system-config-from-file": "file",
+   "tags": "list:str",
+   "threads-per-core": "int",
+   "total-max-nodes": "int",
+   "total-min-nodes": "int",
+   "workload-metadata": "unresolved"
+  },
+  "value": [
+   "accelerator",
+   "accelerator-network-profile",
+   "additional-node-network",
+   "additional-pod-network",
+   "autoscaled-rollout-policy",
+   "boot-disk-kms-key",
+   "boot-disk-provisioned-iops",
+   "boot-disk-provisioned-throughput",
+   "cluster",
+   "confidential-node-type",
+   "consolidation-delay",
+   "containerd-config-from-file",
+   "create-pod-ipv4-range",
+   "data-cache-count",
+   "disk-size",
+   "disk-type",
+   "image",
+   "image-project",
+   "image-type",
+   "labels",
+   "local-ssd-count",
+   "location",
+   "location-policy",
+   "logging-variant",
+   "m",
+   "machine-type",
+   "max-nodes",
+   "max-pods-per-node",
+   "max-run-duration",
+   "max-surge-upgrade",
+   "max-unavailable-upgrade",
+   "metadata",
+   "metadata-from-file",
+   "min-cpu-platform",
+   "min-nodes",
+   "min-provision-nodes",
+   "network-performance-configs",
+   "node-architecture-taint-behavior",
+   "node-drain-grace-period-seconds",
+   "node-drain-pdb-timeout-seconds",
+   "node-group",
+   "node-labels",
+   "node-locations",
+   "node-pool-soak-duration",
+   "node-taints",
+   "node-version",
+   "num-nodes",
+   "opportunistic-maintenance",
+   "performance-monitoring-unit",
+   "placement-policy",
+   "placement-type",
+   "pod-ipv4-range",
+   "region",
+   "reservation",
+   "reservation-affinity",
+   "resource-manager-tags",
+   "sandbox",
+   "scopes",
+   "secondary-boot-disk",
+   "service-account",
+   "sole-tenant-min-node-cpus",
+   "sole-tenant-node-affinity-file",
+   "standard-rollout-policy",
+   "storage-pools",
+   "subnetwork",
+   "system-config-from-file",
+   "tags",
+   "threads-per-core",
+   "total-max-nodes",
+   "total-min-nodes",
+   "tpu-topology",
+   "windows-os-version",
+   "workload-metadata",
+   "z",
+   "zone"
+  ]
+ },
+ "container node-pools delete": {
+  "actions": {
+   "cluster": "unresolved",
+   "zone": "unresolved"
+  },
+  "alias": {
+   "z": "zone"
+  },
+  "bool": [
+   "async"
+  ],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "cluster",
+   "location",
+   "region",
+   "z",
+   "zone"
+  ]
+ },
+ "container node-pools describe": {
+  "actions": {
+   "cluster": "unresolved",
+   "zone": "unresolved"
+  },
+  "alias": {
+   "z": "zone"
+  },
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "cluster",
+   "location",
+   "region",
+   "z",
+   "zone"
+  ]
+ },
+ "container node-pools list": {
+  "actions": {
+   "cluster": "unresolved",
+   "zone": "unresolved"
+  },
+  "alias": {
+   "z": "zone"
+  },
+  "bool": [
+   "uri"
+  ],
+  "dict": [],
+  "list": [
+   "sort-by"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "cluster",
+   "filter",
+   "limit",
+   "location",
+   "page-size",
+   "region",
+   "sort-by",
+   "z",
+   "zone"
+  ]
+ },
+ "container node-pools rollback": {
+  "actions": {
+   "cluster": "unresolved",
+   "zone": "unresolved"
+  },
+  "alias": {
+   "z": "zone"
+  },
+  "bool": [
+   "async"
+  ],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "respect-pdb": "unresolved"
+  },
+  "value": [
+   "cluster",
+   "location",
+   "region",
+   "respect-pdb",
+   "z",
+   "zone"
+  ]
+ },
+ "container node-pools update": {
+  "actions": {
+   "cluster": "unresolved",
+   "network-performance-configs": "append",
+   "zone": "unresolved"
+  },
+  "alias": {
+   "z": "zone"
+  },
+  "bool": [
+   "add-maintenance-exclusion-until-end-of-support",
+   "async",
+   "enable-autoprovisioning",
+   "enable-autorepair",
+   "enable-autoscaling",
+   "enable-autoupgrade",
+   "enable-blue-green-upgrade",
+   "enable-confidential-nodes",
+   "enable-gvnic",
+   "enable-image-streaming",
+   "enable-insecure-kubelet-readonly-port",
+   "enable-kernel-module-signature-enforcement",
+   "enable-private-nodes",
+   "enable-queued-provisioning",
+   "enable-surge-upgrade",
+   "flex-start",
+   "remove-maintenance-exclusion-until-end-of-support",
+   "respect-pdb-during-node-pool-deletion"
+  ],
+  "dict": [
+   "accelerator",
+   "autoscaled-rollout-policy",
+   "labels",
+   "network-performance-configs",
+   "node-labels",
+   "node-taints",
+   "resource-manager-tags",
+   "standard-rollout-policy"
+  ],
+  "list": [
+   "node-locations",
+   "storage-pools",
+   "tags"
+  ],
+  "optional": [],
+  "specs": {
+   "accelerator": {
+    "key_only": false,
+    "members": {
+     "count": "int",
+     "gpu-driver-version": null,
+     "gpu-partition-size": null,
+     "gpu-sharing-strategy": null,
+     "max-shared-clients-per-gpu": "int",
+     "max-time-shared-clients-per-gpu": "int",
+     "type": null
+    },
+    "required": [
+     "type"
+    ]
+   },
+   "autoscaled-rollout-policy": {
+    "key_only": false,
+    "members": {
+     "wait-for-drain-duration": null
+    },
+    "required": []
+   },
+   "network-performance-configs": {
+    "key_only": false,
+    "members": {
+     "total-egress-bandwidth-tier": null
+    },
+    "required": []
+   },
+   "standard-rollout-policy": {
+    "key_only": false,
+    "members": {
+     "batch-node-count": "int",
+     "batch-percent": "float",
+     "batch-soak-duration": null
+    },
+    "required": []
+   }
+  },
+  "types": {
+   "accelerator": "dict",
+   "autoscaled-rollout-policy": "dict",
+   "boot-disk-provisioned-iops": "int",
+   "boot-disk-provisioned-throughput": "int",
+   "containerd-config-from-file": "file",
+   "disk-size": "size:G",
+   "labels": "dict",
+   "max-nodes": "int",
+   "max-surge-upgrade": "int",
+   "max-unavailable-upgrade": "int",
+   "min-nodes": "int",
+   "network-performance-configs": "dict",
+   "node-labels": "dict",
+   "node-locations": "list:str",
+   "node-taints": "dict",
+   "resource-manager-tags": "dict",
+   "standard-rollout-policy": "dict",
+   "storage-pools": "list:str",
+   "system-config-from-file": "file",
+   "tags": "list:str",
+   "total-max-nodes": "int",
+   "total-min-nodes": "int",
+   "workload-metadata": "unresolved"
+  },
+  "value": [
+   "accelerator",
+   "autoscaled-rollout-policy",
+   "boot-disk-provisioned-iops",
+   "boot-disk-provisioned-throughput",
+   "cluster",
+   "confidential-node-type",
+   "consolidation-delay",
+   "containerd-config-from-file",
+   "datapath-provider",
+   "disk-size",
+   "disk-type",
+   "labels",
+   "location",
+   "location-policy",
+   "logging-variant",
+   "machine-type",
+   "max-nodes",
+   "max-run-duration",
+   "max-surge-upgrade",
+   "max-unavailable-upgrade",
+   "min-nodes",
+   "network-performance-configs",
+   "node-architecture-taint-behavior",
+   "node-config-update-mode",
+   "node-drain-grace-period-seconds",
+   "node-drain-pdb-timeout-seconds",
+   "node-labels",
+   "node-locations",
+   "node-pool-soak-duration",
+   "node-taints",
+   "region",
+   "resource-manager-tags",
+   "standard-rollout-policy",
+   "storage-pools",
+   "system-config-from-file",
+   "tags",
+   "total-max-nodes",
+   "total-min-nodes",
+   "windows-os-version",
+   "workload-metadata",
+   "z",
+   "zone"
+  ]
+ },
+ "functions add-iam-policy-binding": {
+  "actions": {
+   "region": "unresolved"
+  },
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "member",
+   "region",
+   "role"
+  ]
+ },
+ "functions delete": {
+  "actions": {
+   "region": "unresolved"
+  },
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "region"
+  ]
+ },
+ "functions deploy": {
+  "actions": {
+   "region": "unresolved",
+   "remove-secrets": "update",
+   "set-secrets": "update",
+   "trigger-event-filters": "update",
+   "trigger-event-filters-path-pattern": "update",
+   "update-secrets": "update"
+  },
+  "alias": {},
+  "bool": [
+   "allow-unauthenticated",
+   "clear-binary-authorization",
+   "clear-build-env-vars",
+   "clear-build-service-account",
+   "clear-build-worker-pool",
+   "clear-docker-repository",
+   "clear-env-vars",
+   "clear-kms-key",
+   "clear-labels",
+   "clear-max-instances",
+   "clear-min-instances",
+   "clear-network",
+   "clear-network-tags",
+   "clear-secrets",
+   "clear-vpc-connector",
+   "gen2",
+   "no-allow-unauthenticated",
+   "retry",
+   "serve-all-traffic-latest-revision",
+   "trigger-http"
+  ],
+  "dict": [
+   "set-build-env-vars",
+   "set-env-vars",
+   "set-secrets",
+   "trigger-event-filters",
+   "trigger-event-filters-path-pattern",
+   "update-build-env-vars",
+   "update-env-vars",
+   "update-labels",
+   "update-secrets"
+  ],
+  "list": [
+   "network-tags",
+   "remove-build-env-vars",
+   "remove-env-vars",
+   "remove-labels",
+   "remove-secrets"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "concurrency": "int",
+   "docker-repository": "unresolved",
+   "kms-key": "unresolved",
+   "max-instances": "int",
+   "min-instances": "int",
+   "network-tags": "list:str",
+   "remove-secrets": "unresolved",
+   "set-secrets": "unresolved",
+   "stage-bucket": "unresolved",
+   "timeout": "duration:s",
+   "trigger-bucket": "unresolved",
+   "trigger-event-filters": "dict",
+   "trigger-event-filters-path-pattern": "dict",
+   "trigger-topic": "unresolved",
+   "update-secrets": "unresolved"
+  },
+  "value": [
+   "binary-authorization",
+   "build-env-vars-file",
+   "build-service-account",
+   "build-worker-pool",
+   "concurrency",
+   "cpu",
+   "direct-vpc-egress",
+   "docker-registry",
+   "docker-repository",
+   "egress-settings",
+   "entry-point",
+   "env-vars-file",
+   "ignore-file",
+   "ingress-settings",
+   "kms-key",
+   "max-instances",
+   "memory",
+   "min-instances",
+   "network",
+   "network-tags",
+   "region",
+   "remove-build-env-vars",
+   "remove-env-vars",
+   "remove-labels",
+   "remove-secrets",
+   "run-service-account",
+   "runtime",
+   "runtime-update-policy",
+   "security-level",
+   "service-account",
+   "set-build-env-vars",
+   "set-env-vars",
+   "set-secrets",
+   "source",
+   "stage-bucket",
+   "subnet",
+   "timeout",
+   "trigger-bucket",
+   "trigger-event",
+   "trigger-event-filters",
+   "trigger-event-filters-path-pattern",
+   "trigger-location",
+   "trigger-resource",
+   "trigger-service-account",
+   "trigger-topic",
+   "update-build-env-vars",
+   "update-env-vars",
+   "update-labels",
+   "update-secrets",
+   "vpc-connector"
+  ]
+ },
+ "functions describe": {
+  "actions": {
+   "region": "unresolved"
+  },
+  "alias": {},
+  "bool": [
+   "v2"
+  ],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "region"
+  ]
+ },
+ "functions list": {
+  "actions": {},
+  "alias": {},
+  "bool": [
+   "v2"
+  ],
+  "dict": [],
+  "list": [
+   "regions",
+   "sort-by"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "limit": "int",
+   "regions": "list:str"
+  },
+  "value": [
+   "filter",
+   "limit",
+   "page-size",
+   "regions",
+   "sort-by"
+  ]
+ },
+ "functions remove-iam-policy-binding": {
+  "actions": {
+   "region": "unresolved"
+  },
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "member",
+   "region",
+   "role"
+  ]
+ },
+ "functions set-iam-policy": {
+  "actions": {
+   "region": "unresolved"
+  },
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "region"
+  ]
+ },
+ "iam service-accounts add-iam-policy-binding": {
+  "actions": {},
+  "alias": {},
+  "bool": [],
+  "dict": [
+   "condition"
+  ],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "condition": "unresolved",
+   "condition-from-file": "file"
+  },
+  "value": [
+   "condition",
+   "condition-from-file",
+   "member",
+   "role"
+  ]
+ },
+ "iam service-accounts create": {
+  "actions": {},
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "description",
+   "display-name"
+  ]
+ },
+ "iam service-accounts delete": {
+  "actions": {},
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": []
+ },
+ "iam service-accounts describe": {
+  "actions": {},
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": []
+ },
+ "iam service-accounts list": {
+  "actions": {},
+  "alias": {},
+  "bool": [
+   "uri"
+  ],
+  "dict": [],
+  "list": [
+   "sort-by"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "filter",
+   "limit",
+   "sort-by"
+  ]
+ },
+ "iam service-accounts remove-iam-policy-binding": {
+  "actions": {},
+  "alias": {},
+  "bool": [
+   "all"
+  ],
+  "dict": [
+   "condition"
+  ],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "condition": "unresolved",
+   "condition-from-file": "file"
+  },
+  "value": [
+   "condition",
+   "condition-from-file",
+   "member",
+   "role"
+  ]
+ },
+ "iam service-accounts set-iam-policy": {
+  "actions": {},
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": []
+ },
+ "iam service-accounts update": {
+  "actions": {},
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "description",
+   "display-name"
+  ]
+ },
+ "projects add-iam-policy-binding": {
+  "actions": {},
+  "alias": {},
+  "bool": [],
+  "dict": [
+   "condition"
+  ],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "condition",
+   "condition-from-file",
+   "member",
+   "role"
+  ]
+ },
+ "projects create": {
+  "actions": {
+   "tags": "update"
+  },
+  "alias": {},
+  "bool": [
+   "enable-cloud-apis",
+   "set-as-default"
+  ],
+  "dict": [
+   "labels",
+   "tags"
+  ],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "folder": "unresolved",
+   "organization": "unresolved",
+   "tags": "dict"
+  },
+  "value": [
+   "folder",
+   "labels",
+   "name",
+   "organization",
+   "tags"
+  ]
+ },
+ "projects delete": {
+  "actions": {},
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": []
+ },
+ "projects describe": {
+  "actions": {},
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": []
+ },
+ "projects list": {
+  "actions": {},
+  "alias": {},
+  "bool": [
+   "uri"
+  ],
+  "dict": [],
+  "list": [
+   "sort-by"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "page-size": "unresolved"
+  },
+  "value": [
+   "filter",
+   "limit",
+   "page-size",
+   "sort-by"
+  ]
+ },
+ "projects remove-iam-policy-binding": {
+  "actions": {},
+  "alias": {},
+  "bool": [
+   "all"
+  ],
+  "dict": [
+   "condition"
+  ],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "condition",
+   "condition-from-file",
+   "member",
+   "role"
+  ]
+ },
+ "projects set-iam-policy": {
+  "actions": {},
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": []
+ },
+ "projects update": {
+  "actions": {},
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "name"
+  ]
+ },
+ "pubsub topics add-iam-policy-binding": {
+  "actions": {},
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "member",
+   "role"
+  ]
+ },
+ "pubsub topics create": {
+  "actions": {
+   "tags": "update"
+  },
+  "alias": {},
+  "bool": [
+   "message-storage-policy-enforce-in-transit"
+  ],
+  "dict": [
+   "labels",
+   "tags"
+  ],
+  "list": [
+   "message-storage-policy-allowed-regions"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "cloud-storage-ingestion-input-format": "unresolved",
+   "message-encoding": "unresolved",
+   "message-retention-duration": "unresolved",
+   "message-storage-policy-allowed-regions": "list:str",
+   "tags": "dict"
+  },
+  "value": [
+   "aws-msk-ingestion-aws-role-arn",
+   "aws-msk-ingestion-cluster-arn",
+   "aws-msk-ingestion-service-account",
+   "aws-msk-ingestion-topic",
+   "azure-event-hubs-ingestion-client-id",
+   "azure-event-hubs-ingestion-event-hub",
+   "azure-event-hubs-ingestion-namespace",
+   "azure-event-hubs-ingestion-resource-group",
+   "azure-event-hubs-ingestion-service-account",
+   "azure-event-hubs-ingestion-subscription-id",
+   "azure-event-hubs-ingestion-tenant-id",
+   "cloud-storage-ingestion-bucket",
+   "cloud-storage-ingestion-input-format",
+   "cloud-storage-ingestion-match-glob",
+   "cloud-storage-ingestion-minimum-object-create-time",
+   "cloud-storage-ingestion-text-delimiter",
+   "confluent-cloud-ingestion-bootstrap-server",
+   "confluent-cloud-ingestion-cluster-id",
+   "confluent-cloud-ingestion-identity-pool-id",
+   "confluent-cloud-ingestion-service-account",
+   "confluent-cloud-ingestion-topic",
+   "first-revision-id",
+   "ingestion-log-severity",
+   "kinesis-ingestion-consumer-arn",
+   "kinesis-ingestion-role-arn",
+   "kinesis-ingestion-service-account",
+   "kinesis-ingestion-stream-arn",
+   "labels",
+   "last-revision-id",
+   "message-encoding",
+   "message-retention-duration",
+   "message-storage-policy-allowed-regions",
+   "message-transforms-file",
+   "schema",
+   "schema-project",
+   "tags",
+   "topic-encryption-key",
+   "topic-encryption-key-keyring",
+   "topic-encryption-key-location",
+   "topic-encryption-key-project"
+  ]
+ },
+ "pubsub topics delete": {
+  "actions": {},
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": []
+ },
+ "pubsub topics describe": {
+  "actions": {},
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": []
+ },
+ "pubsub topics list": {
+  "actions": {},
+  "alias": {},
+  "bool": [
+   "uri"
+  ],
+  "dict": [],
+  "list": [
+   "sort-by"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "filter",
+   "limit",
+   "page-size",
+   "sort-by"
+  ]
+ },
+ "pubsub topics remove-iam-policy-binding": {
+  "actions": {},
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "member",
+   "role"
+  ]
+ },
+ "pubsub topics set-iam-policy": {
+  "actions": {},
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": []
+ },
+ "pubsub topics update": {
+  "actions": {},
+  "alias": {},
+  "bool": [
+   "clear-ingestion-data-source-settings",
+   "clear-labels",
+   "clear-message-retention-duration",
+   "clear-message-transforms",
+   "clear-schema-settings",
+   "message-storage-policy-enforce-in-transit",
+   "recompute-message-storage-policy"
+  ],
+  "dict": [
+   "update-labels"
+  ],
+  "list": [
+   "message-storage-policy-allowed-regions",
+   "remove-labels"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "cloud-storage-ingestion-input-format": "unresolved",
+   "message-encoding": "unresolved",
+   "message-retention-duration": "unresolved",
+   "message-storage-policy-allowed-regions": "list:str"
+  },
+  "value": [
+   "aws-msk-ingestion-aws-role-arn",
+   "aws-msk-ingestion-cluster-arn",
+   "aws-msk-ingestion-service-account",
+   "aws-msk-ingestion-topic",
+   "azure-event-hubs-ingestion-client-id",
+   "azure-event-hubs-ingestion-event-hub",
+   "azure-event-hubs-ingestion-namespace",
+   "azure-event-hubs-ingestion-resource-group",
+   "azure-event-hubs-ingestion-service-account",
+   "azure-event-hubs-ingestion-subscription-id",
+   "azure-event-hubs-ingestion-tenant-id",
+   "cloud-storage-ingestion-bucket",
+   "cloud-storage-ingestion-input-format",
+   "cloud-storage-ingestion-match-glob",
+   "cloud-storage-ingestion-minimum-object-create-time",
+   "cloud-storage-ingestion-text-delimiter",
+   "confluent-cloud-ingestion-bootstrap-server",
+   "confluent-cloud-ingestion-cluster-id",
+   "confluent-cloud-ingestion-identity-pool-id",
+   "confluent-cloud-ingestion-service-account",
+   "confluent-cloud-ingestion-topic",
+   "first-revision-id",
+   "ingestion-log-severity",
+   "kinesis-ingestion-consumer-arn",
+   "kinesis-ingestion-role-arn",
+   "kinesis-ingestion-service-account",
+   "kinesis-ingestion-stream-arn",
+   "last-revision-id",
+   "message-encoding",
+   "message-retention-duration",
+   "message-storage-policy-allowed-regions",
+   "message-transforms-file",
+   "remove-labels",
+   "schema",
+   "schema-project",
+   "topic-encryption-key",
+   "topic-encryption-key-keyring",
+   "topic-encryption-key-location",
+   "topic-encryption-key-project",
+   "update-labels"
+  ]
+ },
+ "root": {
+  "alias": {
+   "q": "quiet",
+   "v": "version"
+  },
+  "bool": [
+   "h",
+   "help",
+   "log-http",
+   "q",
+   "quiet",
+   "user-output-enabled",
+   "v",
+   "version"
+  ],
+  "dict": [],
+  "list": [
+   "flatten"
+  ],
+  "optional": [],
+  "value": [
+   "access-token-file",
+   "account",
+   "billing-project",
+   "configuration",
+   "flags-file",
+   "flatten",
+   "format",
+   "impersonate-service-account",
+   "project",
+   "trace-token",
+   "verbosity"
+  ]
+ },
+ "run deploy": {
+  "actions": {
+   "add-volume": "append",
+   "add-volume-mount": "append",
+   "args": "update",
+   "command": "update",
+   "depends-on": "update",
+   "network-tags": "update",
+   "remove-containers": "update",
+   "remove-volume": "update",
+   "remove-volume-mount": "update",
+   "set-env-vars": "update",
+   "set-secrets": "update",
+   "update-env-vars": "update"
+  },
+  "alias": {},
+  "bool": [
+   "allow-unauthenticated",
+   "async",
+   "automatic-updates",
+   "clear-base-image",
+   "clear-binary-authorization",
+   "clear-build-env-vars",
+   "clear-build-service-account",
+   "clear-build-worker-pool",
+   "clear-cloudsql-instances",
+   "clear-custom-audiences",
+   "clear-encryption-key-shutdown-hours",
+   "clear-env-vars",
+   "clear-key",
+   "clear-labels",
+   "clear-network",
+   "clear-network-tags",
+   "clear-post-key-revocation-action-type",
+   "clear-secrets",
+   "clear-volume-mounts",
+   "clear-volumes",
+   "clear-vpc-connector",
+   "cpu-boost",
+   "cpu-throttling",
+   "default-url",
+   "deploy-health-check",
+   "gpu-zonal-redundancy",
+   "iap",
+   "invoker-iam-check",
+   "no-allow-unauthenticated",
+   "no-automatic-updates",
+   "no-cpu-boost",
+   "no-cpu-throttling",
+   "no-default-url",
+   "no-deploy-health-check",
+   "no-gpu-zonal-redundancy",
+   "no-iap",
+   "no-invoker-iam-check",
+   "no-session-affinity",
+   "no-traffic",
+   "no-use-http2",
+   "session-affinity",
+   "use-http2"
+  ],
+  "dict": [
+   "add-volume",
+   "add-volume-mount",
+   "labels",
+   "liveness-probe",
+   "readiness-probe",
+   "set-build-env-vars",
+   "set-env-vars",
+   "set-secrets",
+   "startup-probe",
+   "update-build-env-vars",
+   "update-env-vars",
+   "update-labels",
+   "update-secrets"
+  ],
+  "list": [
+   "add-cloudsql-instances",
+   "add-custom-audiences",
+   "args",
+   "command",
+   "depends-on",
+   "network-tags",
+   "remove-build-env-vars",
+   "remove-cloudsql-instances",
+   "remove-containers",
+   "remove-custom-audiences",
+   "remove-env-vars",
+   "remove-labels",
+   "remove-secrets",
+   "remove-volume",
+   "remove-volume-mount",
+   "set-cloudsql-instances",
+   "set-custom-audiences"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "add-volume": "dict",
+   "add-volume-mount": "dict",
+   "args": "list:str",
+   "build-env-vars-file": "unresolved",
+   "build-service-account": "unresolved",
+   "command": "list:str",
+   "concurrency": "unresolved",
+   "depends-on": "unresolved",
+   "env-vars-file": "unresolved",
+   "max": "unresolved",
+   "max-instances": "unresolved",
+   "min": "unresolved",
+   "min-instances": "unresolved",
+   "network-tags": "list:str",
+   "port": "unresolved",
+   "remove-containers": "unresolved",
+   "remove-volume": "list:str",
+   "remove-volume-mount": "list:str",
+   "scaling": "unresolved",
+   "scaling-concurrency-target": "unresolved",
+   "scaling-cpu-target": "unresolved",
+   "set-cloudsql-instances": "list:str",
+   "set-env-vars": "dict",
+   "set-secrets": "dict",
+   "timeout": "duration:s",
+   "update-env-vars": "dict"
+  },
+  "value": [
+   "add-cloudsql-instances",
+   "add-custom-audiences",
+   "add-volume",
+   "add-volume-mount",
+   "args",
+   "base-image",
+   "binary-authorization",
+   "breakglass",
+   "build-env-vars-file",
+   "build-service-account",
+   "build-worker-pool",
+   "command",
+   "concurrency",
+   "container",
+   "cpu",
+   "depends-on",
+   "description",
+   "encryption-key-shutdown-hours",
+   "env-vars-file",
+   "execution-environment",
+   "function",
+   "gpu",
+   "gpu-type",
+   "image",
+   "ingress",
+   "key",
+   "labels",
+   "liveness-probe",
+   "max",
+   "max-instances",
+   "memory",
+   "min",
+   "min-instances",
+   "namespace",
+   "network",
+   "network-tags",
+   "port",
+   "post-key-revocation-action-type",
+   "readiness-probe",
+   "region",
+   "regions",
+   "remove-build-env-vars",
+   "remove-cloudsql-instances",
+   "remove-containers",
+   "remove-custom-audiences",
+   "remove-env-vars",
+   "remove-labels",
+   "remove-secrets",
+   "remove-volume",
+   "remove-volume-mount",
+   "revision-suffix",
+   "scaling",
+   "scaling-concurrency-target",
+   "scaling-cpu-target",
+   "service-account",
+   "set-build-env-vars",
+   "set-cloudsql-instances",
+   "set-custom-audiences",
+   "set-env-vars",
+   "set-secrets",
+   "source",
+   "startup-probe",
+   "subnet",
+   "tag",
+   "timeout",
+   "update-build-env-vars",
+   "update-env-vars",
+   "update-labels",
+   "update-secrets",
+   "vpc-connector",
+   "vpc-egress",
+   "workdir"
+  ]
+ },
+ "run services add-iam-policy-binding": {
+  "actions": {},
+  "alias": {},
+  "bool": [],
+  "dict": [
+   "condition"
+  ],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "condition",
+   "condition-from-file",
+   "member",
+   "region",
+   "role"
+  ]
+ },
+ "run services delete": {
+  "actions": {},
+  "alias": {},
+  "bool": [
+   "async",
+   "no-async"
+  ],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "namespace",
+   "region"
+  ]
+ },
+ "run services describe": {
+  "actions": {},
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "namespace",
+   "region"
+  ]
+ },
+ "run services list": {
+  "actions": {},
+  "alias": {},
+  "bool": [
+   "uri"
+  ],
+  "dict": [],
+  "list": [
+   "sort-by"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "filter",
+   "limit",
+   "page-size",
+   "region",
+   "sort-by"
+  ]
+ },
+ "run services remove-iam-policy-binding": {
+  "actions": {},
+  "alias": {},
+  "bool": [
+   "all"
+  ],
+  "dict": [
+   "condition"
+  ],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "condition",
+   "condition-from-file",
+   "member",
+   "region",
+   "role"
+  ]
+ },
+ "run services set-iam-policy": {
+  "actions": {},
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "region"
+  ]
+ },
+ "run services update": {
+  "actions": {
+   "add-volume": "append",
+   "add-volume-mount": "append",
+   "args": "update",
+   "command": "update",
+   "depends-on": "update",
+   "network-tags": "update",
+   "remove-containers": "update",
+   "remove-volume": "update",
+   "remove-volume-mount": "update",
+   "set-env-vars": "update",
+   "set-secrets": "update",
+   "update-env-vars": "update"
+  },
+  "alias": {},
+  "bool": [
+   "async",
+   "clear-binary-authorization",
+   "clear-cloudsql-instances",
+   "clear-custom-audiences",
+   "clear-encryption-key-shutdown-hours",
+   "clear-env-vars",
+   "clear-key",
+   "clear-labels",
+   "clear-network",
+   "clear-network-tags",
+   "clear-post-key-revocation-action-type",
+   "clear-secrets",
+   "clear-volume-mounts",
+   "clear-volumes",
+   "clear-vpc-connector",
+   "cpu-boost",
+   "cpu-throttling",
+   "default-url",
+   "deploy-health-check",
+   "gpu-zonal-redundancy",
+   "iap",
+   "invoker-iam-check",
+   "no-cpu-boost",
+   "no-cpu-throttling",
+   "no-default-url",
+   "no-deploy-health-check",
+   "no-gpu-zonal-redundancy",
+   "no-iap",
+   "no-invoker-iam-check",
+   "no-session-affinity",
+   "no-traffic",
+   "no-use-http2",
+   "session-affinity",
+   "use-http2"
+  ],
+  "dict": [
+   "add-volume",
+   "add-volume-mount",
+   "labels",
+   "liveness-probe",
+   "readiness-probe",
+   "set-env-vars",
+   "set-secrets",
+   "startup-probe",
+   "update-env-vars",
+   "update-labels",
+   "update-secrets"
+  ],
+  "list": [
+   "add-cloudsql-instances",
+   "add-custom-audiences",
+   "args",
+   "command",
+   "depends-on",
+   "network-tags",
+   "remove-cloudsql-instances",
+   "remove-containers",
+   "remove-custom-audiences",
+   "remove-env-vars",
+   "remove-labels",
+   "remove-secrets",
+   "remove-volume",
+   "remove-volume-mount",
+   "set-cloudsql-instances",
+   "set-custom-audiences"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "add-volume": "dict",
+   "add-volume-mount": "dict",
+   "args": "list:str",
+   "command": "list:str",
+   "concurrency": "unresolved",
+   "depends-on": "unresolved",
+   "env-vars-file": "unresolved",
+   "max": "unresolved",
+   "max-instances": "unresolved",
+   "min": "unresolved",
+   "min-instances": "unresolved",
+   "network-tags": "list:str",
+   "port": "unresolved",
+   "remove-containers": "unresolved",
+   "remove-volume": "list:str",
+   "remove-volume-mount": "list:str",
+   "scaling": "unresolved",
+   "scaling-concurrency-target": "unresolved",
+   "scaling-cpu-target": "unresolved",
+   "set-cloudsql-instances": "list:str",
+   "set-env-vars": "dict",
+   "set-secrets": "dict",
+   "timeout": "duration:s",
+   "update-env-vars": "dict"
+  },
+  "value": [
+   "add-cloudsql-instances",
+   "add-custom-audiences",
+   "add-volume",
+   "add-volume-mount",
+   "args",
+   "binary-authorization",
+   "breakglass",
+   "command",
+   "concurrency",
+   "container",
+   "cpu",
+   "depends-on",
+   "encryption-key-shutdown-hours",
+   "env-vars-file",
+   "execution-environment",
+   "gpu",
+   "gpu-type",
+   "image",
+   "ingress",
+   "key",
+   "labels",
+   "liveness-probe",
+   "max",
+   "max-instances",
+   "memory",
+   "min",
+   "min-instances",
+   "namespace",
+   "network",
+   "network-tags",
+   "port",
+   "post-key-revocation-action-type",
+   "readiness-probe",
+   "region",
+   "remove-cloudsql-instances",
+   "remove-containers",
+   "remove-custom-audiences",
+   "remove-env-vars",
+   "remove-labels",
+   "remove-secrets",
+   "remove-volume",
+   "remove-volume-mount",
+   "revision-suffix",
+   "scaling",
+   "scaling-concurrency-target",
+   "scaling-cpu-target",
+   "service-account",
+   "set-cloudsql-instances",
+   "set-custom-audiences",
+   "set-env-vars",
+   "set-secrets",
+   "startup-probe",
+   "subnet",
+   "tag",
+   "timeout",
+   "update-env-vars",
+   "update-labels",
+   "update-secrets",
+   "vpc-connector",
+   "vpc-egress",
+   "workdir"
+  ]
+ },
+ "sql export bak": {
+  "actions": {},
+  "alias": {
+   "d": "database"
+  },
+  "bool": [
+   "async",
+   "differential-base",
+   "no-striped",
+   "striped"
+  ],
+  "dict": [],
+  "list": [
+   "d",
+   "database"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "database": "list:str",
+   "export-log-end-time": "unresolved",
+   "export-log-start-time": "unresolved",
+   "stripe_count": "int"
+  },
+  "value": [
+   "bak-type",
+   "d",
+   "database",
+   "export-log-end-time",
+   "export-log-start-time",
+   "stripe_count"
+  ]
+ },
+ "sql export csv": {
+  "actions": {},
+  "alias": {
+   "d": "database"
+  },
+  "bool": [
+   "async",
+   "offload"
+  ],
+  "dict": [],
+  "list": [
+   "d",
+   "database"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "database": "list:str"
+  },
+  "value": [
+   "d",
+   "database",
+   "escape",
+   "fields-terminated-by",
+   "lines-terminated-by",
+   "query",
+   "quote"
+  ]
+ },
+ "sql export sql": {
+  "actions": {},
+  "alias": {
+   "d": "database",
+   "t": "table"
+  },
+  "bool": [
+   "async",
+   "clean",
+   "if-exists",
+   "offload",
+   "parallel"
+  ],
+  "dict": [],
+  "list": [
+   "d",
+   "database",
+   "t",
+   "table"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "database": "list:str",
+   "table": "list:str",
+   "threads": "unresolved"
+  },
+  "value": [
+   "d",
+   "database",
+   "t",
+   "table",
+   "threads"
+  ]
+ },
+ "sql export tde": {
+  "actions": {},
+  "alias": {},
+  "bool": [
+   "async",
+   "prompt-for-pvk-password"
+  ],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "cert-path",
+   "certificate",
+   "pvk-password",
+   "pvk-path"
+  ]
+ },
+ "sql import bak": {
+  "actions": {},
+  "alias": {
+   "d": "database"
+  },
+  "bool": [
+   "async",
+   "keep-encrypted",
+   "no-recovery",
+   "no-striped",
+   "prompt-for-pvk-password",
+   "recovery-only",
+   "striped"
+  ],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "stop-at": "unresolved"
+  },
+  "value": [
+   "bak-type",
+   "cert-path",
+   "d",
+   "database",
+   "pvk-password",
+   "pvk-path",
+   "stop-at",
+   "stop-at-mark"
+  ]
+ },
+ "sql import csv": {
+  "actions": {},
+  "alias": {
+   "d": "database"
+  },
+  "bool": [
+   "async"
+  ],
+  "dict": [],
+  "list": [
+   "columns"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "columns": "list:str"
+  },
+  "value": [
+   "columns",
+   "d",
+   "database",
+   "escape",
+   "fields-terminated-by",
+   "lines-terminated-by",
+   "quote",
+   "table",
+   "user"
+  ]
+ },
+ "sql import sql": {
+  "actions": {},
+  "alias": {
+   "d": "database"
+  },
+  "bool": [
+   "async",
+   "clean",
+   "if-exists",
+   "parallel"
+  ],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "threads": "unresolved"
+  },
+  "value": [
+   "d",
+   "database",
+   "threads",
+   "user"
+  ]
+ },
+ "sql import tde": {
+  "actions": {},
+  "alias": {},
+  "bool": [
+   "async",
+   "prompt-for-pvk-password"
+  ],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "cert-path",
+   "certificate",
+   "pvk-password",
+   "pvk-path"
+  ]
+ },
+ "sql instances create": {
+  "actions": {
+   "active-directory-dns-servers": "unresolved",
+   "custom-subject-alternative-names": "unresolved",
+   "psc-auto-connections": "unresolved"
+  },
+  "alias": {
+   "t": "tier"
+  },
+  "bool": [
+   "assign-ip",
+   "async",
+   "auto-scale-disable-scale-in",
+   "auto-scale-enabled",
+   "backup",
+   "cascadable-replica",
+   "clear-active-directory-dns-servers",
+   "deletion-protection",
+   "enable-auto-upgrade-minor-version",
+   "enable-bin-log",
+   "enable-connection-pooling",
+   "enable-data-cache",
+   "enable-dataplex-integration",
+   "enable-google-ml-integration",
+   "enable-google-private-path",
+   "enable-password-policy",
+   "enable-point-in-time-recovery",
+   "enable-private-service-connect",
+   "enable-psc-auto-connection-policy",
+   "enable-psc-auto-dns",
+   "enable-psc-write-endpoint-dns",
+   "enforce-new-sql-network-architecture",
+   "final-backup",
+   "insights-config-enhanced-query-insights-enabled",
+   "insights-config-query-insights-enabled",
+   "insights-config-record-application-tags",
+   "insights-config-record-client-address",
+   "no-assign-ip",
+   "no-auto-scale-disable-scale-in",
+   "no-auto-scale-enabled",
+   "no-deletion-protection",
+   "no-enable-connection-pooling",
+   "no-enable-data-cache",
+   "no-enable-dataplex-integration",
+   "no-enable-google-ml-integration",
+   "no-enable-psc-auto-connection-policy",
+   "no-enable-psc-auto-dns",
+   "no-enable-psc-write-endpoint-dns",
+   "no-final-backup",
+   "no-insights-config-enhanced-query-insights-enabled",
+   "no-insights-config-query-insights-enabled",
+   "no-insights-config-record-application-tags",
+   "no-insights-config-record-client-address",
+   "no-password-policy-disallow-username-substring",
+   "no-recreate-replicas-on-primary-crash",
+   "no-retain-backups-on-delete",
+   "no-storage-auto-increase",
+   "password-policy-disallow-username-substring",
+   "recreate-replicas-on-primary-crash",
+   "require-ssl",
+   "retain-backups-on-delete",
+   "storage-auto-increase"
+  ],
+  "dict": [
+   "auto-scale-target-metrics",
+   "connection-pool-flags",
+   "database-flags",
+   "performance-capture-config",
+   "psc-auto-connections",
+   "tags"
+  ],
+  "list": [
+   "active-directory-dns-servers",
+   "allowed-psc-projects",
+   "authorized-networks",
+   "custom-subject-alternative-names"
+  ],
+  "optional": [],
+  "specs": {
+   "auto-scale-target-metrics": {
+    "key_only": false,
+    "members": {
+     "AVERAGE_CPU_UTILIZATION": "float",
+     "AVERAGE_DB_CONNECTIONS": "float"
+    },
+    "required": []
+   }
+  },
+  "types": {
+   "active-directory-dns-servers": "list:str",
+   "allowed-psc-projects": "list:str",
+   "audit-retention-interval": "duration:s",
+   "audit-upload-interval": "duration:s",
+   "authorized-networks": "unresolved",
+   "auto-scale-in-cooldown-seconds": "int",
+   "auto-scale-max-node-count": "int",
+   "auto-scale-min-node-count": "int",
+   "auto-scale-out-cooldown-seconds": "int",
+   "auto-scale-target-metrics": "dict",
+   "connection-pool-flags": "dict",
+   "cpu": "int",
+   "custom-subject-alternative-names": "list:str",
+   "database-flags": "dict",
+   "final-backup-retention-days": "unresolved",
+   "insights-config-query-plans-per-minute": "int",
+   "insights-config-query-string-length": "int",
+   "maintenance-window-day": "unresolved",
+   "maintenance-window-hour": "int",
+   "memory": "size:G",
+   "node-count": "int",
+   "password-policy-min-length": "int",
+   "password-policy-password-change-interval": "duration:s",
+   "password-policy-reuse-interval": "int",
+   "performance-capture-config": "dict",
+   "psc-auto-connections": "unresolved",
+   "retained-backups-count": "unresolved",
+   "retained-transaction-log-days": "unresolved",
+   "storage-auto-increase-limit": "unresolved",
+   "storage-provisioned-iops": "unresolved",
+   "storage-provisioned-throughput": "unresolved",
+   "storage-size": "size:G",
+   "tags": "dict",
+   "threads-per-core": "int",
+   "timeout": "unresolved"
+  },
+  "value": [
+   "activation-policy",
+   "active-directory-dns-servers",
+   "active-directory-domain",
+   "active-directory-mode",
+   "active-directory-organizational-unit",
+   "active-directory-secret-manager-key",
+   "allowed-psc-projects",
+   "audit-bucket-path",
+   "audit-retention-interval",
+   "audit-upload-interval",
+   "authorized-networks",
+   "auto-scale-in-cooldown-seconds",
+   "auto-scale-max-node-count",
+   "auto-scale-min-node-count",
+   "auto-scale-out-cooldown-seconds",
+   "auto-scale-target-metrics",
+   "availability-type",
+   "backup-location",
+   "backup-start-time",
+   "collation",
+   "connection-pool-flags",
+   "connector-enforcement",
+   "cpu",
+   "custom-subject-alternative-names",
+   "data-api-access",
+   "database-flags",
+   "database-version",
+   "deny-maintenance-period-end-date",
+   "deny-maintenance-period-start-date",
+   "deny-maintenance-period-time",
+   "disk-encryption-key",
+   "disk-encryption-key-keyring",
+   "disk-encryption-key-location",
+   "disk-encryption-key-project",
+   "edition",
+   "entra-id-application-id",
+   "entra-id-tenant-id",
+   "failover-replica-name",
+   "final-backup-retention-days",
+   "gce-zone",
+   "insights-config-query-plans-per-minute",
+   "insights-config-query-string-length",
+   "instance-type",
+   "maintenance-release-channel",
+   "maintenance-window-day",
+   "maintenance-window-hour",
+   "master-instance-name",
+   "memory",
+   "network",
+   "node-count",
+   "password-policy-complexity",
+   "password-policy-min-length",
+   "password-policy-password-change-interval",
+   "password-policy-reuse-interval",
+   "performance-capture-config",
+   "psc-auto-connections",
+   "region",
+   "replica-type",
+   "replication",
+   "retained-backups-count",
+   "retained-transaction-log-days",
+   "root-password",
+   "secondary-zone",
+   "server-ca-mode",
+   "server-ca-pool",
+   "server-certificate-rotation-mode",
+   "ssl-mode",
+   "storage-auto-increase-limit",
+   "storage-provisioned-iops",
+   "storage-provisioned-throughput",
+   "storage-size",
+   "storage-type",
+   "t",
+   "tags",
+   "threads-per-core",
+   "tier",
+   "time-zone",
+   "timeout",
+   "zone"
+  ]
+ },
+ "sql instances delete": {
+  "actions": {},
+  "alias": {},
+  "bool": [
+   "async",
+   "enable-final-backup"
+  ],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "final-backup-expiry-time": "unresolved",
+   "final-backup-retention-days": "unresolved"
+  },
+  "value": [
+   "final-backup-description",
+   "final-backup-expiry-time",
+   "final-backup-retention-days"
+  ]
+ },
+ "sql instances describe": {
+  "actions": {},
+  "alias": {},
+  "bool": [],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": []
+ },
+ "sql instances list": {
+  "actions": {},
+  "alias": {},
+  "bool": [
+   "show-edition",
+   "show-sql-network-architecture",
+   "show-transactional-log-storage-state",
+   "uri"
+  ],
+  "dict": [],
+  "list": [
+   "sort-by"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "filter",
+   "limit",
+   "page-size",
+   "sort-by"
+  ]
+ },
+ "storage buckets add-iam-policy-binding": {
+  "actions": {},
+  "alias": {},
+  "bool": [],
+  "dict": [
+   "condition"
+  ],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "condition",
+   "condition-from-file",
+   "member",
+   "role"
+  ]
+ },
+ "storage buckets create": {
+  "actions": {
+   "additional-headers": "unresolved"
+  },
+  "alias": {
+   "b": "uniform-bucket-level-access",
+   "c": "default-storage-class",
+   "k": "default-encryption-key",
+   "l": "location",
+   "public-access-prevention": "pap",
+   "rpo": "recovery-point-objective",
+   "s": "default-storage-class"
+  },
+  "bool": [
+   "b",
+   "enable-autoclass",
+   "enable-hierarchical-namespace",
+   "enable-per-object-retention",
+   "no-enable-autoclass",
+   "no-pap",
+   "no-public-access-prevention",
+   "no-uniform-bucket-level-access",
+   "pap",
+   "public-access-prevention",
+   "uniform-bucket-level-access"
+  ],
+  "dict": [
+   "labels"
+  ],
+  "list": [
+   "placement"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "labels": "dict",
+   "placement": "list:str",
+   "soft-delete-duration": "duration:s"
+  },
+  "value": [
+   "additional-headers",
+   "autoclass-terminal-storage-class",
+   "c",
+   "default-encryption-key",
+   "default-storage-class",
+   "encryption-enforcement-file",
+   "ip-filter-file",
+   "k",
+   "l",
+   "labels",
+   "labels-file",
+   "lifecycle-file",
+   "location",
+   "placement",
+   "recovery-point-objective",
+   "retention-period",
+   "rpo",
+   "s",
+   "soft-delete-duration"
+  ]
+ },
+ "storage buckets delete": {
+  "actions": {
+   "additional-headers": "unresolved"
+  },
+  "alias": {
+   "c": "continue-on-error"
+  },
+  "bool": [
+   "c",
+   "continue-on-error"
+  ],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "additional-headers"
+  ]
+ },
+ "storage buckets describe": {
+  "actions": {
+   "additional-headers": "unresolved"
+  },
+  "alias": {},
+  "bool": [
+   "raw"
+  ],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "additional-headers"
+  ]
+ },
+ "storage buckets list": {
+  "actions": {
+   "additional-headers": "unresolved"
+  },
+  "alias": {},
+  "bool": [
+   "raw",
+   "uri"
+  ],
+  "dict": [],
+  "list": [
+   "sort-by"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "additional-headers",
+   "filter",
+   "limit",
+   "page-size",
+   "sort-by"
+  ]
+ },
+ "storage buckets remove-iam-policy-binding": {
+  "actions": {},
+  "alias": {},
+  "bool": [
+   "all"
+  ],
+  "dict": [
+   "condition"
+  ],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "condition",
+   "condition-from-file",
+   "member",
+   "role"
+  ]
+ },
+ "storage buckets set-iam-policy": {
+  "actions": {},
+  "alias": {
+   "c": "continue-on-error",
+   "e": "etag"
+  },
+  "bool": [
+   "c",
+   "continue-on-error"
+  ],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "e",
+   "etag"
+  ]
+ },
+ "storage buckets update": {
+  "actions": {
+   "add-acl-grant": "append",
+   "add-default-object-acl-grant": "append",
+   "additional-headers": "unresolved",
+   "remove-acl-grant": "append",
+   "remove-default-object-acl-grant": "append"
+  },
+  "alias": {
+   "I": "read-paths-from-stdin",
+   "a": "canned-acl",
+   "c": "continue-on-error",
+   "clear-public-access-prevention": "clear-pap",
+   "predefined-acl": "canned-acl",
+   "public-access-prevention": "pap",
+   "rpo": "recovery-point-objective"
+  },
+  "bool": [
+   "I",
+   "c",
+   "clear-cors",
+   "clear-default-encryption-key",
+   "clear-ip-filter",
+   "clear-labels",
+   "clear-lifecycle",
+   "clear-log-bucket",
+   "clear-log-object-prefix",
+   "clear-pap",
+   "clear-public-access-prevention",
+   "clear-retention-period",
+   "clear-soft-delete",
+   "clear-web-error-page",
+   "clear-web-main-page-suffix",
+   "continue-on-error",
+   "default-event-based-hold",
+   "enable-autoclass",
+   "lock-retention-period",
+   "no-default-event-based-hold",
+   "no-enable-autoclass",
+   "no-pap",
+   "no-public-access-prevention",
+   "no-requester-pays",
+   "no-uniform-bucket-level-access",
+   "no-versioning",
+   "pap",
+   "public-access-prevention",
+   "read-paths-from-stdin",
+   "requester-pays",
+   "uniform-bucket-level-access",
+   "versioning"
+  ],
+  "dict": [
+   "add-acl-grant",
+   "add-default-object-acl-grant",
+   "update-labels"
+  ],
+  "list": [
+   "remove-labels"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "add-acl-grant": "dict",
+   "add-default-object-acl-grant": "dict",
+   "remove-labels": "list:str",
+   "soft-delete-duration": "duration:s",
+   "update-labels": "dict"
+  },
+  "value": [
+   "a",
+   "acl-file",
+   "add-acl-grant",
+   "add-default-object-acl-grant",
+   "additional-headers",
+   "autoclass-terminal-storage-class",
+   "canned-acl",
+   "cors-file",
+   "default-encryption-key",
+   "default-object-acl-file",
+   "default-storage-class",
+   "encryption-enforcement-file",
+   "ip-filter-file",
+   "labels-file",
+   "lifecycle-file",
+   "log-bucket",
+   "log-object-prefix",
+   "predefined-acl",
+   "predefined-default-object-acl",
+   "recovery-point-objective",
+   "remove-acl-grant",
+   "remove-default-object-acl-grant",
+   "remove-labels",
+   "retention-period",
+   "rpo",
+   "soft-delete-duration",
+   "update-labels",
+   "web-error-page",
+   "web-main-page-suffix"
+  ]
+ },
+ "storage cp": {
+  "actions": {
+   "additional-headers": "unresolved"
+  },
+  "alias": {
+   "A": "all-versions",
+   "D": "daisy-chain",
+   "I": "read-paths-from-stdin",
+   "J": "gzip-in-flight-all",
+   "L": "manifest-path",
+   "P": "preserve-posix",
+   "R": "recursive",
+   "U": "skip-unsupported",
+   "Z": "gzip-local-all",
+   "a": "canned-acl",
+   "c": "continue-on-error",
+   "j": "gzip-in-flight",
+   "n": "no-clobber",
+   "p": "preserve-acl",
+   "predefined-acl": "canned-acl",
+   "r": "recursive",
+   "s": "storage-class",
+   "v": "print-created-message",
+   "z": "gzip-local"
+  },
+  "bool": [
+   "A",
+   "D",
+   "I",
+   "J",
+   "P",
+   "R",
+   "U",
+   "Z",
+   "all-versions",
+   "c",
+   "clear-custom-contexts",
+   "clear-custom-metadata",
+   "continue-on-error",
+   "daisy-chain",
+   "do-not-decompress",
+   "gzip-in-flight-all",
+   "gzip-local-all",
+   "ignore-symlinks",
+   "include-managed-folders",
+   "n",
+   "no-clobber",
+   "no-preserve-acl",
+   "p",
+   "preserve-acl",
+   "preserve-posix",
+   "preserve-symlinks",
+   "print-created-message",
+   "r",
+   "read-paths-from-stdin",
+   "recursive",
+   "skip-unsupported",
+   "v"
+  ],
+  "dict": [
+   "custom-contexts",
+   "custom-metadata",
+   "update-custom-contexts",
+   "update-custom-metadata"
+  ],
+  "list": [
+   "decryption-keys",
+   "gzip-in-flight",
+   "gzip-local",
+   "j",
+   "remove-custom-contexts",
+   "remove-custom-metadata",
+   "z"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "custom-contexts": "dict",
+   "custom-metadata": "dict",
+   "custom-time": "unresolved",
+   "decryption-keys": "list:str",
+   "gzip-in-flight": "list:str",
+   "gzip-local": "list:str",
+   "remove-custom-contexts": "list:str",
+   "remove-custom-metadata": "list:str",
+   "retain-until": "unresolved",
+   "update-custom-contexts": "dict",
+   "update-custom-metadata": "dict"
+  },
+  "value": [
+   "L",
+   "a",
+   "additional-headers",
+   "cache-control",
+   "canned-acl",
+   "content-disposition",
+   "content-encoding",
+   "content-language",
+   "content-md5",
+   "content-type",
+   "custom-contexts",
+   "custom-contexts-file",
+   "custom-metadata",
+   "custom-time",
+   "decryption-keys",
+   "encryption-key",
+   "gzip-in-flight",
+   "gzip-local",
+   "if-generation-match",
+   "if-metageneration-match",
+   "j",
+   "manifest-path",
+   "predefined-acl",
+   "remove-custom-contexts",
+   "remove-custom-metadata",
+   "retain-until",
+   "retention-mode",
+   "s",
+   "storage-class",
+   "update-custom-contexts",
+   "update-custom-metadata",
+   "z"
+  ]
+ },
+ "storage mv": {
+  "actions": {
+   "additional-headers": "unresolved"
+  },
+  "alias": {
+   "A": "all-versions",
+   "D": "daisy-chain",
+   "I": "read-paths-from-stdin",
+   "J": "gzip-in-flight-all",
+   "L": "manifest-path",
+   "P": "preserve-posix",
+   "U": "skip-unsupported",
+   "Z": "gzip-local-all",
+   "a": "canned-acl",
+   "c": "continue-on-error",
+   "j": "gzip-in-flight",
+   "n": "no-clobber",
+   "p": "preserve-acl",
+   "predefined-acl": "canned-acl",
+   "s": "storage-class",
+   "v": "print-created-message",
+   "z": "gzip-local"
+  },
+  "bool": [
+   "A",
+   "D",
+   "I",
+   "J",
+   "P",
+   "U",
+   "Z",
+   "all-versions",
+   "c",
+   "clear-custom-contexts",
+   "clear-custom-metadata",
+   "continue-on-error",
+   "daisy-chain",
+   "do-not-decompress",
+   "gzip-in-flight-all",
+   "gzip-local-all",
+   "ignore-symlinks",
+   "include-managed-folders",
+   "n",
+   "no-clobber",
+   "no-preserve-acl",
+   "p",
+   "preserve-acl",
+   "preserve-posix",
+   "preserve-symlinks",
+   "print-created-message",
+   "read-paths-from-stdin",
+   "skip-unsupported",
+   "v"
+  ],
+  "dict": [
+   "custom-contexts",
+   "custom-metadata",
+   "update-custom-contexts",
+   "update-custom-metadata"
+  ],
+  "list": [
+   "decryption-keys",
+   "gzip-in-flight",
+   "gzip-local",
+   "j",
+   "remove-custom-contexts",
+   "remove-custom-metadata",
+   "z"
+  ],
+  "optional": [],
+  "specs": {},
+  "types": {
+   "custom-contexts": "dict",
+   "custom-metadata": "dict",
+   "custom-time": "unresolved",
+   "decryption-keys": "list:str",
+   "gzip-in-flight": "list:str",
+   "gzip-local": "list:str",
+   "remove-custom-contexts": "list:str",
+   "remove-custom-metadata": "list:str",
+   "retain-until": "unresolved",
+   "update-custom-contexts": "dict",
+   "update-custom-metadata": "dict"
+  },
+  "value": [
+   "L",
+   "a",
+   "additional-headers",
+   "cache-control",
+   "canned-acl",
+   "content-disposition",
+   "content-encoding",
+   "content-language",
+   "content-md5",
+   "content-type",
+   "custom-contexts",
+   "custom-contexts-file",
+   "custom-metadata",
+   "custom-time",
+   "decryption-keys",
+   "encryption-key",
+   "gzip-in-flight",
+   "gzip-local",
+   "if-generation-match",
+   "if-metageneration-match",
+   "j",
+   "manifest-path",
+   "predefined-acl",
+   "remove-custom-contexts",
+   "remove-custom-metadata",
+   "retain-until",
+   "retention-mode",
+   "s",
+   "storage-class",
+   "update-custom-contexts",
+   "update-custom-metadata",
+   "z"
+  ]
+ },
+ "storage rm": {
+  "actions": {
+   "additional-headers": "unresolved"
+  },
+  "alias": {
+   "I": "read-paths-from-stdin",
+   "R": "recursive",
+   "a": "all-versions",
+   "c": "continue-on-error",
+   "r": "recursive"
+  },
+  "bool": [
+   "I",
+   "R",
+   "a",
+   "all-versions",
+   "c",
+   "continue-on-error",
+   "exclude-managed-folders",
+   "r",
+   "read-paths-from-stdin",
+   "recursive"
+  ],
+  "dict": [],
+  "list": [],
+  "optional": [],
+  "specs": {},
+  "types": {},
+  "value": [
+   "additional-headers",
+   "if-generation-match",
+   "if-metageneration-match"
+  ]
+ }
+}

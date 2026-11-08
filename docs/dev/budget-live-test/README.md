@@ -64,4 +64,4 @@ run (19.98 AI credits, 1 premium request). Gemini: none (402 before the first re
 
 The temporary user-level hooks (`~/.copilot/hooks/aegis.json`, `~/.codex/hooks.json`, neither
 of which existed before) were removed with `aegis install … --remove`; the throwaway project,
-venv and run logs were in `/private/tmp/aegis-budget-live/`.
+venv and run logs were in a throwaway temporary directory.

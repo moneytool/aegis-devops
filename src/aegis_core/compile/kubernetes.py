@@ -449,6 +449,11 @@ def _client_verbs(cl: Clause, owner: str, kind: str, flags: frozenset[str]) -> s
             if any(_sends_into(r, cl, owner, kind, flags) for r in requests)}
 
 
+# kubectl verbs the client parser also reads as creating another object (parser.py
+# _kubectl_created_objects): the object's kind.
+_CLIENT_CREATES = {"expose": "service", "autoscale": "horizontalpodautoscaler"}
+
+
 @dataclass
 class _Rule:
     c: Constraint
@@ -472,8 +477,20 @@ class _Rule:
         denies when they make the same change) or ``not-compiled``."""
         if self.expression is None:
             return {"status": "not-compiled", "widened_verbs": []}
-        widened = [] if ANY_ACTION in self.c.actions else sorted(self.client_verbs - self.c.actions)
+        widened = [] if ANY_ACTION in self.c.actions else sorted(
+            verb for verb in self.client_verbs - self.c.actions
+            if not self._client_also_creates(verb))
         return {"status": "wider-than-client" if widened else "same", "widened_verbs": widened}
+
+    def _client_also_creates(self, verb: str) -> bool:
+        """Whether the client hook already reads ``verb`` as creating an object this rule
+        covers (``kubectl expose`` is also a Service create intent, ``autoscale`` an HPA
+        create intent), so the rule holds there too."""
+        import fnmatch
+
+        kind = _CLIENT_CREATES.get(verb)
+        return (kind is not None and "create" in self.c.actions
+                and fnmatch.fnmatch(f"{kind}/x", self.c.resource_pattern))
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"id": self.c.id, "effect": self.c.effect, "status": self.status}

@@ -106,8 +106,8 @@ import yaml
 
 from aegis_core.gitsource import GIT_PREFIX, SourceNotChecked, SourceRejected
 from aegis_core.gitsource import REASON_MESSAGES as GIT_REASON_MESSAGES
-from aegis_core.intent import InfrastructureIntent
-from aegis_core.parser import _KUBECTL_BUILTIN_NAMES
+from aegis_core.intent import InfrastructureIntent, canonical_key
+from aegis_core.parser import _KUBECTL_BUILTIN_NAMES, normalize_typed
 from aegis_core.provenance import (
     CachingSourceFetcher,
     SourceFetcher,
@@ -482,31 +482,102 @@ def _constraint_from_dict(data: dict[str, Any]) -> Constraint:
 _GLOB_CHARS = frozenset("*?[")
 
 
+def _dig_paths(mapping: dict[str, Any], key: str) -> list[Any]:
+    """Every value ``key`` reaches in ``mapping``: a literal key, and every dotted path
+    (``set.replicaCount`` -> ``mapping["set"]["replicaCount"]``), where each level may
+    also hold a key with dots in it (``labels.app.kubernetes.io/name`` ->
+    ``mapping["labels"]["app.kubernetes.io/name"]``, helm's ``--set a\\.b=1``). All of
+    them count, so a literal dotted key can never hide a nested value of the same path.
+    Keys are compared by :func:`canonical_key` at every level."""
+    values: list[Any] = []
+    want = canonical_key(key)
+    for name, inner in mapping.items():
+        if not isinstance(name, str):
+            continue
+        have = canonical_key(name)
+        if have == want:
+            values.append(inner)
+        elif (isinstance(inner, dict) and want.startswith(have)
+                and want[len(have):len(have) + 1] == "."):
+            values.extend(_dig_paths(inner, key[len(name) + 1:]))
+        elif (isinstance(inner, list) and want.startswith(have)
+                and want[len(have):len(have) + 1] == "."):
+            # a repeated group (gcloud --create-disk, one value per --container): the
+            # path reaches into each of them, and any one counts
+            for item in inner:
+                if isinstance(item, dict):
+                    values.extend(_dig_paths(item, key[len(name) + 1:]))
+    return values
+
+
+def _key_spellings(key: str) -> list[tuple[str, bool]]:
+    """The spellings of one scope key, with whether the value is the negation: the key
+    and a boolean's other side (``no-verify-ssl`` is ``verify-ssl`` negated,
+    ``verify-ssl`` is ``no-verify-ssl`` negated), so a rule written either way meets
+    what a parser recorded either way. ``-`` and ``_`` need no spelling of their own:
+    :func:`canonical_key` makes them one."""
+    head, dot, tail = key.rpartition(".")
+    prefix = head + dot
+    leaf = canonical_key(tail)
+    out: list[tuple[str, bool]] = [(key, False)]
+    if leaf.startswith("no-") and len(leaf) > 3:
+        out.append((prefix + tail[3:], True))
+    else:
+        out.append((prefix + "no-" + tail, True))
+    return out
+
+
+def _dig_all(mapping: dict[str, Any], key: str) -> list[Any]:
+    """Every value any spelling of ``key`` (:func:`_key_spellings`) reaches in ``mapping``,
+    a negated spelling only when its value is a boolean."""
+    values: list[Any] = []
+    for spelling, negate in _key_spellings(key):
+        for value in _dig_paths(mapping, spelling):
+            if not negate:
+                values.append(value)
+            else:
+                as_bool = _as_bool(value)
+                if as_bool is not None:
+                    values.append(not as_bool)
+    return values
+
+
 def _dig(mapping: dict[str, Any], key: str) -> tuple[bool, Any]:
-    """``(found, value)`` for ``key`` in ``mapping`` -- a literal key first,
-    then a dotted path (``set.replicaCount`` -> ``mapping["set"]["replicaCount"]``)."""
-    if key in mapping:
-        return True, mapping[key]
-    if "." in key:
-        current: Any = mapping
-        for part in key.split("."):
-            if not isinstance(current, dict) or part not in current:
-                return False, None
-            current = current[part]
-        return True, current
-    return False, None
+    """``(found, first value)`` of :func:`_dig_all`."""
+    values = _dig_all(mapping, key)
+    return (True, values[0]) if values else (False, None)
 
 
 def _as_bool(value: Any) -> bool | None:
+    """A boolean as Go's strconv.ParseBool reads it (``true``/``false`` in any case, ``1``,
+    ``t``, ``0``, ``f``), the spellings every tool here accepts."""
     if isinstance(value, bool):
         return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
     if isinstance(value, str):
         lowered = value.strip().lower()
-        if lowered == "true":
+        if lowered in ("true", "1", "t"):
             return True
-        if lowered == "false":
+        if lowered in ("false", "0", "f"):
             return False
     return None
+
+
+def _typed_expected(key: str, expected: Any, params: dict[str, Any]) -> tuple[bool, Any]:
+    """A rule's value for ``key`` read as the intent's value for it was read
+    (``params["value_types"]``, through :func:`canonical_key`): ``(ok, value)``; not ok
+    when the rule's value cannot be that type (a duration key given ``"soon"``)."""
+    types = params.get("value_types")
+    kind = types.get(canonical_key(key)) if isinstance(types, dict) else None
+    if kind is None:
+        return True, expected
+    try:
+        if isinstance(expected, list):
+            return True, [normalize_typed(kind, e) for e in expected]
+        return True, normalize_typed(kind, expected)
+    except ValueError:
+        return False, expected
 
 
 def scope_value_matches(expected: Any, actual: Any) -> bool:
@@ -534,6 +605,17 @@ def scope_value_matches(expected: Any, actual: Any) -> bool:
     return expected == actual
 
 
+# A flag whose value a parser records under a scope key of another name: a rule written
+# with the flag's name meets the scope key (az --location and gcloud --location are
+# region; helm --kube-context is context). Every other flag a command line gives is in
+# params under its long name, or in metadata under a key of the same name (namespace,
+# context, cluster, repo, resource_group, app_namespace, project, zone, region, profile):
+# see docs/constraints.md.
+_SCOPE_KEY_ALIASES = {canonical_key(k): v for k, v in {
+    "location": "region", "kube-context": "context", "kube-apiserver": "server",
+}.items()}
+
+
 def scope_matches(
     scope: dict[str, Any], metadata: dict[str, Any], params: dict[str, Any]
 ) -> bool:
@@ -544,17 +626,47 @@ def scope_matches(
     ``params`` when ``metadata`` lacks it entirely. A key absent from both
     never matches."""
     for key, expected in scope.items():
-        found, actual = _dig(metadata, key)
-        if not found:
-            found, actual = _dig(params, key)
-        if not found or not scope_value_matches(expected, actual):
+        ok, expected = _typed_expected(key, expected, params)
+        if not ok:
+            return False  # unresolved, not a match: see scope_unresolved
+        actuals = (_dig_all(metadata, key) or _dig_all(params, key)
+                   or _dig_all(metadata, _SCOPE_KEY_ALIASES.get(canonical_key(key), "")))
+        # A flag given several times (a StringArray or StringSlice) holds a list: each of
+        # its values counts, as each is applied
+        actuals = [*actuals, *(v for a in actuals if isinstance(a, list) for v in a)]
+        if key.rpartition(".")[2] in _CASE_INSENSITIVE_SCOPE_KEYS:
+            expected = _casefold(expected)
+            actuals = [_casefold(a) for a in actuals]
+        # Every value the key reaches counts: two spellings of one value that disagree
+        # (helm's literal "a.b" beside nested a.b) match if either does.
+        if not any(scope_value_matches(expected, actual) for actual in actuals):
             return False
     return True
 
 
+# Scope keys whose values the service compares without case: GitHub owner/repo, Azure
+# subscription and resource group names.
+# Azure compares locations (and resource groups, subscriptions) without case
+_CASE_INSENSITIVE_SCOPE_KEYS = frozenset({"repo", "resource_group", "subscription", "region"})
+
+
+def _casefold(value: Any) -> Any:
+    if isinstance(value, str):
+        return value.casefold()
+    if isinstance(value, list):
+        return [_casefold(v) for v in value]
+    return value
+
+
 def _scope_matches(scope: dict[str, Any], intent: InfrastructureIntent) -> bool:
+    """Whether ``scope`` matches definitively. A scope key the intent leaves unresolved
+    (:func:`_unresolved_scope_keys`) never matches definitively, whatever value is recorded
+    for it: the rule takes the unresolved path (:func:`scope_unresolved`) and escalates,
+    so a value an override or a file can replace never decides a BLOCK."""
     if not scope:
         return True
+    if _unresolved_scope_keys(scope, intent):
+        return False
     return scope_matches(scope, intent.metadata, intent.params)
 
 
@@ -619,6 +731,11 @@ def resource_matches(pattern: str, intent: InfrastructureIntent) -> bool:
     """``fnmatch`` of ``pattern`` against every alias of the intent's
     resource (:meth:`InfrastructureIntent.resource_aliases`), so
     ``aws_db_instance.*`` matches ``module.app.aws_db_instance.main``."""
+    if intent.provider == "azure" or (intent.provider == "github"
+                                      and intent.resource.startswith("repo/")):
+        # Azure resource names and GitHub owner/repo are compared without case
+        return any(fnmatch.fnmatchcase(alias.casefold(), pattern.casefold())
+                   for alias in intent.resource_aliases())
     return any(fnmatch.fnmatch(alias, pattern) for alias in intent.resource_aliases())
 
 
@@ -679,6 +796,26 @@ def _may_be_runtime_target(pattern: str, target: dict[str, Any]) -> bool:
     return _pattern_may_start_with(rest, prefix)
 
 
+def _may_be_possible_resource(pattern: str, intent: InfrastructureIntent) -> bool:
+    """Whether a rule on ``pattern`` matches a resource ``intent`` may turn out to be
+    (``params["possible_resources"]``): ``git push origin v1`` pushes ``ref/v1``, which
+    is a tag when the local ``v1`` is one, as only git knows when it runs."""
+    possible = intent.params.get("possible_resources")
+    if not isinstance(possible, list):
+        return False
+    return any(resource_matches(pattern, InfrastructureIntent(
+        resource=resource, action=intent.action, provider=intent.provider))
+        for resource in possible if isinstance(resource, str))
+
+
+def _may_be_unresolved_target(pattern: str, intent: InfrastructureIntent) -> bool:
+    """Whether a rule on ``pattern`` that does not match ``intent`` may still be about
+    what it reaches when the tool runs."""
+    target = intent.params.get("resolved_at_runtime")
+    return ((isinstance(target, dict) and _may_be_runtime_target(pattern, target))
+            or _may_be_possible_resource(pattern, intent))
+
+
 def _may_be_about_target(pattern: str, intent: InfrastructureIntent) -> bool:
     """Whether a rule on ``pattern`` matches what ``intent`` targets, or might:
     its objects are in a manifest nobody read, or kubectl finds them when it runs."""
@@ -686,8 +823,7 @@ def _may_be_about_target(pattern: str, intent: InfrastructureIntent) -> bool:
         return True
     if intent.params.get("manifest_not_inspected") is True:
         return not pattern.startswith("manifest/")
-    target = intent.params.get("resolved_at_runtime")
-    return isinstance(target, dict) and _may_be_runtime_target(pattern, target)
+    return _may_be_unresolved_target(pattern, intent)
 
 
 def _matches_except_scope(
@@ -747,9 +883,11 @@ def env_unresolved(scope: dict[str, Any], intent: InfrastructureIntent) -> bool:
 
 
 # Providers whose commands target a namespace (a missing one is unresolved,
-# not "no namespace"). flux is not here: it defaults to flux-system, not to
-# the kubeconfig context.
-_NAMESPACED_PROVIDERS = frozenset({"kubernetes", "helm"})
+# not "no namespace"). flux's default is flux-system only when neither
+# $FLUX_SYSTEM_NAMESPACE nor --ns-follows-kube-context / $FLUX_NS_FOLLOWS_KUBE_CONTEXT
+# says otherwise (flux2 main.go), and the argv shows neither variable, so a flux
+# command with no -n has an unknown namespace too (resolve_current_context reads them).
+_NAMESPACED_PROVIDERS = frozenset({"kubernetes", "helm", "flux"})
 
 
 def _kind_is_cluster_scoped(resource: str) -> bool:
@@ -777,6 +915,77 @@ def namespace_unresolved(intent: InfrastructureIntent) -> bool:
     return "namespace" not in intent.metadata and "namespace" not in intent.params
 
 
+def param_unresolved(key: str, intent: InfrastructureIntent) -> bool:
+    """Whether a parser marked scope ``key`` as unknown (``params["unresolved_scope"]``):
+    ``set.replicaCount`` when helm --set-file sets it from a file nobody read, and ``*``
+    for every key (argocd --file, kubectl run --overrides). An unresolved key is
+    unresolved whatever value is recorded for it, in metadata or params: the recorded
+    value never decides. A prefix mark (``tags.*``) covers every key under it, recorded or
+    not. The one exception is a prefix mark the parser also lists in
+    ``params["unresolved_except_recorded"]``: only helm's ``set.*`` with values files or
+    reused values, which stands for the ``set.`` keys the command line leaves to them, so a
+    key --set replaced outright (recorded) is known, since helm applies --set over every
+    file. A mark meets every spelling of the key that matching would meet
+    (:func:`canonical_key`, and a boolean's negated side)."""
+    marks = intent.params.get("unresolved_scope")
+    if not isinstance(marks, list):
+        return False
+    excepted = intent.params.get("unresolved_except_recorded")
+    excepted = {canonical_key(m) for m in excepted if isinstance(m, str)} if isinstance(
+        excepted, list) else set()
+    spellings = {canonical_key(spelling) for spelling, _ in _key_spellings(key)}
+    for mark in marks:
+        if not isinstance(mark, str):
+            continue
+        canon = canonical_key(mark)
+        if canon in spellings or canon in ("*", "**"):
+            return True
+        if canon.endswith(".*") and any(s.startswith(canon[:-1]) for s in spellings):
+            if canon in excepted and _dig_all(intent.params, key):
+                continue  # helm: a key --set replaced outright is known
+            return True
+    return _descendant_unresolved(spellings, marks)
+
+
+def _descendant_unresolved(spellings: set[str], marks: list[Any]) -> bool:
+    """Whether some key under ``key`` is unresolved (an exact mark ``key.a.b``, or a prefix
+    mark ``key.a.*`` or ``key.*``): a rule that compares ``key`` whole compares that key's
+    value too, so it is unresolved as well (helm ``--set-file config.secret=f`` beside
+    ``--set config.public=x`` leaves ``set.config`` unknown, whatever is recorded for it).
+    For every tool alike."""
+    for mark in marks:
+        if not isinstance(mark, str):
+            continue
+        path = canonical_key(mark).removesuffix(".*")
+        if any(path.startswith(f"{s}.") or (mark.endswith(".*") and path == s)
+               for s in spellings):
+            return True
+    return False
+
+
+def _prefix_unresolved(key: str, expected: Any, intent: InfrastructureIntent) -> bool:
+    """Whether a rule's value for ``key`` may be one of the values the command reaches
+    when it runs, all starting with a known prefix (``params["unresolved_prefix"]``: a
+    recursive copy, move or delete of ``logs`` reaches ``logs/a``, ``logs/b``...). A value
+    that cannot start with the prefix is not reached, and the key decides as recorded. Nor
+    is a value equal to the literal recorded value (``gsutil mv gs://b/logs`` moves the
+    object ``logs`` itself for certain): that one decides as recorded too."""
+    prefixes = intent.params.get("unresolved_prefix")
+    if not isinstance(prefixes, dict):
+        return False
+    want = canonical_key(key)
+    for name, prefix in prefixes.items():
+        if canonical_key(name) == want and isinstance(prefix, str):
+            if not isinstance(expected, str):
+                return True  # a value that is not text: not known not to be reached
+            recorded = intent.params.get(name)
+            if (isinstance(recorded, str) and expected == recorded
+                    and not _GLOB_CHARS & set(recorded) and not _GLOB_CHARS & set(expected)):
+                return False
+            return _pattern_may_start_with(expected, prefix)
+    return False
+
+
 def scope_unresolved(scope: dict[str, Any], intent: InfrastructureIntent) -> list[str]:
     """The scope keys of ``scope`` that this intent leaves unresolved
     (``env`` without a resolved environment; ``namespace`` per
@@ -784,17 +993,36 @@ def scope_unresolved(scope: dict[str, Any], intent: InfrastructureIntent) -> lis
     Such a rule can neither be honoured nor dismissed, so the interceptor
     escalates with ``"<key>-unresolved: <id>"`` -- "unknown namespace" is
     never "not prod", exactly as for ``env`` (REVIEW-4 T1.3)."""
-    unknown = set()
+    unknown = _unresolved_scope_keys(scope, intent)
+    if not unknown:
+        return []
+    gone = {canonical_key(k) for k in unknown}
+    rest = {k: v for k, v in scope.items() if k not in unknown}
+    metadata = {k: v for k, v in intent.metadata.items() if canonical_key(k) not in gone}
+    params = {k: v for k, v in intent.params.items() if canonical_key(k) not in gone}
+    return sorted(unknown) if scope_matches(rest, metadata, params) else []
+
+
+def _unresolved_scope_keys(scope: dict[str, Any], intent: InfrastructureIntent) -> set[str]:
+    """The keys of ``scope`` this intent leaves unresolved: ``env`` and ``namespace`` when
+    not known, a key a parser marked (exactly, by a prefix mark, under it, or through a
+    scope-key alias), a key whose value the command reaches only at run time
+    (``unresolved_prefix``), and a rule value the key's type cannot hold."""
+    unknown: set[str] = set()
     if "env" in scope and "env" not in intent.metadata:
         unknown.add("env")
     if "namespace" in scope and namespace_unresolved(intent):
         unknown.add("namespace")
-    if not unknown:
-        return []
-    rest = {k: v for k, v in scope.items() if k not in unknown}
-    metadata = {k: v for k, v in intent.metadata.items() if k not in unknown}
-    params = {k: v for k, v in intent.params.items() if k not in unknown}
-    return sorted(unknown) if scope_matches(rest, metadata, params) else []
+    unknown.update(key for key in scope if param_unresolved(key, intent) or (
+        canonical_key(key) in _SCOPE_KEY_ALIASES
+        and param_unresolved(_SCOPE_KEY_ALIASES[canonical_key(key)], intent)))
+    unknown.update(key for key, expected in scope.items()
+                   if _prefix_unresolved(key, expected, intent))
+    # a rule's value its key's type cannot hold (a duration key given "soon") neither
+    # matches nor fails to: it escalates, as an unknown value does
+    unknown.update(key for key, expected in scope.items()
+                   if not _typed_expected(key, expected, intent.params)[0])
+    return unknown
 
 
 def time_window_unresolved(
@@ -1311,18 +1539,19 @@ class ConstraintStore:
         (``params["resolved_at_runtime"]``: ``kubectl exec deploy/web``, ``kubectl
         delete all --all``): every constraint for the same provider and action
         that might be about one of them but does not match the intent, like a
-        rule on ``pod/payments-0``. The interceptor escalates with
+        rule on ``pod/payments-0``, and a rule on a resource the intent may turn out
+        to be (``params["possible_resources"]``). The interceptor escalates with
         ``target-unresolved: <id>``, since neither "applies" nor "does not" can
         be known here."""
         _require_tz_aware(now)
-        target = intent.params.get("resolved_at_runtime")
-        if not isinstance(target, dict):
+        if not isinstance(intent.params.get("resolved_at_runtime"), dict) and not \
+                intent.params.get("possible_resources"):
             return []
         return [
             c
             for c in self._candidates(intent)
             if not resource_matches(c.resource_pattern, intent)
-            and _may_be_runtime_target(c.resource_pattern, target)
+            and _may_be_unresolved_target(c.resource_pattern, intent)
             and self._applies_apart_from_resource(c, intent, now)
         ]
 

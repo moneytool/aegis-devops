@@ -5,6 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "aegis-devops"
 license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 dynamic = ["version"]
 description = "Provenance-backed, authority-aware policy verifier for agentic DevOps actions."
 authors = [{ name = "Vamshidher Reddy Jannapu Reddy" }]
@@ -63,7 +64,7 @@ version = {attr = "aegis_core.__version__"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-aegis_core = ["_examples/**/*", "integrations/*", "compile/actions/*", "budget/*.yaml", "budget/*.json"]
+aegis_core = ["_examples/**/*", "integrations/*", "compile/actions/*", "budget/*.yaml", "budget/*.json", "data/*"]
 
 [tool.ruff]
 line-length = 100

@@ -121,8 +121,21 @@ not pick that object: `kubectl delete deploy -l a=b` asks, and so does `kubectl 
 `get` rule on `pod/payments-0`. A rule on another kind or another action is not affected, and a
 namespace in the rule's scope still counts (`-n staging` passes a rule scoped to `prod`).
 `kubectl taint node n1 --all` is both `node/n1` and `node/*`, since kubectl ignores the name there.
-`cordon`, `uncordon`, `drain` and `logs` with `-l` name nothing the parser can read, so the hook
-refuses them.
+`cordon`, `uncordon` and `drain` with `-l` act on every node the selector matches (`node/*`), and
+`logs -l` reads every pod it matches (`pod/*`), as kubectl 1.36 does.
+
+The same holds where other tools pick their targets when they run: `argocd app sync -l` or
+`--project` and `argocd app delete -l` (`app/*`, beside any app named), `flux suspend|resume
+<kind> --all` (`<kind>/*`), `flux reconcile --with-source` (the source kinds the object can
+reference, in any namespace), `helm install --generate-name` (`release/*`), `git filter-repo`
+(`history/*`) and an aws command whose target is in a `--cli-input-json file://` file
+(`<service>/<kind>/*`; inline input is read). A rule on one of them escalates with
+`target-unresolved: <id>`. So does a wildcard bucket (`gcloud storage rm gs://prod-*/x`,
+gsutil): a rule on any bucket the pattern may match (one that can start with `prod-`)
+escalates, while `storage/bucket/*` matches it outright. A wildcard object, `-r`, and aws `s3
+--recursive` or `sync` leave `key` unresolved. So does a rule on a resource the intent may turn out to be
+(`params.possible_resources`): `git push origin v1.2.0` pushes `ref/v1.2.0`, which is
+`tag/v1.2.0` when the local ref of that name is a tag.
 
 `kubectl describe TYPE NAME` describes the object called NAME, and if there is none, every object
 whose name starts with NAME. So `kubectl describe pod pay` is `pod/pay`, and a `describe` rule that
@@ -167,6 +180,30 @@ identity also becomes an intent of its own, `impersonate` on `user/<name>`, `gro
 
 ### Metadata vocabulary
 
+**Where a flag's value is, for a rule written with the flag's name.** One mechanism for every
+tool: a scope key is looked up in `metadata`, then in `params`, by `canonical_key` (`-` and `_` are
+one). Every flag the command line gives is in `params` under its long name (a short letter is
+recorded as its long flag, and every long name of one option, an alias, holds its value), or in
+`metadata` under a key of the same name (`namespace`, `context`, `cluster`, `user`, `repo`,
+`resource_group`, `subscription`, `app_namespace`, `project`, `zone`, `region`, `profile`,
+`server`). A flag that names the target is in `params` too, with that target's value (aws
+`--role-name`, `--instance-ids`, `--bucket`, az `--name` and the name an `--ids` path gives), so
+`{"role-name": "protected"}` meets `aws iam delete-role --role-name protected` as a rule on
+`iam/role/protected` does. Three flags are recorded under a scope key of another name, and a rule
+written with the flag's name meets that key: `location` (az and gcloud) is `region`,
+`kube-context` (helm) is `context`, `kube-apiserver` (helm) is `server`. No flag is dropped:
+the only flags not recorded are each tool's no-effect flags (`parser._NO_EFFECT_FLAGS`: output
+format, verbosity, colour, pagers, rate limits, timeouts that only shorten, help), and a secret
+flag's value is recorded as `[secret]`. Impersonation from kubectl, helm and flux is one
+`params["impersonate"]` structure and an `impersonate` intent per identity (`user/<name>`,
+`group/<name>`, `uid/<id>`, provider `kubernetes`); gcloud and gsutil impersonation is an
+`impersonate` intent on `iam/service-account/<email>`.
+
+**A key with an unresolved key under it.** When a rule compares a key whole (`set.config`,
+`metadata`, `tags`) and some key under it is unresolved (an exact mark such as
+`set.config.secret`, or a prefix mark such as `metadata.*`), the key is unresolved too: its
+value includes one nobody read. This holds for every tool (`store.param_unresolved`).
+
 Every parser in `aegis_core.parser` fills `Intent.metadata` with operator-derived context (not
 agent-controlled — see the scope semantics below) parsed from the argv itself. `aegis_core.environments`
 fills in the rest (`env`, and any of `context`/`cluster`/`project`/`account`/`subscription`/
@@ -178,16 +215,18 @@ ones it filled in `metadata["resolved_from_environment"]`. This table is generat
 | --- | --- | --- |
 | `namespace` | kubectl (`-n`/`--namespace`), helm (`-n`/`--namespace`), flux (`-n`/`--namespace`) | `prod` |
 | `context` | kubectl (`--context`), helm (`--kube-context`), argocd (`--server`/context resolution), flux (`--context`) | `gke_acme_prod` |
-| `cluster` | kubectl (`--cluster`) | `prod-us-east` |
+| `cluster` | kubectl (`--cluster`); dropped and left unresolved when `server` is given, since the request goes to that URL | `prod-us-east` |
+| `server` | kubectl (`--server`/`-s`), helm (`--kube-apiserver`), flux (`--server`): the API server URL that overrides the context's cluster; argocd (`--server`) | `https://prod:6443` |
+| `endpoint_url` | aws (`--endpoint-url`): leaves `account` and `region` unresolved | `https://localhost:4566` |
 | `kubeconfig` | accepted as a global flag by kubectl/helm/flux/argocd so it never leaks into `resource`/`action`, but its value is **discarded** — not recorded in `metadata` or `params` by any parser | *(not recorded)* |
-| `region` | terraform (from `values`/`planned_values`/`provider_config`), aws (`--region`), az (`-l`/`--location`), gcloud (`--region`, or derived from `--zone` — see below) | `us-east-1` |
+| `region` | terraform (from `values`/`planned_values`/`provider_config`), aws (`--region`), az (`-l`/`--location`; a display name with a space is `location_display_name`, leaving `region` unresolved), gcloud (`--region`, or derived from `--zone` — see below) | `us-east-1` |
 | `zone` | gcloud (`--zone`) | `us-east1-b` |
-| `project` | gcloud (`--project`) | `acme-prod` |
+| `project` | gcloud (`--project`, or a resource path's `projects/<id>`; a number is `project_number`, leaving `project` unresolved) | `acme-prod` |
 | `account` | not emitted by any parser directly; resolved only via `EnvironmentMap`/`--resolve-current-context` (`AWS_PROFILE`) | `123456789012` |
 | `profile` | aws (`--profile`) | `prod-admin` |
-| `subscription` | az (`--subscription`) | `00000000-0000-0000-0000-000000000000` |
+| `subscription` | az (`--subscription` given as a GUID, or an `--ids` path; a name is `subscription_name`, leaving `subscription` unresolved) | `00000000-0000-0000-0000-000000000000` |
 | `resource_group` | az (`--resource-group`/`-g`, and parsed out of an ARM `--ids` path) | `rg-prod` |
-| `repo` | gh (`--repo`/`-R`, or parsed from a `.../repos/<owner>/<name>/...` API path) | `acme/infra` |
+| `repo` | gh (`--repo`/`-R`, or parsed from a `.../repos/<owner>/<name>/...` API path or absolute URL; `gh api` has no `-R`; a GitHub Enterprise Server URL gives `host/owner/repo`) | `acme/infra` |
 | `ref` | gh (`--ref`, or parsed from a workflow-dispatch API path) | `main` |
 | `env` | never emitted by a parser; set by `EnvironmentMap.apply()` from `environments.yaml` when a resolvable key (`context`/`cluster`/`project`/`account`/`subscription`/`resource_group`/`workspace`) is present and mapped | `prod` |
 | `workspace` | never emitted by a parser; only resolved through `environments.yaml`'s `terraform_workspaces` table | `prod` |
@@ -219,7 +258,11 @@ A constraint's `scope: {...}` (and a plan selector's `scope`) is matched against
 - **Dotted paths.** A scope key with a `.` (e.g. `set.replicaCount`) first tries a literal key of that
   exact name, then walks the dots into nested dicts (`params["set"]["replicaCount"]`) — this is what
   makes `helm --set replicaCount=0` (parsed into `params["set"] = {"replicaCount": 0}`) expressible as
-  `scope: {set.replicaCount: 0}`.
+  `scope: {set.replicaCount: 0}`. `--set-json`, `--set-string` and `--set-literal` land there too,
+  merged in helm's order. A key set by `--set-file`, or left to a values file (`-f`) or
+  `--reuse-values`, comes from a file nobody read, so a rule scoped on it escalates with
+  `set.<key>-unresolved: <id>`. The chart's own defaults are not read either: `set.*` is what the
+  command line sets.
 - **`actions: ["*"]`.** A per-intent constraint (or plan selector, where `actions` is already an
   "any of these" list) may include the literal string `"*"` in its `actions` set to mean "any action".
   It is otherwise an ordinary string: no special validation, and no effect on the constraint's
@@ -300,6 +343,39 @@ on `namespace` that would otherwise match escalates with the note `namespace-unr
 instead of silently not applying: `kubectl rollout restart deploy/web` escalates against a
 `namespace: prod` rule. A cluster-scoped kind (`node`, `namespace`, ...) has no namespace and is
 never affected. (Until 1.0 such a rule simply did not match; reported by a reader on dev.to.)
+A flux command without `-n` is the same: flux uses `flux-system`, or `$FLUX_SYSTEM_NAMESPACE`,
+or with `--ns-follows-kube-context` or `$FLUX_NS_FOLLOWS_KUBE_CONTEXT` the kubeconfig context's
+namespace, and the argv shows none of these variables. The same holds for **`repo`** on gh: without
+`-R` (or a `repos/<owner>/<repo>` path to `gh api`) gh acts on the repository of the current
+directory or `$GH_REPO`, so a rule scoped on `repo` escalates with `repo-unresolved: <id>`
+(`--resolve-current-context` fills it from `$GH_REPO`). A `gh api` path with `{owner}`, `{repo}`
+or `{branch}` is the same.
+
+Any other scope a tool takes from its configuration when the argv does not give it is the
+same: kubeconfig `context` and `cluster`, aws `region` and `profile`, gcloud `project` and
+`region`, az `subscription`, `resource_group` and `region`, argocd `server`, `project` and
+`app_namespace`, and the `remote` of a git push. The intent lists them in
+`params.unresolved_scope`, and a rule scoped on one of them escalates with
+`<key>-unresolved: <id>` until the argv or `--resolve-current-context` gives it.
+
+**One value, every spelling.** A scope key matches its `-`/`_` twin (`dry-run`, `dry_run`, at
+every level of a nested key) and a boolean's negated spelling (`no-verify-ssl: true` is
+`verify-ssl: false`), and an unresolved mark in `params.unresolved_scope` meets every spelling
+the key does (`*` stands for every key). A key marked unresolved is unresolved whatever value
+is recorded for it: the recorded value never decides, and the rule escalates. The one prefix
+mark, helm's `set.*`, stands for the `set.` keys the command line leaves to a values file.
+
+**Typed values.** A flag's value is recorded by its type (`params.value_types`): a duration
+in seconds (`--timeout 5m` and `--timeout 300s` are both `300`), an integer as Go reads it
+(`0x10` is 16), a float, a boolean, a key=value map. A rule's value for that key is read the
+same way, so `timeout: "5m"`, `"300s"`, `"5m0s"` and `300` all match `--timeout 300s`, and
+`install: "0"` matches `--install=false`. A rule value the type cannot hold (`timeout:
+"soon"`) escalates with `<key>-unresolved`; it is not rejected when the rule is loaded,
+because a scope key has no type until an intent gives it one. When a key reaches more than one value (helm's literal `a.b` beside the nested
+`a.b`), the rule matches if any of them does. `repo`, `resource_group`, `subscription` and
+`region` compare without case, as GitHub and Azure do, and so do Azure resource names and
+GitHub `repo/...` resources. An aws option is recorded under its full name however it was
+abbreviated, and `--cli-input-json`/`--cli-input-yaml` members under the options they stand for.
 
 **Manifests are not read.** `kubectl apply|create|replace|delete -f <file>` (or a directory,
 `-k <kustomization>`, or `-f -` for stdin) is one intent on `manifest/<name>`, with one for each
@@ -317,7 +393,9 @@ explicit `--context` on the argv always wins, and the keys that were filled are 
 `metadata.resolved_from_environment`. For kubectl and helm it also fills a missing
 namespace from the context's `namespace` (`default` when the context sets none, as kubectl does;
 never for a cluster-scoped kind, with `-A`, or for a manifest that was not read, whose objects may
-name their own namespace). An explicit `--kubeconfig` on the argv is the only file consulted, and
+name their own namespace). For flux it fills the namespace flux would use: the context's
+own namespace when flux follows the context and the context names one, else
+`$FLUX_SYSTEM_NAMESPACE` when it is a valid name, else `flux-system`. An explicit `--kubeconfig` on the argv is the only file consulted, and
 if it cannot be read nothing is filled; otherwise the files in `$KUBECONFIG` are merged as kubectl
 merges them (the first to define a context wins). It is opt-in because it **trusts the invoking
 environment**: whoever controls the process environment controls what Aegis believes the
