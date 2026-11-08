@@ -2772,7 +2772,9 @@ _GCLOUD_GROUP_MAP = {
 
 _GCS_LEGACY_VERB_MAP = {"rm": "delete", "rb": "delete", "cp": "put", "mv": "put"}
 
-# gcloud global booleans: never swallow the group/verb token after them.
+# gcloud global booleans: never swallow the group/verb token after them. This table and
+# _GCLOUD_VALUE_FLAGS are for commands outside the reference table (_GCLOUD_FLAGS_FILE),
+# and for alpha and beta, whose flags that table may not list.
 _GCLOUD_BOOL_FLAGS = {
     "log-http", "no-user-output-enabled", "user-output-enabled", "help",
     # The boolean flags of the commands that change something most often, from the gcloud
@@ -2868,8 +2870,35 @@ def _region_from_zone(zone: str) -> str:
     return _ZONE_SUFFIX.sub("", zone)
 
 
+# Every flag of each gcloud command the parser models, read from the gcloud reference
+# pages (scripts/gen_gcloud_flags.py; "_source" says where and when). For such a command
+# each flag's kind is known, and one the command does not have is refused, as gcloud
+# refuses it. "root" is the gcloud-wide flags.
+_GCLOUD_FLAGS_FILE = Path(__file__).parent / "data" / "gcloud_flags.json"
+
+
+@lru_cache(maxsize=1)
+def _gcloud_flag_tables() -> dict[str, Any]:
+    with open(_GCLOUD_FLAGS_FILE) as f:
+        return json.load(f)
+
+
+def _gcloud_flag_table(command: str) -> dict[str, frozenset[str]] | None:
+    """The flags of ``command`` (``compute instances update``) and gcloud's own, by kind,
+    or None when the command is not in the table."""
+    tables = _gcloud_flag_tables()
+    entry = tables.get(command)
+    if entry is None:
+        return None
+    root = tables["root"]
+    return {kind: frozenset(entry.get(kind, ())) | frozenset(root.get(kind, ()))
+            for kind in ("bool", "value", "optional")}
+
+
 def _parse_gcloud_tokens(
     tokens: list[str], *, storage: bool = False,
+    table: dict[str, frozenset[str]] | None = None, strict: bool = False,
+    lenient: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     """``(metadata, params, positional)``. gcloud takes no abbreviated flag (calliope
     disables argparse's prefixes) and never a word starting with "-" as a value. A flag in
@@ -2877,7 +2906,10 @@ def _parse_gcloud_tokens(
     flag is gcloud's off switch of a boolean and takes no value. Words after ``--`` go to
     the command gcloud runs (``compute ssh``), and are kept in ``params["passthrough"]``.
     ``storage`` reads ``gcloud storage``, whose targets are only ``gs://`` paths: there an
-    unknown flag may take a word that is not a path."""
+    unknown flag may take a word that is not a path. ``table`` is the command's flags
+    (:func:`_gcloud_flag_table`), which decide each flag they list; with ``strict`` a flag
+    not in it is refused. ``lenient`` only finds the command's words: an unknown flag then
+    takes no word."""
     metadata: dict[str, Any] = {}
     params: dict[str, Any] = {}
     positional: list[str] = []
@@ -2927,6 +2959,21 @@ def _parse_gcloud_tokens(
                 # a YAML file of more flags (--project too), which is not read
                 raise ValueError(f"gcloud: {tok} reads flags from a file the hook cannot see: "
                                  f"{tokens!r}")
+            elif table is not None and key in table["bool"]:
+                _set_bool_param(params, key, _bool_param(val))
+            elif table is not None and key in table["value"]:
+                if val is None:
+                    i += 1
+                    val = _value_at(tokens, i, tok)
+                params[key] = _coerce(val)
+            elif table is not None and key in table["optional"]:
+                if val is None and i + 1 < n and not tokens[i + 1].startswith("-"):
+                    i += 1  # argparse takes the next word as the optional value
+                    val = tokens[i]
+                params[key] = True if val is None else _coerce(val)
+            elif table is not None and strict:
+                raise ValueError(f"gcloud: {tok} is not a flag of this command, and gcloud "
+                                 f"refuses it: {tokens!r}")
             elif key in _GCLOUD_BOOL_FLAGS or (storage and key in _GCLOUD_STORAGE_BOOL_FLAGS):
                 _set_bool_param(params, key, _bool_param(val))
             elif key in _GCLOUD_VALUE_FLAGS and tok.startswith("--"):
@@ -2938,6 +2985,8 @@ def _parse_gcloud_tokens(
                 params[key] = _coerce(val)
             elif key.startswith("no-") and tok.startswith("--"):
                 _set_bool_param(params, key, True)
+            elif lenient:
+                params[key] = True
             elif i + 1 < n and not tokens[i + 1].startswith("-"):
                 if not storage:
                     raise ValueError(
@@ -2967,7 +3016,8 @@ def _gcloud_name(name: str, metadata: dict[str, Any]) -> str:
     """A resource gcloud is given by URI or path (``https://www.googleapis.com/compute/v1/
     projects/p/zones/z/instances/web-1``, ``projects/p/zones/z/instances/web-1``) is the
     same resource as its plain name, in that project and zone, which then win over the
-    flags as they do in gcloud."""
+    flags as they do in gcloud. ``metadata`` is that one name's own copy: each path
+    names its own project and zone."""
     if "/" not in name or name.startswith("gs://"):
         return name
     parts = [p for p in name.split("?")[0].split("/") if p]
@@ -3068,15 +3118,30 @@ def _from_gsutil(argv: list[str]) -> list[InfrastructureIntent]:
 
 
 def from_gcloud_multi(argv: list[str]) -> list[InfrastructureIntent]:
+    """Parses a ``gcloud`` (or legacy ``gsutil``) CLI invocation (see
+    :func:`_from_gcloud_multi`). A project given by number (``--project 123456789``) is
+    recorded as ``project_number``: which project ID it is, is only known to gcloud, so
+    ``project`` is left unresolved and a rule on a project ID escalates."""
+    intents = _from_gcloud_multi(argv)
+    for intent in intents:
+        project = intent.metadata.get("project")
+        if isinstance(project, str) and project.isdigit():
+            intent.metadata["project_number"] = intent.metadata.pop("project")
+    return intents
+
+
+def _from_gcloud_multi(argv: list[str]) -> list[InfrastructureIntent]:
     """Parses a ``gcloud`` (or legacy ``gsutil``) CLI invocation, e.g.:
 
     ``gcloud compute instances start web-1 --zone us-central1-a``
       -> resource "compute/instance/web-1", action "start"
 
-    One intent per name: ``gcloud compute instances delete a b`` deletes both. A flag the
-    parser has no entry for, followed by a word, is refused: the word is its value or a
-    name, and the parser cannot tell which (``--no-graceful-shutdown`` is a boolean by its
-    name, and takes none).
+    One intent per name: ``gcloud compute instances delete a b`` deletes both. The flags of
+    a command in the reference table (:func:`_gcloud_flag_table`) are read by their kind,
+    and one the command does not have is refused. For any other command (and for alpha
+    and beta, whose flags the table may not list), a flag the parser has no entry for,
+    followed by a word, is refused: the word is its value or a name, and the parser cannot
+    tell which (``--no-graceful-shutdown`` is a boolean by its name, and takes none).
     """
     if not argv:
         raise ValueError("empty argv")
@@ -3091,7 +3156,13 @@ def from_gcloud_multi(argv: list[str]) -> list[InfrastructureIntent]:
     # gcloud storage's targets are gs:// paths, so an unknown flag there cannot hide one
     storage = argv[1:2] == ["storage"] or argv[1:3] in (["alpha", "storage"],
                                                          ["beta", "storage"])
-    metadata, params, positional = _parse_gcloud_tokens(tokens, storage=storage)
+    _md, _params, words = _parse_gcloud_tokens(tokens, storage=storage, lenient=True)
+    command = _gcloud_command(words)
+    table = _gcloud_flag_table(command) if command else None
+    # alpha and beta may have flags the (GA) table does not list: those keep the old rule
+    strict = table is not None and words[:1] not in (["alpha"], ["beta"])
+    metadata, params, positional = _parse_gcloud_tokens(tokens, storage=storage,
+                                                        table=table, strict=strict)
 
     release_track = None
     if positional and positional[0] in ("alpha", "beta"):
@@ -3102,7 +3173,8 @@ def from_gcloud_multi(argv: list[str]) -> list[InfrastructureIntent]:
         and positional[0] == "storage"
         and positional[1] in _GCS_LEGACY_VERB_MAP
     ):
-        metadata, params, positional = _parse_gcloud_tokens(tokens, storage=True)
+        metadata, params, positional = _parse_gcloud_tokens(tokens, storage=True,
+                                                            table=table, strict=strict)
         if release_track:
             positional.remove(release_track)
             params["release_track"] = release_track
@@ -3129,15 +3201,30 @@ def from_gcloud_multi(argv: list[str]) -> list[InfrastructureIntent]:
     if resource_prefix is None:
         *head, last = group_words
         resource_prefix = "/".join([*head, _singularize(last)])
-    names = [_gcloud_name(name, metadata) for name in names]
-
     action = "update" if verb in _GCLOUD_IAM_BINDING_VERBS else _normalize_verb(verb)
     params["raw_action"] = verb
-    resources = [f"{resource_prefix}/{name}" for name in dict.fromkeys(names)] or [
-        f"{resource_prefix}/*"]
-    return [InfrastructureIntent(resource=r, action=action, provider="gcp",
-                                 params=dict(params), metadata=dict(metadata))
-            for r in resources]
+    targets: dict[tuple[str, tuple], dict[str, Any]] = {}
+    for name in names:
+        own = dict(metadata)  # each path names its own project and zone
+        resource = f"{resource_prefix}/{_gcloud_name(name, own)}"
+        targets.setdefault((resource, tuple(sorted(own.items()))), own)
+    if not targets:
+        targets[(f"{resource_prefix}/*", ())] = dict(metadata)
+    return [InfrastructureIntent(resource=resource, action=action, provider="gcp",
+                                 params=dict(params), metadata=own)
+            for (resource, _), own in targets.items()]
+
+
+def _gcloud_command(words: list[str]) -> str | None:
+    """The command the words name, as the flag table spells it (``compute instances
+    update``, ``sql import csv``), or None."""
+    words = words[1:] if words[:1] in (["alpha"], ["beta"]) else words
+    tables = _gcloud_flag_tables()
+    for size in (4, 3, 2):
+        command = " ".join(words[:size])
+        if len(words) >= size and command in tables:
+            return command
+    return None
 
 
 def from_gcloud(argv: list[str]) -> InfrastructureIntent:

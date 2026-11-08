@@ -633,8 +633,8 @@ def test_an_az_name_rule_holds_on_a_glued_name():
      ["compute/instance/web-1"]),
     # a flag the table has takes its value; the word after that is the name
     ("gcloud compute instances delete --keep-disks boot web-1", ["compute/instance/web-1"]),
-    ("gcloud compute instances delete web-1 --some-flag=x prod-1",
-     ["compute/instance/web-1", "compute/instance/prod-1"]),
+    ("gcloud compute networks delete web-1 --some-flag=x prod-1",
+     ["compute/network/web-1", "compute/network/prod-1"]),
     ("gcloud compute instances create web --machine-type e2-small",
      ["compute/instance/web"]),
     ("gcloud sql import sql prod-db gs://b/f.sql", ["sql/instance/prod-db"]),
@@ -669,9 +669,12 @@ def test_gcloud_rule_on_one_name_holds(command, verdict):
 
 
 @pytest.mark.parametrize("command", [
-    # an unknown flag followed by a word: its value, or a boolean and then a name
-    "gcloud compute instances delete web-1 --graceful prod-1",
-    "gcloud compute instances delete --unknown-flag web-1",
+    # a command outside the reference table: an unknown flag followed by a word is its
+    # value, or a boolean and then a name
+    "gcloud compute networks delete web-1 --graceful prod-1",
+    "gcloud compute networks delete --unknown-flag web-1",
+    "gcloud beta compute instances delete --unknown-flag web-1",
+    # the word may be the command's first: which command it is, is not known
     "gcloud --unknown-global x compute instances delete web-1",
 ])
 def test_gcloud_refuses_an_unknown_flag_before_a_word(command):
@@ -679,11 +682,23 @@ def test_gcloud_refuses_an_unknown_flag_before_a_word(command):
         from_argv(command.split())
 
 
+@pytest.mark.parametrize("command", [
+    # a command in the reference table: a flag it does not have, gcloud refuses
+    "gcloud compute instances delete web-1 --graceful prod-1",
+    "gcloud compute instances delete --unknown-flag web-1",
+    "gcloud compute instances delete web-1 --unknown-flag",
+    "gcloud storage rm --unknown-flag x gs://b",
+])
+def test_gcloud_refuses_a_flag_the_command_does_not_have(command):
+    with pytest.raises(ValueError, match="not a flag of this command"):
+        from_argv(command.split())
+
+
 @pytest.mark.parametrize("command,resources", [
-    ("gcloud compute instances delete web-1 --unknown-flag", ["compute/instance/web-1"]),
-    ("gcloud compute instances delete web-1 --unknown-flag --zone us-east1-b",
-     ["compute/instance/web-1"]),
-    ("gcloud storage rm --unknown-flag x gs://b", ["storage/bucket/b"]),
+    ("gcloud compute networks delete web-1 --unknown-flag", ["compute/network/web-1"]),
+    ("gcloud compute networks delete web-1 --unknown-flag --project p",
+     ["compute/network/web-1"]),
+    ("gcloud beta storage rm --unknown-flag x gs://b", ["storage/bucket/b"]),
 ])
 def test_gcloud_unknown_flags_that_cannot_hide_a_name_are_kept(command, resources):
     assert [i.resource for i in from_argv(command.split())] == resources
@@ -1664,3 +1679,53 @@ def test_aws_desired_capacity_rule_holds_in_every_spelling(command, verdict):
     rule = _rule("aws", "autoscaling/auto-scaling-group/*", ["scale"],
                  {"desired_capacity": 0})
     assert _verdict([rule], command) == verdict
+
+
+@pytest.mark.parametrize("command,resources,params", [
+    # C3: each modeled command's flags, from the gcloud reference pages
+    ("gcloud compute instances update --clear-labels web --zone us-east1-b",
+     ["compute/instance/web"], {"clear_labels": True}),
+    ("gcloud compute instances update --no-deletion-protection web",
+     ["compute/instance/web"], {"deletion_protection": False}),
+    ("gcloud compute instances update --update-labels a=b web",
+     ["compute/instance/web"], {"update-labels": "a=b"}),
+    # an optional value takes the next word, as argparse does
+    ("gcloud compute instances stop web --discard-local-ssd", ["compute/instance/web"],
+     {"discard-local-ssd": True}),
+    ("gcloud container clusters resize c --num-nodes 0 --region r",
+     ["container/cluster/c"], {"num-nodes": 0}),
+    ("gcloud storage rm -r gs://b/x", ["storage/bucket/b"], {"r": True}),
+    ("gcloud compute instances list --filter name=x", ["compute/instance/*"],
+     {"filter": "name=x"}),
+])
+def test_gcloud_flags_are_read_from_the_reference_table(command, resources, params):
+    intents = from_argv(command.split())
+    assert [i.resource for i in intents] == resources
+    assert {k: intents[0].params.get(k) for k in params} == params
+
+
+def test_gcloud_each_path_names_its_own_project_and_zone():
+    # C1: metadata per operand, not the last path's for all
+    command = ("gcloud compute instances delete projects/p1/zones/us-east1-b/instances/a "
+               "projects/p2/zones/europe-west1-c/instances/b")
+    a, b = from_argv(command.split())
+    assert (a.metadata["project"], a.metadata["zone"]) == ("p1", "us-east1-b")
+    assert (b.metadata["project"], b.metadata["zone"]) == ("p2", "europe-west1-c")
+    rule = _rule("gcp", "compute/instance/*", ["delete"], {"project": "p1"})
+    assert _verdict([rule], command) == "BLOCK"
+    rule = _rule("gcp", "compute/instance/b", ["delete"], {"project": "p1"})
+    assert _verdict([rule], command) == "ALLOW"
+
+
+def test_gcloud_project_number_leaves_the_project_id_unresolved():
+    # C2: a number names a project, but which project ID only gcloud knows
+    from aegis_core.environments import resolve_current_context
+
+    command = "gcloud compute instances delete web --project 123456789 --zone us-east1-b"
+    intent = from_argv(command.split())[0]
+    assert "project" not in intent.metadata
+    assert intent.metadata["project_number"] == "123456789"
+    rule = _rule("gcp", "compute/instance/*", ["delete"], {"project": "prod"})
+    assert _verdict([rule], command) == "ESCALATE"
+    resolve_current_context(intent, environ={"CLOUDSDK_CORE_PROJECT": "dev"})
+    assert "project" not in intent.metadata

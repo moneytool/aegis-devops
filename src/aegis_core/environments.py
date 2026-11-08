@@ -387,7 +387,8 @@ def resolve_current_context(
         fill("profile", environ.get("AWS_PROFILE"))
         fill("region", environ.get("AWS_DEFAULT_REGION") or environ.get("AWS_REGION"))
     elif provider == "gcp":
-        fill("project", environ.get("CLOUDSDK_CORE_PROJECT"))
+        if "project_number" not in md:  # the argv named a project, by number
+            fill("project", environ.get("CLOUDSDK_CORE_PROJECT"))
     elif provider == "azure":
         fill("subscription", environ.get("AZURE_SUBSCRIPTION_ID"))
     elif provider == "argocd":
