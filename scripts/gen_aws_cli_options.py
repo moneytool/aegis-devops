@@ -14,7 +14,8 @@ command is ``{"o": {option: arity}, "m": {Member: option}, "p": [[name, arity]],
 ``m`` the input shape's member names (what ``--cli-input-json`` keys are) with the option
 each one is, ``t`` the type of each value that is not a string (``integer``, ``long``,
 ``float``, ``double``, ``timestamp``, ``blob``, ``structure``, ``map``, ``list:<member>``),
-``p`` positional arguments, ``s`` subcommands (``ec2 wait``)."""
+``x`` the botocore shape of each structure, map or list option (in the command's
+``shapes``, by name), ``p`` positional arguments, ``s`` subcommands (``ec2 wait``)."""
 
 import argparse
 import json
@@ -34,8 +35,30 @@ def _arity(action: argparse.Action) -> str:
     return str(action.nargs)
 
 
-def _command(cmd, depth: int) -> dict:
+def _shape_name(model, shapes: dict) -> str:
+    """Records ``model`` (and every shape it holds) in ``shapes`` by name, as botocore
+    names them: ``{"t": type, "m": {member: shape}, "e": list member, "v": map value,
+    "doc": document}``; returns its name."""
+    name = getattr(model, "name", None) or model.type_name
+    if name in shapes:
+        return name
+    node: dict = {"t": model.type_name}
+    shapes[name] = node
+    if getattr(model, "metadata", {}).get("document") or getattr(model, "is_document_type",
+                                                                   False):
+        node["doc"] = True
+    if model.type_name == "structure":
+        node["m"] = {k: _shape_name(v, shapes) for k, v in model.members.items()}
+    elif model.type_name == "list":
+        node["e"] = _shape_name(model.member, shapes)
+    elif model.type_name == "map":
+        node["v"] = _shape_name(model.value, shapes)
+    return name
+
+
+def _command(cmd, depth: int, shapes: dict | None = None) -> dict:
     entry: dict = {}
+    shapes = {} if shapes is None else shapes
     try:
         arg_table = cmd.arg_table
     except Exception:  # a group with no options of its own
@@ -63,6 +86,14 @@ def _command(cmd, depth: int) -> dict:
                 types[name] = kind
         if types:
             entry["t"] = types
+        # the botocore shape of every structure, map and list option (named in ``shapes``)
+        complex_shapes = {}
+        for name, arg in arg_table.items():
+            model = getattr(arg, "argument_model", None)
+            if model is not None and model.type_name in ("structure", "map", "list"):
+                complex_shapes[name] = _shape_name(model, shapes)
+        if complex_shapes:
+            entry["x"] = complex_shapes
         members: dict[str, str] = {}
         for name, arg in arg_table.items():
             member = getattr(arg, "_serialized_name", None)
@@ -79,7 +110,8 @@ def _command(cmd, depth: int) -> dict:
         else:
             sub = getattr(cmd, "subcommand_table", None)
     if sub:
-        entry["s"] = {name: _command(child, depth + 1) for name, child in sorted(sub.items())}
+        entry["s"] = {name: _command(child, depth + 1, shapes)
+                      for name, child in sorted(sub.items())}
     return entry
 
 
@@ -88,7 +120,11 @@ def main(out: str) -> None:
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         archive.writestr("VERSION", awscli.__version__ + "\n")
         for name, cmd in sorted(driver._get_command_table().items()):
-            archive.writestr(f"{name}.json", json.dumps(_command(cmd, 1), sort_keys=True,
+            shapes: dict = {}
+            entry = _command(cmd, 1, shapes)
+            if shapes:
+                entry["shapes"] = shapes
+            archive.writestr(f"{name}.json", json.dumps(entry, sort_keys=True,
                                                         separators=(",", ":")))
 
 

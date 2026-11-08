@@ -564,6 +564,31 @@ name). git verbs without an option table leave every param unresolved when given
   (an argocd `--source-positions` Int64Slice), and the store normalizes each element of a
   rule's value; a test checks every type in the table has a normalization. gcloud's
   `^DELIM^` escaping takes a delimiter of any length (`^--^env=prod--team=x`). From source.
+- `kubectl create secret generic settings` was two targets, `secret/generic` and
+  `secret/settings`: the subcommand word of `create secret|service <type>` is no longer a
+  name. With `--append-hash` kubectl names the object `settings-<hash of its data>`, from
+  files it reads when it runs: the target is now `secret/settings-*`, marked with that
+  prefix (configmaps too). aws `--generate-cli-skeleton` calls nothing and is a rehearsal.
+- aws `--instance-ids '["i-1"]'` was refused, and `--tags Key=a,Value=b` kept as text.
+  Structure, map and list values are now decoded as aws-cli's argprocess does: JSON when the
+  value (or a list's one value) starts with `[` or `{`, aws-cli's shorthand syntax
+  otherwise (its parser, vendored from aws-cli 2.37.4 as `aegis_core/aws_shorthand.py`,
+  Apache-2.0), typed by the botocore shapes, which the option table now records; a member a
+  shape does not have, or a value aws cannot decode, is refused. Targets come from the
+  decoded values. Run with aws 2.37.
+- az `--tags env=prod` stayed a list, though az's `tags_type` validator makes it a map.
+  Each az argument's converter is now read from `_params.py` and applied: `tags_type` (a
+  map, a bare key an empty value), `get_three_state_flag` (a boolean), `get_enum_type` (a
+  declared choice, matched without case; another value refused). A value whose argument
+  has another validator, not ported, is unresolved. From azure-cli source.
+- gcloud `--num-nodes 03` stayed `"03"`, the reference pages carrying no types. Each value
+  flag's type is now read from the SDK source mirror
+  (github.com/google-cloud-sdk-unofficial/google-cloud-sdk, its commit recorded in
+  `gcloud_flags.json`): int and BoundedInt, float, ArgBoolean, BinarySize (in bytes:
+  `10GB`, `10240MB` and a bare `10` are equal), Duration (in seconds, gcloud's ISO
+  parser) and ArgList element types, ported from calliope's arg_parsers; the store reads a
+  rule's value the same way. A type that cannot be read statically leaves the value
+  unresolved. From the SDK source; gcloud was not run.
 - Tests that used `flux reconcile ... --dry-run`, `flux get ... --export` and `git push
   --dry-run=false`, which the tools refuse, now use commands the tools accept (`flux create ...
   --export`, `git push --dry-run --no-dry-run`).

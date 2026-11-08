@@ -45,6 +45,32 @@ def _options_list(call: ast.Call, types: dict[str, list[str]]) -> list[str] | No
 
 # How many words the core argument types take (azure-cli-core commands/parameters.py).
 _CORE_TYPE_NARGS = {"tags_type": "*", "zones_type": "+", "tag_type": "?"}
+# What the core argument types turn a value into (their validator or type): tags_type's
+# validate_tags makes key[=value] words a map, tag_type one pair.
+_CORE_TYPE_CONV = {"tags_type": "tags", "tag_type": "tags"}
+
+
+def _conversion(call: ast.Call, type_conv: dict[str, str]) -> str | None:
+    """What az does to an argument's value after argparse: ``tags`` (validate_tags: a
+    map), ``bool`` (get_three_state_flag), ``enum:<json choices>`` (get_enum_type: a
+    choice, matched without case), or ``validator`` (another validator, not ported)."""
+    for arg in [*call.args[1:], *(k.value for k in call.keywords if k.arg == "arg_type")]:
+        if isinstance(arg, ast.Name) and arg.id in type_conv:
+            return type_conv[arg.id]
+        if isinstance(arg, ast.Call):
+            name = getattr(arg.func, "id", getattr(arg.func, "attr", ""))
+            if name == "get_three_state_flag":
+                return "bool"
+            if name == "get_enum_type" and arg.args:
+                choices = _strings(arg.args[0])
+                if choices:
+                    return "enum:" + json.dumps(choices)
+                return "validator"  # an enum class: its values are not here
+    for keyword in call.keywords:
+        if keyword.arg == "validator" and not (isinstance(keyword.value, ast.Constant)
+                                               and keyword.value.value is None):
+            return "validator"
+    return None
 
 
 def _nargs(call: ast.Call, type_nargs: dict[str, str]) -> str | None:
@@ -181,6 +207,7 @@ def module_arguments(source: str) -> dict[str, dict[str, Any]]:
     tree = ast.parse(source)
     types: dict[str, list[str]] = {}
     type_nargs: dict[str, str] = dict(_CORE_TYPE_NARGS)
+    type_conv: dict[str, str] = dict(_CORE_TYPE_CONV)
     for node in ast.walk(tree):
         if (isinstance(node, ast.Assign) and len(node.targets) == 1
                 and isinstance(node.targets[0], ast.Name) and isinstance(node.value, ast.Call)):
@@ -190,6 +217,9 @@ def module_arguments(source: str) -> dict[str, dict[str, Any]]:
             nargs = _nargs(node.value, {})
             if nargs:
                 type_nargs[node.targets[0].id] = nargs
+            conv = _conversion(node.value, {})
+            if conv:
+                type_conv[node.targets[0].id] = conv
     helpers = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
 
     def argument_calls(node: ast.AST, var: str, depth: int = 0):
@@ -225,6 +255,9 @@ def module_arguments(source: str) -> dict[str, dict[str, Any]]:
                 if (keyword.arg == "type" and isinstance(keyword.value, ast.Name)
                         and keyword.value.id in ("int", "float")):
                     nargs.setdefault(f"type:{dest}", keyword.value.id)
+            conv = _conversion(sub, type_conv)
+            if conv:
+                nargs[f"conv:{dest}"] = conv
             if sub.func.attr == "extra":
                 extras.add(dest)
         for name in names:
@@ -382,9 +415,11 @@ def main(checkout: str, out: str) -> None:
         for dest, options in entry["dest"].items():
             nargs = entry["nargs"].get(dest)
             vtype = entry["nargs"].get(f"type:{dest}")
+            conv = entry["nargs"].get(f"conv:{dest}")
             groups.append([*(options or ["--" + dest.replace("_", "-")]),
                            *([f"nargs:{nargs}"] if nargs else []),
-                           *([f"type:{vtype}"] if vtype else [])])
+                           *([f"type:{vtype}"] if vtype else []),
+                           *([f"conv:{conv}"] if conv else [])])
         table[scope] = {"s": {}, "l": set(), "c": False, "n": {}}
         _set_leaf(table, scope, groups, False)
     # each registered command: its function's parameters as knack spells them (exactly its
@@ -397,10 +432,12 @@ def main(checkout: str, out: str) -> None:
         for dest in dests:
             nargs = dest_nargs(command, dest)
             vtype = dest_nargs(command, f"type:{dest}")
+            conv = dest_nargs(command, f"conv:{dest}") or _CORE_DEST_CONV.get(dest)
             groups.append([*(dest_options(command, dest) or _CORE_DESTS.get(dest)
                              or ["--" + dest.replace("_", "-")]),
                            *([f"nargs:{nargs}"] if nargs else []),
-                           *([f"type:{vtype}"] if vtype else [])])
+                           *([f"type:{vtype}"] if vtype else []),
+                           *([f"conv:{conv}"] if conv else [])])
         if command in aaz and not complete:
             groups, complete = aaz[command], True
         # an argument declared on this very command in _params.py is its own, though the
@@ -452,6 +489,7 @@ _STORAGE_DATA_PLANE = {
 # commands/parameters.py and the global registrations): their spelling is not --dest-name.
 # How many words the arguments core registers by name take.
 _CORE_DEST_NARGS = {"tags": "*", "zones": "+"}
+_CORE_DEST_CONV = {"tags": "tags"}
 
 _CORE_DESTS = {
     "resource_group_name": ["--resource-group", "-g"],
@@ -471,11 +509,11 @@ def _set_leaf(table: dict[str, dict[str, Any]], command: str, groups: list[list[
     shorts: dict[str, str] = {}
     nargs: dict[str, str] = {}
     for group in groups:
-        options = [o for o in group if not o.startswith(("nargs:", "type:"))]
+        options = [o for o in group if not o.startswith(("nargs:", "type:", "conv:"))]
         shorts.update(_aliases(options))
-        for marker in (o for o in group if o.startswith(("nargs:", "type:"))):
-            prefix = "" if marker.startswith("nargs:") else "type:"
-            value = marker.partition(":")[2]
+        for marker in (o for o in group if o.startswith(("nargs:", "type:", "conv:"))):
+            kind, _, value = marker.partition(":")
+            prefix = "" if kind == "nargs" else f"{kind}:"
             nargs.update({prefix + o[2:]: value for o in options if o.startswith("--")})
     if complete:
         entry["l"], entry["s"], entry["n"] = longs, {**entry["s"], **shorts}, nargs

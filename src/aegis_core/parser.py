@@ -751,6 +751,8 @@ def normalize_typed(kind: str, value: Any) -> Any:
         if text in _GO_FALSE:
             return False
         raise ValueError(f"{value!r} is not a boolean Go reads")
+    if kind.startswith(("gint", "gfloat", "gbool", "gsize:", "gduration:")):
+        return _gcloud_typed(kind, value)
     if kind == "map-int":
         pairs = normalize_typed("map", value)
         return {k: normalize_typed("int", v) for k, v in pairs.items()}
@@ -765,6 +767,113 @@ def normalize_typed(kind: str, value: Any) -> Any:
             pairs[k] = v
         return pairs
     return value
+
+
+_GCLOUD_SIZE_SCALES = {"": 1, "K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40,
+                       "P": 1 << 50, "KI": 1 << 10, "MI": 1 << 20, "GI": 1 << 30,
+                       "TI": 1 << 40, "PI": 1 << 50}
+_GCLOUD_LOWER_UNIT = {"PIB": "TIB", "PB": "TIB", "TIB": "GIB", "TB": "GIB", "GIB": "MIB",
+                      "GB": "MIB", "MIB": "KIB", "MB": "KIB", "KIB": "B", "KB": "B"}
+
+
+def _gcloud_typed(kind: str, value: Any) -> Any:
+    """A gcloud value as the SDK's declared type parses it (calliope arg_parsers):
+    ``gint`` BoundedInt (Python int()), ``gfloat`` BoundedFloat, ``gbool`` ArgBoolean
+    (true/yes, false/no, any case), ``gsize:<unit>`` BinarySize in bytes (``10GB``,
+    ``2.5KB``, a bare number in the default unit, units without case, KB = 1024),
+    ``gduration:<unit>`` Duration in seconds (times.ParseDuration: ``1h30m``, ``PT1H``, a
+    bare integer in the default unit). A value the type refuses is a ValueError."""
+    import decimal
+
+    if isinstance(value, bool) and kind != "gbool":
+        raise ValueError(f"{value!r} is not a {kind}")
+    text = str(value)
+    if kind == "gint":
+        return value if isinstance(value, int) else int(text)
+    if kind == "gfloat":
+        number = float(text)
+        return int(number) if number.is_integer() else number
+    if kind == "gbool":
+        if isinstance(value, bool):
+            return value
+        if text.lower() in ("true", "yes"):
+            return True
+        if text.lower() in ("false", "no"):
+            return False
+        raise ValueError(f"{value!r} is not a boolean gcloud reads")
+    if kind.startswith("gsize:"):
+        if isinstance(value, int):
+            return value
+        match = re.fullmatch(r"(\d+\.?\d*)([-/a-zA-Z]+)?", text)
+        if not match:
+            raise ValueError(f"{value!r} is not a size gcloud reads")
+        amount, suffix = decimal.Decimal(match.group(1)), (match.group(2) or "")
+        unit_key = suffix.upper()
+        while amount != amount.to_integral_value() and unit_key in _GCLOUD_LOWER_UNIT:
+            amount, unit_key = amount * 1024, _GCLOUD_LOWER_UNIT[unit_key]
+        if amount != amount.to_integral_value():
+            raise ValueError(f"{value!r} is not a whole size")
+        unit = unit_key[:-1] if unit_key.endswith("B") else unit_key
+        if not suffix:
+            unit = kind[len("gsize:"):].upper().removesuffix("B")
+        if unit not in _GCLOUD_SIZE_SCALES:
+            raise ValueError(f"{value!r} has a unit gcloud does not read")
+        return int(amount) * _GCLOUD_SIZE_SCALES[unit]
+    if kind.startswith("gduration:"):
+        if isinstance(value, (int, float)):
+            return value
+        default = kind[len("gduration:"):]
+        if re.fullmatch(r"[+-]?\d+", text):
+            text = f"{int(text)}{default}"
+        return _gcloud_iso_duration(text)
+    raise ValueError(f"unknown kind {kind}")
+
+
+def _gcloud_iso_duration(text: str) -> int | float:
+    """googlecloudsdk.core.util.iso_duration's Parse, in seconds (no calendar units)."""
+    s = text.upper()
+    sign = -1 if s.startswith("-") else 1
+    s = s.lstrip("+-")
+    t_implied = not s.startswith("P")
+    s = s.removeprefix("P")
+    total, amount, seen_t = 0.0, "", False
+    for i, c in enumerate(s):
+        if c.isdigit():
+            amount += c
+        elif c in ".,":
+            amount += "."
+        elif c == "T":
+            if seen_t:
+                raise ValueError("a duration has at most one T")
+            seen_t = t_implied = True
+        elif not amount:
+            raise ValueError(f"duration unit {text[i:]!r} must follow a number")
+        else:
+            number = float(amount)
+            amount = ""
+            if c == "W":
+                total += number * 7 * 86400
+            elif c == "D":
+                total += number * 86400
+            elif c in "MUN" and s[i + 1:] == "S":
+                total += number / {"M": 1000, "U": 1000000, "N": 1000000000}[c]
+                break
+            elif c in "YM" and not t_implied:
+                raise ValueError("calendar units are not read here")
+            elif c == "H":
+                total += number * 3600
+            elif c == "M":
+                total += number * 60
+            elif c == "S":
+                total += number
+            else:
+                raise ValueError(f"unknown character {c!r} in duration")
+            t_implied = True if c != "D" else t_implied
+    if amount:
+        raise ValueError(f"{text!r} ends without a unit")
+    total *= sign
+    rounded = round(total, 4)
+    return int(rounded) if float(rounded).is_integer() else rounded
 
 
 def _mark_type(params: dict[str, Any], key: str, kind: str) -> None:
@@ -1604,6 +1713,11 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
     # get, describe, delete, scale, patch, cordon, drain, taint, expose, ...
     if verb == "taint":
         positional = [t for t in positional if not _is_taint_operand(t)]
+    if (verb == "create" and len(positional) > 1
+            and positional[1] in _KUBECTL_SUBCOMMANDS.get(("create", positional[0]), ())):
+        # create secret generic NAME, create service clusterip NAME: the second word is
+        # the subcommand, not a name
+        positional = [positional[0], *positional[2:]]
     resources = _parse_resources(positional)
     if verb == "taint" and resources and (params.get("all") or params.get("selector")):
         # kubectl taint ignores a name given with --all or -l (checked on kind)
@@ -1615,6 +1729,15 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
                                  custom_kinds=verb in _KUBECTL_CUSTOM_KIND_VERBS)
     if verb == "describe" and len(positional) == 2 and not any("/" in t for t in positional):
         _mark_name_prefix(intents[0], positional[1])
+    if verb == "create" and params.get("append-hash") is True:
+        # --append-hash renames the object NAME-<hash of its data>: data from files kubectl
+        # reads when it runs, so only the prefix is known
+        for intent in intents:
+            kind, _, name = intent.resource.partition("/")
+            if name and name != "*":
+                intent.resource = f"{kind}/{name}-*"
+                intent.params["resolved_at_runtime"] = {
+                    "from": intent.resource, "kinds": [kind], "name_prefix": f"{name}-"}
     if verb == "delete":
         intents.extend(_namespace_cascade_intents(resources, params, metadata))
     return intents
@@ -2156,6 +2279,110 @@ def _aws_typed(text: str, vtype: str | None, flag: str) -> Any:
     return text
 
 
+# aws-cli's argprocess: the operations whose list of one-member structures still takes
+# plain words (ParamShorthand._uses_old_list_case, aws-cli 2.37).
+_AWS_OLD_LIST_CASE = {
+    ("firehose", "put-record-batch"): {"records"},
+    ("workspaces", "reboot-workspaces"): {"reboot-workspace-requests"},
+    ("workspaces", "rebuild-workspaces"): {"rebuild-workspace-requests"},
+    ("workspaces", "terminate-workspaces"): {"terminate-workspace-requests"},
+    ("elb", "remove-tags"): {"tags"},
+    ("elb", "describe-instance-health"): {"instances"},
+    ("elb", "deregister-instances-from-load-balancer"): {"instances"},
+    ("elb", "register-instances-with-load-balancer"): {"instances"},
+}
+
+
+class _AwsFromFile(Exception):
+    """A shorthand value aws reads from a file when it runs."""
+
+
+def _aws_unpack(value: Any, shape_name: str, shapes: dict[str, Any], flag: str,
+                old_list_case: bool = False) -> Any:
+    """A structure, map or list option's value(s) as aws-cli's argprocess unpacks them:
+    JSON when the value (or a list's one value) starts with ``[`` or ``{``; otherwise
+    aws-cli's shorthand syntax (awscli/shorthand.py, :mod:`aegis_core.aws_shorthand`) for a
+    structure, a map or a list of them, typed by the botocore shapes; a list of scalars
+    takes each word, typed by its member shape. What aws cannot decode, the parser refuses;
+    a value aws reads from a file (``file://`` in shorthand) raises :class:`_AwsFromFile`."""
+    from aegis_core import aws_shorthand
+
+    def node(name: str) -> dict[str, Any]:
+        found = shapes.get(name)
+        return found if isinstance(found, dict) else {"t": name}
+
+    shape = node(shape_name)
+    words = value if isinstance(value, list) else [value]
+    first = str(words[0]).strip() if words else ""
+    try:
+        if shape.get("doc"):
+            return json.loads(str(words[0]))
+        if shape["t"] in ("structure", "map"):
+            text = str(words[0])
+            if text.lstrip().startswith("{"):
+                return json.loads(text)
+            members = shape.get("m", {})
+            if (shape["t"] == "structure" and list(members) == ["Value"]
+                    and node(members["Value"])["t"] == "string" and "=" not in text):
+                return {"Value": text}
+            parsed = aws_shorthand.ShorthandParser().parse(text)
+            aws_shorthand.BackCompatVisitor(shapes).visit(parsed, shape_name)
+            _aws_check_files(parsed)
+            return parsed
+        # a list
+        if len(words) == 1 and first.startswith("["):
+            return json.loads(str(words[0]))
+        member = node(shape.get("e", "string"))
+        if member["t"] in ("structure", "list", "map"):
+            if old_list_case and member["t"] == "structure" and len(member.get("m", {})) == 1:
+                key = next(iter(member["m"]))
+                return [{key: w} for w in words]
+            if first.startswith(("[", "{")):
+                return [json.loads(str(w)) for w in words]
+            parsed = [aws_shorthand.ShorthandParser().parse(str(w)) for w in words]
+            aws_shorthand.BackCompatVisitor(shapes).visit(parsed, shape_name)
+            _aws_check_files(parsed)
+            return parsed
+        return [_aws_typed(str(w), member["t"], flag) for w in words]
+    except _AwsFromFile:
+        raise
+    except (ValueError, aws_shorthand.ShorthandParseError) as exc:
+        raise ValueError(f"aws: {flag} {value!r} is not a value aws decodes: {exc}") from exc
+
+
+def _aws_check_members(value: Any, shape_name: str, shapes: dict[str, Any], flag: str) -> None:
+    """botocore's parameter validation of a decoded value's structure keys: a key the
+    shape does not have, aws refuses."""
+    shape = shapes.get(shape_name)
+    if not isinstance(shape, dict):
+        return
+    if shape["t"] == "structure" and isinstance(value, dict):
+        members = shape.get("m", {})
+        for key, item in value.items():
+            if key not in members:
+                raise ValueError(f"aws: {flag}: {key!r} is not a member aws accepts")
+            _aws_check_members(item, members[key], shapes, flag)
+    elif shape["t"] == "list" and isinstance(value, list):
+        for item in value:
+            _aws_check_members(item, shape.get("e", ""), shapes, flag)
+    elif shape["t"] == "map" and isinstance(value, dict):
+        for item in value.values():
+            _aws_check_members(item, shape.get("v", ""), shapes, flag)
+
+
+def _aws_check_files(value: Any) -> None:
+    from aegis_core.aws_shorthand import FromFile
+
+    if isinstance(value, FromFile):
+        raise _AwsFromFile(str(value))
+    if isinstance(value, dict):
+        for v in value.values():
+            _aws_check_files(v)
+    elif isinstance(value, list):
+        for v in value:
+            _aws_check_files(v)
+
+
 def _aws_take_values(tokens: list[str], i: int, tok: str, val: str | None,
                      arity: str, vtype: str | None = None) -> tuple[Any, int]:
     """The value(s) argparse gives an option of ``arity`` (see _AWS_OPTIONS_ARCHIVE) at
@@ -2185,7 +2412,8 @@ def _aws_take_values(tokens: list[str], i: int, tok: str, val: str | None,
 
 def _parse_aws_tokens(
     tokens: list[str], *, s3: str | None = None, dry_prefix: bool = True,
-    spec: dict[str, Any] | None = None,
+    spec: dict[str, Any] | None = None, aws_shapes: dict[str, Any] | None = None,
+    aws_old_list: frozenset[str] | set[str] = frozenset(),
 ) -> tuple[dict[str, Any], dict[str, Any], list[str], str | None, list[str] | None,
            list[tuple[str, list[str]]], str | None]:
     """``(metadata, params, positional, id, ids, abbreviations, id_flag)``. ``s3`` names the
@@ -2294,6 +2522,17 @@ def _parse_aws_tokens(
                     while i + 1 < n and not tokens[i + 1].startswith("-"):
                         i += 1
                         ids.append(tokens[i])
+                if spec is not None and len(ids) == 1 and ids[0].strip().startswith("["):
+                    # aws-cli json-decodes a list option's one value that starts with "["
+                    try:
+                        decoded = json.loads(ids[0])
+                    except ValueError as exc:
+                        raise ValueError(f"aws: {tok} {ids[0]!r} is not JSON aws decodes"
+                                         ) from exc
+                    if not isinstance(decoded, list) or not all(
+                            isinstance(d, str) for d in decoded):
+                        raise ValueError(f"aws: {tok} {ids[0]!r} is not a list of strings")
+                    ids = decoded
                 if key == "instance-id" and len(ids) == 1:
                     id_value, id_flag = ids[0], "instance-ids"
                 else:
@@ -2315,10 +2554,21 @@ def _parse_aws_tokens(
                 # botocore's "--no-<flag>" is a boolean's off switch: x: False
                 _set_bool_param(params, key, True)
             elif arity is not None:
+                complex_shape = spec.get("x", {}).get(key) if spec else None
                 value, i = _aws_take_values(tokens, i, tok, val, arity,
+                                            None if complex_shape else
                                             spec.get("t", {}).get(key) if spec else None)
                 if arity == "":
                     _set_bool_param(params, key, True)
+                elif complex_shape and not (isinstance(value, str) and value.startswith(
+                        ("file://", "fileb://"))):
+                    try:
+                        params[key] = _aws_unpack(value, complex_shape, aws_shapes or {}, tok,
+                                                  key in aws_old_list)
+                        _aws_check_members(params[key], complex_shape, aws_shapes or {}, tok)
+                    except _AwsFromFile:
+                        params[key] = value
+                        _mark_unresolved(params, key)  # a shorthand value from a file
                 else:
                     params[key] = value
             else:
@@ -2505,17 +2755,24 @@ def from_aws_multi(argv: list[str]) -> list[InfrastructureIntent]:
 
     # read again with the operation's own options: each is resolved to its full name
     spec = _aws_operation_spec(positional)
+    shapes = (_aws_command_table(service) or {}).get("shapes", {})
+    old_list = _AWS_OLD_LIST_CASE.get((service, operation), frozenset())
     (metadata, params, positional, id_value, multi_ids, abbreviations,
-     id_flag) = _parse_aws_tokens(tokens, spec=spec, dry_prefix=False)
+     id_flag) = _parse_aws_tokens(tokens, spec=spec, dry_prefix=False, aws_shapes=shapes,
+                                  aws_old_list=old_list)
     from_input = "cli_input_json" in params or "cli_input_yaml" in params
     if from_input:
         extra, structured, unread = _aws_input_tokens(spec, params)
         if not unread:
             (metadata, params, positional, id_value, multi_ids, abbreviations,
-             id_flag) = _parse_aws_tokens(extra + tokens, spec=spec, dry_prefix=False)
+             id_flag) = _parse_aws_tokens(extra + tokens, spec=spec, dry_prefix=False,
+                                          aws_shapes=shapes, aws_old_list=old_list)
             for key, value in structured.items():
                 params.setdefault(key, value)  # the command line wins over the input
     _mark_aws_file_values(params, spec if from_input and unread else None)
+    if "generate-cli-skeleton" in params:
+        # aws prints a skeleton (of the input, or of the output) and calls nothing
+        params["dry_run"] = True
     intents = _from_aws_operation(service, operation, metadata, params, id_value,
                                   multi_ids, abbreviations, id_flag)
     return _mark_aws_input_targets(intents) if from_input else intents
@@ -3017,6 +3274,47 @@ def _az_roles(aliases: dict[str, str]) -> dict[str, str]:
     return roles
 
 
+def _az_convert(params: dict[str, Any], nargs: dict[str, str], tokens: list[str]) -> None:
+    """What az does to a value after argparse, from the argument's type or validator
+    (the table's ``conv:``): ``tags`` (validate_tags: ``key[=value]`` words a map, a bare
+    key an empty value), ``bool`` (get_three_state_flag: true/false without case, bare
+    true), ``enum`` (get_enum_type: a choice matched without case, spelled as declared;
+    another value az refuses). Another validator is not ported: its value is unresolved."""
+    for key in list(params):
+        conv = nargs.get(f"conv:{key}")
+        if conv is None:
+            continue
+        value = params[key]
+        if conv == "tags":
+            words = value if isinstance(value, list) else [] if value is True else [value]
+            tags: dict[str, str] = {}
+            for word in words:
+                if word:
+                    k, sep, v = str(word).partition("=")
+                    tags[k] = v if sep else ""
+            params[key] = tags
+        elif conv == "bool":
+            if value is True or value is False:
+                continue
+            word = str(value).lower()
+            if word not in ("true", "false"):
+                raise ValueError(f"az: --{key} {value!r} is not true or false: {tokens!r}")
+            params[key] = word == "true"
+        elif conv.startswith("enum:"):
+            choices = json.loads(conv[len("enum:"):])
+
+            def choose(v: Any) -> str:
+                found = next((c for c in choices if c.lower() == str(v).lower()), None)
+                if found is None:
+                    raise ValueError(f"az: --{key} {v!r} is not one of {choices}")
+                return found
+
+            params[key] = [choose(v) for v in value] if isinstance(value, list) \
+                else choose(value)
+        else:
+            _mark_unresolved(params, key)
+
+
 def _az_typed(text: str, nargs: dict[str, str] | None, key: str, tok: str) -> Any:
     """An az value: the text, unless the argument declares ``type=int`` or ``type=float``
     (argparse's int() and float()); what argparse refuses, so does the parser."""
@@ -3156,6 +3454,8 @@ def _parse_az_tokens(
             positional.append(tok)
         i += 1
 
+    if nargs is not None:
+        _az_convert(params, nargs, tokens)
     # az reads an argument value "@path" from that file (knack's argument preprocessing),
     # "@-" from stdin: any other option read that way is unresolved
     for key, value in list(params.items()):
@@ -3503,7 +3803,13 @@ def _gcloud_flag_table(command: str) -> dict[str, Any] | None:
     table: dict[str, Any] = {kind: frozenset(entry.get(kind, ())) | frozenset(root.get(kind, ()))
                              for kind in ("bool", "value", "optional", "list", "dict")}
     table["alias"] = {**root.get("alias", {}), **entry.get("alias", {})}
+    table["types"] = dict(entry.get("types", {}))
     return table
+
+
+# The SDK's declared types (gcloud_flags.json "types") as normalize_typed's kinds.
+_GCLOUD_KINDS = {"int": "gint", "float": "gfloat", "bool": "gbool", "size": "gsize",
+                 "duration": "gduration"}
 
 
 def _gcloud_arg(text: str, is_dict: bool, existing: Any) -> Any:
@@ -3613,8 +3919,26 @@ def _parse_gcloud_tokens(
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
+                declared = table["types"].get(key)
                 if key in table["list"] or key in table["dict"]:
                     params[key] = _gcloud_arg(val, key in table["dict"], params.get(key))
+                    element = (declared or "").partition(":")[2] if (declared or "").startswith(
+                        "list:") else ""
+                    if element in _GCLOUD_KINDS and isinstance(params[key], list):
+                        params[key] = [normalize_typed(_GCLOUD_KINDS[element], v)
+                                       for v in params[key]]
+                        _mark_type(params, key, _GCLOUD_KINDS[element])
+                elif declared == "unresolved":
+                    params[key] = val  # a type the SDK parses its own way: unresolved
+                    _mark_unresolved(params, key)
+                elif declared and declared.split(":")[0] in _GCLOUD_KINDS:
+                    kind = _GCLOUD_KINDS[declared.split(":")[0]] + (
+                        ":" + declared.split(":", 1)[1] if ":" in declared else "")
+                    try:
+                        params[key] = normalize_typed(kind, val)
+                    except ValueError as exc:
+                        raise ValueError(f"gcloud: {tok} {val!r}: {exc}") from exc
+                    _mark_type(params, key, kind)
                 else:
                     params[key] = val
             elif table is not None and key in table["optional"]:

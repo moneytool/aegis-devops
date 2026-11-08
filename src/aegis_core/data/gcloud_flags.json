@@ -1,5 +1,5 @@
 {
- "_source": "https://cloud.google.com/sdk/gcloud/reference (fetched 2026-11-08)",
+ "_source": "https://cloud.google.com/sdk/gcloud/reference (fetched 2026-11-08); value types from github.com/google-cloud-sdk-unofficial/google-cloud-sdk 3dfad14e7f5495f14b555f3dbc148f59f9518f72",
  "compute disks add-iam-policy-binding": {
   "alias": {},
   "bool": [],
@@ -8,6 +8,9 @@
   ],
   "list": [],
   "optional": [],
+  "types": {
+   "role": "unresolved"
+  },
   "value": [
    "condition",
    "condition-from-file",
@@ -32,6 +35,17 @@
    "resource-policies"
   ],
   "optional": [],
+  "types": {
+   "labels": "unresolved",
+   "licenses": "list:str",
+   "provisioned-iops": "int",
+   "provisioned-throughput": "int",
+   "replica-zones": "list:str",
+   "resource-manager-tags": "dict",
+   "resource-policies": "list:str",
+   "size": "unresolved",
+   "type": "unresolved"
+  },
   "value": [
    "access-mode",
    "architecture",
@@ -75,6 +89,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "region",
    "zone"
@@ -86,6 +101,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "region",
    "zone"
@@ -105,6 +121,11 @@
    "zones"
   ],
   "optional": [],
+  "types": {
+   "limit": "unresolved",
+   "regions": "list:str",
+   "zones": "unresolved"
+  },
   "value": [
    "filter",
    "limit",
@@ -126,6 +147,9 @@
   ],
   "list": [],
   "optional": [],
+  "types": {
+   "role": "unresolved"
+  },
   "value": [
    "condition",
    "condition-from-file",
@@ -140,6 +164,9 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {
+   "size": "unresolved"
+  },
   "value": [
    "region",
    "size",
@@ -152,6 +179,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "zone"
   ]
@@ -171,6 +199,14 @@
    "remove-licenses"
   ],
   "optional": [],
+  "types": {
+   "append-licenses": "list:str",
+   "provisioned-iops": "int",
+   "provisioned-throughput": "int",
+   "remove-licenses": "list:str",
+   "replace-license": "list:str",
+   "size": "unresolved"
+  },
   "value": [
    "access-mode",
    "append-licenses",
@@ -207,6 +243,13 @@
    "target-tags"
   ],
   "optional": [],
+  "types": {
+   "action": "unresolved",
+   "direction": "unresolved",
+   "priority": "unresolved",
+   "resource-manager-tags": "dict",
+   "target-service-accounts": "list:str"
+  },
   "value": [
    "action",
    "allow",
@@ -231,6 +274,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": []
  },
  "compute firewall-rules describe": {
@@ -239,6 +283,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": []
  },
  "compute firewall-rules list": {
@@ -253,6 +298,9 @@
    "sort-by"
   ],
   "optional": [],
+  "types": {
+   "limit": "unresolved"
+  },
   "value": [
    "filter",
    "limit",
@@ -281,6 +329,10 @@
    "target-tags"
   ],
   "optional": [],
+  "types": {
+   "priority": "unresolved",
+   "target-service-accounts": "list:str"
+  },
   "value": [
    "allow",
    "description",
@@ -303,6 +355,9 @@
   ],
   "list": [],
   "optional": [],
+  "types": {
+   "role": "unresolved"
+  },
   "value": [
    "condition",
    "condition-from-file",
@@ -364,6 +419,48 @@
    "tags"
   ],
   "optional": [],
+  "types": {
+   "accelerator": "dict",
+   "availability-domain": "int",
+   "boot-disk-provisioned-iops": "int",
+   "boot-disk-provisioned-throughput": "int",
+   "boot-disk-size": "size:G",
+   "create-disk": "dict",
+   "custom-cpu": "unresolved",
+   "custom-memory": "size:G",
+   "discard-local-ssds-at-termination-timestamp": "bool",
+   "disk": "unresolved",
+   "external-ipv6-address": "unresolved",
+   "external-ipv6-prefix-length": "int",
+   "graceful-shutdown-max-duration": "duration:s",
+   "host-error-timeout-seconds": "duration:s",
+   "identity-type": "unresolved",
+   "instance-termination-action": "unresolved",
+   "internal-ipv6-address": "unresolved",
+   "internal-ipv6-prefix-length": "int",
+   "ipv6-network-tier": "unresolved",
+   "labels": "unresolved",
+   "local-ssd": "dict",
+   "local-ssd-recovery-timeout": "duration:h",
+   "maintenance-policy": "unresolved",
+   "max-run-duration": "duration:s",
+   "metadata": "dict",
+   "network-interface": "unresolved",
+   "network-performance-configs": "dict",
+   "network-tier": "unresolved",
+   "node-affinity-file": "unresolved",
+   "preemption-notice-duration": "duration:s",
+   "provisioning-model": "unresolved",
+   "request-valid-for-duration": "duration:s",
+   "resource-manager-tags": "dict",
+   "resource-policies": "list:str",
+   "scopes": "list:str",
+   "stack-type": "unresolved",
+   "tags": "unresolved",
+   "termination-time": "unresolved",
+   "threads-per-core": "int",
+   "visible-core-count": "int"
+  },
   "value": [
    "accelerator",
    "address",
@@ -462,6 +559,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "delete-disks",
    "keep-disks",
@@ -474,6 +572,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "zone"
   ]
@@ -484,6 +583,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "destination",
    "zone"
@@ -512,6 +612,16 @@
    "tags"
   ],
   "optional": [],
+  "types": {
+   "custom-cpu": "unresolved",
+   "custom-memory": "size:G",
+   "labels": "unresolved",
+   "network-tier": "unresolved",
+   "node-affinity-file": "unresolved",
+   "scopes": "list:str",
+   "tags": "unresolved",
+   "timeout": "unresolved"
+  },
   "value": [
    "cloudbuild-service-account",
    "compute-service-account",
@@ -553,6 +663,10 @@
    "zones"
   ],
   "optional": [],
+  "types": {
+   "limit": "unresolved",
+   "zones": "unresolved"
+  },
   "value": [
    "filter",
    "limit",
@@ -573,6 +687,9 @@
   ],
   "list": [],
   "optional": [],
+  "types": {
+   "role": "unresolved"
+  },
   "value": [
    "condition",
    "condition-from-file",
@@ -587,6 +704,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "zone"
   ]
@@ -597,6 +715,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "zone"
   ]
@@ -609,6 +728,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "csek-key-file",
    "zone"
@@ -625,6 +745,7 @@
   "optional": [
    "discard-local-ssd"
   ],
+  "types": {},
   "value": [
    "zone"
   ]
@@ -659,6 +780,11 @@
    "remove-labels"
   ],
   "optional": [],
+  "types": {
+   "graceful-shutdown-max-duration": "duration:s",
+   "identity-type": "unresolved",
+   "node-affinity-file": "unresolved"
+  },
   "value": [
    "graceful-shutdown-max-duration",
    "identity",
@@ -686,6 +812,10 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {
+   "ssh-key-expiration": "unresolved",
+   "ssh-key-expire-after": "duration:s"
+  },
   "value": [
    "command",
    "container",
@@ -829,6 +959,77 @@
    "ephemeral-storage-local-ssd",
    "local-nvme-ssd-block"
   ],
+  "types": {
+   "accelerator": "dict",
+   "additional-zones": "list:str",
+   "addons": "dict",
+   "alpha-cluster-feature-gates": "list:str",
+   "autopilot-privileged-admission": "list:str",
+   "autopilot-workload-policies": "unresolved",
+   "autoprovisioning-config-file": "unresolved",
+   "autoprovisioning-locations": "list:str",
+   "autoprovisioning-max-surge-upgrade": "int",
+   "autoprovisioning-max-unavailable-upgrade": "int",
+   "autoprovisioning-network-tags": "list:str",
+   "autoprovisioning-resource-manager-tags": "dict",
+   "autoprovisioning-scopes": "list:str",
+   "autoprovisioning-standard-rollout-policy": "dict",
+   "binauthz-evaluation-mode": "unresolved",
+   "boot-disk-provisioned-iops": "int",
+   "boot-disk-provisioned-throughput": "int",
+   "containerd-config-from-file": "unresolved",
+   "create-subnetwork": "dict",
+   "data-cache-count": "int",
+   "database-encryption-key": "unresolved",
+   "default-max-pods-per-node": "int",
+   "disk-size": "size:G",
+   "enable-kubernetes-unstable-apis": "list:str",
+   "fleet-project": "unresolved",
+   "labels": "dict",
+   "local-ssd-count": "int",
+   "logging": "list:str",
+   "maintenance-window": "unresolved",
+   "maintenance-window-duration": "duration:s",
+   "maintenance-window-end": "unresolved",
+   "maintenance-window-start": "unresolved",
+   "master-authorized-networks": "list:str",
+   "max-accelerator": "dict",
+   "max-cpu": "int",
+   "max-memory": "int",
+   "max-nodes": "int",
+   "max-nodes-per-pool": "int",
+   "max-pods-per-node": "int",
+   "max-surge-upgrade": "int",
+   "max-unavailable-upgrade": "int",
+   "metadata": "dict",
+   "metadata-from-file": "dict",
+   "min-accelerator": "dict",
+   "min-cpu": "int",
+   "min-memory": "int",
+   "min-nodes": "int",
+   "monitoring": "unresolved",
+   "network-performance-configs": "dict",
+   "node-labels": "dict",
+   "node-locations": "list:str",
+   "node-taints": "dict",
+   "notification-config": "dict",
+   "num-nodes": "int",
+   "patch-update": "list:str",
+   "resource-manager-tags": "dict",
+   "scopes": "list:str",
+   "service-account-signing-keys": "list:str",
+   "service-account-verification-keys": "list:str",
+   "storage-pools": "list:str",
+   "system-config-from-file": "unresolved",
+   "tags": "unresolved",
+   "threads-per-core": "int",
+   "total-max-nodes": "int",
+   "total-min-nodes": "int",
+   "wiz-sensor-api-key-secret-uri": "unresolved",
+   "wiz-sensor-proxy-secret-uri": "unresolved",
+   "wiz-sensor-registry-secret-uri": "unresolved",
+   "workload-metadata": "unresolved"
+  },
   "value": [
    "accelerator",
    "additional-zones",
@@ -989,6 +1190,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "location",
    "region",
@@ -1004,6 +1206,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "location",
    "region",
@@ -1022,6 +1225,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "location",
    "region",
@@ -1041,6 +1245,7 @@
    "sort-by"
   ],
   "optional": [],
+  "types": {},
   "value": [
    "filter",
    "limit",
@@ -1062,6 +1267,10 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {
+   "num-nodes": "int",
+   "size": "int"
+  },
   "value": [
    "location",
    "node-pool",
@@ -1201,6 +1410,59 @@
    "remove-labels"
   ],
   "optional": [],
+  "types": {
+   "add-maintenance-exclusion-end": "unresolved",
+   "add-maintenance-exclusion-start": "unresolved",
+   "additional-ip-ranges": "dict",
+   "additional-pod-ipv4-ranges": "list:str",
+   "autopilot-privileged-admission": "list:str",
+   "autopilot-workload-policies": "unresolved",
+   "autoprovisioning-config-file": "unresolved",
+   "autoprovisioning-locations": "list:str",
+   "autoprovisioning-max-surge-upgrade": "int",
+   "autoprovisioning-max-unavailable-upgrade": "int",
+   "autoprovisioning-network-tags": "list:str",
+   "autoprovisioning-resource-manager-tags": "dict",
+   "autoprovisioning-scopes": "list:str",
+   "autoprovisioning-standard-rollout-policy": "dict",
+   "binauthz-evaluation-mode": "unresolved",
+   "containerd-config-from-file": "unresolved",
+   "database-encryption-key": "unresolved",
+   "enable-kubernetes-unstable-apis": "list:str",
+   "fleet-project": "unresolved",
+   "logging": "list:str",
+   "maintenance-window": "unresolved",
+   "maintenance-window-duration": "duration:s",
+   "maintenance-window-end": "unresolved",
+   "maintenance-window-start": "unresolved",
+   "master-authorized-networks": "list:str",
+   "max-accelerator": "dict",
+   "max-cpu": "int",
+   "max-memory": "int",
+   "max-nodes": "int",
+   "min-accelerator": "dict",
+   "min-cpu": "int",
+   "min-memory": "int",
+   "min-nodes": "int",
+   "monitoring": "unresolved",
+   "network-performance-configs": "dict",
+   "node-locations": "list:str",
+   "notification-config": "dict",
+   "patch-update": "list:str",
+   "remove-additional-ip-ranges": "dict",
+   "remove-additional-pod-ipv4-ranges": "list:str",
+   "remove-autopilot-workload-policies": "unresolved",
+   "remove-labels": "list:str",
+   "remove-workload-policies": "unresolved",
+   "total-max-nodes": "int",
+   "total-min-nodes": "int",
+   "update-addons": "dict",
+   "update-labels": "dict",
+   "wiz-sensor-api-key-secret-uri": "unresolved",
+   "wiz-sensor-proxy-secret-uri": "unresolved",
+   "wiz-sensor-registry-secret-uri": "unresolved",
+   "workload-policies": "unresolved"
+  },
   "value": [
    "add-maintenance-exclusion-end",
    "add-maintenance-exclusion-name",
@@ -1317,6 +1579,9 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {
+   "control-plane-soak-duration": "duration:s"
+  },
   "value": [
    "cluster-version",
    "control-plane-soak-duration",
@@ -1387,6 +1652,48 @@
    "ephemeral-storage-local-ssd",
    "local-nvme-ssd-block"
   ],
+  "types": {
+   "accelerator": "dict",
+   "additional-node-network": "dict",
+   "additional-pod-network": "dict",
+   "autoscaled-rollout-policy": "dict",
+   "boot-disk-provisioned-iops": "int",
+   "boot-disk-provisioned-throughput": "int",
+   "containerd-config-from-file": "unresolved",
+   "create-pod-ipv4-range": "dict",
+   "data-cache-count": "int",
+   "disk-size": "size:G",
+   "labels": "dict",
+   "local-ssd-count": "int",
+   "max-nodes": "int",
+   "max-pods-per-node": "int",
+   "max-surge-upgrade": "int",
+   "max-unavailable-upgrade": "int",
+   "metadata": "dict",
+   "metadata-from-file": "dict",
+   "min-nodes": "int",
+   "min-provision-nodes": "int",
+   "network-performance-configs": "dict",
+   "node-labels": "dict",
+   "node-locations": "list:str",
+   "node-taints": "dict",
+   "num-nodes": "int",
+   "opportunistic-maintenance": "dict",
+   "resource-manager-tags": "dict",
+   "sandbox": "dict",
+   "scopes": "list:str",
+   "secondary-boot-disk": "dict",
+   "sole-tenant-min-node-cpus": "int",
+   "sole-tenant-node-affinity-file": "unresolved",
+   "standard-rollout-policy": "dict",
+   "storage-pools": "list:str",
+   "system-config-from-file": "unresolved",
+   "tags": "unresolved",
+   "threads-per-core": "int",
+   "total-max-nodes": "int",
+   "total-min-nodes": "int",
+   "workload-metadata": "unresolved"
+  },
   "value": [
    "accelerator",
    "accelerator-network-profile",
@@ -1475,6 +1782,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "cluster",
    "location",
@@ -1491,6 +1799,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "cluster",
    "location",
@@ -1511,6 +1820,7 @@
    "sort-by"
   ],
   "optional": [],
+  "types": {},
   "value": [
    "cluster",
    "filter",
@@ -1533,6 +1843,9 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {
+   "respect-pdb": "unresolved"
+  },
   "value": [
    "cluster",
    "location",
@@ -1581,6 +1894,31 @@
    "tags"
   ],
   "optional": [],
+  "types": {
+   "accelerator": "dict",
+   "autoscaled-rollout-policy": "dict",
+   "boot-disk-provisioned-iops": "int",
+   "boot-disk-provisioned-throughput": "int",
+   "containerd-config-from-file": "unresolved",
+   "disk-size": "size:G",
+   "labels": "dict",
+   "max-nodes": "int",
+   "max-surge-upgrade": "int",
+   "max-unavailable-upgrade": "int",
+   "min-nodes": "int",
+   "network-performance-configs": "dict",
+   "node-labels": "dict",
+   "node-locations": "list:str",
+   "node-taints": "dict",
+   "resource-manager-tags": "dict",
+   "standard-rollout-policy": "dict",
+   "storage-pools": "list:str",
+   "system-config-from-file": "unresolved",
+   "tags": "unresolved",
+   "total-max-nodes": "int",
+   "total-min-nodes": "int",
+   "workload-metadata": "unresolved"
+  },
   "value": [
    "accelerator",
    "autoscaled-rollout-policy",
@@ -1632,6 +1970,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "member",
    "region",
@@ -1644,6 +1983,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "region"
   ]
@@ -1691,6 +2031,23 @@
    "remove-secrets"
   ],
   "optional": [],
+  "types": {
+   "concurrency": "int",
+   "docker-repository": "unresolved",
+   "kms-key": "unresolved",
+   "max-instances": "int",
+   "min-instances": "int",
+   "network-tags": "list:str",
+   "remove-secrets": "unresolved",
+   "set-secrets": "unresolved",
+   "stage-bucket": "unresolved",
+   "timeout": "duration:s",
+   "trigger-bucket": "unresolved",
+   "trigger-event-filters": "dict",
+   "trigger-event-filters-path-pattern": "dict",
+   "trigger-topic": "unresolved",
+   "update-secrets": "unresolved"
+  },
   "value": [
    "binary-authorization",
    "build-env-vars-file",
@@ -1752,6 +2109,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "region"
   ]
@@ -1767,6 +2125,10 @@
    "sort-by"
   ],
   "optional": [],
+  "types": {
+   "limit": "int",
+   "regions": "list:str"
+  },
   "value": [
    "filter",
    "limit",
@@ -1781,6 +2143,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "member",
    "region",
@@ -1793,6 +2156,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "region"
   ]
@@ -1805,6 +2169,10 @@
   ],
   "list": [],
   "optional": [],
+  "types": {
+   "condition": "unresolved",
+   "condition-from-file": "unresolved"
+  },
   "value": [
    "condition",
    "condition-from-file",
@@ -1818,6 +2186,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "description",
    "display-name"
@@ -1829,6 +2198,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": []
  },
  "iam service-accounts describe": {
@@ -1837,6 +2207,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": []
  },
  "iam service-accounts list": {
@@ -1849,6 +2220,7 @@
    "sort-by"
   ],
   "optional": [],
+  "types": {},
   "value": [
    "filter",
    "limit",
@@ -1865,6 +2237,10 @@
   ],
   "list": [],
   "optional": [],
+  "types": {
+   "condition": "unresolved",
+   "condition-from-file": "unresolved"
+  },
   "value": [
    "condition",
    "condition-from-file",
@@ -1878,6 +2254,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": []
  },
  "iam service-accounts update": {
@@ -1886,6 +2263,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "description",
    "display-name"
@@ -1899,6 +2277,7 @@
   ],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "condition",
    "condition-from-file",
@@ -1918,6 +2297,11 @@
   ],
   "list": [],
   "optional": [],
+  "types": {
+   "folder": "unresolved",
+   "organization": "unresolved",
+   "tags": "dict"
+  },
   "value": [
    "folder",
    "labels",
@@ -1932,6 +2316,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": []
  },
  "projects describe": {
@@ -1940,6 +2325,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": []
  },
  "projects list": {
@@ -1952,6 +2338,9 @@
    "sort-by"
   ],
   "optional": [],
+  "types": {
+   "page-size": "unresolved"
+  },
   "value": [
    "filter",
    "limit",
@@ -1969,6 +2358,7 @@
   ],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "condition",
    "condition-from-file",
@@ -1982,6 +2372,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": []
  },
  "projects update": {
@@ -1990,6 +2381,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "name"
   ]
@@ -2000,6 +2392,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "member",
    "role"
@@ -2018,6 +2411,13 @@
    "message-storage-policy-allowed-regions"
   ],
   "optional": [],
+  "types": {
+   "cloud-storage-ingestion-input-format": "unresolved",
+   "message-encoding": "unresolved",
+   "message-retention-duration": "unresolved",
+   "message-storage-policy-allowed-regions": "list:str",
+   "tags": "dict"
+  },
   "value": [
    "aws-msk-ingestion-aws-role-arn",
    "aws-msk-ingestion-cluster-arn",
@@ -2067,6 +2467,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": []
  },
  "pubsub topics describe": {
@@ -2075,6 +2476,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": []
  },
  "pubsub topics list": {
@@ -2087,6 +2489,7 @@
    "sort-by"
   ],
   "optional": [],
+  "types": {},
   "value": [
    "filter",
    "limit",
@@ -2100,6 +2503,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "member",
    "role"
@@ -2111,6 +2515,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": []
  },
  "pubsub topics update": {
@@ -2132,6 +2537,12 @@
    "remove-labels"
   ],
   "optional": [],
+  "types": {
+   "cloud-storage-ingestion-input-format": "unresolved",
+   "message-encoding": "unresolved",
+   "message-retention-duration": "unresolved",
+   "message-storage-policy-allowed-regions": "list:str"
+  },
   "value": [
    "aws-msk-ingestion-aws-role-arn",
    "aws-msk-ingestion-cluster-arn",
@@ -2290,6 +2701,34 @@
    "set-custom-audiences"
   ],
   "optional": [],
+  "types": {
+   "add-volume": "dict",
+   "add-volume-mount": "dict",
+   "args": "list:str",
+   "build-env-vars-file": "unresolved",
+   "build-service-account": "unresolved",
+   "command": "list:str",
+   "concurrency": "unresolved",
+   "depends-on": "unresolved",
+   "env-vars-file": "unresolved",
+   "max": "unresolved",
+   "max-instances": "unresolved",
+   "min": "unresolved",
+   "min-instances": "unresolved",
+   "network-tags": "list:str",
+   "port": "unresolved",
+   "remove-containers": "unresolved",
+   "remove-volume": "list:str",
+   "remove-volume-mount": "list:str",
+   "scaling": "unresolved",
+   "scaling-concurrency-target": "unresolved",
+   "scaling-cpu-target": "unresolved",
+   "set-cloudsql-instances": "list:str",
+   "set-env-vars": "dict",
+   "set-secrets": "dict",
+   "timeout": "duration:s",
+   "update-env-vars": "dict"
+  },
   "value": [
    "add-cloudsql-instances",
    "add-custom-audiences",
@@ -2373,6 +2812,7 @@
   ],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "condition",
    "condition-from-file",
@@ -2390,6 +2830,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "namespace",
    "region"
@@ -2401,6 +2842,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "namespace",
    "region"
@@ -2416,6 +2858,7 @@
    "sort-by"
   ],
   "optional": [],
+  "types": {},
   "value": [
    "filter",
    "limit",
@@ -2434,6 +2877,7 @@
   ],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "condition",
    "condition-from-file",
@@ -2448,6 +2892,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "region"
   ]
@@ -2522,6 +2967,32 @@
    "set-custom-audiences"
   ],
   "optional": [],
+  "types": {
+   "add-volume": "dict",
+   "add-volume-mount": "dict",
+   "args": "list:str",
+   "command": "list:str",
+   "concurrency": "unresolved",
+   "depends-on": "unresolved",
+   "env-vars-file": "unresolved",
+   "max": "unresolved",
+   "max-instances": "unresolved",
+   "min": "unresolved",
+   "min-instances": "unresolved",
+   "network-tags": "list:str",
+   "port": "unresolved",
+   "remove-containers": "unresolved",
+   "remove-volume": "list:str",
+   "remove-volume-mount": "list:str",
+   "scaling": "unresolved",
+   "scaling-concurrency-target": "unresolved",
+   "scaling-cpu-target": "unresolved",
+   "set-cloudsql-instances": "list:str",
+   "set-env-vars": "dict",
+   "set-secrets": "dict",
+   "timeout": "duration:s",
+   "update-env-vars": "dict"
+  },
   "value": [
    "add-cloudsql-instances",
    "add-custom-audiences",
@@ -2602,6 +3073,12 @@
    "database"
   ],
   "optional": [],
+  "types": {
+   "database": "unresolved",
+   "export-log-end-time": "unresolved",
+   "export-log-start-time": "unresolved",
+   "stripe_count": "int"
+  },
   "value": [
    "bak-type",
    "d",
@@ -2625,6 +3102,9 @@
    "database"
   ],
   "optional": [],
+  "types": {
+   "database": "unresolved"
+  },
   "value": [
    "d",
    "database",
@@ -2655,6 +3135,11 @@
    "table"
   ],
   "optional": [],
+  "types": {
+   "database": "unresolved",
+   "table": "unresolved",
+   "threads": "unresolved"
+  },
   "value": [
    "d",
    "database",
@@ -2672,6 +3157,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "cert-path",
    "certificate",
@@ -2695,6 +3181,10 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {
+   "database": "unresolved",
+   "stop-at": "unresolved"
+  },
   "value": [
    "bak-type",
    "cert-path",
@@ -2718,6 +3208,11 @@
    "columns"
   ],
   "optional": [],
+  "types": {
+   "columns": "list:str",
+   "database": "unresolved",
+   "table": "unresolved"
+  },
   "value": [
    "columns",
    "d",
@@ -2743,6 +3238,10 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {
+   "database": "unresolved",
+   "threads": "unresolved"
+  },
   "value": [
    "d",
    "database",
@@ -2759,6 +3258,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "cert-path",
    "certificate",
@@ -2839,6 +3339,43 @@
    "custom-subject-alternative-names"
   ],
   "optional": [],
+  "types": {
+   "active-directory-dns-servers": "list:str",
+   "allowed-psc-projects": "list:str",
+   "audit-retention-interval": "duration:s",
+   "audit-upload-interval": "duration:s",
+   "authorized-networks": "unresolved",
+   "auto-scale-in-cooldown-seconds": "int",
+   "auto-scale-max-node-count": "int",
+   "auto-scale-min-node-count": "int",
+   "auto-scale-out-cooldown-seconds": "int",
+   "auto-scale-target-metrics": "dict",
+   "connection-pool-flags": "dict",
+   "cpu": "int",
+   "custom-subject-alternative-names": "list:str",
+   "database-flags": "dict",
+   "final-backup-retention-days": "unresolved",
+   "insights-config-query-plans-per-minute": "int",
+   "insights-config-query-string-length": "int",
+   "maintenance-window-day": "unresolved",
+   "maintenance-window-hour": "int",
+   "memory": "size:G",
+   "node-count": "int",
+   "password-policy-min-length": "int",
+   "password-policy-password-change-interval": "duration:s",
+   "password-policy-reuse-interval": "int",
+   "performance-capture-config": "dict",
+   "psc-auto-connections": "unresolved",
+   "retained-backups-count": "unresolved",
+   "retained-transaction-log-days": "unresolved",
+   "storage-auto-increase-limit": "unresolved",
+   "storage-provisioned-iops": "unresolved",
+   "storage-provisioned-throughput": "unresolved",
+   "storage-size": "size:G",
+   "tags": "dict",
+   "threads-per-core": "int",
+   "timeout": "unresolved"
+  },
   "value": [
    "activation-policy",
    "active-directory-dns-servers",
@@ -2930,6 +3467,10 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {
+   "final-backup-expiry-time": "unresolved",
+   "final-backup-retention-days": "unresolved"
+  },
   "value": [
    "final-backup-description",
    "final-backup-expiry-time",
@@ -2942,6 +3483,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": []
  },
  "sql instances list": {
@@ -2957,6 +3499,7 @@
    "sort-by"
   ],
   "optional": [],
+  "types": {},
   "value": [
    "filter",
    "limit",
@@ -2972,6 +3515,7 @@
   ],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "condition",
    "condition-from-file",
@@ -3008,6 +3552,11 @@
    "placement"
   ],
   "optional": [],
+  "types": {
+   "labels": "dict",
+   "placement": "list:str",
+   "soft-delete-duration": "duration:s"
+  },
   "value": [
    "additional-headers",
    "autoclass-terminal-storage-class",
@@ -3041,6 +3590,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "additional-headers"
   ]
@@ -3053,6 +3603,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "additional-headers"
   ]
@@ -3068,6 +3619,7 @@
    "sort-by"
   ],
   "optional": [],
+  "types": {},
   "value": [
    "additional-headers",
    "filter",
@@ -3086,6 +3638,7 @@
   ],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "condition",
    "condition-from-file",
@@ -3105,6 +3658,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "e",
    "etag"
@@ -3162,6 +3716,13 @@
    "update-labels"
   ],
   "optional": [],
+  "types": {
+   "add-acl-grant": "dict",
+   "add-default-object-acl-grant": "dict",
+   "remove-labels": "list:str",
+   "soft-delete-duration": "duration:s",
+   "update-labels": "dict"
+  },
   "value": [
    "a",
    "acl-file",
@@ -3265,6 +3826,19 @@
    "z"
   ],
   "optional": [],
+  "types": {
+   "custom-contexts": "dict",
+   "custom-metadata": "dict",
+   "custom-time": "unresolved",
+   "decryption-keys": "list:str",
+   "gzip-in-flight": "list:str",
+   "gzip-local": "list:str",
+   "remove-custom-contexts": "list:str",
+   "remove-custom-metadata": "list:str",
+   "retain-until": "unresolved",
+   "update-custom-contexts": "dict",
+   "update-custom-metadata": "dict"
+  },
   "value": [
    "L",
    "a",
@@ -3366,6 +3940,19 @@
    "z"
   ],
   "optional": [],
+  "types": {
+   "custom-contexts": "dict",
+   "custom-metadata": "dict",
+   "custom-time": "unresolved",
+   "decryption-keys": "list:str",
+   "gzip-in-flight": "list:str",
+   "gzip-local": "list:str",
+   "remove-custom-contexts": "list:str",
+   "remove-custom-metadata": "list:str",
+   "retain-until": "unresolved",
+   "update-custom-contexts": "dict",
+   "update-custom-metadata": "dict"
+  },
   "value": [
    "L",
    "a",
@@ -3424,6 +4011,7 @@
   "dict": [],
   "list": [],
   "optional": [],
+  "types": {},
   "value": [
    "additional-headers",
    "if-generation-match",

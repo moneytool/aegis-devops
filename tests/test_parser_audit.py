@@ -260,7 +260,7 @@ AUDIT = [
     ("C10", "git", "git push origin safe", ("first_marked_destination",)),
     # C26 a multi-value option takes every value, as the tool's parser gives it
     ("C26", "az", "az group create --name rg --location eastus --tags a=b c=d",
-     param("tags", ["a=b", "c=d"])),
+     param("tags", {"a": "b", "c": "d"})),  # validate_tags makes a map
     ("C26", "az", "az vm update -g rg -n v --set a=1 b=2", param("set", ["a=1", "b=2"])),
     ("C26", "aws", "aws ec2 create-tags --resources i-1 i-2 --tags Key=a,Value=b",
      param("resources", ["i-1", "i-2"])),
@@ -283,6 +283,20 @@ AUDIT = [
     # C28 custom pflag Values, and slice element types
     ("C28", "helm", "helm upgrade r ./c --wait=false", param("wait", "hookOnly")),
     ("C28", "argocd", "argocd app sync a --source-positions 0x2", param("source_positions", [2])),
+    # round 12
+    ("C7", "kubectl", "kubectl create secret generic s --from-literal a=b", res("secret/s")),
+    ("C11", "kubectl", "kubectl create configmap c --from-literal a=b --append-hash",
+     marked("configmap/c-*")),
+    ("C11", "aws", "aws ec2 terminate-instances --instance-ids i-1 --generate-cli-skeleton",
+     param("dry_run", True)),
+    ("C27", "aws", "aws ec2 terminate-instances --instance-ids '[\"i-1\"]'",
+     res("ec2/instance/i-1")),
+    ("C27", "aws", "aws ec2 create-tags --resources i-1 --tags Key=a,Value=b",
+     param("tags", [{"Key": "a", "Value": "b"}])),
+    ("C27", "az", "az group create --name rg --location eastus --tags env=prod",
+     param("tags", {"env": "prod"})),
+    ("C27", "gcloud", "gcloud container clusters resize c --num-nodes 03 --region r",
+     param("num-nodes", 3)),
     # C25 a flag read by its value, not its presence
     ("C25", "git", "git branch --no-column -f prod HEAD~1", res("branch/prod", "branch/prod",
                                                                "branch/prod")),

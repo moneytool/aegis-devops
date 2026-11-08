@@ -658,7 +658,7 @@ def test_from_gcloud_container_clusters_resize_maps_to_scale():
     )
     assert intent.action == "scale"
     assert intent.resource == "container/cluster/prod"
-    assert intent.params["num-nodes"] == "5"  # gcloud values are text unless declared
+    assert intent.params["num-nodes"] == 5  # the SDK declares it an int
 
 
 def test_from_gcloud_sql_instances_delete():

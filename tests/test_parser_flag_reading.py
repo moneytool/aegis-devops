@@ -1699,7 +1699,7 @@ def test_aws_desired_capacity_rule_holds_in_every_spelling(command, verdict):
     ("gcloud compute instances stop web --discard-local-ssd", ["compute/instance/web"],
      {"discard-local-ssd": True}),
     ("gcloud container clusters resize c --num-nodes 0 --region r",
-     ["container/cluster/c"], {"num-nodes": "0"}),
+     ["container/cluster/c"], {"num-nodes": 0}),
     ("gcloud storage rm -r gs://b/x", ["storage/bucket/b"], {"recursive": True}),
     ("gcloud compute instances list --filter name=x", ["compute/instance/*"],
      {"filter": "name=x"}),
@@ -2787,7 +2787,7 @@ def test_a_rule_meets_any_value_of_a_repeated_flag():
 @pytest.mark.parametrize("command,key,value", [
     # az: every word up to the next option, as argparse gives nargs + / * and append
     ("az group create --name rg --location eastus --tags owner=ops env=prod", "tags",
-     ["owner=ops", "env=prod"]),
+     {"owner": "ops", "env": "prod"}),  # tags_type's validate_tags
     ("az vm update -g rg -n v --set a=1 b=2 --set c=3", "set", ["a=1", "b=2", "c=3"]),
     ("az aks create -g rg -n c --zones 1 2 3", "zones", ["1", "2", "3"]),
     # aws: a list parameter takes every word up to the next option
@@ -2805,7 +2805,7 @@ def test_multi_value_options_take_every_value(command, key, value):
 
 
 @pytest.mark.parametrize("rule,command", [
-    (_rule("azure", "resource/group/*", ["create"], {"tags": "env=prod"}),
+    (_rule("azure", "resource/group/*", ["create"], {"tags.env": "prod"}),
      "az group create --name rg --location eastus --tags owner=ops env=prod"),
     (_rule("gcp", "compute/instance/*", ["create"], {"labels.env": "prod"}),
      "gcloud compute instances create web --zone z --labels team=x,env=prod"),
@@ -2934,3 +2934,108 @@ def test_gcloud_delimiters_of_any_length(value, expected):
     intent = from_argv(["gcloud", "compute", "instances", "update", "web", "--update-labels",
                         value])[0]
     assert intent.params["update-labels"] == expected
+
+
+# --- review round 12 -----------------------------------------------------------------
+
+
+@pytest.mark.parametrize("command,resources", [
+    # the subcommand word of create secret/service is not a name
+    ("kubectl create secret generic settings --from-literal a=b", ["secret/settings"]),
+    ("kubectl create secret tls t --cert c --key k", ["secret/t"]),
+    ("kubectl create secret docker-registry r --docker-server s", ["secret/r"]),
+    ("kubectl create service clusterip web --tcp 80:80", ["service/web"]),
+    ("kubectl create service nodeport web --tcp 80:80", ["service/web"]),
+    # --append-hash renames the object NAME-<hash>
+    ("kubectl create secret generic settings --append-hash --from-literal a=b",
+     ["secret/settings-*"]),
+    ("kubectl create configmap c --from-literal a=b --append-hash", ["configmap/c-*"]),
+])
+def test_kubectl_create_names_the_object_kubectl_creates(command, resources):
+    assert [i.resource for i in from_argv(command.split())] == resources
+
+
+def test_append_hash_escalates_a_rule_on_one_hashed_name():
+    command = "kubectl create secret generic settings --append-hash --from-literal a=b"
+    assert _verdict([_rule("kubernetes", "secret/settings-abc123", ["create"])],
+                    command) == "ESCALATE"
+    assert _verdict([_rule("kubernetes", "secret/other-*", ["create"])], command) == "ALLOW"
+
+
+def test_aws_generate_cli_skeleton_calls_nothing():
+    intent = from_argv("aws ec2 terminate-instances --instance-ids i-1 "
+                       "--generate-cli-skeleton".split())[0]
+    assert intent.params["dry_run"] is True
+
+
+@pytest.mark.parametrize("argv,key,value", [
+    # aws-cli argprocess: JSON for a value starting with [ or {, shorthand otherwise
+    (["aws", "ec2", "terminate-instances", "--instance-ids", '["i-1","i-2"]'], None, None),
+    (["aws", "ec2", "create-tags", "--resources", "i-1", "--tags", "Key=a,Value=b",
+      "Key=c,Value=d"], "tags", [{"Key": "a", "Value": "b"}, {"Key": "c", "Value": "d"}]),
+    (["aws", "ec2", "create-tags", "--resources", "i-1", "--tags",
+      '[{"Key":"a","Value":"b"}]'], "tags", [{"Key": "a", "Value": "b"}]),
+    (["aws", "ec2", "describe-instances", "--filters", "Name=tag:env,Values=prod,dev"],
+     "filters", [{"Name": "tag:env", "Values": ["prod", "dev"]}]),
+])
+def test_aws_complex_values_are_decoded_as_aws_decodes_them(argv, key, value):
+    intents = from_argv(argv)
+    if key is None:
+        assert [i.resource for i in intents] == ["ec2/instance/i-1", "ec2/instance/i-2"]
+    else:
+        assert intents[0].params[key] == value
+
+
+def test_aws_json_list_targets_meet_their_rule():
+    rule = _rule("aws", "ec2/instance/i-2", ["delete"])
+    assert _verdict([rule], ["aws", "ec2", "terminate-instances", "--instance-ids",
+                             '["i-1","i-2"]']) == "BLOCK"
+
+
+@pytest.mark.parametrize("argv", [
+    ["aws", "ec2", "terminate-instances", "--instance-ids", "[i-1"],  # not JSON
+    ["aws", "ec2", "create-tags", "--resources", "i-1", "--tags", "Key=a,=b"],
+])
+def test_aws_refuses_values_aws_cannot_decode(argv):
+    with pytest.raises(ValueError):
+        from_argv(argv)
+
+
+@pytest.mark.parametrize("command,key,value", [
+    # az validators: tags_type makes a map, get_three_state_flag a bool, get_enum_type a
+    # choice spelled as declared
+    ("az group create --name rg --location eastus --tags env=prod owner", "tags",
+     {"env": "prod", "owner": ""}),
+    ("az storage account update -g rg -n sa --enable-sftp TRUE", "enable-sftp", True),
+    ("az storage account update -g rg -n sa --use-subdomain True", "use-subdomain", "true"),
+])
+def test_az_validators_convert_values_as_az_does(command, key, value):
+    assert from_argv(command.split())[0].params[key] == value
+
+
+def test_az_tags_rule_meets_the_map():
+    rule = _rule("azure", "resource/group/*", ["create"], {"tags.env": "prod"})
+    assert _verdict([rule], "az group create --name rg --location eastus --tags env=prod"
+                    .split()) == "BLOCK"
+
+
+@pytest.mark.parametrize("command,key,value", [
+    # gcloud: each value by the type the SDK declares (calliope arg_parsers)
+    ("gcloud container clusters resize c --num-nodes 03 --region r", "num-nodes", 3),
+    ("gcloud compute instances create w --zone z --boot-disk-size 10GB", "boot-disk-size",
+     10 * 1024 ** 3),
+    ("gcloud compute instances create w --zone z --boot-disk-size 10", "boot-disk-size",
+     10 * 1024 ** 3),  # BinarySize's default unit, GB
+])
+def test_gcloud_values_are_typed_by_the_sdk(command, key, value):
+    assert from_argv(command.split())[0].params[key] == value
+
+
+@pytest.mark.parametrize("rule_value,command", [
+    ("3", "gcloud container clusters resize c --num-nodes 03 --region r"),
+    ("10GB", "gcloud compute instances create w --zone z --boot-disk-size 10240MB"),
+])
+def test_gcloud_typed_rules_meet_every_spelling(rule_value, command):
+    key = "num-nodes" if "num-nodes" in command else "boot-disk-size"
+    rule = _rule("gcp", "*", ["scale", "create"], {key: rule_value})
+    assert _verdict([rule], command) == "BLOCK"
