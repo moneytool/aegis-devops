@@ -362,8 +362,10 @@ keeps a value written as `--flag=value`. Anywhere else the command is refused (`
 whether '--x' takes a value`): if the flag takes a value the next word is that value, and if it
 does not the next word is a flag, a name or an operand, so either guess could misread the
 namespace or the target. A short flag in no table is read the same way. Words after `--` are
-operands on helm, flux and argocd. `kubectl get --raw <path>` is still refused: a URI path can
-read any kind, secrets included, which no kind-based rule would match.
+operands on helm, flux and argocd. `kubectl get|create|replace|delete --raw <path>` acts on the
+object or collection the path names (`/api/v1/namespaces/prod/pods/x` is `pod/x` in `prod`),
+whatever the other words, `-n` and `--dry-run` say, since kubectl ignores them; a path that
+names no object or collection (a subresource, a query, `/healthz`) is refused.
 
 **Updating the flag tables.** The tables in `src/aegis_core/parser.py` are pinned to the
 versions named above, and a flag a later release adds is refused until it is listed: that is

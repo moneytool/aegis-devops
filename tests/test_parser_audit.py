@@ -1,4 +1,4 @@
-"""The sibling audit of review rounds 1-13 (docs/dev/parser-audit.md): one check per class
+"""The sibling audit of review rounds 1-14 (docs/dev/parser-audit.md): one check per class
 of finding and per tool where the class applies, so a fix that covers one tool and misses
 its siblings fails here. Each row is ``(class, tool, argv, check)``."""
 
@@ -324,6 +324,24 @@ AUDIT = [
     ("C31", "gh", "gh api repos/a/b -F name=@n.txt -X PATCH", unres("inputs.name")),
     ("C31", "helm", "helm upgrade web ./c --set-file replicaCount=r.txt",
      unres("set.replicaCount")),
+    # round 14
+    ("C32", "kubectl", "kubectl delete pod harmless -n dev "
+     "--raw=/api/v1/namespaces/prod/pods/protected", res("pod/protected")),
+    ("C32", "kubectl", "kubectl delete pod harmless -n dev "
+     "--raw=/api/v1/namespaces/prod/pods/protected", meta("namespace", "prod")),
+    ("C32", "kubectl", "kubectl delete --raw /api/v1/namespaces/prod/pods/x/status", REFUSE),
+    ("C32", "kubectl", "kubectl apply --raw /api/v1/namespaces/prod/pods/x -f a.yaml", REFUSE),
+    ("C32", "az", "az rest --method delete --uri /subscriptions/s/resourceGroups/rg", REFUSE),
+    ("C27", "aws", "aws s3 cp f s3://b/k --metadata classification=secret",
+     param("metadata", {"classification": "secret"})),
+    ("C27", "aws", "aws s3 rm s3://b/k --page-size 010", param("page-size", 10)),
+    ("C6", "aws", "aws s3 sync . s3://b --exclude a --include b --exclude c",
+     param("exclude", ["a", "c"])),
+    ("C31", "gcloud", "gcloud compute instances create vm --zone z "
+     "--metadata-from-file enable-oslogin=f.txt", unres("metadata.enable-oslogin")),
+    ("C31", "gcloud", "gcloud storage buckets update gs://b --labels-file l.json",
+     unres("labels.*")),
+    ("C31", "aws", "aws s3 cp f s3://b/k --metadata file://m.json", unres("metadata.*")),
 ]
 
 

@@ -614,6 +614,30 @@ name). git verbs without an option table leave every param unresolved when given
   (`--tags file://t.json` was refused as bad shorthand), marking the key and its nested keys,
   and kubectl `create configmap|secret --from-file`/`--from-env-file` leave `data` and
   `data.*` unresolved.
+- `kubectl delete pod harmless -n dev --raw=/api/v1/namespaces/prod/pods/protected` deletes
+  `prod`'s `protected`: kubectl sends one DELETE to the raw path and ignores the other words,
+  `-n` and `--dry-run`. It was read as a delete of `harmless` in `dev`. kubectl `get`,
+  `create`, `replace` and `delete --raw` (the verbs that have it; apply has none and is
+  refused) now read the target, namespace and collection from the path; a subresource, a
+  non-resource path, a query or an escaped, empty or dot segment is refused, and create and
+  replace need exactly one `-f`. `kubectl get --raw` of a kind's path is now read as a read
+  of that kind instead of refused. From kubectl 1.36 source. `az rest` stays refused.
+- `aws s3 cp --metadata classification=secret` stayed text, so a rule on
+  `metadata.classification` did not meet it. The options of the high-level `aws s3` commands
+  now come from aws-cli 2.37.4's own s3 argument tables (generated, not written by hand) and
+  are read as aws-cli reads them: `--metadata` a map from shorthand or JSON, `--page-size` and
+  `--progress-frequency` integers, choices checked exactly (`--sse AES` is refused), a bare
+  `--sse` or `--request-payer` its default, `--include`/`--exclude` an ordered `filters` list
+  (before, only the last was kept), `mb --tags` a map, and a store-true option given a value
+  refused.
+  `--expires` and the `--content-*` and `--sse-*` values are plain strings in aws-cli and stay
+  text. Checked against aws 2.37.4.
+- `gcloud compute instances create --metadata-from-file enable-oslogin=oslogin.txt` sets
+  `metadata.enable-oslogin` to the file's contents, which are not read; a rule on it did not
+  escalate. Every gcloud flag named `*-from-file` or `*-file`, or typed as file contents in the
+  SDK source, now leaves the setting it fills unresolved (`metadata.<key>` for each key given,
+  `labels.*` for `--labels-file`, the env vars for `--env-vars-file`). The gcloud table's types
+  were refreshed from the same SDK commit with `--types-only`, which keeps the flag lists.
 
 ### Added
 - A `NOTICE` file at the repository root lists the third-party code and data in the package
