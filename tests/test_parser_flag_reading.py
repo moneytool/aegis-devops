@@ -82,7 +82,7 @@ def test_a_helm_boolean_leaves_the_release_alone(command, release, params):
     "helm upgrade api ./c -x prod",
 ])
 def test_a_helm_flag_in_no_table_is_refused(command):
-    with pytest.raises(ValueError, match="cannot tell whether"):
+    with pytest.raises(ValueError, match="cannot tell whether|not a short flag"):
         from_argv(command.split())
 
 
@@ -198,7 +198,7 @@ def test_a_flux_value_flag_takes_the_next_word(command, namespace, params):
     "flux suspend ks a -x b",
 ])
 def test_a_flux_flag_in_no_table_is_refused(command):
-    with pytest.raises(ValueError, match="cannot tell whether"):
+    with pytest.raises(ValueError, match="cannot tell whether|not a short flag"):
         from_argv(command.split())
 
 
@@ -2294,3 +2294,36 @@ def test_gh_api_dispatch_inputs_meet_the_porcelain_rule():
     command = ["gh", "api", "-X", "POST", "repos/o/r/actions/workflows/d.yml/dispatches",
                "-f", "ref=main", "-F", "inputs[env]=prod"]
     assert _verdict([rule], command) == "BLOCK"
+
+
+def test_az_formatted_scopes_are_read():
+    # 'storage fs file delete' is built with .format() in azure-cli's _params.py
+    intent = from_argv("az storage fs file delete -f fs -p prod --account-name a -y".split())[0]
+    assert intent.params["file-system"] == "fs" and intent.params["path"] == "prod"
+    rule = _rule("azure", "*", ["delete"], {"path": "prod"})
+    assert _verdict([rule], "az storage fs file delete -f fs -p prod --account-name a -y"
+                    .split()) == "BLOCK"
+
+
+@pytest.mark.parametrize("command", [
+    # a short letter with no known meaning on the command is refused, on every tool
+    "az vm delete -g rg -n v -q x",
+    "kubectl get pods -x",
+    "helm upgrade api ./c -x",
+    "flux get ks -x",
+    "argocd app sync a -x",
+    "gh pr merge 1 -x",
+    "gh issue edit 1 -x foo",
+    "gcloud compute instances delete web -x",
+    "gcloud compute networks delete web -x",
+])
+def test_an_unmapped_short_letter_is_refused(command):
+    with pytest.raises(ValueError):
+        from_argv(command.split())
+
+
+@pytest.mark.parametrize("command", ["git fetch -n origin", "git clean -fn", "git stash -p"])
+def test_git_verbs_without_a_table_record_no_option_as_written(command):
+    intent = from_argv(command.split())[0]
+    assert "dry_run" not in intent.params
+    assert intent.params["unresolved_scope"][0] == "*"

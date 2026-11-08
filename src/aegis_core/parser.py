@@ -608,10 +608,8 @@ def _split_short_word(
     is namespace ``=``, since pflag only strips a ``=`` that has something after it.
     The result needs no more splitting, so ``-n=prod`` comes back as it is.
 
-    A letter in neither set makes the tool stop with an error, so nothing after it
-    counts: it is dropped, as an unknown short flag always was. A later version could
-    give that letter a meaning, though, and then a value letter or ``A`` behind it
-    could be real. That word is refused, since which it would be cannot be told."""
+    A letter in neither set is refused: what it means on this command is not known, and
+    nothing is recorded as written."""
     flags: list[str] = []
     rest = word[1:]
     while rest:
@@ -623,12 +621,8 @@ def _split_short_word(
             flags.append(f"-{letter}={rest}" if rest else f"-{letter}")
             break
         if letter not in bools:
-            if any(c == "A" or c in values for c in rest):
-                raise ValueError(
-                    f"{tool}: cannot tell what {word!r} means: {letter!r} is not a short "
-                    f"flag known on this command, and {rest!r} follows it"
-                )
-            break
+            raise ValueError(f"{tool}: -{letter} in {word!r} is not a short flag the parser "
+                             f"knows on this command; write its long flag")
         flags.append(f"-{letter}")
     return flags
 
@@ -925,8 +919,10 @@ def _parse_flags(
             if not is_long:
                 # a short letter is its long flag from here on: both record the same
                 long_name = _kubectl_short_name(key, verb, replicas_short)
-                if long_name is not None:
-                    key, is_long = long_name, True
+                if long_name is None:
+                    raise ValueError(f"kubectl: -{key} is not a short flag the parser knows "
+                                     f"on this command; write its long flag: {tokens!r}")
+                key, is_long = long_name, True
             if key == "namespace":
                 if val is None:
                     i += 1
@@ -2655,6 +2651,13 @@ def _az_aliases(words: list[str]) -> dict[str, str]:
     return aliases
 
 
+# az's own short options (knack and azure-cli core): -o output, -h help, -y the --yes that
+# knack adds to every command that asks for confirmation (knack commands.py), and the -g,
+# -n and -l of the shared resource-group, name and location arguments.
+_AZ_GLOBAL_SHORTS = {"o": "output", "h": "help", "y": "yes", "g": "resource-group",
+                     "n": "name", "l": "location"}
+
+
 def _az_roles(aliases: dict[str, str]) -> dict[str, str]:
     """The long options that name the target, its resource group or its location on this
     command: ``--name``, ``--resource-group`` and ``--location``, and the option the
@@ -2706,8 +2709,11 @@ def _parse_az_tokens(
                                  f"the target or its scope; write the option in full")
             if aliases is not None and roles is not None:
                 if not tok.startswith("--"):
-                    key = aliases.get(key) or {"g": "resource-group", "n": "name",
-                                               "l": "location"}.get(key, key)
+                    if key not in aliases and key not in _AZ_GLOBAL_SHORTS:
+                        raise ValueError(f"az: -{key} is not a short option the parser "
+                                         f"knows on this command; write its long option: "
+                                         f"{tokens!r}")
+                    key = aliases.get(key) or _AZ_GLOBAL_SHORTS[key]
                 key = roles.get(key, key)
             if key in ("l", "location"):
                 if val is None:
@@ -3150,6 +3156,10 @@ def _parse_gcloud_tokens(
             if table is not None:
                 # a short or other spelling is its flag (-z is --zone): both record the same
                 key = table["alias"].get(key, key)
+            if (not lenient and not tok.startswith("--") and len(key) == 1 and key not in ("q", "h")
+                    and not (storage and key in _GCLOUD_STORAGE_BOOL_FLAGS)):
+                raise ValueError(f"gcloud: -{key} is not a short flag the parser knows on "
+                                 f"this command; write its long flag: {tokens!r}")
             if key == "region":
                 if val is None:
                     i += 1
@@ -3601,8 +3611,10 @@ def _parse_helm_tokens(
             if not is_long:
                 # a short letter is recorded as its long flag: both spellings record the same
                 long_name = _helm_short_name(key, verb)
-                if long_name is not None:
-                    key = long_name
+                if long_name is None:
+                    raise ValueError(f"-{key} is not a short flag the parser knows on this "
+                                     f"command; write its long flag: {tokens!r}")
+                key = long_name
             if key == "namespace":
                 if val is None:
                     i += 1
@@ -4166,6 +4178,9 @@ def _parse_argocd_tokens(
             key, val = _split_flag(tok)
             name = key if is_long else _argocd_short_name(key, verb)
             known = is_long or key in _ARGOCD_SHORT_VALUE_LETTERS | _ARGOCD_SHORT_BOOL_LETTERS
+            if not known:
+                raise ValueError(f"argocd: -{key} is not a short flag the parser knows; write "
+                                 f"its long flag: {tokens!r}")
             if name == "project" and known:
                 # A StringArray on sync and list: every one counts.
                 if val is None:
@@ -4549,8 +4564,10 @@ def _parse_flux_tokens(
             if not is_long:
                 # a short letter is recorded as its long flag: both spellings record the same
                 long_name = _flux_short_name(key, verb)
-                if long_name is not None:
-                    key = long_name
+                if long_name is None:
+                    raise ValueError(f"-{key} is not a short flag the parser knows on this "
+                                     f"command; write its long flag: {tokens!r}")
+                key = long_name
             if key == "namespace":
                 if val is None:
                     i += 1
@@ -4788,45 +4805,24 @@ _GIT_BOOL_FLAGS = {
 
 
 def _parse_git_tokens(tokens: list[str]) -> tuple[dict[str, Any], list[str]]:
+    """A git verb without an option table: which of its options take a value, and what each
+    letter means, is not known here, so no option is recorded as written (``-n`` is
+    --dry-run on one verb and --no-tags on another). Any option leaves every param
+    unresolved (``*``), so a rule scoped on one escalates, and the words are the verb's
+    arguments only up to the first option, and after ``--``."""
     params: dict[str, Any] = {}
     positional: list[str] = []
-
-    i = 0
-    n = len(tokens)
-    while i < n:
-        tok = tokens[i]
+    seen_option = False
+    for i, tok in enumerate(tokens):
+        if tok == "--":
+            positional.extend(tokens[i + 1:])
+            break
         if tok.startswith("-") and tok != "-":
-            key, val = _split_flag(tok)
-            if key in ("force", "f"):
-                params["force"] = True
-            elif key == "force-with-lease":
-                params["force"] = True
-                params["force_with_lease"] = True
-            elif key in ("delete", "d", "D"):
-                params["delete"] = True
-            elif key == "tags":
-                params["tags"] = True
-            elif key == "hard":
-                params["hard"] = True
-            elif key == "amend":
-                params["amend"] = True
-            elif key in ("dry-run", "n"):
-                _record_dry_run(params, _is_dry_run(val))
-            elif key == "no-dry-run":
-                params.pop("dry_run", None)
-            elif key in _GIT_BOOL_FLAGS:
-                params[key.replace("-", "_")] = _bool_param(val)
-            elif val is not None:
-                params[key.replace("-", "_")] = _coerce(val)
-            elif i + 1 < n and not tokens[i + 1].startswith("-"):
-                i += 1
-                params[key.replace("-", "_")] = _coerce(tokens[i])
-            else:
-                params[key.replace("-", "_")] = True
-        else:
+            seen_option = True
+        elif not seen_option:
             positional.append(tok)
-        i += 1
-
+    if seen_option:
+        params["unresolved_scope"] = ["*"]
     return params, positional
 
 
@@ -5301,8 +5297,9 @@ def from_git_multi(argv: list[str]) -> list[InfrastructureIntent]:
         return [one("history/HEAD", "rewrite")]
 
     if verb == "filter-branch":
-        target = positional[0] if positional else "HEAD"
-        return [one(f"history/{target}", "rewrite")]
+        # rev-list arguments pick the refs it rewrites, behind options the parser does not
+        # read: which refs, only git knows
+        return _mark_open_targets([one("history/*", "rewrite")])
 
     if verb == "filter-repo":
         # git filter-repo rewrites every ref of the repository, whatever it is given
@@ -5669,6 +5666,10 @@ def _parse_gh_tokens_inner(
         tok = tokens[i]
         if tok.startswith("-") and tok != "-":
             key, val = _split_flag(tok)
+            if not tok.startswith("--") and key not in ("R", "r", "f", "F", "X"):
+                # a command with no flag table: no other letter's meaning is known here
+                raise ValueError(f"gh: -{key} is not a short flag the parser knows on this "
+                                 f"command; write its long flag: {tokens!r}")
             if key in ("R", "repo"):
                 if val is None:
                     i += 1
@@ -5838,6 +5839,9 @@ def _parse_gh_command_tokens(
                 continue
         key, val = _split_flag(tok)
         name = key if is_long else shorts.get(key)
+        if name is None and not is_long:
+            raise ValueError(f"gh: -{key} is not a short flag the parser knows on this "
+                             f"command; write its long flag: {tokens!r}")
         if name is None or (name not in bools and name not in values):
             i, params[key.replace("-", "_")] = _other_flag(tokens, i, values=(), bools=(),
                                                            tool="gh")
@@ -6181,7 +6185,11 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
         )
 
     # every other group: a read only where the table says so
-    metadata, params, positional = _parse_gh_tokens(tokens)
+    if group == "extension" and tokens[:1] == ["exec"]:
+        # extension exec disables flag parsing: every word goes to the extension
+        metadata, params, positional = {}, {}, list(tokens)
+    else:
+        metadata, params, positional = _parse_gh_tokens(tokens)
     params["raw_action"] = group
     # gh <group> <command> ...: the resource keeps the command word, as before
     subverb = positional[0] if (group, None) not in _GH_ACTIONS and positional else None

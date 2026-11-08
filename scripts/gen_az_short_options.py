@@ -7,9 +7,10 @@ and the long option it is, read from azure-cli's ``command_modules/*/_params.py`
 Each ``with self.argument_context(SCOPE) as c:`` block names a command or group, and each
 ``c.argument(dest, ..., options_list=[...])`` in it (or an argument type with an
 ``options_list``, defined in the module) gives the short spellings of the first long
-option. A scope applies to every command under it, and the most specific scope wins. A
-scope written as a loop variable over a literal list counts once per item. Spellings built
-at run time are not read: such a letter is recorded as written."""
+option. A scope applies to every command under it, and the most specific scope wins. A scope
+built from loop variables, ``+``, ``.format()`` or an f-string is read for every value the
+names can take (literal lists, and names bound to them). A scope built any other way is not
+read, and the parser refuses a letter it has no entry for."""
 
 import ast
 import json
@@ -47,6 +48,57 @@ def _aliases(options: list[str]) -> dict[str, str]:
             if o.startswith("-") and not o.startswith("--") and len(o) == 2}
 
 
+def _eval(node: ast.AST, env: dict[str, list[str]]) -> list[str] | None:
+    """Every string a scope expression can be, given the names bound to lists of strings:
+    a literal, a name, ``a + b``, ``'...'.format(x, ...)`` and an f-string. None when it
+    cannot be read."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return [node.value]
+    if isinstance(node, ast.Name):
+        return env.get(node.id)
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+        # source.value for an enum member bound by a loop: not read
+        return None
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, right = _eval(node.left, env), _eval(node.right, env)
+        if left is None or right is None:
+            return None
+        return [a + b for a in left for b in right]
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "format" and not node.keywords):
+        templates = _eval(node.func.value, env)
+        args = [_eval(a, env) for a in node.args]
+        if templates is None or any(a is None for a in args):
+            return None
+        out = [""]
+        combos: list[list[str]] = [[]]
+        for values in args:
+            combos = [c + [v] for c in combos for v in values]
+        out = []
+        for template in templates:
+            for combo in combos:
+                try:
+                    out.append(template.format(*combo))
+                except (IndexError, KeyError):
+                    return None
+        return out
+    if isinstance(node, ast.JoinedStr):
+        parts: list[list[str]] = [[""]]
+        for value in node.values:
+            if isinstance(value, ast.Constant):
+                parts.append([str(value.value)])
+            elif isinstance(value, ast.FormattedValue):
+                got = _eval(value.value, env)
+                if got is None:
+                    return None
+                parts.append(got)
+        out = [""]
+        for options in parts:
+            out = [a + b for a in out for b in options]
+        return out
+    return None
+
+
 def module_scopes(source: str) -> dict[str, dict[str, str]]:
     tree = ast.parse(source)
     types: dict[str, list[str]] = {}
@@ -58,12 +110,22 @@ def module_scopes(source: str) -> dict[str, dict[str, str]]:
                 types[node.targets[0].id] = options
     scopes: dict[str, dict[str, str]] = {}
 
-    def visit(node: ast.AST, loop: dict[str, list[str]]) -> None:
+    def block(statements: list[ast.stmt], env: dict[str, list[str]]) -> None:
+        env = dict(env)
+        for node in statements:
+            if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Name)):
+                values = _strings(node.value) or _eval(node.value, env)
+                if values is not None:
+                    env[node.targets[0].id] = values
+            visit(node, env)
+
+    def visit(node: ast.AST, env: dict[str, list[str]]) -> None:
         if isinstance(node, ast.For) and isinstance(node.target, ast.Name):
-            items = _strings(node.iter)
-            inner = {**loop, node.target.id: items} if items else loop
-            for child in node.body:
-                visit(child, inner)
+            items = _strings(node.iter) or (env.get(node.iter.id)
+                                            if isinstance(node.iter, ast.Name) else None)
+            inner = {**env, node.target.id: items} if items else env
+            block(node.body, inner)
             return
         if isinstance(node, ast.With):
             for item in node.items:
@@ -71,10 +133,7 @@ def module_scopes(source: str) -> dict[str, dict[str, str]]:
                 if (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
                         and call.func.attr == "argument_context" and call.args
                         and isinstance(item.optional_vars, ast.Name)):
-                    scope = call.args[0]
-                    names = ([scope.value] if isinstance(scope, ast.Constant)
-                             and isinstance(scope.value, str) else
-                             loop.get(scope.id, []) if isinstance(scope, ast.Name) else [])
+                    names = _eval(call.args[0], env) or []
                     var = item.optional_vars.id
                     found: dict[str, str] = {}
                     for sub in ast.walk(node):
@@ -87,10 +146,18 @@ def module_scopes(source: str) -> dict[str, dict[str, str]]:
                                 found.update(_aliases(options))
                     for name in names:
                         scopes.setdefault(name, {}).update(found)
+            block(node.body, env)
+            return
+        if isinstance(node, (ast.FunctionDef, ast.If, ast.Try)):
+            for field in ("body", "orelse", "finalbody"):
+                block(getattr(node, field, []) or [], env)
+            for handler in getattr(node, "handlers", []):
+                block(handler.body, env)
+            return
         for child in ast.iter_child_nodes(node):
-            visit(child, loop)
+            visit(child, env)
 
-    visit(tree, {})
+    block(tree.body, {})
     return {k: v for k, v in scopes.items() if v}
 
 

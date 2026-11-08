@@ -682,6 +682,15 @@
 "backup container unregister": {
 "c": "container-name"
 },
+"backup deleted-vault get": {
+"n": "name"
+},
+"backup deleted-vault list-containers": {
+"n": "name"
+},
+"backup deleted-vault undelete": {
+"n": "name"
+},
 "backup item": {
 "v": "vault-name",
 "c": "container-name"
@@ -707,10 +716,22 @@
 "backup job list": {
 "v": "vault-name"
 },
+"backup job show": {
+"n": "name"
+},
+"backup job stop": {
+"n": "name"
+},
+"backup job wait": {
+"n": "name"
+},
 "backup policy": {
 "v": "vault-name"
 },
 "backup policy create": {
+"n": "name"
+},
+"backup policy delete": {
 "n": "name"
 },
 "backup policy get-default-for-vm": {
@@ -719,9 +740,15 @@
 "backup policy list": {
 "v": "vault-name"
 },
+"backup policy list-associated-items": {
+"n": "name"
+},
 "backup policy set": {
 "n": "name",
 "y": "yes"
+},
+"backup policy show": {
+"n": "name"
 },
 "backup protectable-item": {
 "v": "vault-name",
@@ -735,14 +762,43 @@
 "v": "vault-name",
 "p": "policy-name"
 },
+"backup protection auto-disable-for-azurewl": {
+"v": "vault-name"
+},
+"backup protection auto-enable-for-azurewl": {
+"v": "vault-name"
+},
+"backup protection backup-now": {
+"c": "container-name",
+"i": "item-name"
+},
+"backup protection disable": {
+"c": "container-name",
+"i": "item-name"
+},
 "backup protection enable-for-azurefileshare": {
 "v": "vault-name",
 "y": "yes"
+},
+"backup protection enable-for-azurewl": {
+"v": "vault-name"
 },
 "backup protection enable-for-vm": {
 "v": "vault-name"
 },
 "backup protection reconfigure": {
+"c": "container-name",
+"i": "item-name"
+},
+"backup protection resume": {
+"c": "container-name",
+"i": "item-name"
+},
+"backup protection undelete": {
+"c": "container-name",
+"i": "item-name"
+},
+"backup protection update-for-vm": {
 "c": "container-name",
 "i": "item-name"
 },
@@ -835,6 +891,24 @@
 "n": "name"
 },
 "batch account show": {
+"n": "name"
+},
+"batch application create": {
+"n": "name"
+},
+"batch application delete": {
+"n": "name"
+},
+"batch application list": {
+"n": "name"
+},
+"batch application package": {
+"n": "name"
+},
+"batch application set": {
+"n": "name"
+},
+"batch application show": {
 "n": "name"
 },
 "batch private-endpoint-connection show": {
@@ -1229,6 +1303,9 @@
 "a": "account-name",
 "n": "name"
 },
+"cosmosdb cassandra keyspace throughput migrate": {
+"t": "throughput-type"
+},
 "cosmosdb cassandra table": {
 "a": "account-name",
 "k": "keyspace-name",
@@ -1238,6 +1315,9 @@
 "a": "account-name",
 "k": "keyspace-name",
 "n": "name"
+},
+"cosmosdb cassandra table throughput migrate": {
+"t": "throughput-type"
 },
 "cosmosdb collection": {
 "c": "collection-name"
@@ -1284,6 +1364,9 @@
 "a": "account-name",
 "n": "name"
 },
+"cosmosdb gremlin database throughput migrate": {
+"t": "throughput-type"
+},
 "cosmosdb gremlin graph": {
 "a": "account-name",
 "d": "database-name",
@@ -1301,6 +1384,9 @@
 "a": "account-name",
 "d": "database-name",
 "n": "name"
+},
+"cosmosdb gremlin graph throughput migrate": {
+"t": "throughput-type"
 },
 "cosmosdb gremlin restorable-database": {
 "l": "location",
@@ -1344,6 +1430,9 @@
 "d": "database-name",
 "n": "name"
 },
+"cosmosdb mongodb collection throughput migrate": {
+"t": "throughput-type"
+},
 "cosmosdb mongodb database": {
 "a": "account-name",
 "n": "name"
@@ -1356,6 +1445,9 @@
 "cosmosdb mongodb database throughput": {
 "a": "account-name",
 "n": "name"
+},
+"cosmosdb mongodb database throughput migrate": {
+"t": "throughput-type"
 },
 "cosmosdb mongodb restorable-collection": {
 "l": "location",
@@ -1439,6 +1531,9 @@
 "d": "database-name",
 "n": "name"
 },
+"cosmosdb sql container throughput migrate": {
+"t": "throughput-type"
+},
 "cosmosdb sql database": {
 "a": "account-name",
 "n": "name"
@@ -1451,6 +1546,9 @@
 "cosmosdb sql database throughput": {
 "a": "account-name",
 "n": "name"
+},
+"cosmosdb sql database throughput migrate": {
+"t": "throughput-type"
 },
 "cosmosdb sql restorable-container": {
 "l": "location",
@@ -1541,6 +1639,9 @@
 "cosmosdb table throughput": {
 "a": "account-name",
 "n": "name"
+},
+"cosmosdb table throughput migrate": {
+"t": "throughput-type"
 },
 "cosmosdb update": {
 "p": "public-network-access",
@@ -1740,6 +1841,18 @@
 "eventhubs namespace private-endpoint-connection": {
 "n": "name"
 },
+"eventhubs namespace private-endpoint-connection approve": {
+"n": "name"
+},
+"eventhubs namespace private-endpoint-connection delete": {
+"n": "name"
+},
+"eventhubs namespace private-endpoint-connection reject": {
+"n": "name"
+},
+"eventhubs namespace private-endpoint-connection show": {
+"n": "name"
+},
 "feature": {
 "n": "name"
 },
@@ -1750,8 +1863,25 @@
 "s": "slot",
 "n": "name"
 },
+"functionapp config access-restriction add": {
+"r": "rule-name",
+"p": "priority",
+"i": "ignore-missing-endpoint",
+"k": "skip-service-tag-validation"
+},
+"functionapp config access-restriction remove": {
+"r": "rule-name",
+"k": "skip-service-tag-validation"
+},
+"functionapp config container": {
+"t": "enable-app-service-storage"
+},
 "functionapp config hostname": {
 "n": "name"
+},
+"functionapp config ssl create": {
+"n": "name",
+"g": "resource-group"
 },
 "functionapp config ssl delete": {
 "n": "name"
@@ -1762,14 +1892,31 @@
 "functionapp config ssl show": {
 "n": "name"
 },
+"functionapp config ssl upload": {
+"s": "slot"
+},
+"functionapp cors": {
+"a": "allowed-origins"
+},
 "functionapp create": {
-"f": "flexconsumption-location"
+"l": "deployment-local-git",
+"z": "deployment-zip",
+"u": "deployment-source-url",
+"b": "deployment-source-branch",
+"f": "flexconsumption-location",
+"p": "plan",
+"n": "name",
+"s": "storage-account",
+"c": "consumption-plan-location"
 },
 "functionapp delete": {
 "n": "name"
 },
 "functionapp deploy": {
 "n": "name"
+},
+"functionapp deployment container config": {
+"e": "enable-cd"
 },
 "functionapp deployment github-actions": {
 "n": "name",
@@ -1783,6 +1930,12 @@
 },
 "functionapp deployment slot": {
 "n": "name"
+},
+"functionapp deployment source": {
+"u": "repo-url"
+},
+"functionapp deployment source config-zip": {
+"t": "timeout"
 },
 "functionapp flex-migration start": {
 "i": "in-place"
@@ -1941,6 +2094,21 @@
 "n": "certificate-name",
 "e": "etag"
 },
+"iot dps certificate create": {
+"v": "verified"
+},
+"iot dps certificate update": {
+"v": "verified"
+},
+"iot dps policy": {
+"n": "dps-name"
+},
+"iot dps policy create": {
+"r": "rights"
+},
+"iot dps policy update": {
+"r": "rights"
+},
 "iot hub": {
 "n": "name",
 "e": "etag"
@@ -1948,6 +2116,12 @@
 "iot hub certificate": {
 "p": "path",
 "n": "name"
+},
+"iot hub certificate create": {
+"v": "verified"
+},
+"iot hub certificate update": {
+"v": "verified"
 },
 "iot hub consumer-group": {
 "n": "name"
@@ -1986,21 +2160,52 @@
 "keyvault": {
 "n": "name"
 },
+"keyvault backup start": {
+"t": "storage-container-SAS-token"
+},
 "keyvault certificate backup": {
+"v": "version",
+"n": "name",
 "f": "file"
 },
 "keyvault certificate create": {
 "n": "name",
 "p": "policy"
 },
+"keyvault certificate decrypt": {
+"v": "version",
+"n": "name"
+},
+"keyvault certificate delete": {
+"v": "version",
+"n": "name"
+},
 "keyvault certificate download": {
+"v": "version",
+"n": "name",
 "f": "file",
 "e": "encoding"
+},
+"keyvault certificate encrypt": {
+"v": "version",
+"n": "name"
 },
 "keyvault certificate import": {
 "n": "name",
 "f": "file",
 "p": "policy"
+},
+"keyvault certificate list": {
+"v": "version",
+"n": "name"
+},
+"keyvault certificate list-deleted": {
+"v": "version",
+"n": "name"
+},
+"keyvault certificate list-versions": {
+"v": "version",
+"n": "name"
 },
 "keyvault certificate pending": {
 "n": "name"
@@ -2008,11 +2213,26 @@
 "keyvault certificate pending merge": {
 "f": "file"
 },
+"keyvault certificate purge": {
+"n": "name"
+},
+"keyvault certificate recover": {
+"n": "name"
+},
 "keyvault certificate restore": {
 "f": "file"
 },
 "keyvault certificate set-attributes": {
+"v": "version",
+"n": "name",
 "p": "policy"
+},
+"keyvault certificate show": {
+"v": "version",
+"n": "name"
+},
+"keyvault certificate show-deleted": {
+"n": "name"
 },
 "keyvault check-name": {
 "n": "name"
@@ -2021,22 +2241,122 @@
 "n": "name"
 },
 "keyvault key backup": {
+"n": "name",
+"v": "version",
 "f": "file"
 },
+"keyvault key create": {
+"n": "name",
+"v": "version",
+"p": "protection"
+},
+"keyvault key decrypt": {
+"n": "name",
+"v": "version",
+"a": "algorithm"
+},
+"keyvault key delete": {
+"n": "name",
+"v": "version"
+},
 "keyvault key download": {
+"n": "name",
+"v": "version",
 "f": "file",
 "e": "encoding"
 },
+"keyvault key encrypt": {
+"n": "name",
+"v": "version",
+"a": "algorithm"
+},
 "keyvault key get-attestation": {
+"n": "name",
+"v": "version",
 "f": "file"
 },
+"keyvault key import": {
+"n": "name",
+"v": "version",
+"p": "protection"
+},
+"keyvault key list": {
+"n": "name",
+"v": "version"
+},
+"keyvault key list-deleted": {
+"n": "name",
+"v": "version"
+},
+"keyvault key list-versions": {
+"n": "name",
+"v": "version"
+},
+"keyvault key purge": {
+"n": "name",
+"v": "version"
+},
+"keyvault key recover": {
+"n": "name",
+"v": "version"
+},
 "keyvault key restore": {
+"n": "name",
+"v": "version",
 "f": "file",
 "u": "storage-resource-uri",
-"t": "storage-container-SAS-token",
-"n": "name"
+"t": "storage-container-SAS-token"
+},
+"keyvault key rotate": {
+"n": "name",
+"v": "version"
 },
 "keyvault key rotation-policy": {
+"n": "name"
+},
+"keyvault key rotation-policy show": {
+"n": "name",
+"v": "version"
+},
+"keyvault key rotation-policy update": {
+"n": "name",
+"v": "version"
+},
+"keyvault key set-attributes": {
+"n": "name",
+"v": "version"
+},
+"keyvault key show": {
+"n": "name",
+"v": "version"
+},
+"keyvault key show-deleted": {
+"n": "name",
+"v": "version"
+},
+"keyvault key sign": {
+"n": "name",
+"v": "version",
+"a": "algorithm"
+},
+"keyvault key verify": {
+"n": "name",
+"v": "version",
+"a": "algorithm"
+},
+"keyvault private-endpoint-connection approve": {
+"n": "name"
+},
+"keyvault private-endpoint-connection delete": {
+"n": "name"
+},
+"keyvault private-endpoint-connection reject": {
+"n": "name"
+},
+"keyvault private-endpoint-connection show": {
+"n": "name"
+},
+"keyvault private-endpoint-connection wait": {
 "n": "name"
 },
 "keyvault purge": {
@@ -2048,6 +2368,9 @@
 "keyvault region": {
 "r": "region-name"
 },
+"keyvault restore start": {
+"t": "storage-container-SAS-token"
+},
 "keyvault role assignment": {
 "n": "name"
 },
@@ -2057,13 +2380,65 @@
 "keyvault role definition": {
 "n": "name"
 },
+"keyvault secret backup": {
+"v": "version",
+"n": "name",
+"f": "file"
+},
+"keyvault secret decrypt": {
+"v": "version",
+"n": "name"
+},
+"keyvault secret delete": {
+"v": "version",
+"n": "name"
+},
 "keyvault secret download": {
-"e": "encoding"
+"v": "version",
+"n": "name",
+"e": "encoding",
+"f": "file"
+},
+"keyvault secret encrypt": {
+"v": "version",
+"n": "name"
+},
+"keyvault secret list": {
+"v": "version",
+"n": "name"
+},
+"keyvault secret list-deleted": {
+"v": "version",
+"n": "name"
+},
+"keyvault secret list-versions": {
+"v": "version",
+"n": "name"
+},
+"keyvault secret purge": {
+"n": "name"
+},
+"keyvault secret recover": {
+"n": "name"
+},
+"keyvault secret restore": {
+"f": "file"
 },
 "keyvault secret set": {
 "n": "name",
 "f": "file",
 "e": "encoding"
+},
+"keyvault secret set-attributes": {
+"v": "version",
+"n": "name"
+},
+"keyvault secret show": {
+"v": "version",
+"n": "name"
+},
+"keyvault secret show-deleted": {
+"n": "name"
 },
 "keyvault setting": {
 "n": "name"
@@ -2095,6 +2470,14 @@
 "n": "name"
 },
 "logicapp create": {
+"l": "deployment-local-git",
+"z": "deployment-zip",
+"u": "deployment-source-url",
+"b": "deployment-source-branch",
+"p": "plan",
+"n": "name",
+"s": "storage-account",
+"c": "consumption-plan-location",
 "i": "deployment-container-image-name",
 "d": "docker-registry-server-user",
 "w": "docker-registry-server-password",
@@ -2180,6 +2563,16 @@
 },
 "managedapp definition": {
 "n": "name"
+},
+"managedapp definition create": {
+"a": "authorizations",
+"c": "create-ui-definition",
+"t": "main-template"
+},
+"managedapp definition update": {
+"a": "authorizations",
+"c": "create-ui-definition",
+"t": "main-template"
 },
 "maps": {
 "n": "name"
@@ -2267,8 +2660,18 @@
 "s": "server-name"
 },
 "mysql flexible-server ad-admin create": {
+"i": "object-id",
 "u": "display-name",
 "t": "type"
+},
+"mysql flexible-server ad-admin delete": {
+"i": "object-id"
+},
+"mysql flexible-server ad-admin show": {
+"i": "object-id"
+},
+"mysql flexible-server ad-admin wait": {
+"i": "object-id"
 },
 "mysql flexible-server backup create": {
 "b": "backup-name"
@@ -2291,11 +2694,26 @@
 "d": "database-name",
 "y": "yes"
 },
+"mysql flexible-server db create": {
+"s": "server-name",
+"d": "database-name"
+},
 "mysql flexible-server db delete": {
+"s": "server-name",
+"d": "database-name",
 "y": "yes"
 },
 "mysql flexible-server db list": {
-"s": "server-name"
+"s": "server-name",
+"d": "database-name"
+},
+"mysql flexible-server db show": {
+"s": "server-name",
+"d": "database-name"
+},
+"mysql flexible-server db update": {
+"s": "server-name",
+"d": "database-name"
 },
 "mysql flexible-server delete": {
 "y": "yes"
@@ -2313,8 +2731,25 @@
 "b": "backup-name",
 "u": "sas-uri"
 },
+"mysql flexible-server firewall-rule create": {
+"n": "name",
+"r": "rule-name"
+},
 "mysql flexible-server firewall-rule delete": {
+"n": "name",
+"r": "rule-name",
 "y": "yes"
+},
+"mysql flexible-server firewall-rule list": {
+"n": "name"
+},
+"mysql flexible-server firewall-rule show": {
+"n": "name",
+"r": "rule-name"
+},
+"mysql flexible-server firewall-rule update": {
+"n": "name",
+"r": "rule-name"
 },
 "mysql flexible-server geo-restore": {
 "z": "zone",
@@ -2356,14 +2791,50 @@
 "s": "server-name",
 "m": "maintenance-name"
 },
+"mysql flexible-server migration check-name-availability": {
+"n": "name",
+"b": "properties"
+},
+"mysql flexible-server migration create": {
+"n": "name",
+"b": "properties"
+},
+"mysql flexible-server migration delete": {
+"n": "name",
+"b": "properties"
+},
+"mysql flexible-server migration list": {
+"n": "name",
+"b": "properties"
+},
+"mysql flexible-server migration show": {
+"n": "name",
+"b": "properties"
+},
+"mysql flexible-server migration update": {
+"n": "name",
+"b": "properties"
+},
 "mysql flexible-server mirroring disable": {
 "n": "name"
 },
 "mysql flexible-server mirroring enable": {
 "n": "name"
 },
+"mysql flexible-server parameter list": {
+"s": "server-name"
+},
 "mysql flexible-server parameter set": {
+"s": "server-name",
+"n": "name",
 "v": "value"
+},
+"mysql flexible-server parameter set-batch": {
+"s": "server-name"
+},
+"mysql flexible-server parameter show": {
+"s": "server-name",
+"n": "name"
 },
 "mysql flexible-server replica create": {
 "z": "zone"
@@ -2429,27 +2900,79 @@
 "network dns record-set a": {
 "a": "ipv4-address"
 },
+"network dns record-set a add-record": {
+"n": "record-set-name"
+},
+"network dns record-set a remove-record": {
+"n": "record-set-name"
+},
 "network dns record-set aaaa": {
 "a": "ipv6-address"
+},
+"network dns record-set aaaa add-record": {
+"n": "record-set-name"
+},
+"network dns record-set aaaa remove-record": {
+"n": "record-set-name"
+},
+"network dns record-set caa add-record": {
+"n": "record-set-name"
+},
+"network dns record-set caa remove-record": {
+"n": "record-set-name"
 },
 "network dns record-set cname": {
 "c": "cname"
 },
+"network dns record-set cname add-record": {
+"n": "record-set-name"
+},
+"network dns record-set cname remove-record": {
+"n": "record-set-name"
+},
 "network dns record-set cname set-record": {
+"n": "record-set-name"
+},
+"network dns record-set ds add-record": {
+"n": "record-set-name"
+},
+"network dns record-set ds remove-record": {
 "n": "record-set-name"
 },
 "network dns record-set mx": {
 "e": "exchange",
 "p": "preference"
 },
+"network dns record-set mx add-record": {
+"n": "record-set-name"
+},
+"network dns record-set mx remove-record": {
+"n": "record-set-name"
+},
+"network dns record-set naptr add-record": {
+"n": "record-set-name"
+},
+"network dns record-set naptr remove-record": {
+"n": "record-set-name"
+},
 "network dns record-set ns": {
 "d": "nsdname"
 },
 "network dns record-set ns add-record": {
+"n": "record-set-name",
 "s": "subscriptionid"
+},
+"network dns record-set ns remove-record": {
+"n": "record-set-name"
 },
 "network dns record-set ptr": {
 "d": "ptrdname"
+},
+"network dns record-set ptr add-record": {
+"n": "record-set-name"
+},
+"network dns record-set ptr remove-record": {
+"n": "record-set-name"
 },
 "network dns record-set soa": {
 "t": "host",
@@ -2466,8 +2989,26 @@
 "r": "port",
 "t": "target"
 },
+"network dns record-set srv add-record": {
+"n": "record-set-name"
+},
+"network dns record-set srv remove-record": {
+"n": "record-set-name"
+},
+"network dns record-set tlsa add-record": {
+"n": "record-set-name"
+},
+"network dns record-set tlsa remove-record": {
+"n": "record-set-name"
+},
 "network dns record-set txt": {
 "v": "value"
+},
+"network dns record-set txt add-record": {
+"n": "record-set-name"
+},
+"network dns record-set txt remove-record": {
+"n": "record-set-name"
 },
 "network dns zone": {
 "n": "name"
@@ -2507,11 +3048,29 @@
 "network private-dns record-set a": {
 "a": "ipv4-address"
 },
+"network private-dns record-set a add-record": {
+"n": "record-set-name"
+},
+"network private-dns record-set a remove-record": {
+"n": "record-set-name"
+},
 "network private-dns record-set aaaa": {
 "a": "ipv6-address"
 },
+"network private-dns record-set aaaa add-record": {
+"n": "record-set-name"
+},
+"network private-dns record-set aaaa remove-record": {
+"n": "record-set-name"
+},
 "network private-dns record-set cname": {
 "c": "cname"
+},
+"network private-dns record-set cname add-record": {
+"n": "record-set-name"
+},
+"network private-dns record-set cname remove-record": {
+"n": "record-set-name"
 },
 "network private-dns record-set cname set-record": {
 "n": "record-set-name"
@@ -2520,8 +3079,20 @@
 "e": "exchange",
 "p": "preference"
 },
+"network private-dns record-set mx add-record": {
+"n": "record-set-name"
+},
+"network private-dns record-set mx remove-record": {
+"n": "record-set-name"
+},
 "network private-dns record-set ptr": {
 "d": "ptrdname"
+},
+"network private-dns record-set ptr add-record": {
+"n": "record-set-name"
+},
+"network private-dns record-set ptr remove-record": {
+"n": "record-set-name"
 },
 "network private-dns record-set soa": {
 "t": "host",
@@ -2538,8 +3109,20 @@
 "r": "port",
 "t": "target"
 },
+"network private-dns record-set srv add-record": {
+"n": "record-set-name"
+},
+"network private-dns record-set srv remove-record": {
+"n": "record-set-name"
+},
 "network private-dns record-set txt": {
 "v": "value"
+},
+"network private-dns record-set txt add-record": {
+"n": "record-set-name"
+},
+"network private-dns record-set txt remove-record": {
+"n": "record-set-name"
 },
 "network private-dns zone": {
 "n": "name"
@@ -2549,6 +3132,28 @@
 },
 "network private-dns zone import": {
 "f": "file-name"
+},
+"network private-endpoint-connection approve": {
+"d": "description",
+"n": "name"
+},
+"network private-endpoint-connection delete": {
+"d": "description",
+"n": "name"
+},
+"network private-endpoint-connection list": {
+"n": "name"
+},
+"network private-endpoint-connection reject": {
+"d": "description",
+"n": "name"
+},
+"network private-endpoint-connection show": {
+"d": "description",
+"n": "name"
+},
+"network private-link-resource list": {
+"n": "name"
 },
 "network private-link-service ip-configs": {
 "n": "name"
@@ -2612,13 +3217,32 @@
 "policy attestation": {
 "n": "attestation-name"
 },
+"policy attestation create": {
+"a": "policy-assignment-id"
+},
+"policy attestation update": {
+"a": "policy-assignment-id"
+},
+"policy event": {
+"m": "management-group",
+"s": "policy-set-definition",
+"d": "policy-definition",
+"a": "policy-assignment"
+},
 "policy metadata show": {
 "n": "name"
 },
 "policy remediation": {
+"m": "management-group",
 "n": "name"
 },
 "policy remediation create": {
+"a": "policy-assignment"
+},
+"policy state": {
+"m": "management-group",
+"s": "policy-set-definition",
+"d": "policy-definition",
 "a": "policy-assignment"
 },
 "private-link association create": {
@@ -2763,6 +3387,161 @@
 "search shared-private-link-resource": {
 "n": "name"
 },
+"security adaptive-application-controls": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security adaptive_network_hardenings": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security alert": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security alerts-suppression-rule": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security allowed_connections": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security assessment": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security assessment-metadata": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security atp": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security auto-provisioning-setting": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security automation": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security discovered-security-solution": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security external-security-solution": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security iot-alerts": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security iot-analytics": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security iot-recommendations": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security iot-solution": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security jit-policy": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security location": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security pricing": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security regulatory-compliance-assessments": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security regulatory-compliance-controls": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security regulatory-compliance-standards": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security secure-score-control-definitions": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security secure-score-controls": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security secure-scores": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security security_solutions_reference_data": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security setting": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security sub-assessment": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security task": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security topology": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
+"security workspace-setting": {
+"g": "resource-group",
+"n": "name",
+"l": "location"
+},
 "servicebus georecovery-alias set": {
 "a": "alias"
 },
@@ -2782,6 +3561,18 @@
 "n": "namespace-name"
 },
 "servicebus namespace private-endpoint-connection": {
+"n": "name"
+},
+"servicebus namespace private-endpoint-connection approve": {
+"n": "name"
+},
+"servicebus namespace private-endpoint-connection delete": {
+"n": "name"
+},
+"servicebus namespace private-endpoint-connection reject": {
+"n": "name"
+},
+"servicebus namespace private-endpoint-connection show": {
 "n": "name"
 },
 "sf": {
@@ -3151,6 +3942,330 @@
 "sql vm update": {
 "y": "yes"
 },
+"stack group create": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack group delete": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack group export": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack group list": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack group show": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack group validate": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack mg create": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack mg delete": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack mg export": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack mg list": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack mg show": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack mg validate": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack sub create": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack sub delete": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack sub export": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack sub list": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack sub show": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack sub validate": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack-whatif group create": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack-whatif group delete": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack-whatif group export": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack-whatif group list": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack-whatif group show": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack-whatif group validate": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack-whatif mg create": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack-whatif mg delete": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack-whatif mg export": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack-whatif mg list": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack-whatif mg show": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack-whatif mg validate": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack-whatif sub create": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack-whatif sub delete": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack-whatif sub export": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack-whatif sub list": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack-whatif sub show": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
+"stack-whatif sub validate": {
+"n": "name",
+"f": "template-file",
+"s": "template-spec",
+"u": "template-uri",
+"q": "query-string",
+"p": "parameters",
+"m": "management-group-id"
+},
 "staticwebapp": {
 "s": "source",
 "t": "token",
@@ -3206,6 +4321,7 @@
 "i": "require-infrastructure-encryption"
 },
 "storage account failover": {
+"n": "name",
 "y": "yes"
 },
 "storage account file-service-properties show": {
@@ -3214,6 +4330,12 @@
 "storage account file-service-properties update": {
 "n": "account-name",
 "k": "kerb-ticket-encryption"
+},
+"storage account hns-migration": {
+"n": "name"
+},
+"storage account keys": {
+"n": "name"
 },
 "storage account keys list": {
 "n": "account-name"
@@ -3242,7 +4364,29 @@
 "storage account private-endpoint-connection": {
 "n": "name"
 },
+"storage account private-endpoint-connection approve": {
+"n": "name"
+},
+"storage account private-endpoint-connection delete": {
+"n": "name"
+},
+"storage account private-endpoint-connection reject": {
+"n": "name"
+},
+"storage account private-endpoint-connection show": {
+"n": "name"
+},
+"storage account revoke-delegation-keys": {
+"n": "name"
+},
+"storage account show": {
+"n": "name"
+},
+"storage account show-connection-string": {
+"n": "name"
+},
 "storage account update": {
+"n": "name",
 "k": "allow-shared-key-access",
 "r": "allow-cross-tenant-replication",
 "d": "default-share-permission",
@@ -3321,17 +4465,71 @@
 "d": "default-encryption-scope",
 "p": "prevent-encryption-scope-override"
 },
+"storage container exists": {
+"n": "name"
+},
 "storage container immutability-policy": {
+"c": "container-name"
+},
+"storage container immutability-policy create": {
+"w": "allow-protected-append-writes"
+},
+"storage container immutability-policy extend": {
+"w": "allow-protected-append-writes"
+},
+"storage container lease acquire": {
+"c": "container-name"
+},
+"storage container lease break": {
+"c": "container-name"
+},
+"storage container lease change": {
+"c": "container-name"
+},
+"storage container lease release": {
+"c": "container-name"
+},
+"storage container lease renew": {
 "c": "container-name"
 },
 "storage container legal-hold": {
 "c": "container-name"
 },
+"storage container metadata show": {
+"n": "name"
+},
+"storage container metadata update": {
+"n": "name"
+},
 "storage container policy": {
 "c": "container-name",
 "n": "name"
 },
+"storage container policy create": {
+"c": "container-name"
+},
+"storage container policy delete": {
+"c": "container-name"
+},
+"storage container policy list": {
+"c": "container-name"
+},
+"storage container policy show": {
+"c": "container-name"
+},
+"storage container policy update": {
+"c": "container-name"
+},
 "storage container restore": {
+"n": "name"
+},
+"storage container set-permission": {
+"n": "name"
+},
+"storage container show": {
+"n": "name"
+},
+"storage container show-permission": {
 "n": "name"
 },
 "storage container-rm": {
@@ -3343,12 +4541,54 @@
 "storage copy": {
 "r": "recursive"
 },
+"storage directory create": {
+"s": "share-name",
+"n": "name"
+},
+"storage directory delete": {
+"s": "share-name",
+"n": "name"
+},
+"storage directory exists": {
+"s": "share-name",
+"n": "name"
+},
 "storage directory list": {
+"s": "share-name",
+"n": "name"
+},
+"storage directory metadata show": {
+"s": "share-name",
+"n": "name"
+},
+"storage directory metadata update": {
+"s": "share-name",
+"n": "name"
+},
+"storage directory show": {
 "s": "share-name",
 "n": "name"
 },
 "storage entity": {
 "e": "entity"
+},
+"storage entity delete": {
+"t": "table-name"
+},
+"storage entity insert": {
+"t": "table-name"
+},
+"storage entity merge": {
+"t": "table-name"
+},
+"storage entity query": {
+"t": "table-name"
+},
+"storage entity replace": {
+"t": "table-name"
+},
+"storage entity show": {
+"t": "table-name"
 },
 "storage file": {
 "n": "name",
@@ -3420,15 +4660,39 @@
 "storage file url": {
 "s": "share-name"
 },
+"storage fs access set": {
+"f": "file-system",
+"p": "path"
+},
+"storage fs access show": {
+"f": "file-system",
+"p": "path"
+},
 "storage fs create": {
+"n": "name",
 "d": "default-encryption-scope",
 "p": "prevent-encryption-scope-override"
+},
+"storage fs delete": {
+"n": "name"
+},
+"storage fs directory create": {
+"f": "file-system",
+"n": "name"
+},
+"storage fs directory delete": {
+"f": "file-system",
+"n": "name"
 },
 "storage fs directory download": {
 "f": "file-system",
 "s": "source-path",
 "d": "destination-path",
 "r": "recursive"
+},
+"storage fs directory exists": {
+"f": "file-system",
+"n": "name"
 },
 "storage fs directory generate-sas": {
 "f": "file-system",
@@ -3437,8 +4701,22 @@
 "storage fs directory list": {
 "f": "file-system"
 },
+"storage fs directory metadata show": {
+"f": "file-system",
+"n": "name"
+},
+"storage fs directory metadata update": {
+"f": "file-system",
+"n": "name"
+},
 "storage fs directory move": {
+"f": "file-system",
+"n": "name",
 "d": "new-directory"
+},
+"storage fs directory show": {
+"f": "file-system",
+"n": "name"
 },
 "storage fs directory upload": {
 "f": "file-system",
@@ -3446,8 +4724,29 @@
 "s": "source",
 "r": "recursive"
 },
+"storage fs exists": {
+"n": "name"
+},
+"storage fs file append": {
+"f": "file-system",
+"p": "path"
+},
+"storage fs file create": {
+"f": "file-system",
+"p": "path"
+},
+"storage fs file delete": {
+"f": "file-system",
+"p": "path"
+},
 "storage fs file download": {
+"f": "file-system",
+"p": "path",
 "d": "destination"
+},
+"storage fs file exists": {
+"f": "file-system",
+"p": "path"
 },
 "storage fs file generate-sas": {
 "f": "file-system",
@@ -3456,19 +4755,103 @@
 "storage fs file list": {
 "f": "file-system"
 },
+"storage fs file metadata show": {
+"f": "file-system",
+"p": "path"
+},
+"storage fs file metadata update": {
+"f": "file-system",
+"p": "path"
+},
 "storage fs file move": {
 "f": "file-system",
 "p": "path"
 },
+"storage fs file set-expiry": {
+"f": "file-system",
+"p": "path"
+},
+"storage fs file show": {
+"f": "file-system",
+"p": "path"
+},
 "storage fs file upload": {
+"f": "file-system",
+"p": "path",
 "s": "source"
 },
 "storage fs generate-sas": {
 "n": "name"
 },
+"storage fs list-deleted-path": {
+"f": "file-system"
+},
+"storage fs metadata show": {
+"n": "name"
+},
+"storage fs metadata update": {
+"n": "name"
+},
+"storage fs show": {
+"n": "name"
+},
+"storage fs undelete-path": {
+"f": "file-system"
+},
+"storage message clear": {
+"q": "queue-name"
+},
+"storage message delete": {
+"q": "queue-name"
+},
+"storage message get": {
+"q": "queue-name"
+},
+"storage message peek": {
+"q": "queue-name"
+},
+"storage message put": {
+"q": "queue-name"
+},
+"storage message update": {
+"q": "queue-name"
+},
+"storage queue create": {
+"n": "name"
+},
+"storage queue delete": {
+"n": "name"
+},
+"storage queue exists": {
+"n": "name"
+},
+"storage queue generate-sas": {
+"n": "name"
+},
+"storage queue metadata show": {
+"n": "name"
+},
+"storage queue metadata update": {
+"n": "name"
+},
 "storage queue policy": {
 "q": "queue-name",
 "n": "name"
+},
+"storage queue policy create": {
+"q": "queue-name"
+},
+"storage queue policy delete": {
+"q": "queue-name"
+},
+"storage queue policy list": {
+"q": "queue-name"
+},
+"storage queue policy show": {
+"q": "queue-name"
+},
+"storage queue policy update": {
+"q": "queue-name"
 },
 "storage remove": {
 "c": "container-name",
@@ -3498,8 +4881,38 @@
 "storage share list-handle": {
 "n": "name"
 },
+"storage share metadata show": {
+"n": "name"
+},
+"storage share metadata update": {
+"n": "name"
+},
 "storage share policy": {
 "s": "share-name",
+"n": "name"
+},
+"storage share policy create": {
+"s": "share-name"
+},
+"storage share policy delete": {
+"s": "share-name"
+},
+"storage share policy list": {
+"s": "share-name"
+},
+"storage share policy show": {
+"s": "share-name"
+},
+"storage share policy update": {
+"s": "share-name"
+},
+"storage share show": {
+"n": "name"
+},
+"storage share snapshot": {
+"n": "name"
+},
+"storage share stats": {
 "n": "name"
 },
 "storage share update": {
@@ -3508,10 +4921,40 @@
 "storage share-rm": {
 "n": "name"
 },
+"storage share-rm snapshot": {
+"q": "quota"
+},
 "storage table create": {
 "n": "name"
 },
+"storage table delete": {
+"n": "name"
+},
+"storage table exists": {
+"n": "name"
+},
+"storage table generate-sas": {
+"n": "name"
+},
 "storage table policy": {
+"n": "name"
+},
+"storage table policy create": {
+"t": "table-name"
+},
+"storage table policy delete": {
+"t": "table-name"
+},
+"storage table policy list": {
+"t": "table-name"
+},
+"storage table policy show": {
+"t": "table-name"
+},
+"storage table policy update": {
+"t": "table-name"
+},
+"storage table stats": {
 "n": "name"
 },
 "tag": {
@@ -3664,6 +5107,16 @@
 "webapp browse": {
 "l": "logs"
 },
+"webapp config access-restriction add": {
+"r": "rule-name",
+"p": "priority",
+"i": "ignore-missing-endpoint",
+"k": "skip-service-tag-validation"
+},
+"webapp config access-restriction remove": {
+"r": "rule-name",
+"k": "skip-service-tag-validation"
+},
 "webapp config backup": {
 "n": "webapp-name"
 },
@@ -3678,6 +5131,9 @@
 "webapp config connection-string list": {
 "n": "name"
 },
+"webapp config container": {
+"t": "enable-app-service-storage"
+},
 "webapp config egress connection remove": {
 "y": "yes"
 },
@@ -3688,8 +5144,15 @@
 "webapp config snapshot list": {
 "n": "name"
 },
+"webapp config ssl create": {
+"n": "name",
+"g": "resource-group"
+},
 "webapp config ssl list": {
 "n": "name"
+},
+"webapp config ssl upload": {
+"s": "slot"
 },
 "webapp config storage-account": {
 "i": "custom-id",
@@ -3702,13 +5165,20 @@
 "webapp config storage-account list": {
 "n": "name"
 },
+"webapp cors": {
+"a": "allowed-origins"
+},
 "webapp create": {
 "n": "name",
 "i": "deployment-container-image-name",
 "c": "container-image-name",
 "r": "runtime",
 "p": "plan",
-"e": "end-to-end-encryption-enabled"
+"e": "end-to-end-encryption-enabled",
+"l": "deployment-local-git",
+"z": "deployment-zip",
+"u": "deployment-source-url",
+"b": "deployment-source-branch"
 },
 "webapp create-remote-connection": {
 "p": "port",
@@ -3729,6 +5199,9 @@
 "webapp deploy": {
 "n": "name"
 },
+"webapp deployment container config": {
+"e": "enable-cd"
+},
 "webapp deployment github-actions": {
 "n": "name",
 "g": "resource-group",
@@ -3746,6 +5219,12 @@
 "i": "deployment-container-image-name",
 "r": "container-registry-url",
 "c": "container-image-name"
+},
+"webapp deployment source": {
+"u": "repo-url"
+},
+"webapp deployment source config-zip": {
+"t": "timeout"
 },
 "webapp exec": {
 "n": "name",

@@ -952,8 +952,6 @@ IT = {"stdin": True, "tty": True}  # -i and -t are recorded under their long nam
     ("kubectl rollout -nprod restart deploy/web", "deployment/web", {}, {"namespace": "prod"}),
     ("kubectl set -nprod image deploy/web a=b", "deployment/web", {"images": {"a": "b"}},
      {"namespace": "prod"}),
-    ("kubectl get pod/a -x", "pod/a", {}, {}),
-    ("kubectl get pod/a -xyz", "pod/a", {}, {}),
     # read as kubectl reads them
     ("kubectl get pod/a -wA", "pod/a", {"watch": True}, {"all_namespaces": True}),
     ("kubectl get pod/a -Aw", "pod/a", {"watch": True}, {"all_namespaces": True}),
@@ -1261,14 +1259,14 @@ def test_get_with_files_stays_refused():
     "kubectl delete pod -x web",
 ])
 def test_an_unknown_flag_before_another_word_is_refused(command):
-    with pytest.raises(ValueError, match="cannot tell whether"):
+    # an unknown short letter is refused wherever it is (round 6)
+    with pytest.raises(ValueError, match="cannot tell whether|not a short flag"):
         from_kubectl_multi(command.split())
 
 
 @pytest.mark.parametrize("command,resource,params", [
     ("kubectl delete pod web --no-such-flag", "pod/web", {"no-such-flag": True}),
     ("kubectl delete pod web --no-such-flag=x", "pod/web", {"no-such-flag": "x"}),
-    ("kubectl get pod/a -x", "pod/a", {}),
 ])
 def test_an_unknown_flag_that_shows_its_reading_is_kept(command, resource, params):
     intent = _one(command)
@@ -1310,3 +1308,10 @@ def test_a_value_flag_kubectl_has_takes_a_dash_word():
 def test_an_unknown_flag_reaches_the_hook_as_a_refusal():
     verdict = decide("kubectl delete deploy web --no-such-flag -n prod", ROOT / "data")
     assert verdict.decision == "deny", verdict
+
+
+@pytest.mark.parametrize("command", ["kubectl get pod/a -x", "kubectl get pod/a -xyz"])
+def test_an_unknown_short_letter_is_refused(command):
+    # what an unknown letter means on the command is not known: never recorded as written
+    with pytest.raises(ValueError, match="not a short flag"):
+        _one(command)
