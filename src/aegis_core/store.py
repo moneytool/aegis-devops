@@ -866,25 +866,23 @@ def namespace_unresolved(intent: InfrastructureIntent) -> bool:
 
 def param_unresolved(key: str, intent: InfrastructureIntent) -> bool:
     """Whether a parser marked scope ``key`` as unknown (``params["unresolved_scope"]``):
-    ``set.replicaCount`` when helm --set-file sets it from a file nobody read, and
-    ``set.*`` for every ``set.`` key the command line leaves to a values file, ``*`` for
-    every key it leaves to a file (``aws --cli-input-json file://...``). A mark
-    meets every spelling of the key that matching would meet (:func:`canonical_key`,
-    and a boolean's negated side)."""
+    ``set.replicaCount`` when helm --set-file sets it from a file nobody read, and ``*``
+    for every key (argocd --file, kubectl run --overrides). An unresolved key is
+    unresolved whatever value is recorded for it, in metadata or params: the recorded
+    value never decides. The one prefix mark, helm's ``set.*``, stands for the ``set.``
+    keys the command line leaves to a values file: a key the command line sets is not one
+    of them, since helm applies --set over every file. A mark meets every spelling of the
+    key that matching would meet (:func:`canonical_key`, and a boolean's negated side)."""
     marks = intent.params.get("unresolved_scope")
-    if not isinstance(marks, list) or _dig_all(intent.metadata, key):
+    if not isinstance(marks, list):
         return False
     spellings = {canonical_key(spelling) for spelling, _ in _key_spellings(key)}
     for mark in marks:
         if not isinstance(mark, str):
             continue
         canon = canonical_key(mark)
-        if canon in spellings:
+        if canon in spellings or canon in ("*", "**"):
             return True
-        if canon == "*" and not _dig_all(intent.params, key):
-            return True  # every key the command line does not give (aws input in a file)
-        if canon == "**":
-            return True  # every key, given or not (kubectl run --overrides patches them all)
         if (canon.endswith(".*") and any(s.startswith(canon[:-1]) for s in spellings)
                 and not _dig_all(intent.params, key)):
             return True

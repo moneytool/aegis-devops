@@ -2357,3 +2357,79 @@ def test_gcloud_dashes_on_an_unknown_command_are_refused():
 ])
 def test_words_after_dashes_are_targets_on_every_tool(command, last):
     assert from_argv(command.split())[-1].resource == last
+
+
+# --- review round 7 ------------------------------------------------------------------
+
+
+def test_an_unresolved_key_is_never_decided_by_a_recorded_value():
+    # the store: a key marked unresolved escalates whatever value is recorded for it
+    from aegis_core.intent import InfrastructureIntent
+    from aegis_core.store import scope_unresolved
+
+    for mark in ("project", "*", "**"):
+        intent = InfrastructureIntent(resource="app/*", action="create", provider="argocd",
+                                      params={"unresolved_scope": [mark], "p_x": 1},
+                                      metadata={"project": "dev"})
+        assert scope_unresolved({"project": "prod"}, intent) == ["project"]
+        if mark != "project":  # every key, given or not, through canonical_key
+            assert scope_unresolved({"p-x": 2}, intent) == ["p-x"]
+
+
+def test_argocd_stdin_apps_ignore_the_project_flag():
+    command = "argocd app create decoy --file - --project dev --upsert"
+    intent = from_argv(command.split())[0]
+    assert "project" not in intent.metadata
+    rule = _rule("argocd", "app/*", ["create"], {"project": "prod"})
+    assert _verdict([rule], command) == "ESCALATE"
+
+
+def test_argocd_create_from_a_file_needs_no_name():
+    intent = from_argv("argocd app create -f application.yaml".split())[0]
+    assert intent.resource == "app/*" and "resolved_at_runtime" in intent.params
+
+
+@pytest.mark.parametrize("command,resource", [
+    ("gh secret set DECOY --env-file - -R o/r", "secret/*"),
+    ("gh variable set DECOY -f .env -R o/r", "variable/*"),
+])
+def test_gh_env_file_sets_names_from_the_file(command, resource):
+    intent = from_argv(command.split())[0]
+    assert intent.resource == resource and "resolved_at_runtime" in intent.params
+    rule = _rule("github", resource[:-1] + "PROD_KEY", ["put"])
+    assert _verdict([rule], command) == "ESCALATE"
+
+
+def test_gh_secret_body_from_stdin_is_unresolved():
+    assert "body" in from_argv("gh secret set A -R o/r".split())[0].params["unresolved_scope"]
+
+
+@pytest.mark.parametrize("command,resource", [
+    ("gcloud storage buckets delete gs://prod", "storage/bucket/prod"),
+    ("gcloud storage buckets describe gs://prod", "storage/bucket/prod"),
+    ("gcloud storage buckets update gs://prod --no-versioning", "storage/bucket/prod"),
+    ("gcloud storage objects delete gs://prod/secret", "storage/bucket/prod"),
+])
+def test_gcloud_gs_uris_are_buckets_on_every_storage_command(command, resource):
+    assert from_argv(command.split())[0].resource == resource
+    assert _verdict([_rule("gcp", "storage/bucket/prod", ["delete", "update", "read"])],
+                    command) == "BLOCK"
+
+
+@pytest.mark.parametrize("command", [
+    "gcloud storage buckets update --read-paths-from-stdin --no-versioning",
+    "gcloud storage buckets update gs://a -I --no-versioning",
+])
+def test_gcloud_stdin_paths_are_marked(command):
+    rule = _rule("gcp", "storage/bucket/prod", ["update"])
+    assert _verdict([rule], command) == "ESCALATE"
+
+
+def test_every_star_target_is_marked_in_one_place():
+    # whatever the parser, a kind/* target carries the runtime mark
+    for command in ("kubectl get pods", "helm list", "flux get ks", "argocd app list",
+                    "gh secret list -R o/r", "gcloud compute instances list",
+                    "az vm list -g rg"):
+        for intent in from_argv(command.split()):
+            if intent.resource.endswith("/*"):
+                assert "resolved_at_runtime" in intent.params, command

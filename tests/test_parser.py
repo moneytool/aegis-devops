@@ -3902,8 +3902,10 @@ def test_helm_and_flux_short_words(argv, resource, params, metadata):
     intent = from_argv(argv.split())[0]
     assert intent.resource == resource
     assert {k: v for k, v in intent.params.items()
-            if k not in ("raw_action", "unresolved_scope")} == params
+            if k not in ("raw_action", "unresolved_scope", "resolved_at_runtime")} == params
     assert intent.metadata == metadata
+    # a list of every object is marked: which objects, only the tool knows
+    assert ("resolved_at_runtime" in intent.params) == resource.endswith("/*")
 
 
 def test_flux_logs_f_is_follow():

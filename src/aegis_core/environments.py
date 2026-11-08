@@ -46,7 +46,7 @@ from typing import Any
 
 import yaml
 
-from aegis_core.intent import InfrastructureIntent
+from aegis_core.intent import InfrastructureIntent, canonical_key
 from aegis_core.signing import check_signature
 
 
@@ -358,6 +358,16 @@ def resolve_current_context(
         if value and key not in md:
             md[key] = value
             filled.append(key)
+            # a key the configuration fills is no longer unresolved: the parser marked it
+            # only because the argv did not give it
+            marks = intent.params.get("unresolved_scope")
+            if isinstance(marks, list):
+                kept = [m for m in marks
+                        if not (isinstance(m, str) and canonical_key(m) == canonical_key(key))]
+                if kept:
+                    intent.params["unresolved_scope"] = kept
+                else:
+                    intent.params.pop("unresolved_scope", None)
 
     provider = intent.provider
     if provider in _KUBE_PROVIDERS:

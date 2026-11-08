@@ -1174,7 +1174,7 @@ def from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
         if intent.params.get("overrides") is not None and intent.action == "run":
             # --overrides is a JSON patch kubectl applies over the object it built, after
             # every other flag: it can change the image, the name and anything else
-            _mark_unresolved(intent.params, "**")
+            _mark_unresolved(intent.params, "*")
             kind = intent.resource.partition("/")[0]
             intent.params["resolved_at_runtime"] = {"from": intent.resource, "kinds": [kind]}
     return intents
@@ -2223,7 +2223,7 @@ def from_aws_multi(argv: list[str]) -> list[InfrastructureIntent]:
             # read again with the s3 commands' own options (--recursive takes no value)
             metadata, params, positional, *_ = _parse_aws_tokens(tokens, s3=operation)
             service, operation, *rest = positional
-        _mark_aws_file_values(params, False)
+        _mark_aws_file_values(params, None)
         return _from_aws_s3(operation, rest, metadata, params, argv)
 
     # read again with the operation's own options: each is resolved to its full name
@@ -2238,7 +2238,7 @@ def from_aws_multi(argv: list[str]) -> list[InfrastructureIntent]:
              id_flag) = _parse_aws_tokens(extra + tokens, spec=spec, dry_prefix=False)
             for key, value in structured.items():
                 params.setdefault(key, value)  # the command line wins over the input
-    _mark_aws_file_values(params, from_input and unread)
+    _mark_aws_file_values(params, spec if from_input and unread else None)
     intents = _from_aws_operation(service, operation, metadata, params, id_value,
                                   multi_ids, abbreviations, id_flag)
     return _mark_aws_input_targets(intents) if from_input else intents
@@ -2339,18 +2339,21 @@ def _aws_yaml_loader() -> type:
     return Loader
 
 
-def _mark_aws_file_values(params: dict[str, Any], every: bool) -> None:
+def _mark_aws_file_values(params: dict[str, Any], spec: dict[str, Any] | None) -> None:
     """aws reads an option's value from a file when it is ``file://`` or ``fileb://``
-    (paramfile), which is not read: those options are unresolved. With ``every``, the
-    whole input is in a file: every option the command line does not give is."""
+    (paramfile), which is not read: those options are unresolved. With ``spec``, the whole
+    input is in a file: every option of the operation the command line does not give is
+    unresolved (one the command line gives is known, since it overrides the input)."""
     marks = [key for key, value in params.items()
              if isinstance(value, str) and value.startswith(("file://", "fileb://"))
              and not key.startswith("cli_input")]
-    if every:
-        marks.append("*")
-    if marks:
-        existing = params.setdefault("unresolved_scope", [])
-        existing.extend(m for m in marks if m not in existing)
+    if spec is not None:
+        given = {canonical_key(k) for k in params}
+        options = spec.get("o", {})
+        marks.extend(option for option in spec.get("m", {}).values()
+                     if canonical_key(option) not in given and option in options)
+    for mark in marks:
+        _mark_unresolved(params, mark)
 
 
 def _from_aws_operation(
@@ -3284,6 +3287,26 @@ def _mark_unresolved(params: dict[str, Any], key: str) -> None:
         marks.append(key)
 
 
+def _gcs_target(uri: str, params: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """A ``gs://bucket[/object]`` operand as ``storage/bucket/<bucket>`` with the object in
+    ``params["key"]``, on every gcloud storage and gsutil command alike. A wildcard
+    (``*``, ``**``, ``?``, ``[...]``) or ``-r`` in the object reaches every key it matches:
+    ``key`` is unresolved. gcloud and gsutil expand a wildcard bucket name when they run:
+    the intent is marked with the pattern's literal prefix, so a rule on any bucket the
+    pattern may match escalates."""
+    bucket, _, key = uri[len("gs://"):].partition("/")
+    intent_params = {**params, "key": key} if key else dict(params)
+    recursive = any(params.get(k) is True for k in ("r", "R", "recursive"))
+    if recursive or _GLOB_CHARS_RE.search(key):
+        _mark_unresolved(intent_params, "key")
+    prefix = _glob_literal_prefix(bucket)
+    if prefix is not None:
+        intent_params["resolved_at_runtime"] = {"from": f"storage/bucket/{bucket}",
+                                                "kinds": ["storage/bucket"],
+                                                "name_prefix": prefix}
+    return f"storage/bucket/{bucket}", intent_params
+
+
 def _gcs_uri_intents(
     verb: str,
     operands: list[str],
@@ -3309,22 +3332,10 @@ def _gcs_uri_intents(
     if move:
         sources = operands[:-1] if len(operands) > 1 else []
         targets.extend((src, "delete") for src in sources if src.startswith("gs://"))
-    recursive = any(params.get(k) is True for k in ("r", "R", "recursive"))
     for uri, act in targets:
-        bucket, _, key = uri[len("gs://") :].partition("/")
-        intent_params = {**params, "key": key} if key else dict(params)
-        if recursive or _GLOB_CHARS_RE.search(key):
-            # a wildcard (*, **, ?, [...]) or -r reaches every key it matches
-            _mark_unresolved(intent_params, "key")
-        prefix = _glob_literal_prefix(bucket)
-        if prefix is not None:
-            # gcloud and gsutil expand a wildcard bucket name when they run: which buckets,
-            # only they know. A rule on any bucket the pattern may match escalates.
-            intent_params["resolved_at_runtime"] = {"from": f"storage/bucket/{bucket}",
-                                                    "kinds": ["storage/bucket"],
-                                                    "name_prefix": prefix}
+        resource, intent_params = _gcs_target(uri, params)
         intents.append(InfrastructureIntent(
-            resource=f"storage/bucket/{bucket}", action=act, provider="gcp",
+            resource=resource, action=act, provider="gcp",
             params=intent_params, metadata=dict(metadata)))
     if from_stdin and (verb == "rm" or move):
         intents.append(InfrastructureIntent(
@@ -3478,16 +3489,31 @@ def _from_gcloud_multi(argv: list[str]) -> list[InfrastructureIntent]:
         resource_prefix = "/".join([*head, _singularize(last)])
     action = "update" if verb in _GCLOUD_IAM_BINDING_VERBS else _normalize_verb(verb)
     params["raw_action"] = verb
-    targets: dict[tuple[str, tuple], dict[str, Any]] = {}
+    intents: list[InfrastructureIntent] = []
+    seen: set[tuple[str, str]] = set()
     for name in names:
         own = dict(metadata)  # each path names its own project and zone
-        resource = f"{resource_prefix}/{_gcloud_name(name, own)}"
-        targets.setdefault((resource, tuple(sorted(own.items()))), own)
-    if not targets:
-        targets[(f"{resource_prefix}/*", ())] = dict(metadata)
-    return [InfrastructureIntent(resource=resource, action=action, provider="gcp",
-                                 params=dict(params), metadata=own)
-            for (resource, _), own in targets.items()]
+        if group_words[:1] == ["storage"] and name.startswith("gs://"):
+            # a bucket or object by gs:// URI, on every storage command as on storage rm
+            resource, own_params = _gcs_target(name, params)
+        else:
+            resource, own_params = f"{resource_prefix}/{_gcloud_name(name, own)}", dict(params)
+        signature = (resource, repr(sorted(own.items())) + repr(own_params.get("key")))
+        if signature in seen:
+            continue
+        seen.add(signature)
+        intents.append(InfrastructureIntent(resource=resource, action=action, provider="gcp",
+                                            params=own_params, metadata=own))
+    stdin = params.get("read_paths_from_stdin") is True or params.get("I") is True
+    if not intents or (stdin and group_words[:1] == ["storage"]):
+        # no name, or more names from stdin (--read-paths-from-stdin, -I): which, only
+        # gcloud knows (marked by mark_unknown_names)
+        prefix = "storage/bucket" if group_words[:1] == ["storage"] and stdin else \
+            resource_prefix
+        intents.append(InfrastructureIntent(resource=f"{prefix}/*", action=action,
+                                            provider="gcp", params=dict(params),
+                                            metadata=dict(metadata)))
+    return intents
 
 
 def _gcloud_command(words: list[str]) -> str | None:
@@ -4333,7 +4359,12 @@ def _from_argocd_multi(argv: list[str]) -> list[InfrastructureIntent]:
             picked.append(({**params, "resolved_at_runtime": {"from": "app/*",
                                                                "kinds": ["app"]}}, where))
 
-    if subverb == "list":
+    from_file = subverb == "create" and params.get("file") is not None
+    if from_file:
+        # --file reads the Applications (one or more) from a file, a URL or stdin, and the
+        # name on the line is not needed: handled before any name is required
+        apps = ["*"]
+    elif subverb == "list":
         apps = positional if positional else ["*"]
     elif subverb == "rollback":
         if not positional:
@@ -4350,13 +4381,15 @@ def _from_argocd_multi(argv: list[str]) -> list[InfrastructureIntent]:
             raise ValueError(f"could not find an argocd app name in: {argv!r}")
         apps = [positional[0]]
 
-    if subverb == "create" and params.get("file") is not None:
-        # --file reads the Applications (one or more) from a file, a URL or stdin, and
-        # the name on the line is ignored: which apps, in which project and namespace,
-        # only argocd knows when it reads them
+    if from_file:
+        # which apps, in which project and namespace, only argocd knows when it reads them;
+        # the scope flags on the line are not recorded as theirs (argocd's ConstructApps
+        # does not apply --project to apps read from stdin)
         params["resolved_at_runtime"] = {"from": "app/*", "kinds": ["app"]}
         params["unresolved_scope"] = [*params.get("unresolved_scope", []), "*"]
-        apps = ["*"]
+        params.pop("projects", None)
+        for key in ("project", "app_namespace"):
+            metadata.pop(key, None)
     # A selector or a project adds the apps it picks; it says nothing about the apps named,
     # whose project stays unknown (it is the app's own) and which no selector picked.
     named_params, named_metadata = dict(params), dict(metadata)
@@ -5613,6 +5646,24 @@ def _gh_selected(kind: str, selector: str | None, metadata: dict[str, Any],
     return f"{kind}/*"
 
 
+def _gh_set_name(kind: str, subverb: str, positional: list[str],
+                 params: dict[str, Any]) -> str:
+    """The name ``gh secret|variable <subverb>`` acts on, upper-cased as GitHub does.
+    ``set --env-file`` (``-f``) sets every name in a dotenv file or stdin and ignores the
+    one on the line: ``*``, marked. With neither ``--body`` nor ``--env-file``, ``set``
+    reads the value from stdin or a prompt: ``body`` is unresolved."""
+    if subverb == "set" and params.get("env_file") is not None:
+        params["resolved_at_runtime"] = {"from": f"{kind}/*", "kinds": [kind]}
+        return "*"
+    if subverb == "set" and params.get("body") is None:
+        _mark_unresolved(params, "body")
+    if not positional:
+        if subverb in ("set", "delete", "get"):
+            params["resolved_at_runtime"] = {"from": f"{kind}/*", "kinds": [kind]}
+        return "*"
+    return positional[0].upper()
+
+
 def _gh_workflow(selector: str, params: dict[str, Any]) -> str:
     """A workflow by file name is ``workflow/<file>``. gh also takes its display name or
     its ID, which name the same workflow another way: then which file it is is only
@@ -6118,7 +6169,7 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
         subverb, *rest = tokens
         metadata, params, positional = _parse_gh_tokens(rest, ("secret", subverb))
         params["raw_action"] = f"secret-{subverb}"
-        name = positional[0].upper() if positional else "*"  # GitHub upper-cases names
+        name = _gh_set_name("secret", subverb, positional, params)
         action = _gh_action("secret", subverb)
         return InfrastructureIntent(
             resource=f"secret/{name}", action=action, provider="github",
@@ -6131,7 +6182,7 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
         subverb, *rest = tokens
         metadata, params, positional = _parse_gh_tokens(rest, ("variable", subverb))
         params["raw_action"] = f"variable-{subverb}"
-        name = positional[0].upper() if positional else "*"  # GitHub upper-cases names
+        name = _gh_set_name("variable", subverb, positional, params)
         action = _gh_action("variable", subverb)
         return InfrastructureIntent(
             resource=f"variable/{name}", action=action, provider="github",
@@ -6573,11 +6624,29 @@ _CONFIG_SCOPE_KEYS = {
 }
 
 
+def mark_unknown_names(intents: list[InfrastructureIntent]) -> list[InfrastructureIntent]:
+    """Marks every ``kind/*`` target ``resolved_at_runtime``: ``*`` stands for objects the
+    tool picks when it runs (a list, ``--all``, stdin, a file), so a rule on one of them
+    escalates. Done here, once, for every parser, so no branch can leave one unmarked. A
+    target already marked, a manifest nobody read and an unknown git target keep theirs."""
+    for intent in intents:
+        if not intent.resource.endswith("/*"):
+            continue
+        params = intent.params
+        if ("resolved_at_runtime" in params or params.get("unknown_target") is True
+                or params.get("manifest_not_inspected") is True):
+            continue
+        params["resolved_at_runtime"] = {"from": intent.resource,
+                                         "kinds": [intent.resource[:-2]]}
+    return intents
+
+
 def mark_config_scope(intents: list[InfrastructureIntent]) -> list[InfrastructureIntent]:
     """Adds to ``params["unresolved_scope"]`` each key of :data:`_CONFIG_SCOPE_KEYS` the
     argv did not give, so a rule scoped on it escalates instead of not applying. A key
-    --resolve-current-context fills later counts as given (the store looks at metadata
-    first)."""
+    --resolve-current-context fills later is unmarked when it is filled (environments.py
+    fill). Every unknown name is marked too (:func:`mark_unknown_names`)."""
+    mark_unknown_names(intents)
     for intent in intents:
         keys = _CONFIG_SCOPE_KEYS.get(intent.provider, ())
         if intent.provider == "git" and intent.params.get("raw_action") != "push":
