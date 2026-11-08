@@ -242,6 +242,11 @@ def _dict_spec(node: ast.AST | None, scopes: list[ast.AST] | None = None) -> Any
     }
 
 
+# Flags the SDK registers under several long names in one call (add_argument('--pap',
+# '--public-access-prevention')), per command group: filled by sdk_declarations.
+_LONG_ALIASES: dict[str, list[list[str]]] = {}
+
+
 def sdk_declarations(root: str) -> dict[str, dict[str, set[tuple[Any, Any, str]]]]:
     """Per command group, every declaration of each flag in the SDK mirror's
     ``add_argument`` and ``base.Argument`` calls, as ``(type, action, spec)``."""
@@ -271,6 +276,8 @@ def sdk_declarations(root: str) -> dict[str, dict[str, set[tuple[Any, Any, str]]
                         enclosing = [f for f in functions
                                      if f.lineno <= call.lineno <= (f.end_lineno or f.lineno)]
                         scopes = [*sorted(enclosing, key=lambda f: -f.lineno)[:1], tree]
+                        if len(names) > 1:
+                            _LONG_ALIASES.setdefault(area, []).append(names)
                         decl = (_type_kind(kwargs.get("type")),
                                 _action_kind(kwargs.get("action")),
                                 json.dumps(_dict_spec(kwargs.get("type"), scopes),
@@ -364,6 +371,14 @@ def refresh_types(out: str, sdk: str) -> None:
             continue
         decls = declarations.get(command.split()[0], {})
         resolved += _resolve_shapes(entry, decls)
+        # a long name the SDK registers beside the one the page lists is that flag
+        flags = {*entry["value"], *entry.get("bool", []), *entry.get("optional", [])}
+        for names in _LONG_ALIASES.get(command.split()[0], []):
+            listed = [n for n in names if n in flags]
+            if len(listed) == 1:
+                for other in names:
+                    if other != listed[0] and other not in flags:
+                        entry.setdefault("alias", {})[other] = listed[0]
         shapes = {n: "dict" if n in entry.get("dict", []) else
                   "list" if n in entry.get("list", []) else "scalar"
                   for n in [*entry["value"], *entry.get("optional", [])]}

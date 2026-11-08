@@ -605,6 +605,17 @@ def scope_value_matches(expected: Any, actual: Any) -> bool:
     return expected == actual
 
 
+# A flag whose value a parser records under a scope key of another name: a rule written
+# with the flag's name meets the scope key (az --location and gcloud --location are
+# region; helm --kube-context is context). Every other flag a command line gives is in
+# params under its long name, or in metadata under a key of the same name (namespace,
+# context, cluster, repo, resource_group, app_namespace, project, zone, region, profile):
+# see docs/constraints.md.
+_SCOPE_KEY_ALIASES = {canonical_key(k): v for k, v in {
+    "location": "region", "kube-context": "context", "kube-apiserver": "server",
+}.items()}
+
+
 def scope_matches(
     scope: dict[str, Any], metadata: dict[str, Any], params: dict[str, Any]
 ) -> bool:
@@ -618,7 +629,8 @@ def scope_matches(
         ok, expected = _typed_expected(key, expected, params)
         if not ok:
             return False  # unresolved, not a match: see scope_unresolved
-        actuals = _dig_all(metadata, key) or _dig_all(params, key)
+        actuals = (_dig_all(metadata, key) or _dig_all(params, key)
+                   or _dig_all(metadata, _SCOPE_KEY_ALIASES.get(canonical_key(key), "")))
         # A flag given several times (a StringArray or StringSlice) holds a list: each of
         # its values counts, as each is applied
         actuals = [*actuals, *(v for a in actuals if isinstance(a, list) for v in a)]
@@ -926,6 +938,22 @@ def param_unresolved(key: str, intent: InfrastructureIntent) -> bool:
             if canon in excepted and _dig_all(intent.params, key):
                 continue  # helm: a key --set replaced outright is known
             return True
+    return _descendant_unresolved(spellings, marks)
+
+
+def _descendant_unresolved(spellings: set[str], marks: list[Any]) -> bool:
+    """Whether some key under ``key`` is unresolved (an exact mark ``key.a.b``, or a prefix
+    mark ``key.a.*`` or ``key.*``): a rule that compares ``key`` whole compares that key's
+    value too, so it is unresolved as well (helm ``--set-file config.secret=f`` beside
+    ``--set config.public=x`` leaves ``set.config`` unknown, whatever is recorded for it).
+    For every tool alike."""
+    for mark in marks:
+        if not isinstance(mark, str):
+            continue
+        path = canonical_key(mark).removesuffix(".*")
+        if any(path.startswith(f"{s}.") or (mark.endswith(".*") and path == s)
+               for s in spellings):
+            return True
     return False
 
 
@@ -958,7 +986,9 @@ def scope_unresolved(scope: dict[str, Any], intent: InfrastructureIntent) -> lis
         unknown.add("env")
     if "namespace" in scope and namespace_unresolved(intent):
         unknown.add("namespace")
-    unknown.update(key for key in scope if param_unresolved(key, intent))
+    unknown.update(key for key in scope if param_unresolved(key, intent) or (
+        canonical_key(key) in _SCOPE_KEY_ALIASES
+        and param_unresolved(_SCOPE_KEY_ALIASES[canonical_key(key)], intent)))
     unknown.update(key for key, expected in scope.items()
                    if _prefix_unresolved(key, expected, intent))
     # a rule's value its key's type cannot hold (a duration key given "soon") neither

@@ -224,6 +224,32 @@ def upstream(directory: str) -> str:
     return f"{url}@{rev}" + ("" if sub == "." else f"/{sub}")
 
 
+_VAR_REG = re.compile(r'\.(?:\w+?)Var(?:P)?\(\s*(&[\w.\[\]]+)\s*,\s*"([a-z][\w-]*)"')
+_DEPRECATED = re.compile(r'MarkDeprecated\(\s*"([\w-]+)"')
+
+
+def aliases(dirs: list[str], tool: str) -> dict[str, dict[str, str]]:
+    """Per command, the flags one Go variable is registered under (``&client.ForceReplace``
+    as --force and --force-replace): each other name with the name kept, the one no
+    ``MarkDeprecated`` call names (else the first registered)."""
+    out: dict[str, dict[str, str]] = {}
+    for path in [p for d in dirs for p in Path(d).rglob("*.go") if not p.name.endswith("_test.go")]:
+        text = path.read_text(errors="ignore")
+        deprecated = set(_DEPRECATED.findall(text))
+        groups: dict[tuple[str | None, str], list[str]] = {}
+        for m in _VAR_REG.finditer(text):
+            command = _command_key(tool, path, text, m.start())
+            names = groups.setdefault((command, m.group(1)), [])
+            if m.group(2) not in names:
+                names.append(m.group(2))
+        for (command, _ptr), names in groups.items():
+            if len(names) < 2 or not command:
+                continue
+            kept = next((n for n in names if n not in deprecated), names[0])
+            out.setdefault(command, {}).update({n: kept for n in names if n != kept})
+    return {c: dict(sorted(v.items())) for c, v in sorted(out.items())}
+
+
 def main(out: str, specs: list[str]) -> None:
     named = [f"{tool}=" + ",".join(upstream(d) for d in dirs.split(","))
              for tool, _, dirs in (spec.partition("=") for spec in specs)]
@@ -232,6 +258,10 @@ def main(out: str, specs: list[str]) -> None:
         tool, _, dirs = spec.partition("=")
         letters: dict[str, dict[str, str]] = {}
         flags, commands = scan(dirs.split(","), tool, letters)
+        # flags registered on one variable under two names (helm's --force and
+        # --force-replace, gh's --confirm and --yes): each name with the one the parser keeps,
+        # the one not marked deprecated
+        data[f"{tool}:aliases"] = aliases(dirs.split(","), tool)
         # each command's short letters, as the registrations give them (``-n`` is
         # --namespace), by the command the registration belongs to
         data[f"{tool}:shorts"] = {c: dict(sorted(v.items())) for c, v in sorted(letters.items())}

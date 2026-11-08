@@ -1066,6 +1066,28 @@ def _unbundle_short_word(word: str, verb: str | None, *, replicas: bool = False)
     return _split_short_word(word, bools, values, "kubectl")
 
 
+@lru_cache(maxsize=8)
+def _pflag_aliases(tool: str) -> dict[str, str]:
+    """The flags ``tool`` registers on one variable under two names, each with the name kept
+    (``<tool>:aliases`` in pflag_types.json, from the registrations: helm 4's --force and
+    --atomic are --force-replace and --rollback-on-failure, gh's --confirm is --yes)."""
+    found: dict[str, str] = {}
+    for names in _pflag_tables().get(f"{tool}:aliases", {}).values():
+        found.update(names)
+    return found
+
+
+def _mirror_aliases(params: dict[str, Any], aliases: dict[str, str]) -> None:
+    """Every name of one flag holds its value (applied in order under the kept name), so a
+    rule written with any of them meets it."""
+    for alias, kept in aliases.items():
+        for spelling in (kept, kept.replace("-", "_")):
+            if spelling in params:
+                params.setdefault(alias.replace("-", "_") if "_" in spelling else alias,
+                                  params[spelling])
+                break
+
+
 def _generated_shorts(tool: str, verb: str | None) -> dict[str, str]:
     """The short letters ``tool``'s registrations give the command ``verb`` itself
     (``<tool>:shorts`` in pflag_types.json): ``helm pull -d`` is --destination, where
@@ -2733,6 +2755,8 @@ def _parse_aws_tokens(
                     raise ValueError(f"aws: {tok} is not an option, and aws refuses it")
                 key = _aws_option_name(spec, key)
                 arity = spec["o"][key]
+                # a hidden alias (argrename.HIDDEN_ALIASES) is the argument it copies
+                key = spec.get("al", {}).get(key, key)
             if key in ("cli-input-json", "cli-input-yaml") and spelled != key:
                 # argparse takes the abbreviation, but aws reads the input by its full name
                 # before argparse, so the input is never used (run on aws 2.37)
@@ -2986,6 +3010,8 @@ def _from_aws_s3_alias(
     key = params.pop("key", None)
     if service == "s3api":
         bucket = id_value or "*"
+        if id_value is not None:
+            params["bucket"] = id_value  # the flag is a param too (a rule on bucket)
         if key is not None:
             params["key"] = key
             resource = f"s3/object/{bucket}/{key}"
@@ -2995,7 +3021,7 @@ def _from_aws_s3_alias(
             resource = f"s3/bucket/{bucket}"
     else:
         kind = _singularize(noun) if noun else service
-        name = params.pop("name", None) or id_value
+        name = params.get("name") or id_value
         resource = _aws_resource("s3", kind, name)
     return [
         InfrastructureIntent(
@@ -3281,9 +3307,16 @@ def _from_aws_operation(
         id_value = params[target_flag]
     names = multi_ids if multi_ids else [id_value]
     names = list(dict.fromkeys([*names, *also]))
+    # the flag that named the target is a param too, with each target's own value, so a
+    # rule on it ({"role-name": "protected"}) meets it as a rule on the resource does
+    id_key = ("instance-ids" if multi_ids else
+              target_flag if target_flag and isinstance(params.get(target_flag), str) else
+              id_flag)
     intents = []
     for name in names:
         target_params, target_metadata = dict(params), dict(metadata)
+        if id_key and name is not None:
+            target_params[id_key] = name
         name = _aws_name(service, kind, name, target_params, target_metadata)
         intents.append(InfrastructureIntent(
             resource=_aws_resource(service, kind, name), action=action, provider="aws",
@@ -3523,6 +3556,19 @@ def _az_nargs(words: list[str]) -> dict[str, str]:
     return nargs
 
 
+def _az_long_aliases(words: list[str]) -> dict[str, str]:
+    """The long options of ``az <words>`` that are another name of one argument, each with
+    the first long option of its options_list (the table's ``a``)."""
+    tables = _az_short_tables()
+    leaf = tables.get(" ".join(words), {})
+    if leaf.get("c"):
+        return dict(leaf.get("a", {}))
+    found: dict[str, str] = {}
+    for size in range(1, len(words) + 1):
+        found.update(tables.get(" ".join(words[:size]), {}).get("a", {}))
+    return found
+
+
 def _az_aliases(words: list[str]) -> dict[str, str]:
     """The short options of ``az <words>`` and the long option each is."""
     return _az_entry(words)[0]
@@ -3637,12 +3683,14 @@ def _az_typed(text: str, nargs: dict[str, str] | None, key: str, tok: str) -> An
 def _parse_az_tokens(
     tokens: list[str], aliases: dict[str, str] | None = None,
     longs: frozenset[str] | None = None, nargs: dict[str, str] | None = None,
+    long_aliases: dict[str, str] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], list[str], str | None, list[str]]:
     """``aliases`` (:func:`_az_aliases`) records each short option as the long option it is
     on the command, so ``-c 1`` and ``--node-count 1`` record the same; the long option
     that names the target, resource group or location then feeds them whichever way it is
     spelled."""
     roles = _az_roles(aliases) if aliases is not None else None
+    long_aliases = long_aliases or {}
     metadata: dict[str, Any] = {}
     params: dict[str, Any] = {}
     positional: list[str] = []
@@ -3670,6 +3718,9 @@ def _parse_az_tokens(
                                  f"the target or its scope; write the option in full")
             if longs is not None and tok.startswith("--"):
                 key = _az_long_option(key, longs)  # --node-c is --node-count
+                # another long name of the same argument is that argument
+                # (options_list=['--name', '-n', '--table-name']): one key, values in order
+                key = long_aliases.get(key, key)
             if aliases is not None and roles is not None:
                 if not tok.startswith("--"):
                     if key not in aliases and key not in _AZ_GLOBAL_SHORTS:
@@ -3711,6 +3762,7 @@ def _parse_az_tokens(
                     i += 1
                     val = _value_at(tokens, i, tok)
                 name_value = val
+                params["name"] = val  # also a param: a rule on name meets it
             elif nargs is not None and key in nargs and key not in ("ids",):
                 # several words, as argparse gives an option with nargs + / * / ? or
                 # action append: every word up to the next option-looking one
@@ -3779,6 +3831,11 @@ def _parse_az_tokens(
         if isinstance(value, str) and value.startswith("@"):
             raise ValueError(f"az: {value!r} is read from a file when az runs, and names the "
                              f"target or its scope: {tokens!r}")
+    # every long name of one argument holds its value, so a rule written with any of them
+    # meets it (the value was applied in order under the first one)
+    for alias, canonical in long_aliases.items():
+        if canonical in params and alias not in params:
+            params[alias] = params[canonical]
     return metadata, params, positional, name_value, ids_values
 
 
@@ -3883,7 +3940,8 @@ def _from_az_multi(argv: list[str]) -> list[InfrastructureIntent]:
     words = positional[:next((i + 1 for i, w in enumerate(positional) if w in _AZ_VERBS),
                              len(positional))]
     metadata, params, positional, name_value, ids_values = _parse_az_tokens(
-        tokens, _az_aliases(words), _az_longs(words), _az_nargs(words))
+        tokens, _az_aliases(words), _az_longs(words), _az_nargs(words),
+        _az_long_aliases(words))
 
     if not positional:
         raise ValueError(f"could not find an az verb in: {argv!r}")
@@ -3908,12 +3966,14 @@ def _from_az_multi(argv: list[str]) -> list[InfrastructureIntent]:
         for arm_id in ids_values:
             resource, arm_metadata = _parse_arm_id(arm_id)
             own = {k: v for k, v in metadata.items() if k not in ignored}
+            # the name the ID gives, as --name would record it
+            id_params = {**params, "name": resource.rsplit("/", 1)[-1]}
             intents.append(
                 InfrastructureIntent(
                     resource=resource,
                     action=action,
                     provider="azure",
-                    params=dict(params),
+                    params=id_params,
                     metadata={**own, **arm_metadata},
                 )
             )
@@ -4976,6 +5036,7 @@ def _parse_helm_tokens(
                     raise ValueError(f"-{key} is not a short flag the parser knows on this "
                                      f"command; write its long flag: {tokens!r}")
                 key = long_name
+            key = _pflag_aliases("helm").get(key, key)  # --force is --force-replace (helm 4)
             if key == "namespace":
                 if val is None:
                     i += 1
@@ -5054,6 +5115,7 @@ def _parse_helm_tokens(
         i += 1
 
     _merge_helm_values(params, sets, verb)
+    _mirror_aliases(params, _pflag_aliases("helm"))
     return metadata, params, positional
 
 
@@ -6356,6 +6418,15 @@ _GIT_OPTION_SPECS = {
 }
 
 
+# Long options that are another name of one option, per verb (git 2.52: push.c registers
+# --exec and --receive-pack on one variable; branch.c and tag.c --with and --without as
+# hidden names of --contains and --no-contains): the value lands on one key, in order.
+_GIT_OPTION_ALIASES = {
+    "push": {"exec": "receive-pack"},
+    "branch": {"with": "contains", "without": "no-contains"},
+    "tag": {"with": "contains", "without": "no-contains"},
+}
+
 # The options that take a value each time they are given, per verb (git 2.52's
 # documentation, checked by running git): push -o/--push-option ("can be given multiple
 # times") and --force-with-lease (one per ref); commit and tag -m ("concatenated as
@@ -6482,10 +6553,12 @@ def _git_option_params(verb: str, options: list[tuple[str, Any]]) -> dict[str, A
     ``--verify``, ``-n`` on commit) is that one with ``False``, so one value has one key."""
     longs = _GIT_OPTIONS[verb][1]
     accumulating = _GIT_ACCUMULATING.get(verb, frozenset())
+    aliases = _GIT_OPTION_ALIASES.get(verb, {})
     params: dict[str, Any] = {}
     for name, val in options:
         if val is True and name.startswith("no-") and name[3:] in longs:
             name, val = name[3:], None
+        name = aliases.get(name, name)  # one option under several names: one key
         key = name.replace("-", "_")
         if name in accumulating:
             # each one adds a value; the --no- form empties the list (OPT_STRING_LIST)
@@ -6497,6 +6570,9 @@ def _git_option_params(verb: str, options: list[tuple[str, Any]]) -> dict[str, A
             params[key] = False
         else:
             params[key] = val  # git's option values are text
+    for alias, canonical in aliases.items():  # every name of the option holds its value
+        if canonical.replace("-", "_") in params:
+            params[alias.replace("-", "_")] = params[canonical.replace("-", "_")]
     for name in ("force", "delete", "dry_run", "amend", "hard"):
         params.pop(name, None)
     if verb == "push":
@@ -7455,6 +7531,8 @@ def _parse_gh_command_tokens(
                 n = len(tokens)
                 continue
         key, val = _split_flag(tok)
+        if is_long and _pflag_aliases("gh").get(key) in bools | values:
+            key = _pflag_aliases("gh")[key]  # --confirm is --yes where gh registers both
         if gh_command == "api" and key in ("R", "repo"):
             raise ValueError(f"gh api has no {tok.partition('=')[0]} flag; the path or URL "
                              f"names the repository: {tokens!r}")
@@ -7489,6 +7567,8 @@ def _parse_gh_command_tokens(
 
     _gh_build_fields(params, fields, api=typed_fields)
     _gh_derived_flags(gh_command, params, method_flags, tokens)
+    _mirror_aliases(params, {a: k for a, k in _pflag_aliases("gh").items()
+                             if a in bools | values})
     return metadata, params, positional
 
 

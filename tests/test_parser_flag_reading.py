@@ -3922,3 +3922,75 @@ def test_gcloud_update_labels_rule_meets_the_map():
     rule = _rule("gcp", "storage/bucket/*", ["update"], {"update-labels.env": "prod"})
     assert _verdict([rule], "gcloud storage buckets update gs://b --update-labels env=prod") \
         == "BLOCK"
+
+
+# --- review round 19 ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("command,scope", [
+    # a key with an unresolved key under it is unresolved when a rule compares it whole
+    ("helm upgrade web ./c --reset-values --set config.public=safe "
+     "--set-file config.secret=/dev/null", {"set.config": {"public": "safe", "secret": "x"}}),
+    ("gcloud compute instances create vm --zone z --metadata a=1 --metadata-from-file b=f.txt",
+     {"metadata": {"a": "1", "b": "2"}}),
+    ("aws ec2 create-tags --resources i-1 --tags file://t.json",
+     {"tags": [{"Key": "a", "Value": "b"}]}),
+])
+def test_an_unresolved_descendant_leaves_the_whole_key_unresolved(command, scope):
+    if command.startswith("helm"):
+        provider, pattern, action = "helm", "release/*", "update"
+    elif command.startswith("gcloud"):
+        provider, pattern, action = "gcp", "compute/instance/*", "create"
+    else:
+        provider, pattern, action = "aws", "ec2/tag/*", "create"
+    assert _verdict([_rule(provider, pattern, [action], scope)], shlex.split(command)) == \
+        "ESCALATE"
+
+
+def test_a_resolved_sibling_of_an_unresolved_key_still_decides():
+    rule = _rule("helm", "release/*", ["update"], {"set.config.public": "other"})
+    assert _verdict([rule], "helm upgrade web ./c --reset-values --set config.public=safe "
+                            "--set-file config.secret=/dev/null".split()) == "ALLOW"
+
+
+@pytest.mark.parametrize("command,scope", [
+    # the flag that named the target (or its scope) meets a rule written with its name
+    ("aws iam delete-role --role-name protected", {"role-name": "protected"}),
+    ("aws ec2 terminate-instances --instance-ids i-1 i-2", {"instance-ids": "i-2"}),
+    ("aws s3api delete-bucket --bucket b", {"bucket": "b"}),
+    ("aws lambda delete-function --function-name f", {"function-name": "f"}),
+    ("az vm delete -n vm1 -g rg", {"name": "vm1"}),
+    ("az vm delete -n vm1 -g rg", {"resource-group": "rg"}),
+    ("az group create -n rg -l eastus", {"location": "eastus"}),
+    ("helm uninstall web --kube-context prod", {"kube-context": "prod"}),
+    ("kubectl delete pod x -n prod", {"namespace": "prod"}),
+    ("gh pr close 1 -R a/b", {"repo": "a/b"}),
+    ("argocd app delete web -N ns -y", {"app-namespace": "ns"}),
+])
+def test_a_target_or_scope_flag_meets_a_rule_on_its_name(command, scope):
+    intent = from_argv(command.split())[0]
+    rule = _rule(intent.provider, intent.resource.split("/")[0] + "/*", [intent.action], scope)
+    assert _verdict([rule], command) == "BLOCK"
+
+
+@pytest.mark.parametrize("command,key,value", [
+    # several names of one option: one key, the values in order, every name holding it
+    ("git push --exec=X --receive-pack=Y origin main", "receive_pack", "Y"),
+    ("git push --receive-pack=Y --exec=X origin main", "receive_pack", "X"),
+    ("git push --receive-pack=Y --exec=X origin main", "exec", "X"),
+    ("git branch --with HEAD --contains main", "contains", ["HEAD", "main"]),
+    ("helm upgrade r ./c --force", "force_replace", True),
+    ("helm upgrade r ./c --force --force-replace=false", "force", False),
+    ("helm upgrade r ./c --atomic", "rollback_on_failure", True),
+    ("gh repo delete a/b --confirm", "yes", True),
+    ("az compute-fleet delete --name a --fleet-name b -g rg", "name", "b"),
+    ("az compute-fleet delete --fleet-name b -g rg", "fleet-name", "b"),
+    ("aws mgn start-cutover --source-server-i-ds s-1", "source-server-ids", ["s-1"]),
+])
+def test_option_aliases_are_one_option(command, key, value):
+    assert from_argv(command.split())[0].params[key] == value
+
+
+def test_az_option_alias_names_the_target():
+    intent = from_argv("az compute-fleet delete --name a --fleet-name b -g rg".split())[0]
+    assert intent.resource.endswith("/b")

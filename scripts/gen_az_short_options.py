@@ -1,6 +1,8 @@
 """Writes src/aegis_core/data/az_short_options.json: the short options of az's commands
 and the long option each is (``s``), and the long options declared for each command scope
-(``l``, for argparse's prefix matching), read from azure-cli's
+(``l``, for argparse's prefix matching), the long options that are another name of one
+argument (``a``: each alias and the first long option of its options_list), read from
+azure-cli's
 ``command_modules/*/_params.py``:
 
     python scripts/gen_az_short_options.py <azure-cli checkout> \\
@@ -23,6 +25,8 @@ from typing import Any
 
 
 def _strings(node: ast.AST) -> list[str] | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return [node.value]  # options_list='--workspace-name': one option
     if isinstance(node, (ast.List, ast.Tuple)):
         values = [e.value for e in node.elts if isinstance(e, ast.Constant)
                   and isinstance(e.value, str)]
@@ -429,7 +433,7 @@ def main(checkout: str, out: str) -> None:
         dests = set(params)
         for scope in _scope_chain(command):
             dests |= arguments.get(scope, {}).get("extra", set())
-        for dest in dests:
+        for dest in sorted(dests):  # sorted: the same table on every run
             nargs = dest_nargs(command, dest)
             vtype = dest_nargs(command, f"type:{dest}")
             conv = dest_nargs(command, f"conv:{dest}") or _CORE_DEST_CONV.get(dest)
@@ -459,7 +463,8 @@ def main(checkout: str, out: str) -> None:
     commit = subprocess.run(["git", "-C", checkout, "rev-parse", "HEAD"], capture_output=True,
                             text=True, check=False).stdout.strip()
     data = {k: {"s": v["s"], "l": sorted(v["l"]), **({"c": True} if v["c"] else {}),
-                **({"n": v["n"]} if v.get("n") else {})}
+                **({"n": v["n"]} if v.get("n") else {}),
+                **({"a": dict(sorted(v["a"].items()))} if v.get("a") else {})}
             for k, v in sorted(table.items())}
     with open(out, "w") as f:
         json.dump({"_source": f"azure-cli {commit} command_modules (_params.py, "
@@ -508,19 +513,26 @@ def _set_leaf(table: dict[str, dict[str, Any]], command: str, groups: list[list[
     longs = {o[2:] for group in groups for o in group if o.startswith("--")}
     shorts: dict[str, str] = {}
     nargs: dict[str, str] = {}
+    aliases: dict[str, str] = {}
     for group in groups:
         options = [o for o in group if not o.startswith(("nargs:", "type:", "conv:"))]
         shorts.update(_aliases(options))
+        # several long names for one argument (options_list=['--name', '-n', '--vm-name']):
+        # each is the first one, so its value lands on one key, in order
+        group_longs = [o[2:] for o in options if o.startswith("--")]
+        aliases.update({o: group_longs[0] for o in group_longs[1:]})
         for marker in (o for o in group if o.startswith(("nargs:", "type:", "conv:"))):
             kind, _, value = marker.partition(":")
             prefix = "" if kind == "nargs" else f"{kind}:"
             nargs.update({prefix + o[2:]: value for o in options if o.startswith("--")})
     if complete:
         entry["l"], entry["s"], entry["n"] = longs, {**entry["s"], **shorts}, nargs
+        entry["a"] = aliases
     else:
         entry["l"] |= longs
         entry["s"] = {**entry["s"], **shorts}
         entry["n"] = {**entry.get("n", {}), **nargs}
+        entry["a"] = {**entry.get("a", {}), **aliases}
     entry["c"] = complete
 
 

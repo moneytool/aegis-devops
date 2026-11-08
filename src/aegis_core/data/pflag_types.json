@@ -318,6 +318,7 @@
   "webhook-manifest-cache-warm-disabled": "Bool",
   "yes": "Bool"
  },
+ "argocd:aliases": {},
  "argocd:commands": {
   "add app": {
    "kustomize-namespace": "String",
@@ -954,6 +955,7 @@
   "with-source": "Bool",
   "yes": "Bool"
  },
+ "flux:aliases": {},
  "flux:commands": {
   "bootstrap": {
    "log-level": "String",
@@ -1505,6 +1507,35 @@
   "worktree": "String",
   "yaml": "Bool",
   "yes": "Bool"
+ },
+ "gh:aliases": {
+  "codespace": {
+   "displayName": "display-name"
+  },
+  "gpg-key delete": {
+   "confirm": "yes"
+  },
+  "issue delete": {
+   "confirm": "yes"
+  },
+  "label": {
+   "confirm": "yes"
+  },
+  "repo archive": {
+   "confirm": "yes"
+  },
+  "repo delete": {
+   "confirm": "yes"
+  },
+  "repo rename": {
+   "confirm": "yes"
+  },
+  "repo unarchive": {
+   "confirm": "yes"
+  },
+  "ssh-key delete": {
+   "confirm": "yes"
+  }
  },
  "gh:commands": {
   "add json flag": {
@@ -2468,6 +2499,22 @@
   "wait-for-jobs": "Bool",
   "with-subcharts": "Bool"
  },
+ "helm:aliases": {
+  "add": {
+   "colour": "color"
+  },
+  "add install": {
+   "atomic": "rollback-on-failure",
+   "force": "force-replace"
+  },
+  "rollback": {
+   "force": "force-replace"
+  },
+  "upgrade": {
+   "atomic": "rollback-on-failure",
+   "force": "force-replace"
+  }
+ },
  "helm:commands": {
   "add dry run flag": {
    "dry-run": "String"
@@ -2799,6 +2846,7 @@
   "www": "String",
   "www-prefix": "String"
  },
+ "kubectl:aliases": {},
  "kubectl:commands": {
   "add": {
    "env": "StringToString",

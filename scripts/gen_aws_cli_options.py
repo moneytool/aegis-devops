@@ -17,7 +17,8 @@ each one is, ``t`` the type of each value that is not a string (``integer``, ``l
 ``x`` the botocore shape of each structure, map or list option (in the command's
 ``shapes``, by name), ``a`` options that accumulate (``append``, or ``filter`` for s3's
 ordered --include/--exclude), ``c`` the choices argparse allows, ``k`` the value of a bare
-optional-value option, ``p`` positional arguments, ``s`` subcommands (``ec2 wait``)."""
+optional-value option, ``al`` hidden aliases (another name of one argument), ``p``
+positional arguments, ``s`` subcommands (``ec2 wait``)."""
 
 import argparse
 import json
@@ -111,6 +112,18 @@ def _command(cmd, depth: int, shapes: dict | None = None) -> dict:
                 members[member] = name  # a boolean's member is its positive option
         if members:
             entry["m"] = members
+        # hidden aliases (argrename.HIDDEN_ALIASES: a copy of an argument under another
+        # name, for backward compatibility): each with the argument it stands for
+        aliases = {}
+        for name, arg in arg_table.items():
+            member = getattr(arg, "_serialized_name", None)
+            if getattr(arg, "_UNDOCUMENTED", False) and member:
+                for other, other_arg in arg_table.items():
+                    if (other != name and getattr(other_arg, "_serialized_name", None) == member
+                            and not getattr(other_arg, "_UNDOCUMENTED", False)):
+                        aliases[name] = other
+        if aliases:
+            entry["al"] = aliases
         if positional:
             entry["p"] = positional
         # what argparse does with a value beyond its count: "a" the options that accumulate
