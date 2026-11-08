@@ -112,8 +112,11 @@ count (`max_intents`) or change a `ratio`.
   `sql/instance/prod-db`. `gcloud storage rm --recursive gs://a gs://b` and `gsutil -m rm -r
   gs://b` were refused or read one bucket; both now read their own booleans and every `gs://`
   path, and `mv` also deletes its source. gcloud takes no abbreviated flag (calliope turns them
-  off), which needed no change. `from_gcloud` raises on two targets (use `from_gcloud_multi`).
-  From source; gcloud was not run.
+  off, read in its source), which needed no change. `from_gcloud` raises on two targets (use
+  `from_gcloud_multi`). The booleans of `gcloud storage` and gsutil's option letters come from
+  their documentation, not their source, and neither gcloud nor gsutil was run: a letter or
+  flag missing from those tables is refused (gsutil) or may still take the next word (gcloud
+  storage, though never a `gs://` path).
 - terraform and tofu `apply -destroy=true` (and `-destroy=T`) were refused as needing a plan, and
   `-destroy -destroy=false` was read as a destroy. Go's flag package reads the last `-destroy`,
   with `strconv.ParseBool`, and so does the parser now; `-auto-approve=true` and

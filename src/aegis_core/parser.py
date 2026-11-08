@@ -2403,7 +2403,8 @@ _GCS_LEGACY_VERB_MAP = {"rm": "delete", "rb": "delete", "cp": "put", "mv": "put"
 _GCLOUD_BOOL_FLAGS = {"log-http", "no-user-output-enabled", "user-output-enabled"}
 
 # The boolean options of "gcloud storage cp/mv/rm/rb" (and their short letters), so that
-# "--recursive gs://b" leaves gs://b a path. From the gcloud storage reference.
+# "--recursive gs://b" leaves gs://b a path. From the gcloud storage documentation, not
+# its source; a word starting "gs://" is never taken as a flag's value anyway.
 _GCLOUD_STORAGE_BOOL_FLAGS = frozenset({
     "recursive", "r", "R", "all-versions", "a", "continue-on-error", "c",
     "read-paths-from-stdin", "I", "no-clobber", "n", "daisy-chain", "D", "do-not-decompress",
@@ -2412,8 +2413,9 @@ _GCLOUD_STORAGE_BOOL_FLAGS = frozenset({
     "include-managed-folders", "skip-if-dest-has-newer-mtime", "u",
 })
 
-# gsutil's getopt letters: in front of the command, and on rm, rb, cp and mv. A letter in a
-# "values" set takes the rest of its word or the next word.
+# gsutil's getopt letters: in front of the command, and on rm, rb, cp and mv, from gsutil's
+# documentation (gsutil was not available to read or run). A letter in a "values" set
+# takes the rest of its word or the next word; a letter in neither is refused.
 _GSUTIL_TOP_BOOLS, _GSUTIL_TOP_VALUES = frozenset("mqdDv"), frozenset("hoiu")
 _GSUTIL_VERB_LETTERS = {
     "rm": (frozenset("afIrR"), frozenset()),
