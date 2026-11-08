@@ -107,6 +107,7 @@ import hashlib
 import io
 import json
 import re
+from collections.abc import Collection
 from pathlib import Path
 from typing import Any
 
@@ -279,24 +280,29 @@ _RESOURCE_ALIASES = {
 _KUBECTL_BUILTIN_NAMES = frozenset(_KUBECTL_BUILTIN_KINDS) | frozenset(_RESOURCE_ALIASES)
 
 # kubectl flags that take no value token when given without "=value": the
-# boolean flags of every verb the parser handles (from kubectl 1.36's
-# per-verb --help), plus the string flags pflag gives a default for a bare
-# use (--cascade, --validate). "containers" and "prefix" are strings only
-# under "set env" / "set resources", which the parser does not accept.
+# boolean flags of every kubectl command (from kubectl 1.36's --help on each of
+# them), plus the flags pflag gives a default for a bare use (--cascade,
+# --validate, --embed-certs, ...). "containers" and "prefix" are strings only
+# under "set env" / "set resources", which the parser does not accept, and
+# "command" only under "kuberc set" (see _parse_flags).
 _KNOWN_BOOL_FLAGS = {
     "all", "all-containers", "all-pods", "allow-missing-template-keys", "append-hash",
     "append-server-path", "arguments-only", "as-current-user", "attach", "cached", "cascade",
-    "client", "command", "containers", "delete-emptydir-data", "delete-local-data",
-    "disable-eviction", "disable-filter", "edit", "enable-alpha-plugins", "enable-helm",
-    "expose", "flatten", "follow", "force", "force-conflicts", "helm-debug",
+    "client", "command", "containers", "create-annotation", "current",
+    "delete-emptydir-data", "delete-local-data",
+    "disable-eviction", "disable-filter", "edit", "embed-certs", "enable-alpha-plugins",
+    "enable-helm", "exec-provide-cluster-info",
+    "expose", "flatten", "follow", "force", "force-conflicts", "global-default", "helm-debug",
     "ignore-daemonsets", "ignore-errors", "ignore-not-found",
     "insecure-skip-tls-verify-backend", "interactive", "keep-annotations",
     "keep-init-containers", "keep-labels", "keep-liveness", "keep-readiness", "keep-startup",
-    "leave-stdin-open", "list", "local", "merge", "minify", "namespaced", "network",
+    "leave-stdin-open", "list", "local", "merge", "minify", "name-only", "namespaced",
+    "network",
     "no-headers", "no-preserve", "now", "openapi-patch", "output-patch",
     "output-watch-events", "overwrite", "prefix", "previous", "privileged", "prune", "quiet",
-    "record", "recursive", "replace", "resolve", "rm", "same-node", "save-config",
-    "server-print", "server-side", "share-processes", "show-capacity", "show-events",
+    "record", "recursive", "remove-extra-permissions", "remove-extra-subjects", "replace",
+    "resolve", "rm", "same-node", "save-config", "server-print", "server-side",
+    "set-raw-bytes", "share-processes", "show-capacity", "show-events",
     "show-kind", "show-labels", "show-managed-fields", "show-secrets", "show-swap", "stdin",
     "sum", "timestamps", "tty", "use-protocol-buffers", "validate", "wait", "watch",
     "watch-only", "windows-line-endings",
@@ -308,25 +314,39 @@ _KNOWN_BOOL_FLAGS = {
 # selector, manifest, impersonation and discarded global flags are handled
 # by name before this table is consulted.
 _KUBECTL_VALUE_FLAGS = {
-    "accept-hosts", "accept-paths", "address", "annotation", "annotations", "api-group",
-    "api-prefix", "api-version", "as-user-extra", "audience", "bound-object-kind",
-    "bound-object-name", "bound-object-uid", "categories", "chunk-size", "class",
+    "accept-hosts", "accept-paths", "address", "aggregation-rule", "allowlist-entry",
+    "annotation", "annotations", "api-group", "api-prefix", "api-version", "appendarg",
+    "as-user-extra", "audience", "auth-provider", "auth-provider-arg", "bound-object-kind",
+    "bound-object-name", "bound-object-uid", "categories", "cert", "chunk-size", "class",
     "cluster-ip", "clusterip", "clusterrole", "concurrency", "container", "copy-to", "cpu",
-    "current-replicas", "custom", "default-backend", "detach-keys", "duration", "env",
-    "external-ip", "field-manager", "for", "from", "from-env-file", "from-file",
-    "from-literal", "grace-period", "group", "helm-api-versions", "helm-command",
-    "helm-kube-version", "image", "image-pull-policy", "keepalive", "keys", "kuberc",
-    "label-columns", "labels", "limit-bytes", "limits", "load-balancer-ip",
-    "load-restrictor", "max", "max-log-requests", "memory", "min", "mount", "name",
-    "network-name", "override-type", "overrides", "patch", "patch-file",
-    "pod-running-timeout", "pod-selector", "port", "protocol", "prune-allowlist", "raw",
-    "reject-methods", "reject-paths", "replicas", "requests", "resource-version", "restart",
-    "retries", "revision", "role", "rule", "schedule", "serviceaccount", "session-affinity",
-    "set-image", "since", "since-time", "skip-wait-for-delete-timeout", "sort-by",
-    "subresource", "tail", "target", "target-port", "tcp", "template", "timeout",
-    "to-revision", "type", "types", "unix-socket", "verbs", "vmodule", "www", "www-prefix",
+    "current-replicas", "custom", "default-backend", "description", "detach-keys",
+    "docker-email", "docker-password", "docker-server", "docker-username", "duration", "env",
+    "exec-api-version", "exec-arg", "exec-command", "exec-env", "exec-interactive-mode",
+    "external-ip", "external-name", "field-manager", "for", "from", "from-env-file",
+    "from-file", "from-literal", "grace-period", "group", "hard", "helm-api-versions",
+    "helm-command", "helm-kube-version", "image", "image-pull-policy", "keepalive", "key",
+    "keys", "kuberc", "label-columns", "labels", "limit-bytes", "limits", "load-balancer-ip",
+    "load-restrictor", "max", "max-log-requests", "max-unavailable", "memory", "min",
+    "min-available", "mount", "name", "namespaces", "network-name", "node-port",
+    "non-resource-url", "option", "output-directory", "override-type", "overrides", "patch",
+    "patch-file", "pod-running-timeout", "pod-selector", "policy", "port", "preemption-policy",
+    "prependarg", "protocol", "proxy-url", "prune-allowlist", "raw", "reject-methods",
+    "reject-paths", "replicas", "requests", "resource", "resource-name", "resource-version",
+    "restart", "retries", "revision", "role", "rule", "schedule", "scopes", "section",
+    "serviceaccount", "session-affinity", "set-image", "since", "since-time",
+    "skip-wait-for-delete-timeout", "sort-by", "subresource", "tail", "target",
+    "target-port", "tcp", "template", "timeout", "to-revision", "type", "types",
+    "unix-socket", "value", "verb", "verbs", "vmodule", "www", "www-prefix",
     # short forms: -c container, -L label-columns
     "c", "L",
+}
+
+# kubectl's integer flags (kubectl 1.36). pflag reads them with base 0, so
+# "--replicas=0x0" is 0: see _go_int. --port is a string on expose and run.
+_KUBECTL_INT_FLAGS = {
+    "chunk-size", "concurrency", "current-replicas", "grace-period", "limit-bytes", "max",
+    "max-log-requests", "min", "replicas", "retries", "revision",
+    "skip-wait-for-delete-timeout", "tail", "to-revision",
 }
 # Short value flags, recorded under their long name ("-p" only on patch).
 _KUBECTL_SHORT_VALUE_NAMES = {
@@ -560,8 +580,70 @@ def _split_short_word(
     return flags
 
 
-def _unbundle_short_word(word: str, verb: str | None, *, replicas: bool = False) -> list[str]:
-    """:func:`_split_short_word` with kubectl's letters. ``replicas`` says ``-r`` is
+def _other_flag(
+    tokens: list[str], i: int, *, values: Collection[str], bools: Collection[str], tool: str,
+) -> tuple[int, Any]:
+    """A flag no branch of a pflag tool's walker reads by name, at ``tokens[i]``: the
+    index of its last token and the value to record, as pflag reads it.
+
+    A flag in ``bools`` takes no value token (it may carry ``=value``), and one in
+    ``values`` always takes the next token, whatever it looks like: ``--description
+    -ndev`` is the description ``-ndev``. A flag in neither is unknown to the parser,
+    and then only ``=value``, or being the last word, says how to read it. Otherwise
+    the next word is its value if it takes one, and a flag, a name or an operand if it
+    does not, so the namespace, target or rehearsal read could be the wrong one either
+    way: the command is refused (#80). A short flag ``-x`` gets the same reading. Each
+    table must hold every flag the tool has, so this only refuses a flag the tool does
+    not have, which it refuses too, or one a later version added."""
+    tok = tokens[i]
+    key, val = _split_flag(tok)
+    if key in bools:
+        return i, _bool_param(val)
+    if key in values:
+        if val is None:
+            i += 1
+            val = _value_at(tokens, i, tok)
+        return i, _coerce(val)
+    if val is not None:
+        return i, _coerce(val)
+    if i + 1 >= len(tokens):
+        return i, True
+    raise ValueError(
+        f"{tool}: cannot tell whether {tok!r} takes a value (next word {tokens[i + 1]!r}); "
+        f"write {tok}=<value> or put {tok} last: {tokens!r}"
+    )
+
+
+# What Go's strconv.ParseInt accepts with base 0, which is how pflag reads every
+# integer flag: a sign, then 0x/0o/0b or a leading 0 (octal) for the base, and "_"
+# only between digits (or after the base prefix).
+_GO_INT_RE = re.compile(
+    r"[+-]?(?:0[xX](?:_?[0-9a-fA-F])+|0[bB](?:_?[01])+|0[oO](?:_?[0-7])+|0(?:_?[0-7])*"
+    r"|[1-9](?:_?[0-9])*)"
+)
+
+
+def _go_int(text: str, flag: str, bits: int = 64) -> int:
+    """``text`` as pflag's integer flags read it (``strconv.ParseInt(text, 0, bits)``):
+    ``0xf`` is 15, ``017`` is 15 and ``1_0`` is 10. Anything Go refuses (``08``,
+    ``" 5"``, ``1e3``, a number out of range) is a ValueError, since the tool refuses it
+    and runs nothing."""
+    if not _GO_INT_RE.fullmatch(text):
+        raise ValueError(f"{flag}: {text!r} is not a number the tool accepts")
+    sign = -1 if text[0] == "-" else 1
+    digits = text.lstrip("+-").replace("_", "")
+    if len(digits) > 1 and digits[0] == "0" and digits[1] in "0123456789_":
+        digits = "0o" + digits[1:]
+    value = sign * int(digits, 0)
+    if not -(1 << (bits - 1)) <= value < (1 << (bits - 1)):
+        raise ValueError(f"{flag}: {text!r} is out of range")
+    return value
+
+
+def _kubectl_short_letters(
+    verb: str | None, *, replicas: bool = False
+) -> tuple[frozenset[str], frozenset[str]]:
+    """kubectl's boolean and value letters on ``verb``. ``replicas`` says ``-r`` is
     ``--replicas`` here (``create deployment``). ``proxy`` has letters of its own that
     are not listed, and is refused without a target anyway."""
     bools = _KUBECTL_SHORT_BOOL_LETTERS
@@ -572,6 +654,12 @@ def _unbundle_short_word(word: str, verb: str | None, *, replicas: bool = False)
         values = values | {"p"}
     elif replicas:
         values = values | {"r"}
+    return bools, values
+
+
+def _unbundle_short_word(word: str, verb: str | None, *, replicas: bool = False) -> list[str]:
+    """:func:`_split_short_word` with kubectl's letters (:func:`_kubectl_short_letters`)."""
+    bools, values = _kubectl_short_letters(verb, replicas=replicas)
     return _split_short_word(word, bools, values, "kubectl")
 
 
@@ -734,6 +822,7 @@ def _parse_flags(
     tokens = list(tokens)  # short words are split in place as the walk reaches them
     # Found once here: kubectl also takes -r3 in front of the subcommand.
     replicas_short = verb == "create" and ("deployment" in tokens or "deploy" in tokens)
+    short_bools, short_values = _kubectl_short_letters(verb, replicas=replicas_short)
     i = 0
     n = len(tokens)
     while i < n:
@@ -824,40 +913,38 @@ def _parse_flags(
                 # Only a spelling kubectl reads as false turns the Service off. It
                 # refuses a word like "no", so reading that as on creates nothing.
                 params[key] = val not in _GO_FALSE_WORDS
-            elif key in _KNOWN_BOOL_FLAGS or (key == "raw" and verb == "config"):
+            elif ((key in _KNOWN_BOOL_FLAGS and not (key == "command" and verb == "kuberc"))
+                  or (key == "raw" and verb == "config")):
                 params[key] = _bool_param(val)
             elif (key in _KUBECTL_VALUE_FLAGS or (key == "p" and verb == "patch")
-                  or (key == "r" and replicas_short)):
+                  or (key == "r" and replicas_short) or key == "command"):
                 # Always the next token, even "-1" or "--context": that is
                 # what kubectl does with it.
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
-                params[_KUBECTL_SHORT_VALUE_NAMES.get(key, key)] = _coerce(val)
+                name = _KUBECTL_SHORT_VALUE_NAMES.get(key, key)
+                if name in _KUBECTL_INT_FLAGS:
+                    # create deployment's --replicas is an Int32, the others Int or Int64
+                    bits = 32 if replicas_short and name == "replicas" else 64
+                    params[name] = _go_int(val, f"kubectl {tok}", bits)
+                else:
+                    params[name] = _coerce(val)
                 if key == "copy-to" and raw_copy_to is not None:
                     raw_copy_to[:] = [val]
-            elif val is not None:
+            elif not is_long and key in short_bools:
+                pass  # -i, -t, -q, -R, -w ...: nothing a rule reads
+            elif not is_long and key in short_values:
+                # -e (env): always the next token, as pflag reads it
+                if val is None:
+                    i += 1
+                    val = _value_at(tokens, i, tok)
                 params[key] = _coerce(val)
-            elif is_long and i + 1 >= len(tokens):
-                # Unknown long flag at the end of argv: a boolean, not a
-                # flag missing its value.
-                params[key] = True
-            elif is_long and _bare_flag(tokens, i):
-                # Unknown long flag followed by another option: if it takes a
-                # value, kubectl reads that option as the value, so the
-                # namespace, context or target it seems to set is not real.
-                # Neither reading is safe to guess, so the command is refused.
-                raise ValueError(
-                    f"kubectl: cannot tell whether {tok!r} takes a value "
-                    f"(next token {tokens[i + 1]!r}); write {tok}=<value> or "
-                    f"put {tok} last: {tokens!r}"
-                )
-            elif is_long:
-                # Unknown long flag with no "=value": treat the next token
-                # as its value.
-                i += 1
-                params[key] = _coerce(tokens[i])
-            # else: unrecognised bare short flag -- ignored (kubectl refuses it).
+            elif is_long or i + 1 < len(tokens) or val is not None:
+                # Unknown to the parser. Refused unless "=value" or its place at the
+                # end shows how kubectl would read it (see _other_flag).
+                i, params[key] = _other_flag(tokens, i, values=(), bools=(), tool="kubectl")
+            # else: an unknown short flag at the end -- ignored (kubectl refuses it).
         else:
             positional.append(tok)
         i += 1
@@ -1103,6 +1190,14 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
         if not positional:
             raise ValueError(f"could not find a target resource in: {argv!r}")
         return _run_intents(positional, params, metadata)
+
+    if not positional and params.get("selector") is not None and (
+            verb == "logs" or verb in _NODE_TARGET_VERBS):
+        # kubectl logs -l app=x reads every pod the selector matches, in the namespace
+        # it would use anyway (logs has no -A), and cordon, uncordon and drain -l act on
+        # every node it matches. Checked on kubectl 1.36 against a local stub server.
+        kind = "pod" if verb == "logs" else "node"
+        return _mark_open_targets(_make_intents([f"{kind}/*"], verb, params, metadata))
 
     if verb in _POD_TARGET_VERBS:
         if not positional:

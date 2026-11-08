@@ -3313,13 +3313,33 @@ def test_taint_with_a_name_alone_stays_that_name():
         assert [i.resource for i in from_kubectl_multi(command.split())] == ["node/n1"]
 
 
-@pytest.mark.parametrize("command", [
-    "kubectl cordon -l zone=a", "kubectl uncordon -l zone=a", "kubectl drain -l zone=a",
-    "kubectl logs -l app=web", "kubectl exec -l app=web -- ls",
-])
+@pytest.mark.parametrize("command", ["kubectl exec -l app=web -- ls", "kubectl attach -l a=b"])
 def test_a_selector_on_a_verb_that_names_its_target_stays_refused(command):
+    # exec and attach have no --selector: kubectl refuses them too
     with pytest.raises(ValueError, match="target resource"):
         from_kubectl_multi(command.split())
+
+
+@pytest.mark.parametrize("command,resource,params,metadata", [
+    # checked on kubectl 1.36 against a local stub server: the pods or nodes it listed
+    ("kubectl logs -l app=web", "pod/*", {"selector": "app=web"}, {}),
+    ("kubectl logs -fl app=web -n dev", "pod/*", {"selector": "app=web", "follow": True},
+     {"namespace": "dev"}),
+    ("kubectl logs -lapp=web -c app --namespace=prod", "pod/*",
+     {"selector": "app=web", "container": "app"}, {"namespace": "prod"}),
+    ("kubectl logs --selector app=web --all-containers", "pod/*",
+     {"selector": "app=web", "all-containers": True}, {}),
+    ("kubectl cordon -l zone=a", "node/*", {"selector": "zone=a"}, {}),
+    ("kubectl uncordon -l zone=a", "node/*", {"selector": "zone=a"}, {}),
+    ("kubectl drain -l zone=a --ignore-daemonsets", "node/*",
+     {"selector": "zone=a", "ignore-daemonsets": True}, {}),
+])
+def test_a_selector_is_the_target_where_kubectl_takes_one(command, resource, params, metadata):
+    intents = from_kubectl_multi(command.split())
+    assert [i.resource for i in intents] == [resource]
+    kind = resource.partition("/")[0]
+    assert intents[0].params == {**params, "resolved_at_runtime": _open_marker(kind)}
+    assert intents[0].metadata == metadata
 
 
 @pytest.mark.parametrize("command", ["kubectl run web --image=x", "kubectl debug web --image=x"])

@@ -4765,8 +4765,10 @@ def test_everyday_reads_under_the_example_policy(opted_in_project, command):
     "kubectl cordon -l zone=a", "kubectl drain -l zone=a", "kubectl uncordon -l zone=a",
     "kubectl logs -l app=web",
 ])
-def test_a_selector_on_a_verb_that_names_its_target_stays_denied(opted_in_project, command):
-    assert hook.decide(command, opted_in_project / ".aegis").decision == "deny", command
+def test_a_selector_on_a_verb_that_names_its_target_is_read(opted_in_project, command):
+    # kubectl reads the nodes or pods from the selector; the example policy has no rule
+    # on these verbs, as it has none on the same verbs with a name
+    assert hook.decide(command, opted_in_project / ".aegis").decision == "allow", command
 
 
 def test_a_plan_batch_rule_counts_the_same(opted_in_project):
@@ -4844,9 +4846,21 @@ def test_the_object_a_command_reaches_through_the_hook(opted_in_project, pattern
         assert "target-unresolved: r0" in verdict.reason
 
 
-def test_logs_with_a_selector_stays_refused(opted_in_project):
-    config_dir = _own_policy(opted_in_project, ("pod/*", ["delete"]))
-    assert hook.decide("kubectl logs -l a=b", config_dir).decision == "deny"
+@pytest.mark.parametrize("pattern,action,command,decision", [
+    ("pod/*", "logs", "kubectl logs -l a=b", "deny"),
+    ("pod/*", "logs", "kubectl logs -fl a=b -n dev", "deny"),
+    ("pod/web-0", "logs", "kubectl logs -l a=b", "ask"),
+    ("pod/*", "delete", "kubectl logs -l a=b", "allow"),
+    ("node/*", "drain", "kubectl drain -l zone=a --ignore-daemonsets", "deny"),
+    ("node/n1", "cordon", "kubectl cordon -l zone=a", "ask"),
+])
+def test_logs_and_nodes_by_selector_meet_the_rules(opted_in_project, pattern, action, command,
+                                                   decision):
+    config_dir = _own_policy(opted_in_project, (pattern, [action]))
+    verdict = hook.decide(command, config_dir)
+    assert verdict.decision == decision, (command, verdict)
+    if decision == "ask":
+        assert "target-unresolved: r0" in verdict.reason
 
 
 @pytest.mark.parametrize("command,decision", [
