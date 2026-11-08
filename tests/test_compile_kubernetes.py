@@ -538,6 +538,12 @@ def test_client_parity_lists_a_verb_whose_flag_changes_the_request(tmp_path, pat
     rule = _rule("r", pattern, [verb])
     parity = _cov(_compile(tmp_path, rule), "r")["client_parity"]
     assert parity["status"] == "wider-than-client" and listed in parity["widened_verbs"]
+    if "--raw" in spelled:
+        # a raw write to a subresource names nothing the parser can match: the client
+        # refuses it (review round 14) rather than allowing it
+        with pytest.raises(ValueError):
+            from_kubectl_multi(["kubectl", *spelled.split()])
+        return
     store = ConstraintStore(authority_map={"admin": {"deletion"}})
     store.add_constraint(rule)
     gate = AegisInterceptor(store)

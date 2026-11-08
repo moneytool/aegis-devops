@@ -776,6 +776,41 @@ _GCLOUD_LOWER_UNIT = {"PIB": "TIB", "PB": "TIB", "TIB": "GIB", "TB": "GIB", "GIB
                       "GB": "MIB", "MIB": "KIB", "MB": "KIB", "KIB": "B", "KB": "B"}
 
 
+# The settings a gcloud file flag fills besides the one its name gives (--env-vars-file
+# replaces what --set-env-vars or --update-env-vars would set).
+_GCLOUD_FILE_FLAG_TARGETS = {
+    "env-vars-file": ("env-vars", "set-env-vars", "update-env-vars"),
+    "build-env-vars-file": ("build-env-vars", "set-build-env-vars", "update-build-env-vars"),
+}
+
+
+def _gcloud_mark_file_flag(params: dict[str, Any], key: str, declared: str | None) -> None:
+    """gcloud reads the value of a file flag from a file when it runs: a flag named
+    ``*-from-file`` or ``*-file``, or one the SDK types as FileContents, YAMLFileContents or
+    BufferedFileInput (``file``, ``dict:file``). What the file holds is not read, so the
+    setting it fills is unresolved: ``--metadata-from-file enable-oslogin=f.txt`` leaves
+    ``metadata.enable-oslogin`` unresolved (each key given), ``--labels-file f`` leaves
+    ``labels`` and every ``labels.*`` key unresolved."""
+    if key.endswith("-from-file"):
+        base = key[: -len("-from-file")]
+    elif key.endswith("-file"):
+        base = key[: -len("-file")]
+    elif declared in ("file", "dict:file", "list:file"):
+        base = key
+    else:
+        return
+    targets = _GCLOUD_FILE_FLAG_TARGETS.get(key, (base,))
+    value = params.get(key)
+    if isinstance(value, dict):
+        for name in value:
+            for target in (key, *targets):
+                _mark_unresolved(params, f"{target}.{name}")
+        return
+    for target in dict.fromkeys((key, *targets)):
+        _mark_unresolved(params, target)
+        _mark_unresolved(params, f"{target}.*")
+
+
 def _gcloud_typed(kind: str, value: Any) -> Any:
     """A gcloud value as the SDK's declared type parses it (calliope arg_parsers):
     ``gint`` BoundedInt (Python int()), ``gfloat`` BoundedFloat, ``gbool`` ArgBoolean
@@ -1634,6 +1669,13 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
     elif command is not None:
         params["command"] = command
 
+    if params.get("raw") == "" and verb != "config":
+        del params["raw"]  # kubectl only takes the raw path when it is not empty
+    if isinstance(params.get("raw"), str) and verb != "config":
+        if verb not in _KUBECTL_RAW_VERBS:
+            raise ValueError(f"kubectl {verb} has no --raw: {argv!r}")
+        return _kubectl_raw_intents(argv, verb, params, metadata, positional, manifests)
+
     if manifests and verb in ("apply", "create", "replace", "delete"):
         # The objects are in the manifest, which is not read: kind- and
         # name-based rules escalate on it (manifest-not-inspected).
@@ -1782,6 +1824,89 @@ def _namespace_cascade_intents(
             )
         )
     return cascades
+
+
+# The kubectl verbs with a --raw path (kubectl 1.36: get.go, create.go, replace.go, and
+# delete_flags.go for delete only, not for apply or run).
+_KUBECTL_RAW_VERBS = frozenset({"get", "create", "replace", "delete"})
+# Subresources of a namespace, which /api/v1/namespaces/<ns>/<word> could also be read as
+# a collection in <ns>.
+_KUBE_NAMESPACE_SUBRESOURCES = frozenset({"status", "finalize"})
+
+
+def _kubectl_raw_intents(
+    argv: list[str], verb: str, params: dict[str, Any], metadata: dict[str, Any],
+    positional: list[str], manifests: list[str],
+) -> list[InfrastructureIntent]:
+    """``kubectl get|create|replace|delete --raw PATH``: one GET, POST, PUT or DELETE to
+    PATH (rawhttp). kubectl reads nothing else as the target: the positional words, ``-n``,
+    ``-l`` and ``--dry-run`` are ignored (delete.go Complete returns before it resolves
+    targets, and RawDelete, RawPost and RawPut send no dry-run). So the target, namespace
+    and action come from the path: ``/api/v1[/namespaces/NS]/PLURAL[/NAME]`` and
+    ``/apis/GROUP/VERSION[/namespaces/NS]/PLURAL[/NAME]``; a collection is ``kind/*``,
+    marked. Any other path -- a subresource, a non-resource path, a query, an escaped,
+    empty or dot segment -- is refused, since what it reads or changes is not known.
+    ``-f`` is the request body, which is not read."""
+    raw = params["raw"]
+    write = verb != "get"
+    if write:
+        limit = 1 if verb == "delete" else None
+        if limit is None and len(manifests) != 1:
+            raise ValueError(f"kubectl {verb} --raw takes exactly one -f: {argv!r}")
+        if limit is not None and len(manifests) > limit:
+            raise ValueError(f"kubectl {verb} --raw takes one -f at most: {argv!r}")
+        if any(m.startswith(("http://", "https://")) for m in manifests):
+            raise ValueError(f"kubectl --raw cannot read from a url: {argv!r}")
+        if verb == "create" and positional:
+            raise ValueError(f"kubectl create takes no arguments: {argv!r}")
+    if not raw.startswith("/"):
+        raise ValueError(f"kubectl --raw {raw!r} is not a path on the API server: {argv!r}")
+    path, query_sep, _query = raw.partition("?")
+    segments = path.split("/")[1:]
+    odd = bool(query_sep) or "#" in raw or "%" in path or any(
+        seg in ("", ".", "..") for seg in segments)
+
+    group: str | None = None
+    rest: list[str] = []
+    if segments[:2] == ["api", "v1"]:
+        group, rest = "", segments[2:]
+    elif len(segments) >= 3 and segments[0] == "apis":
+        group, rest = segments[1], segments[3:]
+    namespace = None
+    subresource: list[str] = []
+    if group is not None and len(rest) >= 3 and rest[0] == "namespaces":
+        if group == "" and len(rest) == 3 and rest[2] in _KUBE_NAMESPACE_SUBRESOURCES:
+            rest, subresource = rest[:2], rest[2:]
+        else:
+            namespace, rest = rest[1], rest[2:]
+    if len(rest) > 2:
+        rest, subresource = rest[:2], rest[2:]
+
+    kept = {k: v for k, v in params.items()
+            if k not in ("dry_run", "selector", "file", "manifest_not_inspected")}
+    meta = {k: v for k, v in metadata.items() if k not in ("namespace", "all_namespaces")}
+    if group is None or not rest or odd or subresource:
+        # a read too: a path that names no object can still return any (a list under
+        # /apis, an aggregated API), so it stays refused (fail closed)
+        raise ValueError(f"kubectl {verb} --raw {raw!r} is not one resource or "
+                         f"collection the parser can name: {argv!r}")
+    plural = rest[0]
+    name = rest[1] if len(rest) == 2 else None
+    qualified = f"{plural}.{group}" if group else plural
+    kind, _ = _split_resource_token(f"{qualified}/x")
+    if namespace is not None:
+        meta["namespace"] = namespace
+    if manifests:
+        kept["file"] = manifests[0]
+        if verb in ("create", "replace"):
+            kept["manifest_not_inspected"] = True  # the object sent is in the body
+    if name is not None:
+        return _make_intents([f"{kind}/{name}"], verb, kept, meta)
+    from aegis_core.store import _kind_is_cluster_scoped  # local: avoids a cycle
+
+    if namespace is None and not _kind_is_cluster_scoped(f"{kind}/x"):
+        meta["all_namespaces"] = True  # a namespaced collection with no namespace: all
+    return _mark_open_targets(_make_intents([f"{kind}/*"], verb, kept, meta))
 
 
 def from_kubectl(argv: list[str]) -> InfrastructureIntent:
@@ -2159,41 +2284,86 @@ _AWS_GLOBAL_OPTIONS = {
     "cli-auto-prompt": False, "no-cli-auto-prompt": False, "cli-error-format": True,
 }
 
-# Every option of each "aws s3" command, from aws-cli 2.37 (the ARG_TABLE of each class in
-# awscli/customizations/s3/subcommands.py, and the syncstrategy options of sync), with how
-# many words it takes: "" none, "1" one, "?" the next one unless it is an option, "+" every
-# word up to the next option, "2" two. argparse takes an unambiguous prefix of any of them
-# (--del is --delete on sync, --dryr is --dryrun), after the global options have had theirs.
-_AWS_S3_TRANSFER = (
-    "dryrun: quiet: include:1 exclude:1 acl:1 follow-symlinks: no-follow-symlinks: "
-    "no-guess-mime-type: sse:? sse-c:? sse-c-key:1 sse-kms-key-id:1 sse-c-copy-source:? "
-    "sse-c-copy-source-key:1 storage-class:1 grants:+ website-redirect:1 content-type:1 "
-    "cache-control:1 content-disposition:1 content-encoding:1 content-language:1 expires:1 "
-    "source-region:1 only-show-errors: no-progress: progress-frequency:1 progress-multiline: "
-    "page-size:1 ignore-glacier-warnings: force-glacier-transfer: request-payer:? "
-    "checksum-mode:1 checksum-algorithm:1 metadata:1 copy-props:1 metadata-directive:1 "
-    "case-conflict:1 no-overwrite:"
-)
-_AWS_S3_OPTIONS = {
-    command: dict(word.split(":") for word in spec.split())
-    for command, spec in {
-        "cp": _AWS_S3_TRANSFER + " expected-size:1 recursive:",
-        "mv": _AWS_S3_TRANSFER + " recursive: validate-same-s3-paths:",
-        "sync": _AWS_S3_TRANSFER + " size-only: exact-timestamps: delete:",
-        "rm": "dryrun: quiet: recursive: request-payer:? include:1 exclude:1 "
-              "only-show-errors: page-size:1",
-        "ls": "recursive: page-size:1 human-readable: summarize: request-payer:? "
-              "bucket-name-prefix:1 bucket-region:1",
-        "mb": "tags:2",
-        "rb": "force:",
-    }.items()
-}
+# The options of each "aws s3" command are aws-cli's own (the ARG_TABLE of each class in
+# awscli/customizations/s3/subcommands.py, with the options sync's strategies add), read
+# into aws_cli_options.zip by scripts/gen_aws_cli_options.py: how many words each takes
+# ("" none, "1" one, "?" the next one unless it is an option, "+" every word up to the next
+# option, "2" two), its type ("t": integer, map, blob), its shape ("x"), its choices ("c"),
+# a bare optional value's value ("k"), and whether it accumulates ("a"). argparse takes an
+# unambiguous prefix of any of them (--del is --delete on sync, --dryr is --dryrun), after
+# the global options have had theirs.
+
+
+def _aws_s3_spec(command: str) -> dict[str, Any]:
+    """The table entry of ``aws s3 <command>``."""
+    table = _aws_command_table("s3") or {}
+    return table.get("s", {}).get(command, {})
+
+
+def _aws_s3_store(params: dict[str, Any], command: str, name: str, value: Any,
+                  spec: dict[str, Any], tokens: list[str]) -> None:
+    """One value of an ``aws s3`` option, as aws-cli reads it: argparse checks the choices
+    (exactly as written), then paramfile reads a ``file://``/``fileb://`` value (a one-word
+    list as that word) from the file, which is not read: the option and its nested keys
+    are unresolved. Then an option with a type is unpacked as aws-cli unpacks it (an
+    integer with Python's int, a map from shorthand or JSON); the others stay text.
+    --include and --exclude accumulate in order (``filters``, the later rule winning, as
+    aws applies them), and mb --tags accumulates key-value pairs."""
+    choices = spec.get("c", {}).get(name)
+    words = value if isinstance(value, list) else [value]
+    if choices and any(w not in choices for w in words if isinstance(w, str)):
+        raise ValueError(f"aws s3 {command}: --{name} {value!r} is not one of {choices}, "
+                         f"and aws refuses it: {tokens!r}")
+    accumulate = spec.get("a", {}).get(name)
+    if accumulate == "filter":
+        pattern = words[0]
+        params.setdefault("filters", []).append([name, pattern])
+        params.setdefault(name, []).append(pattern)
+        if _aws_file_ref(pattern):
+            _mark_unresolved(params, name)
+            _mark_unresolved(params, "filters")
+        return
+    if accumulate == "append":
+        if _aws_file_ref(value) or any(_aws_file_ref(w) for w in words):
+            params.setdefault(name, value if isinstance(value, list) else [value])
+            _mark_unresolved(params, name)
+            _mark_unresolved(params, f"{name}.*")
+            return
+        if name == "tags" and len(words) == 2:
+            tags = params.setdefault(name, {})
+            if not isinstance(tags, dict) or words[0] in tags:
+                raise ValueError(f"aws s3 {command}: tag {words[0]!r} given twice: {tokens!r}")
+            tags[words[0]] = words[1]
+        else:
+            params.setdefault(name, []).append(value)
+        return
+    if _aws_file_ref(value):
+        params[name] = value  # paramfile reads it; _mark_aws_file_values marks it
+        return
+    kind = spec.get("t", {}).get(name)
+    if kind == "integer":
+        try:
+            params[name] = int(str(value))
+        except ValueError:
+            raise ValueError(f"aws s3 {command}: --{name} {value!r} is not an integer, "
+                             f"and aws refuses it: {tokens!r}") from None
+    elif kind in ("map", "structure") or (kind or "").startswith("list"):
+        shape = spec.get("x", {}).get(name)
+        table = _aws_command_table("s3") or {}
+        try:
+            params[name] = _aws_unpack(value, shape, table.get("shapes", {}), f"--{name}")
+        except _AwsFromFile:
+            params[name] = value
+            _mark_unresolved(params, name)
+            _mark_unresolved(params, f"{name}.*")
+    else:
+        params[name] = value
 
 
 def _aws_s3_option(command: str, key: str) -> str:
     """The option of ``aws s3 <command>`` that ``--key`` names: the exact name or the one
     option it is a prefix of. Anything else aws refuses, and so does the parser."""
-    options = _AWS_S3_OPTIONS[command]
+    options = _aws_s3_spec(command).get("o", {})
     if key in options:
         return key
     found = [name for name in options if name.startswith(key)]
@@ -2436,7 +2606,7 @@ def _parse_aws_tokens(
 ) -> tuple[dict[str, Any], dict[str, Any], list[str], str | None, list[str] | None,
            list[tuple[str, list[str]]], str | None]:
     """``(metadata, params, positional, id, ids, abbreviations, id_flag)``. ``s3`` names the
-    high-level ``aws s3`` command whose options to read (:data:`_AWS_S3_OPTIONS`). ``spec``
+    high-level ``aws s3`` command whose options to read (:func:`_aws_s3_spec`). ``spec``
     is the operation's entry in the option table (:func:`_aws_operation_spec`): every
     option is then resolved to its full name and given the words aws gives it, and one the
     operation does not have is refused.
@@ -2488,27 +2658,38 @@ def _parse_aws_tokens(
                 metadata["profile"] = val
             elif s3 and tok.startswith("--") and key not in _AWS_GLOBAL_OPTIONS:
                 name = _aws_s3_option(s3, key)
-                arity = _AWS_S3_OPTIONS[s3][name]
+                s3_spec = _aws_s3_spec(s3)
+                arity = s3_spec["o"][name]
+                value: Any
                 if name == "dryrun":
                     _record_dry_run(params, _is_dry_run(val))
-                elif not arity:
-                    params[name] = _bool_param(val)
-                elif val is not None:
-                    params[name] = val
+                    i += 1
+                    continue
+                if not arity:
+                    if val is not None:
+                        raise ValueError(f"aws s3 {s3}: {tok} takes no value: {tokens!r}")
+                    params[name] = True
+                    i += 1
+                    continue
+                if val is not None:
+                    value = val
                 elif arity in ("+", "2"):
                     count = n if arity == "+" else 2
-                    values: list[str] = []
-                    while len(values) < count and i + 1 < n and not tokens[i + 1].startswith("-"):
+                    words: list[str] = []
+                    while len(words) < count and i + 1 < n and not tokens[i + 1].startswith("-"):
                         i += 1
-                        values.append(tokens[i])
-                    params[name] = values
+                        words.append(tokens[i])
+                    if not words or (arity == "2" and len(words) != 2):
+                        raise ValueError(f"aws s3 {s3}: {tok} is missing its values: {tokens!r}")
+                    value = words
                 elif i + 1 < n and not tokens[i + 1].startswith("-"):
                     i += 1
-                    params[name] = tokens[i]
+                    value = tokens[i]
                 elif arity == "?":
-                    params[name] = True
+                    value = s3_spec.get("k", {}).get(name, True)
                 else:
                     raise ValueError(f"aws s3 {s3}: {tok} is missing its value: {tokens!r}")
+                _aws_s3_store(params, s3, name, value, s3_spec, tokens)
             elif key == "dry-run" or (dry_prefix and len(key) >= 3 and tok.startswith("--")
                                       and "dry-run".startswith(key)):
                 # a prefix of --dry-run, before the operation is known (then its table decides)
@@ -3976,6 +4157,7 @@ def _parse_gcloud_tokens(
                     _mark_type(params, key, kind)
                 else:
                     params[key] = val
+                _gcloud_mark_file_flag(params, key, declared)
             elif table is not None and key in table["optional"]:
                 if val is None and i + 1 < n and not tokens[i + 1].startswith("-"):
                     i += 1  # argparse takes the next word as the optional value
@@ -3991,8 +4173,10 @@ def _parse_gcloud_tokens(
                     i += 1
                     val = _value_at(tokens, i, tok)
                 params[key] = val
+                _gcloud_mark_file_flag(params, key, None)
             elif val is not None:
                 params[key] = val
+                _gcloud_mark_file_flag(params, key, None)
             elif key.startswith("no-") and tok.startswith("--"):
                 _set_bool_param(params, key, True)
             elif lenient:

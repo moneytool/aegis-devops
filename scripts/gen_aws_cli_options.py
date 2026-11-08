@@ -15,7 +15,9 @@ command is ``{"o": {option: arity}, "m": {Member: option}, "p": [[name, arity]],
 each one is, ``t`` the type of each value that is not a string (``integer``, ``long``,
 ``float``, ``double``, ``timestamp``, ``blob``, ``structure``, ``map``, ``list:<member>``),
 ``x`` the botocore shape of each structure, map or list option (in the command's
-``shapes``, by name), ``p`` positional arguments, ``s`` subcommands (``ec2 wait``)."""
+``shapes``, by name), ``a`` options that accumulate (``append``, or ``filter`` for s3's
+ordered --include/--exclude), ``c`` the choices argparse allows, ``k`` the value of a bare
+optional-value option, ``p`` positional arguments, ``s`` subcommands (``ec2 wait``)."""
 
 import argparse
 import json
@@ -59,6 +61,14 @@ def _shape_name(model, shapes: dict) -> str:
 def _command(cmd, depth: int, shapes: dict | None = None) -> dict:
     entry: dict = {}
     shapes = {} if shapes is None else shapes
+    # a command's own table first: building it registers the options plugins add to the
+    # command's arguments (s3 sync's --delete, --size-only, --exact-timestamps)
+    sub = None
+    if depth < 3:
+        if hasattr(cmd, "_get_command_table"):
+            sub = cmd._get_command_table()
+        else:
+            sub = getattr(cmd, "subcommand_table", None)
     try:
         arg_table = cmd.arg_table
     except Exception:  # a group with no options of its own
@@ -103,12 +113,29 @@ def _command(cmd, depth: int, shapes: dict | None = None) -> dict:
             entry["m"] = members
         if positional:
             entry["p"] = positional
-    sub = None
-    if depth < 3:
-        if hasattr(cmd, "_get_command_table"):
-            sub = cmd._get_command_table()
-        else:
-            sub = getattr(cmd, "subcommand_table", None)
+        # what argparse does with a value beyond its count: "a" the options that accumulate
+        # (action append, s3's AppendFilter), "c" the choices argparse allows, "k" the value
+        # of a bare optional-value option (const)
+        accumulate, choices, consts = {}, {}, {}
+        for action in parser._actions:
+            long_names = [s[2:] for s in action.option_strings if s.startswith("--")]
+            if not long_names:
+                continue
+            name = long_names[0]
+            if type(action).__name__ == "AppendFilter":
+                accumulate[name] = "filter"
+            elif isinstance(action, argparse._AppendAction):
+                accumulate[name] = "append"
+            if action.choices:
+                choices[name] = list(action.choices)
+            if action.nargs == "?" and action.const is not None:
+                consts[name] = action.const
+        if accumulate:
+            entry["a"] = accumulate
+        if choices:
+            entry["c"] = choices
+        if consts:
+            entry["k"] = consts
     if sub:
         entry["s"] = {name: _command(child, depth + 1, shapes)
                       for name, child in sorted(sub.items())}

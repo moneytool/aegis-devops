@@ -111,8 +111,10 @@ _SDK_AREAS = {
 def _type_kind(node: ast.AST | None) -> str | None:
     """A flag's ``type=`` as the kinds the parser normalizes: ``int``, ``float``, ``bool``
     (ArgBoolean), ``size:<default unit>`` (BinarySize, in bytes), ``duration:<default
-    unit>`` (Duration, in seconds), ``list:<element kind>`` (ArgList), ``dict`` (ArgDict);
-    None for a string; ``unresolved`` for a type that cannot be read statically."""
+    unit>`` (Duration, in seconds), ``list:<element kind>`` (ArgList), ``dict`` (ArgDict),
+    ``file`` (FileContents, YAMLFileContents, BufferedFileInput: read from a file) and
+    ``dict:file`` (an ArgDict of them); None for a string; ``unresolved`` for a type that
+    cannot be read statically."""
     if node is None:
         return None
     if isinstance(node, ast.Name):
@@ -140,12 +142,22 @@ def _type_kind(node: ast.AST | None) -> str | None:
             unit = const("default_unit", "s")
             parsed = const("parsed_unit", "s")
             return f"duration:{unit}" if unit and parsed == "s" else "unresolved"
+        if name in _FILE_TYPES:
+            return "file"
         if name == "ArgList":
             element = _type_kind(kwargs.get("element_type"))
             return f"list:{element or 'str'}" if element != "unresolved" else "unresolved"
         if name == "ArgDict":
-            return "dict"
+            # ArgDict(value_type=FileContents()): each key's value is a file's contents
+            values = _type_kind(kwargs.get("value_type")) if "value_type" in kwargs else None
+            return "dict:file" if values == "file" else "dict"
+    if isinstance(node, ast.Attribute) and node.attr in _FILE_TYPES:
+        return "file"
     return "unresolved"
+
+
+# calliope's types whose value is read from a file (or stdin) when gcloud runs
+_FILE_TYPES = frozenset({"FileContents", "YAMLFileContents", "BufferedFileInput"})
 
 
 def sdk_types(root: str) -> dict[str, dict[str, str]]:
@@ -187,6 +199,27 @@ def fetch(path: str) -> str:
         return response.read().decode("utf-8")
 
 
+def refresh_types(out: str, sdk: str) -> None:
+    """Re-reads only the value types of an existing table from the SDK mirror at ``sdk``,
+    keeping its flag lists (which come from the reference pages)."""
+    with open(out) as f:
+        table = json.load(f)
+    commit = subprocess.run(["git", "-C", sdk, "rev-parse", "HEAD"], capture_output=True,
+                            text=True, check=False).stdout.strip()
+    source, _, _ = table["_source"].partition("; value types from")
+    table["_source"] = (f"{source}; value types from "
+                        f"github.com/google-cloud-sdk-unofficial/google-cloud-sdk {commit}")
+    types = sdk_types(sdk)
+    for command, entry in table.items():
+        if command.startswith("_") or command == "root":
+            continue
+        area = types.get(command.split()[0], {})
+        entry["types"] = {name: area[name] for name in entry["value"] if name in area}
+    with open(out, "w") as f:
+        json.dump(table, f, indent=1, sort_keys=True)
+        f.write("\n")
+
+
 def main(out: str, sdk: str) -> None:
     commit = subprocess.run(["git", "-C", sdk, "rev-parse", "HEAD"], capture_output=True,
                             text=True, check=False).stdout.strip()
@@ -209,4 +242,7 @@ def main(out: str, sdk: str) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    if sys.argv[1] == "--types-only":
+        refresh_types(sys.argv[2], sys.argv[3])
+    else:
+        main(sys.argv[1], sys.argv[2])

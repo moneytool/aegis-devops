@@ -448,7 +448,7 @@
    "network-interface": "unresolved",
    "network-performance-configs": "dict",
    "network-tier": "unresolved",
-   "node-affinity-file": "unresolved",
+   "node-affinity-file": "file",
    "preemption-notice-duration": "duration:s",
    "provisioning-model": "unresolved",
    "request-valid-for-duration": "duration:s",
@@ -617,7 +617,7 @@
    "custom-memory": "size:G",
    "labels": "unresolved",
    "network-tier": "unresolved",
-   "node-affinity-file": "unresolved",
+   "node-affinity-file": "file",
    "scopes": "list:str",
    "tags": "unresolved",
    "timeout": "unresolved"
@@ -783,7 +783,7 @@
   "types": {
    "graceful-shutdown-max-duration": "duration:s",
    "identity-type": "unresolved",
-   "node-affinity-file": "unresolved"
+   "node-affinity-file": "file"
   },
   "value": [
    "graceful-shutdown-max-duration",
@@ -966,7 +966,7 @@
    "alpha-cluster-feature-gates": "list:str",
    "autopilot-privileged-admission": "list:str",
    "autopilot-workload-policies": "unresolved",
-   "autoprovisioning-config-file": "unresolved",
+   "autoprovisioning-config-file": "file",
    "autoprovisioning-locations": "list:str",
    "autoprovisioning-max-surge-upgrade": "int",
    "autoprovisioning-max-unavailable-upgrade": "int",
@@ -977,7 +977,7 @@
    "binauthz-evaluation-mode": "unresolved",
    "boot-disk-provisioned-iops": "int",
    "boot-disk-provisioned-throughput": "int",
-   "containerd-config-from-file": "unresolved",
+   "containerd-config-from-file": "file",
    "create-subnetwork": "dict",
    "data-cache-count": "int",
    "database-encryption-key": "unresolved",
@@ -1020,7 +1020,7 @@
    "service-account-signing-keys": "list:str",
    "service-account-verification-keys": "list:str",
    "storage-pools": "list:str",
-   "system-config-from-file": "unresolved",
+   "system-config-from-file": "file",
    "tags": "unresolved",
    "threads-per-core": "int",
    "total-max-nodes": "int",
@@ -1417,7 +1417,7 @@
    "additional-pod-ipv4-ranges": "list:str",
    "autopilot-privileged-admission": "list:str",
    "autopilot-workload-policies": "unresolved",
-   "autoprovisioning-config-file": "unresolved",
+   "autoprovisioning-config-file": "file",
    "autoprovisioning-locations": "list:str",
    "autoprovisioning-max-surge-upgrade": "int",
    "autoprovisioning-max-unavailable-upgrade": "int",
@@ -1426,7 +1426,7 @@
    "autoprovisioning-scopes": "list:str",
    "autoprovisioning-standard-rollout-policy": "dict",
    "binauthz-evaluation-mode": "unresolved",
-   "containerd-config-from-file": "unresolved",
+   "containerd-config-from-file": "file",
    "database-encryption-key": "unresolved",
    "enable-kubernetes-unstable-apis": "list:str",
    "fleet-project": "unresolved",
@@ -1659,7 +1659,7 @@
    "autoscaled-rollout-policy": "dict",
    "boot-disk-provisioned-iops": "int",
    "boot-disk-provisioned-throughput": "int",
-   "containerd-config-from-file": "unresolved",
+   "containerd-config-from-file": "file",
    "create-pod-ipv4-range": "dict",
    "data-cache-count": "int",
    "disk-size": "size:G",
@@ -1684,10 +1684,10 @@
    "scopes": "list:str",
    "secondary-boot-disk": "dict",
    "sole-tenant-min-node-cpus": "int",
-   "sole-tenant-node-affinity-file": "unresolved",
+   "sole-tenant-node-affinity-file": "file",
    "standard-rollout-policy": "dict",
    "storage-pools": "list:str",
-   "system-config-from-file": "unresolved",
+   "system-config-from-file": "file",
    "tags": "unresolved",
    "threads-per-core": "int",
    "total-max-nodes": "int",
@@ -1899,7 +1899,7 @@
    "autoscaled-rollout-policy": "dict",
    "boot-disk-provisioned-iops": "int",
    "boot-disk-provisioned-throughput": "int",
-   "containerd-config-from-file": "unresolved",
+   "containerd-config-from-file": "file",
    "disk-size": "size:G",
    "labels": "dict",
    "max-nodes": "int",
@@ -1913,7 +1913,7 @@
    "resource-manager-tags": "dict",
    "standard-rollout-policy": "dict",
    "storage-pools": "list:str",
-   "system-config-from-file": "unresolved",
+   "system-config-from-file": "file",
    "tags": "unresolved",
    "total-max-nodes": "int",
    "total-min-nodes": "int",
@@ -2171,7 +2171,7 @@
   "optional": [],
   "types": {
    "condition": "unresolved",
-   "condition-from-file": "unresolved"
+   "condition-from-file": "file"
   },
   "value": [
    "condition",
@@ -2239,7 +2239,7 @@
   "optional": [],
   "types": {
    "condition": "unresolved",
-   "condition-from-file": "unresolved"
+   "condition-from-file": "file"
   },
   "value": [
    "condition",

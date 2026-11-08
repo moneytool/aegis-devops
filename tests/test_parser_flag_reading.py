@@ -3203,3 +3203,137 @@ def test_gh_field_from_a_file_is_unresolved_and_raw_field_is_text():
     raw = from_argv("gh api repos/a/b -f name=@n.txt -X PATCH".split())[0]
     assert raw.params["inputs"] == {"name": "@n.txt"}
     assert "inputs.name" not in raw.params.get("unresolved_scope", [])
+
+
+# --- review round 14 ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("command,resource,action,namespace", [
+    # kubectl sends one request to the raw path; the words, -n and --dry-run are not read
+    ("kubectl delete pod harmless -n dev --raw=/api/v1/namespaces/prod/pods/protected",
+     "pod/protected", "delete", "prod"),
+    ("kubectl delete pod harmless -n dev --dry-run=server --raw "
+     "/api/v1/namespaces/prod/pods/protected", "pod/protected", "delete", "prod"),
+    ("kubectl replace --raw /apis/apps/v1/namespaces/prod/deployments/web -f d.json",
+     "deployment/web", "replace", "prod"),
+    ("kubectl create --raw /api/v1/namespaces/prod/pods -f p.json", "pod/*", "create",
+     "prod"),
+    ("kubectl delete --raw /api/v1/nodes/n1", "node/n1", "delete", None),
+    ("kubectl delete --raw /api/v1/namespaces/prod", "namespace/prod", "delete", None),
+    ("kubectl delete --raw /apis/rbac.authorization.k8s.io/v1/clusterroles/admin",
+     "clusterrole/admin", "delete", None),
+    ("kubectl get --raw /api/v1/namespaces/prod/secrets/x", "secret/x", "get", "prod"),
+])
+def test_kubectl_raw_path_is_the_target(command, resource, action, namespace):
+    intents = from_argv(command.split())
+    assert [(i.resource, i.action) for i in intents] == [(resource, action)]
+    assert intents[0].metadata.get("namespace") == namespace
+    assert "dry_run" not in intents[0].params
+
+
+def test_kubectl_raw_rules_meet_the_path_not_the_words():
+    command = "kubectl delete pod harmless -n dev --raw=/api/v1/namespaces/prod/pods/protected"
+    assert _verdict([_rule("kubernetes", "pod/protected", ["delete"])], command) == "BLOCK"
+    assert _verdict([_rule("kubernetes", "pod/*", ["delete"], {"namespace": "prod"})],
+                    command) == "BLOCK"
+    assert _verdict([_rule("kubernetes", "pod/harmless", ["delete"])], command) == "ALLOW"
+
+
+def test_kubectl_raw_collection_is_marked():
+    intent = from_argv("kubectl delete --raw /api/v1/pods".split())[0]
+    assert intent.resource == "pod/*" and "resolved_at_runtime" in intent.params
+    assert intent.metadata.get("all_namespaces") is True
+
+
+@pytest.mark.parametrize("command", [
+    "kubectl delete --raw /api/v1/namespaces/prod/pods?labelSelector=a",  # a query
+    "kubectl delete --raw /api/v1/namespaces/dev/pods/../../prod/pods/x",  # dot segments
+    "kubectl delete --raw /api/v1/namespaces/prod/pods/x%2Fy",  # escaped
+    "kubectl create --raw /api/v1/namespaces/prod/pods/x/eviction -f e.json",  # subresource
+    "kubectl delete --raw /api/v1/namespaces/prod/finalize",  # a namespace subresource
+    "kubectl delete --raw /healthz",  # not a resource
+    "kubectl delete --raw https://elsewhere/api/v1/namespaces/prod/pods/x",  # not a path
+    "kubectl create --raw /api/v1/namespaces/prod/pods",  # create --raw needs one -f
+    "kubectl create --raw /api/v1/namespaces/prod/pods -f a.json -f b.json",
+    "kubectl apply --raw /api/v1/namespaces/prod/pods/x -f a.yaml",  # apply has no --raw
+])
+def test_kubectl_raw_writes_the_parser_cannot_name_are_refused(command):
+    with pytest.raises(ValueError):
+        from_argv(command.split())
+
+
+@pytest.mark.parametrize("command", [
+    "kubectl get --raw /healthz",
+    "kubectl get --raw /apis",
+    "kubectl get --raw /api/v1/namespaces/prod/pods/x/log",
+])
+def test_kubectl_get_raw_of_a_path_naming_no_object_stays_refused(command):
+    with pytest.raises(ValueError):
+        from_argv(command.split())
+
+
+@pytest.mark.parametrize("command,key,value", [
+    # aws-cli's s3 ARG_TABLE: --metadata is a map (shorthand or JSON), --page-size an int
+    ("aws s3 cp f s3://b/k --metadata classification=secret,owner=a", "metadata",
+     {"classification": "secret", "owner": "a"}),
+    ("aws s3 cp f s3://b/k --metadata {\"classification\":\"secret\"}", "metadata",
+     {"classification": "secret"}),
+    ("aws s3 rm s3://b/k --page-size 010", "page-size", 10),
+    ("aws s3 cp f s3://b/k --sse", "sse", "AES256"),  # a bare optional value: its const
+    ("aws s3 cp f s3://b/k --request-payer", "request-payer", "requester"),
+    ("aws s3 cp f s3://b/k --expires 2026-01-01T00:00:00Z", "expires",
+     "2026-01-01T00:00:00Z"),  # a plain string in aws-cli's table
+    ("aws s3 mb s3://b --tags env prod --tags team a", "tags", {"env": "prod", "team": "a"}),
+    ("aws s3 sync . s3://b --exclude * --include *.txt --exclude x*", "filters",
+     [["exclude", "*"], ["include", "*.txt"], ["exclude", "x*"]]),
+    ("aws s3 sync . s3://b --delete --size-only", "size-only", True),
+])
+def test_aws_s3_options_are_typed_as_aws_cli_declares(command, key, value):
+    assert from_argv(command.split())[0].params[key] == value
+
+
+def test_aws_s3_metadata_rule_meets_the_map():
+    rule = _rule("aws", "s3/bucket/*", ["put"], {"metadata.classification": "secret"})
+    assert _verdict([rule], "aws s3 cp f s3://b/k --metadata classification=secret") == \
+        "BLOCK"
+    assert _verdict([rule], "aws s3 cp f s3://b/k --metadata classification=public") == \
+        "ALLOW"
+    assert _verdict([rule], "aws s3 cp f s3://b/k --metadata file://m.json") == "ESCALATE"
+
+
+@pytest.mark.parametrize("command", [
+    "aws s3 cp f s3://b/k --sse AES",  # argparse choices, exactly as written
+    "aws s3 cp f s3://b/k --acl Public-Read",
+    "aws s3 rm s3://b/k --page-size 0x10",  # int() refuses it
+    "aws s3 cp f s3://b/k --recursive=false",  # store_true takes no value
+    "aws s3 mb s3://b --tags env",  # two words
+])
+def test_aws_s3_values_aws_refuses_are_refused(command):
+    with pytest.raises(ValueError):
+        from_argv(command.split())
+
+
+@pytest.mark.parametrize("command,marks", [
+    ("gcloud compute instances create vm --zone z --metadata-from-file "
+     "enable-oslogin=oslogin.txt", {"metadata.enable-oslogin"}),
+    ("gcloud container clusters create c --region r --metadata-from-file a=x.txt,b=y.txt",
+     {"metadata.a", "metadata.b"}),
+    ("gcloud storage buckets update gs://b --labels-file l.json", {"labels", "labels.*"}),
+    ("gcloud run deploy s --region r --image i --env-vars-file e.yaml",
+     {"set-env-vars.*", "update-env-vars.*", "env-vars.*"}),
+    ("gcloud iam service-accounts add-iam-policy-binding sa@p.iam.gserviceaccount.com "
+     "--member user:a --role r --condition-from-file c.yaml", {"condition", "condition.*"}),
+    ("gcloud container node-pools update p --cluster c --region r "
+     "--system-config-from-file s.yaml", {"system-config.*"}),
+])
+def test_gcloud_values_from_files_leave_their_settings_unresolved(command, marks):
+    intent = from_argv(command.split())[0]
+    assert marks <= set(intent.params["unresolved_scope"])
+
+
+def test_gcloud_metadata_from_file_escalates_a_metadata_rule():
+    rule = _rule("gcp", "compute/instance/*", ["create"], {"metadata.enable-oslogin": "TRUE"})
+    assert _verdict([rule], "gcloud compute instances create vm --zone z "
+                            "--metadata-from-file enable-oslogin=oslogin.txt") == "ESCALATE"
+    assert _verdict([rule], "gcloud compute instances create vm --zone z "
+                            "--metadata enable-oslogin=TRUE") == "BLOCK"

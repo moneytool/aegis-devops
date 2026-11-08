@@ -3036,11 +3036,18 @@ def test_gh_extension_exec_help_is_still_blocked_by_an_extension_rule():
     "kubectl get --raw /api/v1/namespaces/prod/secrets",
     "kubectl get --raw=/api/v1/namespaces/prod/secrets",
 ])
-def test_kubectl_get_raw_is_still_refused(argv):
-    """A raw URI path can read any kind (secrets included), which no
-    kind-based rule would match, so it stays a parse error (fail closed)."""
-    with pytest.raises(ValueError, match="could not find a target resource"):
-        from_kubectl_multi(argv.split())
+def test_kubectl_get_raw_reads_the_kind_its_path_names(argv):
+    """A raw URI path can read any kind (secrets included): the kind and namespace are
+    read from the path (review round 14), so a kind-based rule meets it."""
+    intents = from_kubectl_multi(argv.split())
+    assert [(i.resource, i.action) for i in intents] == [("secret/*", "get")]
+    assert intents[0].metadata["namespace"] == "prod"
+
+
+def test_kubectl_get_raw_of_a_path_naming_no_kind_is_still_refused():
+    """A path that names no kind stays a parse error (fail closed)."""
+    with pytest.raises(ValueError, match="not one resource or collection"):
+        from_kubectl_multi("kubectl get --raw /apis".split())
 
 
 @pytest.mark.parametrize("argv", [
