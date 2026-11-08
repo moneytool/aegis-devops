@@ -2093,10 +2093,6 @@ _AZ_BOOL_FLAGS = {"yes", "y", "no-wait", "debug", "verbose", "only-show-errors"}
 # --resource are full options of their own on many commands.
 _AZ_SCOPE_OPTIONS = ("name", "resource-group", "location", "subscription", "ids")
 _AZ_OWN_OPTIONS = frozenset({"id", "resource"})
-# The short options every az command has with one meaning: -n, -g and -l name the target and
-# its scope, -o is the output format, and -y (--yes) takes no value.
-_AZ_SHORT_VALUE_LETTERS = frozenset("nglo")
-_AZ_SHORT_BOOL_LETTERS = frozenset("yh")
 
 
 _AZ_GROUP_MAP = {
@@ -2119,30 +2115,60 @@ _AZ_GROUP_MAP = {
 }
 
 
+# The short letters of az commands, from every command module's _params.py in azure-cli
+# (dev branch, November 2026), plus -h (help) and -o (output). A letter in
+# _AZ_SHORT_BOOL_LETTERS is a plain boolean (store_true) on at least one command, so in a
+# bundled word the next letter may be an option of its own; every other known letter takes
+# the rest of its word as its value (three-state flags such as -z take an attached word as
+# their value too). -n, -g, -l and -o are read as the name, resource group, location and
+# output everywhere, as the parser always has. A letter no command has is refused, since
+# argparse would then try it as a prefix of a long single-dash option.
+_AZ_SHORT_VALUE_LETTERS = frozenset("nglo")
+_AZ_SHORT_BOOL_LETTERS = frozenset("abcdefimprtuyh")
+_AZ_SHORT_KNOWN_LETTERS = frozenset("abcdefghijklmnopqrstuvwxyzKLPU")
+
+
+def _az_short_readings(rest: str) -> list[list[str]]:
+    """Every way argparse can read the letters of a short word, as flags: a letter that
+    takes a value takes the rest of the word, and a boolean lets the next letter be an
+    option. A reading that reaches a letter no command has is left out: az refuses it."""
+    readings: list[list[str]] = []
+    if not rest:
+        return [[]]
+    letter, tail = rest[0], rest[1:]
+    if letter not in _AZ_SHORT_KNOWN_LETTERS:
+        return []
+    if letter not in "yh":
+        if tail.startswith("="):
+            readings.append([f"-{letter}={tail[1:]}"])
+        else:
+            readings.append([f"-{letter}={tail}"] if tail else [f"-{letter}"])
+    if letter in _AZ_SHORT_BOOL_LETTERS and letter not in _AZ_SHORT_VALUE_LETTERS:
+        readings.extend([f"-{letter}", *more] for more in _az_short_readings(tail))
+    return readings
+
+
 def _split_az_short_word(word: str) -> list[str]:
     """One short-option word as argparse reads it: ``-nweb`` is ``-n web``, ``-n=web`` is
-    ``-n web`` and ``-ynweb`` is ``-y -n web``. A word that starts with a letter whose
-    meaning depends on the command (``-sserver``) is kept whole, unless a later ``n``, ``g``
-    or ``l`` could be read as the name, resource group or location: that is refused."""
+    ``-n web``, ``-ynweb`` is ``-y -n web`` and ``-cmycontainer`` is ``-c mycontainer``. When
+    the letters can be read more than one way (a letter that is a boolean on some commands)
+    and the readings give a different name, resource group or location, the word is
+    refused (``-dnprod``: ``-d nprod``, or ``-d -n prod`` where -d is a boolean)."""
     if word.startswith("--") or len(word) <= 2:
         return [word]
-    flags: list[str] = []
-    rest = word[1:]
-    while rest:
-        letter, rest = rest[0], rest[1:]
-        if letter in _AZ_SHORT_VALUE_LETTERS:
-            value = rest[1:] if rest.startswith("=") and not flags else rest
-            flags.append(f"-{letter}={value}" if rest else f"-{letter}")
-            return flags
-        if letter in _AZ_SHORT_BOOL_LETTERS:
-            flags.append(f"-{letter}")
-            continue
-        if any(c in "ngl" for c in rest):
-            raise ValueError(f"az: cannot tell what {word!r} means: -{letter} depends on the "
-                             f"command, and {rest!r} follows it")
-        flags.append(f"-{letter}={rest}")  # -sserver: -s with the value "server"
-        return flags
-    return flags
+    if word[1] not in _AZ_SHORT_KNOWN_LETTERS:
+        raise ValueError(f"az: -{word[1]} is a short option no az command has: {word!r}")
+    readings = _az_short_readings(word[1:])
+    if not readings:
+        raise ValueError(f"az: no az command reads {word!r}")
+
+    def scope(reading: list[str]) -> dict[str, str]:
+        return {f[1]: f[3:] for f in reading if f[1] in "ngl"}
+
+    if len({tuple(sorted(scope(r).items())) for r in readings}) > 1:
+        raise ValueError(f"az: cannot tell what {word!r} means: it can set the name, resource "
+                         f"group or location in more than one way")
+    return readings[0]
 
 
 def _parse_az_tokens(

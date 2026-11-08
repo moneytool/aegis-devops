@@ -575,6 +575,13 @@ def test_aws_refuses_what_aws_refuses(command):
     ("az sql db delete -sserver -n db -g rg", "sql/db/db", {"resource_group": "rg"},
      {"s": "server"}),
     ("az ad user delete --id x", "iam/user/*", {}, {"id": "x"}),
+    # a letter that only ever takes a value (or is a three-state flag) takes the rest
+    ("az sql db delete -snprod -g rg -n db", "sql/db/db", {"resource_group": "rg"},
+     {"s": "nprod"}),
+    # -c is a boolean on one command, but no reading reaches an n, g or l: m, y, c and then
+    # o, which takes "ntainer"
+    ("az storage container delete -cmycontainer -n x", "storage/container/x", {},
+     {"c": "mycontainer"}),
 ])
 def test_az_short_words(command, resource, metadata, params):
     intent = from_argv(command.split())[0]
@@ -589,8 +596,10 @@ def test_az_short_words(command, resource, metadata, params):
     "az vm delete -n prod-vm --resource-gr rg",
     "az group delete --n prod",
     "az vm create -n v -g rg --loc westus",
-    # -s depends on the command; if it is a boolean, -n takes "prod"
-    "az sql db delete -snprod -g rg",
+    # -d is a boolean on some commands (vm show -d), and then -n takes "prod"
+    "az vm show -dnprod -g rg",
+    # no az command has -A
+    "az vm delete -Anprod -g rg",
     "az vm delete -n x -g rg -- y",
 ])
 def test_az_refuses_what_it_cannot_read(command):
