@@ -500,6 +500,13 @@ def _dig_paths(mapping: dict[str, Any], key: str) -> list[Any]:
         elif (isinstance(inner, dict) and want.startswith(have)
                 and want[len(have):len(have) + 1] == "."):
             values.extend(_dig_paths(inner, key[len(name) + 1:]))
+        elif (isinstance(inner, list) and want.startswith(have)
+                and want[len(have):len(have) + 1] == "."):
+            # a repeated group (gcloud --create-disk, one value per --container): the
+            # path reaches into each of them, and any one counts
+            for item in inner:
+                if isinstance(item, dict):
+                    values.extend(_dig_paths(item, key[len(name) + 1:]))
     return values
 
 

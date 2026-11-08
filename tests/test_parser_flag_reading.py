@@ -3219,7 +3219,6 @@ def test_gh_field_from_a_file_is_unresolved_and_raw_field_is_text():
     ("kubectl create --raw /api/v1/namespaces/prod/pods -f p.json", "pod/*", "create",
      "prod"),
     ("kubectl delete --raw /api/v1/nodes/n1", "node/n1", "delete", None),
-    ("kubectl delete --raw /api/v1/namespaces/prod", "namespace/prod", "delete", None),
     ("kubectl delete --raw /apis/rbac.authorization.k8s.io/v1/clusterroles/admin",
      "clusterrole/admin", "delete", None),
     ("kubectl get --raw /api/v1/namespaces/prod/secrets/x", "secret/x", "get", "prod"),
@@ -3337,3 +3336,133 @@ def test_gcloud_metadata_from_file_escalates_a_metadata_rule():
                             "--metadata-from-file enable-oslogin=oslogin.txt") == "ESCALATE"
     assert _verdict([rule], "gcloud compute instances create vm --zone z "
                             "--metadata enable-oslogin=TRUE") == "BLOCK"
+
+
+# --- review round 15 ------------------------------------------------------------------
+
+
+def _shape(intents):
+    """What a rule can see of each intent, without the spelling-only params."""
+    return [(i.resource, i.action, i.metadata.get("namespace"),
+             i.metadata.get("all_namespaces"), i.params.get("cascade_from"),
+             bool(i.params.get("resolved_at_runtime")))
+            for i in intents]
+
+
+@pytest.mark.parametrize("raw,words", [
+    # every expansion the words get, the raw path gets too
+    ("kubectl delete --raw /api/v1/namespaces/prod", "kubectl delete namespace prod"),
+    ("kubectl delete --raw /api/v1/namespaces/prod/pods/web", "kubectl delete pod web -n prod"),
+    ("kubectl delete --raw /api/v1/nodes/n1", "kubectl delete node n1"),
+    ("kubectl delete --raw /apis/apps/v1/namespaces/prod/deployments/web",
+     "kubectl delete deployment web -n prod"),
+    ("kubectl get --raw /api/v1/namespaces/prod/secrets/x", "kubectl get secret x -n prod"),
+])
+def test_kubectl_raw_and_words_give_the_same_intents(raw, words):
+    assert _shape(from_argv(raw.split())) == _shape(from_argv(words.split()))
+
+
+def test_kubectl_raw_namespace_delete_cascades():
+    rule = _rule("kubernetes", "*/*", ["delete"], {"namespace": "prod"})
+    assert _verdict([rule], "kubectl delete --raw /api/v1/namespaces/prod") == "BLOCK"
+    assert _verdict([rule], "kubectl delete namespace prod") == "BLOCK"
+
+
+def test_kubectl_raw_drops_flags_kubectl_does_not_send():
+    intent = from_argv("kubectl delete --raw /api/v1/namespaces/prod/pods/x --cascade=orphan "
+                       "--grace-period=0 --force".split())[0]
+    assert not {"cascade", "grace-period", "grace_period", "force"} & set(intent.params)
+    with pytest.raises(ValueError):  # a category is kubectl's, not an API resource
+        from_argv("kubectl delete --raw /api/v1/namespaces/prod/all".split())
+
+
+@pytest.mark.parametrize("command,resource,repo", [
+    # Go's url.Parse drops the fragment; the server decodes the path
+    ("gh api repos/acme/prod#ignored -X DELETE", "repo/acme/prod", "acme/prod"),
+    ("gh api repos/acme/pr%6Fd -X DELETE", "repo/acme/prod", "acme/prod"),
+    ("gh api repos/acme/prod/ -X DELETE", "repo/acme/prod", "acme/prod"),
+    ("gh api https://api.github.com/repos/acme/prod?x=1#frag -X DELETE", "repo/acme/prod",
+     "acme/prod"),
+    ("gh repo delete https://github.com/acme/prod#x --yes", "repo/acme/prod", "acme/prod"),
+    ("gh issue close https://github.com/acme/pr%6Fd/issues/3", "issue/3", "acme/prod"),
+])
+def test_gh_url_targets_are_read_as_gh_sends_them(command, resource, repo):
+    intent = from_argv(command.split())[0]
+    assert intent.resource == resource and intent.metadata["repo"] == repo
+
+
+@pytest.mark.parametrize("command", [
+    "gh api repos/acme//prod -X DELETE",
+    "gh api repos/acme/safe/../prod -X DELETE",
+    "gh api repos/acme/a%2Fb -X DELETE",
+    "gh api ftp://x/repos/a/b -X DELETE",
+    "gcloud compute instances delete "
+    "https://www.googleapis.com/compute/v1/projects/p/zones/z/instances/vm#x",
+    "gcloud compute instances delete projects/p/zones/z/instances/../instances/vm",
+    "az resource delete --ids "
+    "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm#x",
+    "az resource delete --ids "
+    "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/v%6D",
+    "kubectl delete --raw /api/v1/namespaces/prod/pods/x#y",
+])
+def test_url_targets_with_parts_the_parser_cannot_place_are_refused(command):
+    with pytest.raises(ValueError):
+        from_argv(command.split())
+
+
+def test_gcloud_uri_path_is_decoded():
+    intent = from_argv("gcloud compute instances delete "
+                       "https://www.googleapis.com/compute/v1/projects/p/zones/z/instances/"
+                       "v%6D".split())[0]
+    assert intent.resource == "compute/instance/vm"
+
+
+RUN_TWO = ("gcloud run deploy s --region r --container app --image forbidden "
+           "--container sidecar --image safe")
+
+
+def test_gcloud_run_flags_belong_to_their_container():
+    intent = from_argv(RUN_TWO.split())[0]
+    assert intent.params["containers"] == {"app": {"image": "forbidden"},
+                                           "sidecar": {"image": "safe"}}
+    assert intent.params["image"] == ["forbidden", "safe"]
+
+
+@pytest.mark.parametrize("scope,verdict", [
+    ({"image": "forbidden"}, "BLOCK"),  # any container's image
+    ({"image": "safe"}, "BLOCK"),
+    ({"image": "other"}, "ALLOW"),
+    ({"containers.app.image": "forbidden"}, "BLOCK"),
+    ({"containers.sidecar.image": "forbidden"}, "ALLOW"),
+])
+def test_gcloud_run_image_rule_meets_every_container(scope, verdict):
+    assert _verdict([_rule("gcp", "run/service/*", ["update"], scope)], RUN_TWO) == verdict
+
+
+@pytest.mark.parametrize("command", [
+    # gcloud refuses a container flag before the first --container, and any other flag
+    # inside a container
+    "gcloud run deploy s --region r --image x --container a --image y",
+    "gcloud run deploy s --container a --image y --region r",
+])
+def test_gcloud_run_container_misplacements_are_refused(command):
+    with pytest.raises(ValueError):
+        from_argv(command.split())
+
+
+@pytest.mark.parametrize("scope,command", [
+    # a rule on a key of a repeated group meets each group
+    ({"create-disk.image": "forbidden"},
+     "gcloud compute instances create vm --zone z --create-disk name=a,size=10GB "
+     "--create-disk name=b,image=forbidden"),
+    ({"network-interface.network": "b"},
+     "gcloud compute instances create vm --zone z --network-interface network=a "
+     "--network-interface network=b"),
+    ({"set-env-vars.A": "2"},
+     "gcloud run deploy s --region r --container app --image i --set-env-vars A=1 "
+     "--container side --image j --set-env-vars A=2"),
+])
+def test_rules_reach_into_every_repeated_group(scope, command):
+    resource = "compute/instance/*" if "compute" in command else "run/service/*"
+    action = "create" if "compute" in command else "update"
+    assert _verdict([_rule("gcp", resource, [action], scope)], command) == "BLOCK"

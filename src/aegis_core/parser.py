@@ -1674,7 +1674,9 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
     if isinstance(params.get("raw"), str) and verb != "config":
         if verb not in _KUBECTL_RAW_VERBS:
             raise ValueError(f"kubectl {verb} has no --raw: {argv!r}")
-        return _kubectl_raw_intents(argv, verb, params, metadata, positional, manifests)
+        resources, params, metadata = _kubectl_raw_target(argv, verb, params, metadata,
+                                                          positional, manifests)
+        return _kubectl_target_intents(verb, [], resources, params, metadata)
 
     if manifests and verb in ("apply", "create", "replace", "delete"):
         # The objects are in the manifest, which is not read: kind- and
@@ -1785,7 +1787,18 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
         resources.append(f"{_split_resource_token(positional[0])[0]}/*")
     if not resources:
         raise ValueError(f"could not find a target resource in: {argv!r}")
-    resources = _expand_categories(resources)
+    return _kubectl_target_intents(verb, positional, _expand_categories(resources), params,
+                                   metadata)
+
+
+def _kubectl_target_intents(
+    verb: str, positional: list[str], resources: list[str], params: dict[str, Any],
+    metadata: dict[str, Any],
+) -> list[InfrastructureIntent]:
+    """The intents of a verb's targets, with every expansion the verb has: open targets
+    marked, describe's name prefix, create's --append-hash name, and delete's namespace
+    cascade. A ``--raw`` path's target comes here too (:func:`_kubectl_raw_target`), so
+    the two spellings of one request give the same intents."""
     intents = _mark_open_targets(_make_intents(resources, verb, params, metadata),
                                  custom_kinds=verb in _KUBECTL_CUSTOM_KIND_VERBS)
     if verb == "describe" and len(positional) == 2 and not any("/" in t for t in positional):
@@ -1829,15 +1842,20 @@ def _namespace_cascade_intents(
 # The kubectl verbs with a --raw path (kubectl 1.36: get.go, create.go, replace.go, and
 # delete_flags.go for delete only, not for apply or run).
 _KUBECTL_RAW_VERBS = frozenset({"get", "create", "replace", "delete"})
+# The params of flags kubectl does not apply to a --raw request (canonical keys).
+_KUBECTL_RAW_IGNORED = frozenset(canonical_key(k) for k in (
+    "dry_run", "selector", "field-selector", "all", "all_namespaces", "cascade",
+    "grace-period", "force", "now", "wait", "timeout", "recursive", "append-hash",
+    "ignore-not-found", "file", "manifest_not_inspected", "kustomize"))
 # Subresources of a namespace, which /api/v1/namespaces/<ns>/<word> could also be read as
 # a collection in <ns>.
 _KUBE_NAMESPACE_SUBRESOURCES = frozenset({"status", "finalize"})
 
 
-def _kubectl_raw_intents(
+def _kubectl_raw_target(
     argv: list[str], verb: str, params: dict[str, Any], metadata: dict[str, Any],
     positional: list[str], manifests: list[str],
-) -> list[InfrastructureIntent]:
+) -> tuple[list[str], dict[str, Any], dict[str, Any]]:
     """``kubectl get|create|replace|delete --raw PATH``: one GET, POST, PUT or DELETE to
     PATH (rawhttp). kubectl reads nothing else as the target: the positional words, ``-n``,
     ``-l`` and ``--dry-run`` are ignored (delete.go Complete returns before it resolves
@@ -1846,7 +1864,8 @@ def _kubectl_raw_intents(
     ``/apis/GROUP/VERSION[/namespaces/NS]/PLURAL[/NAME]``; a collection is ``kind/*``,
     marked. Any other path -- a subresource, a non-resource path, a query, an escaped,
     empty or dot segment -- is refused, since what it reads or changes is not known.
-    ``-f`` is the request body, which is not read."""
+    ``-f`` is the request body, which is not read. Returns the target, params and
+    metadata, which then go through the same expansions as a target named by words."""
     raw = params["raw"]
     write = verb != "get"
     if write:
@@ -1882,8 +1901,10 @@ def _kubectl_raw_intents(
     if len(rest) > 2:
         rest, subresource = rest[:2], rest[2:]
 
+    # what kubectl does not send with --raw: no dry-run, selector, --all, cascade or grace
+    # period (the DELETE carries only the body -f gives), no --append-hash renaming
     kept = {k: v for k, v in params.items()
-            if k not in ("dry_run", "selector", "file", "manifest_not_inspected")}
+            if canonical_key(k) not in _KUBECTL_RAW_IGNORED}
     meta = {k: v for k, v in metadata.items() if k not in ("namespace", "all_namespaces")}
     if group is None or not rest or odd or subresource:
         # a read too: a path that names no object can still return any (a list under
@@ -1894,6 +1915,9 @@ def _kubectl_raw_intents(
     name = rest[1] if len(rest) == 2 else None
     qualified = f"{plural}.{group}" if group else plural
     kind, _ = _split_resource_token(f"{qualified}/x")
+    if kind in _KUBECTL_CATEGORIES:
+        # a category is kubectl's, not the API server's: no such resource to request
+        raise ValueError(f"kubectl --raw {raw!r} names a category, not a resource: {argv!r}")
     if namespace is not None:
         meta["namespace"] = namespace
     if manifests:
@@ -1901,12 +1925,12 @@ def _kubectl_raw_intents(
         if verb in ("create", "replace"):
             kept["manifest_not_inspected"] = True  # the object sent is in the body
     if name is not None:
-        return _make_intents([f"{kind}/{name}"], verb, kept, meta)
+        return [f"{kind}/{name}"], kept, meta
     from aegis_core.store import _kind_is_cluster_scoped  # local: avoids a cycle
 
     if namespace is None and not _kind_is_cluster_scoped(f"{kind}/x"):
         meta["all_namespaces"] = True  # a namespaced collection with no namespace: all
-    return _mark_open_targets(_make_intents([f"{kind}/*"], verb, kept, meta))
+    return [f"{kind}/*"], kept, meta
 
 
 def from_kubectl(argv: list[str]) -> InfrastructureIntent:
@@ -3718,6 +3742,11 @@ def _parse_arm_id(arm_id: str) -> tuple[str, dict[str, Any]]:
     ``<ns lower>/<type lower>/<name>`` for an unmapped type) and
     ``metadata`` carries ``subscription`` / ``resource_group`` /
     ``arm_id``. Raises ``ValueError`` for anything that isn't an ARM id."""
+    if any(c in arm_id for c in "#?%") or "//" in arm_id.strip("/") or any(
+            seg in (".", "..") for seg in arm_id.split("/")):
+        # az puts the ID into the request URL: a fragment, a query, an escape or a dot
+        # segment there is read by the URL, not as the name
+        raise ValueError(f"az: {arm_id!r} is not an ARM resource id az sends as written")
     parts = [p for p in arm_id.split("/") if p]
     if len(parts) < 2 or parts[0].lower() != "subscriptions":
         raise ValueError(f"not an ARM resource id: {arm_id!r}")
@@ -4214,7 +4243,14 @@ def _gcloud_name(name: str, metadata: dict[str, Any]) -> str:
     names its own project and zone."""
     if "/" not in name or name.startswith("gs://"):
         return name
-    parts = [p for p in name.split("?")[0].split("/") if p]
+    if "#" in name:
+        raise ValueError(f"gcloud: {name!r} has a fragment, which is not part of a resource")
+    from urllib.parse import urlsplit
+
+    # a URI's path (a relative name is all path), decoded as the API decodes it; an
+    # empty, dot or escaped-slash segment is refused
+    path = urlsplit(name).path if "://" in name else name.split("?")[0]
+    parts = _url_path_segments(path, "gcloud")
     for i, part in enumerate(parts[:-1]):
         if part == "projects":
             metadata["project"] = parts[i + 1]
@@ -4388,6 +4424,85 @@ def _from_gsutil(argv: list[str]) -> list[InfrastructureIntent]:
     return _gcs_uri_intents(verb, words, {}, params, argv, "gsutil")
 
 
+# gcloud run commands whose flags after each --container NAME belong to that container
+# (googlecloudsdk/command_lib/run/container_parser.py), and the flags a container takes:
+# run deploy's ContainerArgGroup (surface/run/deploy.py), the helper flags it adds
+# included (env vars, secrets, build env vars, probes).
+_GCLOUD_CONTAINER_COMMANDS = frozenset({"run deploy", "run services update"})
+_GCLOUD_CONTAINER_FLAGS = frozenset({
+    "add-volume-mount", "args", "automatic-updates", "no-automatic-updates", "base-image",
+    "build-env-vars-file", "build-service-account", "build-worker-pool", "clear-base-image",
+    "clear-build-service-account", "clear-build-worker-pool", "clear-volume-mounts",
+    "command", "cpu", "depends-on", "env-vars-file", "function", "gpu", "image",
+    "local-build", "memory", "no-build", "port", "remove-volume-mount", "run-upload",
+    "sandbox", "sandbox-identity", "sandbox-launcher", "source", "use-http2",
+    "no-use-http2", "workdir", "set-env-vars", "update-env-vars", "remove-env-vars",
+    "clear-env-vars", "set-secrets", "update-secrets", "remove-secrets", "clear-secrets",
+    "set-build-env-vars", "update-build-env-vars", "remove-build-env-vars",
+    "clear-build-env-vars", "startup-probe", "liveness-probe", "readiness-probe",
+})
+
+
+def _gcloud_split_containers(tokens: list[str],
+                             argv: list[str]) -> tuple[list[str], dict[str, list[str]]]:
+    """The words of a run command split as container_parser.ParseKnownArgs splits them:
+    every word after ``--container NAME`` (or ``--container=NAME``) belongs to that
+    container until the next ``--container``, and ``--`` ends the split. The rest are the
+    command's own words."""
+    rest: list[str] = []
+    containers: dict[str, list[str]] = {}
+    current = rest
+    i = 0
+    while i < len(tokens):
+        word = tokens[i]
+        i += 1
+        if word == "--container":
+            if i >= len(tokens):
+                raise ValueError(f"gcloud: --container needs a name: {argv!r}")
+            current = containers.setdefault(tokens[i], [])
+            i += 1
+        elif word.startswith("--container="):
+            current = containers.setdefault(word.split("=", 1)[1], [])
+        elif word == "--":
+            rest.extend(tokens[i - 1:])
+            break
+        else:
+            current.append(word)
+    return rest, containers
+
+
+def _gcloud_container_params(containers: dict[str, list[str]], params: dict[str, Any],
+                             table: dict[str, Any] | None, strict: bool,
+                             argv: list[str]) -> None:
+    """Each container's flags, parsed on their own (a fresh parser per container, as gcloud
+    does), into ``params["containers"][NAME]``. A plain key holds every container's value
+    (``image`` is the list of their images), so a rule on ``image`` meets any of them,
+    and a key a container leaves unresolved is unresolved plainly too. gcloud refuses a
+    container flag before the first --container and any other flag or word inside one
+    (GA), and so does the parser."""
+    early = [k for k in params if k in _GCLOUD_CONTAINER_FLAGS]
+    if early:
+        raise ValueError(f"gcloud: with --container, --{early[0]} must come after a "
+                         f"--container: {argv!r}")
+    params["containers"] = {}
+    for name, words in containers.items():
+        meta, own, positional = _parse_gcloud_tokens(words, table=table, strict=strict)
+        marks = own.pop("unresolved_scope", [])
+        types = own.pop("value_types", {})
+        stray = [k for k in own if k not in _GCLOUD_CONTAINER_FLAGS]
+        if meta or positional or stray:
+            raise ValueError(f"gcloud: container {name!r} has {stray or positional or meta!r}, "
+                             f"which is not a container flag: {argv!r}")
+        params["containers"][name] = own
+        for key, value in own.items():
+            params.setdefault(key, []).append(value)
+        for mark in marks:
+            _mark_unresolved(params, mark)
+            _mark_unresolved(params, f"containers.{name}.{mark}")
+        for key, kind in types.items():
+            _mark_type(params, key, kind)
+
+
 def from_gcloud_multi(argv: list[str]) -> list[InfrastructureIntent]:
     """Parses a ``gcloud`` (or legacy ``gsutil``) CLI invocation (see
     :func:`_from_gcloud_multi`). A project given by number (``--project 123456789``) is
@@ -4441,9 +4556,14 @@ def _from_gcloud_multi(argv: list[str]) -> list[InfrastructureIntent]:
     if "--" in tokens and not passthrough and table is None:
         raise ValueError(f"gcloud: whether this command takes a command after '--' is not "
                          f"known, and the words after it may be targets: {argv!r}")
+    containers: dict[str, list[str]] = {}
+    if command in _GCLOUD_CONTAINER_COMMANDS:
+        tokens, containers = _gcloud_split_containers(tokens, argv)
     metadata, params, positional = _parse_gcloud_tokens(tokens, storage=storage,
                                                         table=table, strict=strict,
                                                         passthrough=passthrough)
+    if containers:
+        _gcloud_container_params(containers, params, table, strict, argv)
 
     release_track = None
     if positional and positional[0] in ("alpha", "beta"):
@@ -6703,7 +6823,7 @@ def _gh_repo(spec: str) -> tuple[str, str | None]:
     compares them without case), and the host when it is not github.com. On another host
     the repo is ``host/owner/repo``, so a rule written for a github.com repository never
     takes a GitHub Enterprise one of the same name for it."""
-    m = _GH_REPO_SPEC_RE.match(spec.strip())
+    m = _GH_REPO_SPEC_RE.match(_gh_clean_url(spec.strip()))
     if not m:
         raise ValueError(f"gh: {spec!r} is not a repository gh accepts")
     host = (m.group("host") or "github.com").lower()
@@ -6711,6 +6831,19 @@ def _gh_repo(spec: str) -> tuple[str, str | None]:
     if host in ("github.com", "www.github.com"):
         return repo, None
     return f"{host}/{repo}", host
+
+
+def _gh_clean_url(spec: str) -> str:
+    """An http(s) URL as gh's url.Parse reads it: the fragment and query dropped and the
+    path decoded (``pr%6Fd`` is ``prod``); an empty, dot or escaped-slash segment refused
+    (:func:`_url_path_segments`). Anything else is returned as it is."""
+    from urllib.parse import urlsplit
+
+    if not spec.lower().startswith(("http://", "https://")):
+        return spec
+    parts = urlsplit(spec)
+    segments = _url_path_segments(parts.path, "gh")
+    return f"{parts.scheme}://{parts.netloc}/" + "/".join(segments)
 
 
 def _gh_set_repo(metadata: dict[str, Any], spec: str) -> None:
@@ -6735,7 +6868,7 @@ def _gh_number(selector: str | None, metadata: dict[str, Any]) -> str | None:
         return None
     if re.fullmatch(r"#?[+-]?[0-9]+", selector):
         return str(int(selector.lstrip("#")))
-    m = _GH_NUMBER_URL_RE.match(selector) or _GH_FULL_REF_RE.match(selector)
+    m = _GH_NUMBER_URL_RE.match(_gh_clean_url(selector)) or _GH_FULL_REF_RE.match(selector)
     if m:
         host = m.groupdict().get("host") or "github.com"
         _gh_set_repo(metadata, f"{host}/{m.group('owner')}/{m.group('repo')}")
@@ -7093,12 +7226,55 @@ _GH_API_ROUTES: list[tuple[re.Pattern[str], dict[str, tuple[str, str]]]] = [
 ]
 
 
-def _gh_api_normalise_path(path: str) -> str:
-    """``https://api.github.com/repos/o/r?x=1`` / ``/repos/o/r/`` -> ``repos/o/r``."""
-    if path.startswith(("http://", "https://")):
-        path = path.split("://", 1)[1].split("/", 1)[1] if "/" in path.split("://", 1)[1] else ""
-    path = path.split("?", 1)[0]
-    return path.strip("/")
+def _url_path_segments(path: str, where: str) -> list[str]:
+    """A URL path's segments as the server reads them: each percent-decoded (Go's url.Parse
+    decodes the path, and the server decodes what is sent), with leading and trailing
+    slashes dropped. An empty segment (``//``), ``.``, ``..`` or an escaped ``/`` is
+    refused: Go's HTTP client sends the path as written, and whether the server cleans it
+    is not known."""
+    from urllib.parse import unquote
+
+    segments = path.strip("/").split("/") if path.strip("/") else []
+    decoded: list[str] = []
+    for segment in segments:
+        if "%2f" in segment.lower() or "%5c" in segment.lower():
+            raise ValueError(f"{where}: an escaped slash in {path!r} is read differently by "
+                             "servers")
+        try:
+            word = unquote(segment, errors="strict")
+        except UnicodeDecodeError:
+            raise ValueError(f"{where}: {path!r} is not a path a server decodes") from None
+        if word in ("", ".", ".."):
+            raise ValueError(f"{where}: {path!r} has an empty or dot segment, which the "
+                             "client sends as written")
+        decoded.append(word)
+    return decoded
+
+
+def _gh_api_target(raw: str, params: dict[str, Any]) -> tuple[str | None, str]:
+    """``gh api``'s endpoint as gh sends it: ``(host, path)``. gh takes an argument with
+    ``://`` in it as an absolute URL, used as it is (http.go httpRequest), and any other
+    as a path under the host's REST prefix; Go's url.Parse then drops a ``#fragment``,
+    and the query is sent as it is (kept in ``params["api_query"]``, it does not change
+    the endpoint). The path is decoded as the server decodes it (``pr%6Fd`` is ``prod``);
+    a scheme Go's client does not speak, or a path with an empty, dot or escaped-slash
+    segment, is refused."""
+    from urllib.parse import parse_qsl, urlsplit
+
+    host = None
+    if "://" in raw:
+        parts = urlsplit(raw)
+        if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
+            raise ValueError(f"gh api: {raw!r} is not an http or https URL gh can send")
+        host = parts.hostname.lower()  # gh names a host without its port
+        host = "github.com" if host == "api.github.com" else host
+        path, query = parts.path, parts.query
+    else:
+        path = raw.split("#", 1)[0]
+        path, _, query = path.partition("?")
+    if query:
+        params["api_query"] = dict(parse_qsl(query, keep_blank_values=True))
+    return host, "/".join(_url_path_segments(path, "gh api"))
 
 
 def from_gh_multi(argv: list[str]) -> list[InfrastructureIntent]:
@@ -7325,11 +7501,7 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
         # an absolute URL is sent as it is (api.go): its host is the host, whatever
         # --hostname says; api.github.com is github.com, any other host is a GHES one,
         # whose REST paths start with api/v3
-        url_host = None
-        if raw.startswith(("http://", "https://")):
-            netloc = raw.split("://", 1)[1].split("/", 1)[0].lower()
-            url_host = "github.com" if netloc == "api.github.com" else netloc
-        path = _gh_api_normalise_path(raw) if positional else "*"
+        url_host, path = _gh_api_target(raw, params) if positional else (None, "*")
         if url_host and url_host != "github.com" and path.startswith("api/v3/"):
             path = path[len("api/v3/"):]
         params["api_path"] = path
