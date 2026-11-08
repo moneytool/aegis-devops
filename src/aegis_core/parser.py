@@ -4661,6 +4661,7 @@ def _parse_gh_command_tokens(
 # groups, action), so ``gh api -X POST
 # repos/o/r/actions/workflows/deploy-prod.yml/dispatches`` is
 # ``workflow/deploy-prod.yml`` / ``run`` exactly like ``gh workflow run``.
+_GH_API_PLACEHOLDER_RE = re.compile(r":(?:owner|repo|branch)\b|\{(?:owner|repo|branch)\}")
 _GH_API_REPO_RE = re.compile(r"^repos/([^/]+)/([^/]+)(?:/|$)")
 _GH_API_ROUTES: list[tuple[re.Pattern[str], dict[str, tuple[str, str]]]] = [
     (
@@ -4703,7 +4704,21 @@ def from_gh(argv: list[str]) -> InfrastructureIntent:
 
     ``gh pr merge 42 --admin --squash``
       -> resource "pr/42", action "merge", params {"admin": True, "method": "squash"}
+
+    Without ``-R`` (or a ``repos/<owner>/<repo>`` api path) gh acts on the repository of
+    the current directory or ``$GH_REPO``, which the argv does not show: ``repo`` is then
+    in ``params["unresolved_scope"]``, so a rule scoped on a repository escalates instead
+    of not applying, as an unknown namespace does.
     """
+    intent = _from_gh(argv)
+    if "repo" not in intent.metadata:
+        marks = intent.params.setdefault("unresolved_scope", [])
+        if "repo" not in marks:
+            marks.append("repo")
+    return intent
+
+
+def _from_gh(argv: list[str]) -> InfrastructureIntent:
     if len(argv) < 2 or _basename(argv[0]) != "gh":
         raise ValueError(f"not a recognizable gh invocation: {argv!r}")
 
@@ -4811,14 +4826,23 @@ def from_gh(argv: list[str]) -> InfrastructureIntent:
 
     if group == "api":
         metadata, params, positional = _parse_gh_tokens(tokens, ("api", ""))
-        method = params.pop("_method", "GET")
+        # gh api sends POST when it has fields or a body and no -X/--method (cli v2.103
+        # api.go: "!RequestMethodPassed && (len(params) > 0 || RequestInputFile != "")")
+        method = params.pop("_method", None)
+        if method is None:
+            method = "POST" if params.get("inputs") or params.get("input") else "GET"
         action = _GH_METHOD_ACTION.get(method, "read")
         params["raw_action"] = f"api-{method.lower()}"
         path = _gh_api_normalise_path(positional[0]) if positional else "*"
         params["api_path"] = path
+        # {owner}, {repo} and {branch} (or :owner, ...) are filled from the current
+        # repository when gh runs, which the argv does not show
+        unknown = bool(_GH_API_PLACEHOLDER_RE.search(path))
+        path = _GH_API_PLACEHOLDER_RE.sub("*", path)
         repo_match = _GH_API_REPO_RE.match(path)
-        if repo_match and "repo" not in metadata:
+        if repo_match and "repo" not in metadata and not unknown:
             metadata["repo"] = f"{repo_match.group(1)}/{repo_match.group(2)}"
+        resource = f"api/{path}"
         for pattern, by_method in _GH_API_ROUTES:
             match = pattern.match(path)
             if not match:
@@ -4832,12 +4856,12 @@ def from_gh(argv: list[str]) -> InfrastructureIntent:
                 ref = (params.get("inputs") or {}).get("ref")
                 if ref is not None and "ref" not in metadata:
                     metadata["ref"] = ref
-            return InfrastructureIntent(
-                resource=resource, action=action, provider="github",
-                params=params, metadata=metadata,
-            )
+            break
+        if unknown and "*" in resource:
+            kind = resource.partition("/")[0]
+            params["resolved_at_runtime"] = {"from": resource, "kinds": [kind]}
         return InfrastructureIntent(
-            resource=f"api/{path}", action=action, provider="github",
+            resource=resource, action=action, provider="github",
             params=params, metadata=metadata,
         )
 

@@ -788,7 +788,7 @@ def param_unresolved(key: str, intent: InfrastructureIntent) -> bool:
     ``set.replicaCount`` when helm --set-file sets it from a file nobody read, and
     ``set.*`` for every ``set.`` key the command line leaves to a values file."""
     marks = intent.params.get("unresolved_scope")
-    if not isinstance(marks, list):
+    if not isinstance(marks, list) or _dig(intent.metadata, key)[0]:
         return False
     for mark in marks:
         if mark == key:

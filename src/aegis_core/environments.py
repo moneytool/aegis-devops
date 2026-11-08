@@ -341,7 +341,8 @@ def resolve_current_context(
       ``$AWS_DEFAULT_REGION`` / ``$AWS_REGION``;
     * gcp: ``project`` from ``$CLOUDSDK_CORE_PROJECT``;
     * azure: ``subscription`` from ``$AZURE_SUBSCRIPTION_ID``;
-    * argocd: ``server`` from ``$ARGOCD_SERVER``.
+    * argocd: ``server`` from ``$ARGOCD_SERVER``;
+    * github: ``repo`` from ``$GH_REPO`` (``[HOST/]OWNER/REPO``).
 
     Only keys that are absent from ``metadata`` are filled (an explicit
     ``--context`` always wins), and the keys that were filled are listed
@@ -391,6 +392,10 @@ def resolve_current_context(
         fill("subscription", environ.get("AZURE_SUBSCRIPTION_ID"))
     elif provider == "argocd":
         fill("server", environ.get("ARGOCD_SERVER"))
+    elif provider == "github":
+        # gh's own variable for the repository it acts on when -R is not given
+        repo = environ.get("GH_REPO", "")
+        fill("repo", repo.split("/", 1)[1] if repo.count("/") == 2 else repo)
 
     if filled:
         md["resolved_from_environment"] = filled

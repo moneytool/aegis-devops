@@ -1026,3 +1026,57 @@ def test_aws_dry_prefix_is_not_a_rehearsal_where_another_option_starts_with_dry(
 def test_aws_sync_del_meets_a_delete_rule():
     assert _verdict([_rule("aws", "s3/bucket/prod", ["delete"])],
                     "aws s3 sync ./empty s3://prod --del") == "BLOCK"
+
+
+# --- gh api's method, and the repository gh acts on (cli v2.103 api.go) -----------------
+
+
+@pytest.mark.parametrize("command,resource,action,method", [
+    # fields or a body without -X make gh send POST
+    ("gh api repos/o/r/actions/workflows/deploy.yml/dispatches -f ref=main",
+     "workflow/deploy.yml", "run", "post"),
+    ("gh api repos/o/r/actions/workflows/deploy.yml/dispatches -F ref=main",
+     "workflow/deploy.yml", "run", "post"),
+    ("gh api repos/o/r/releases --input body.json", "release/*", "create", "post"),
+    ("gh api repos/o/r/releases --raw-field tag_name=v1", "release/*", "create", "post"),
+    # -X wins
+    ("gh api repos/o/r/actions/workflows/deploy.yml/dispatches -X GET -f ref=main",
+     "api/repos/o/r/actions/workflows/deploy.yml/dispatches", "read", "get"),
+    ("gh api -Xdelete repos/o/r", "repo/o/r", "delete", "delete"),
+    ("gh api --method=DELETE repos/o/r", "repo/o/r", "delete", "delete"),
+    ("gh api repos/o/r", "api/repos/o/r", "read", "get"),
+])
+def test_gh_api_method_is_the_one_gh_sends(command, resource, action, method):
+    intent = from_argv(command.split())[0]
+    assert (intent.resource, intent.action) == (resource, action)
+    assert intent.params["raw_action"] == f"api-{method}"
+
+
+def test_gh_api_dispatch_without_x_meets_a_workflow_rule():
+    rule = _rule("github", "workflow/deploy.yml", ["run"])
+    assert _verdict([rule], "gh api repos/o/r/actions/workflows/deploy.yml/dispatches "
+                            "-f ref=main") == "BLOCK"
+
+
+@pytest.mark.parametrize("command,verdict", [
+    # the repository comes from the current directory or $GH_REPO
+    ("gh api repos/{owner}/{repo} -X DELETE", "ESCALATE"),
+    ("gh repo delete --yes", "ESCALATE"),
+    ("gh workflow run deploy.yml", "ESCALATE"),
+    ("gh workflow run deploy.yml -R acme/web", "BLOCK"),
+    ("gh workflow run deploy.yml -R acme/other", "ALLOW"),
+    ("gh api repos/acme/web/actions/workflows/deploy.yml/dispatches -f ref=main", "BLOCK"),
+])
+def test_a_repository_rule_escalates_when_gh_picks_the_repository(command, verdict):
+    rule = _rule("github", "*", ["run", "delete"], {"repo": "acme/web"})
+    assert _verdict([rule], command) == verdict
+
+
+def test_gh_repo_resolves_from_gh_repo():
+    from aegis_core.environments import resolve_current_context
+    from aegis_core.store import scope_unresolved
+
+    intent = from_argv("gh workflow run deploy.yml".split())[0]
+    resolve_current_context(intent, environ={"GH_REPO": "github.com/acme/web"})
+    assert intent.metadata["repo"] == "acme/web"
+    assert scope_unresolved({"repo": "acme/web"}, intent) == []

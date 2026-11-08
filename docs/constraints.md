@@ -313,7 +313,11 @@ instead of silently not applying: `kubectl rollout restart deploy/web` escalates
 never affected. (Until 1.0 such a rule simply did not match; reported by a reader on dev.to.)
 A flux command without `-n` is the same: flux uses `flux-system`, or `$FLUX_SYSTEM_NAMESPACE`,
 or with `--ns-follows-kube-context` or `$FLUX_NS_FOLLOWS_KUBE_CONTEXT` the kubeconfig context's
-namespace, and the argv shows none of these variables.
+namespace, and the argv shows none of these variables. The same holds for **`repo`** on gh: without
+`-R` (or a `repos/<owner>/<repo>` path to `gh api`) gh acts on the repository of the current
+directory or `$GH_REPO`, so a rule scoped on `repo` escalates with `repo-unresolved: <id>`
+(`--resolve-current-context` fills it from `$GH_REPO`). A `gh api` path with `{owner}`, `{repo}`
+or `{branch}` is the same.
 
 **Manifests are not read.** `kubectl apply|create|replace|delete -f <file>` (or a directory,
 `-k <kustomization>`, or `-f -` for stdin) is one intent on `manifest/<name>`, with one for each
