@@ -750,6 +750,25 @@ name). git verbs without an option table leave every param unresolved when given
   and read as aws reads them. Everyday aws commands parse.
 - az `--ids` with no ID after it and flux `--dry-run` (which flux refuses) were accepted; both
   are refused now, as the tools refuse them.
+- `argocd app create dev/protected -N prod` creates the app in `prod`: create sets `-N` over the
+  qualified name, the other way round from every other verb. And `argocd app create decoy
+  ignored --name protected` creates `protected`: one word is the name, with none or several
+  `--name` is. Both are now read per verb from argocd's source, and verbs that take exactly
+  one app refuse more. helm's argument counts now come from each command's cobra validator
+  (generated), so `helm upgrade a ./c extra` and `helm status a b` are refused, and `helm pull`
+  takes several charts.
+- `git rebase --update-refs main feature` also rewrites other branches, and rebase.updateRefs
+  in a config file can turn it on: every rebase now also rewrites `history/*`, marked, unless
+  `--no-update-refs`. A pull may be a rebase (pull.rebase), and a push may push submodules
+  (push.recurseSubmodules): both are now marked unless the command line says otherwise.
+- gh commands that change more than they name: `pr close -d` deletes the head branch,
+  `issue transfer` creates the issue in the target repository, `release delete --cleanup-tag`
+  deletes the tag, `label clone` writes the destination's labels, `repo rename` takes the new
+  name, and `cache delete` names the cache or every cache.
+- `az group update --tags env=safe --set tags.env=prod` ends with `env=prod`: az's generic
+  update applies `--set`, `--add` and `--remove` after the typed arguments, in order. A tags path
+  writes the tags map; any other path leaves that property unresolved. gcloud's
+  `--update-labels`, `--remove-labels` and `--clear-labels` are combined as gcloud combines them.
 
 ### Added
 - A `NOTICE` file at the repository root lists the third-party code and data in the package

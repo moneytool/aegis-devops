@@ -1,4 +1,4 @@
-"""The sibling audit of review rounds 1-20 (docs/dev/parser-audit.md): one check per class
+"""The sibling audit of review rounds 1-21 (docs/dev/parser-audit.md): one check per class
 of finding and per tool where the class applies, so a fix that covers one tool and misses
 its siblings fails here. Each row is ``(class, tool, argv, check)``."""
 
@@ -182,7 +182,7 @@ AUDIT = [
     ("C10", "gcloud", "gcloud compute instances delete web --project p", unres("zone")),
     # C11 a value the tool fills in when it runs
     ("C11", "gh", "gh api -X POST repos/o/r/x -F a={owner}", unres("inputs.a")),
-    ("C11", "git", "git push origin @{u}", res("ref/*", "tag/*")),
+    ("C11", "git", "git push origin @{u}", res("ref/*", "tag/*", "submodule/*")),
     ("C11", "git", "git branch -f @{-1} HEAD", ("all_marked", "branch/*")),
     # C12 one value, every spelling
     ("C12", "aws", "aws iam delete-role --role-name arn:aws:iam::1:role/p/r",
@@ -410,6 +410,18 @@ AUDIT = [
      param("instance-id", "i-1")),
     ("C43", "aws", "aws ec2 modify-instance-attribute --instance-id i-1 "
      "--disable-api-termination", param("disable-api-termination", {"Value": True})),
+    # round 21
+    ("C8", "argocd", "argocd app create dev/protected -N prod --repo r",
+     meta("app_namespace", "prod")),
+    ("C23", "argocd", "argocd app create decoy ignored --name protected --repo r",
+     res("app/protected")),
+    ("C23", "helm", "helm upgrade a ./c extra", REFUSE),
+    ("C10", "git", "git rebase main feature", ("has", "history/*", "rewrite")),
+    ("C37", "gh", "gh pr close 42 -d", ("has", "branch/*", "delete")),
+    ("C44", "az", "az group update -n rg --tags env=safe --set tags.env=prod",
+     param("tags", {"env": "prod"})),
+    ("C44", "gcloud", "gcloud compute instances update vm --zone z "
+     "--update-labels env=prod,team=a --remove-labels team", param("labels", {"env": "prod"})),
 ]
 
 
