@@ -1729,3 +1729,51 @@ def test_gcloud_project_number_leaves_the_project_id_unresolved():
     assert _verdict([rule], command) == "ESCALATE"
     resolve_current_context(intent, environ={"CLOUDSDK_CORE_PROJECT": "dev"})
     assert "project" not in intent.metadata
+
+
+GUID = "0b1f6471-1bf0-4dda-aec3-111122223333"
+
+
+@pytest.mark.parametrize("flags,metadata", [
+    # C2: a name or display name is not the ID or name a rule may use
+    (f"--subscription {GUID}", {"subscription": GUID}),
+    ("--subscription Production", {"subscription_name": "Production"}),
+    (["--location", "East US"], {"location_display_name": "East US"}),
+    ("--location eastus", {"region": "eastus"}),
+])
+def test_az_scope_names_are_kept_apart_from_ids(flags, metadata):
+    extra = flags.split() if isinstance(flags, str) else flags
+    intent = from_argv(["az", "vm", "delete", "-g", "rg", "-n", "vm1", "--yes", *extra])[0]
+    assert {k: intent.metadata.get(k) for k in metadata} == metadata
+    for absent in ({"subscription", "subscription_name", "region", "location_display_name"}
+                   - set(metadata)):
+        assert absent not in intent.metadata
+
+
+@pytest.mark.parametrize("rule_scope,flags,verdict", [
+    ({"subscription": GUID}, "--subscription Production", "ESCALATE"),
+    ({"subscription": GUID}, f"--subscription {GUID.upper()}", "BLOCK"),
+    ({"region": "eastus"}, "--location EastUS", "BLOCK"),  # ARM ignores case
+    ({"resource_group": "prod-rg"}, "-g PROD-RG", "BLOCK"),
+])
+def test_az_scope_rules_hold_for_names(rule_scope, flags, verdict):
+    rule = _rule("azure", "compute/vm/*", ["delete"], rule_scope)
+    command = ["az", "vm", "delete", "-n", "vm1", "--yes", *flags.split()]
+    if "-g" not in command:
+        command += ["-g", "rg"]
+    assert _verdict([rule], command) == verdict
+
+
+def test_az_location_display_name_escalates_a_region_rule():
+    rule = _rule("azure", "compute/vm/*", ["delete"], {"region": "eastus"})
+    command = ["az", "vm", "delete", "-g", "rg", "-n", "vm1", "--yes", "-l", "East US"]
+    assert _verdict([rule], command) == "ESCALATE"
+
+
+def test_az_ids_override_the_subscription_flag():
+    # C1: az takes the subscription and group of each ID and ignores the flags
+    arm = f"/subscriptions/{GUID}/resourceGroups/prod/providers/Microsoft.Compute"
+    command = ["az", "vm", "delete", "--yes", "--subscription", "Other", "-g", "dev",
+               "--ids", f"{arm}/virtualMachines/a"]
+    rule = _rule("azure", "compute/vm/*", ["delete"], {"resource_group": "prod"})
+    assert _verdict([rule], command) == "BLOCK"

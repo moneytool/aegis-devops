@@ -1998,6 +1998,9 @@ def test_az_ids_matches_the_named_flag_form():
     by_name = from_az(
         ["az", "aks", "delete", "-n", "c1", "-g", "rg-1", "--subscription", "sub-1", "--yes"]
     )
+    # a subscription by name is subscription_name: which ID it is, only az knows
+    assert by_name.metadata["subscription_name"] == "sub-1"
+    by_name.metadata["subscription"] = by_name.metadata.pop("subscription_name")
     assert by_ids.resource == by_name.resource == "aks/cluster/c1"
     assert by_ids.action == by_name.action == "delete"
     assert by_ids.params == by_name.params
@@ -2040,7 +2043,7 @@ def test_az_multiple_ids_yield_one_intent_each_and_single_form_rejects():
     assert [i.resource for i in from_argv(argv)] == ["compute/vm/a", "compute/vm/b"]
 
 
-def test_az_ids_equals_form_and_explicit_flags_win_over_arm_metadata():
+def test_az_ids_equals_form_and_the_id_wins_over_explicit_flags():
     intent = from_az(
         [
             "az",
@@ -2052,7 +2055,10 @@ def test_az_ids_equals_form_and_explicit_flags_win_over_arm_metadata():
         ]
     )
     assert intent.resource == "compute/vm/a"
-    assert intent.metadata["subscription"] == "other"
+    # az ignores --subscription with --ids: the ID's subscription is used (azure-cli
+    # core commands/arm.py parse_ids_arguments)
+    assert intent.metadata["subscription"] == "sub-1"
+    assert "subscription_name" not in intent.metadata
 
 
 @pytest.mark.parametrize(

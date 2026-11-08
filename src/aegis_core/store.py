@@ -601,7 +601,8 @@ def scope_matches(
 
 # Scope keys whose values the service compares without case: GitHub owner/repo, Azure
 # subscription and resource group names.
-_CASE_INSENSITIVE_SCOPE_KEYS = frozenset({"repo", "resource_group", "subscription"})
+# Azure compares locations (and resource groups, subscriptions) without case
+_CASE_INSENSITIVE_SCOPE_KEYS = frozenset({"repo", "resource_group", "subscription", "region"})
 
 
 def _casefold(value: Any) -> Any:

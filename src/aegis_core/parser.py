@@ -2430,6 +2430,9 @@ _AZ_BOOL_FLAGS = {"yes", "y", "no-wait", "debug", "verbose", "only-show-errors"}
 # rg" is the resource group. Whether a prefix is one depends on the command's other options,
 # which the parser does not have, so a prefix of one of these is refused. --id and
 # --resource are full options of their own on many commands.
+_GUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+                      r"[0-9a-fA-F]{12}")
+
 _AZ_SCOPE_OPTIONS = ("name", "resource-group", "location", "subscription", "ids")
 _AZ_OWN_OPTIONS = frozenset({"id", "resource"})
 
@@ -2542,12 +2545,25 @@ def _parse_az_tokens(
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
-                metadata["region"] = val
+                if " " in val:
+                    # a display name ("East US"): az looks up the location it names in the
+                    # subscription's list when it runs (core commands/parameters.py)
+                    metadata.pop("region", None)
+                    metadata["location_display_name"] = val
+                else:
+                    metadata.pop("location_display_name", None)
+                    metadata["region"] = val
             elif key == "subscription":
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
-                metadata["subscription"] = val
+                if _GUID_RE.fullmatch(val):
+                    metadata.pop("subscription_name", None)
+                    metadata["subscription"] = val
+                else:
+                    # a name: which subscription ID it is, only az knows when it runs
+                    metadata.pop("subscription", None)
+                    metadata["subscription_name"] = val
             elif key in ("g", "resource-group"):
                 if val is None:
                     i += 1
@@ -2586,7 +2602,8 @@ def _parse_az_tokens(
     # az reads an argument value "@path" from that file (knack's argument preprocessing):
     # the target or its scope would then be a file nobody read
     for value in (name_value, *ids_values, metadata.get("region"),
-                  metadata.get("resource_group"), metadata.get("subscription")):
+                  metadata.get("location_display_name"), metadata.get("resource_group"),
+                  metadata.get("subscription"), metadata.get("subscription_name")):
         if isinstance(value, str) and value.startswith("@"):
             raise ValueError(f"az: {value!r} is read from a file when az runs, and names the "
                              f"target or its scope: {tokens!r}")
@@ -2683,15 +2700,20 @@ def from_az_multi(argv: list[str]) -> list[InfrastructureIntent]:
 
     if ids_values:
         intents = []
+        # az fills every argument with an id part (the name, --resource-group and
+        # --subscription) from each ID and ignores what the command line gave them
+        # (azure-cli core commands/arm.py parse_ids_arguments)
+        ignored = {"resource_group", "subscription", "subscription_name"}
         for arm_id in ids_values:
             resource, arm_metadata = _parse_arm_id(arm_id)
+            own = {k: v for k, v in metadata.items() if k not in ignored}
             intents.append(
                 InfrastructureIntent(
                     resource=resource,
                     action=action,
                     provider="azure",
                     params=dict(params),
-                    metadata={**arm_metadata, **metadata},
+                    metadata={**own, **arm_metadata},
                 )
             )
         return intents

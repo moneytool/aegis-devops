@@ -78,7 +78,9 @@ class EnvironmentMap:
             ("profile", self.aws_profiles),
             ("account", self.aws_accounts),
             ("project", self.gcp_projects),
+            ("project_number", self.gcp_projects),
             ("subscription", self.azure_subscriptions),
+            ("subscription_name", self.azure_subscriptions),
             ("resource_group", self.azure_resource_groups),
             ("repo", self.github_repos),
             ("workspace", self.terraform_workspaces),
@@ -390,7 +392,8 @@ def resolve_current_context(
         if "project_number" not in md:  # the argv named a project, by number
             fill("project", environ.get("CLOUDSDK_CORE_PROJECT"))
     elif provider == "azure":
-        fill("subscription", environ.get("AZURE_SUBSCRIPTION_ID"))
+        if "subscription_name" not in md:  # the argv named a subscription, by name
+            fill("subscription", environ.get("AZURE_SUBSCRIPTION_ID"))
     elif provider == "argocd":
         fill("server", environ.get("ARGOCD_SERVER"))
     elif provider == "github":
