@@ -747,9 +747,11 @@ def env_unresolved(scope: dict[str, Any], intent: InfrastructureIntent) -> bool:
 
 
 # Providers whose commands target a namespace (a missing one is unresolved,
-# not "no namespace"). flux is not here: it defaults to flux-system, not to
-# the kubeconfig context.
-_NAMESPACED_PROVIDERS = frozenset({"kubernetes", "helm"})
+# not "no namespace"). flux's default is flux-system only when neither
+# $FLUX_SYSTEM_NAMESPACE nor --ns-follows-kube-context / $FLUX_NS_FOLLOWS_KUBE_CONTEXT
+# says otherwise (flux2 main.go), and the argv shows neither variable, so a flux
+# command with no -n has an unknown namespace too (resolve_current_context reads them).
+_NAMESPACED_PROVIDERS = frozenset({"kubernetes", "helm", "flux"})
 
 
 def _kind_is_cluster_scoped(resource: str) -> bool:

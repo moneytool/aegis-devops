@@ -114,7 +114,7 @@ intent's environment could not be resolved contributes ESCALATE with the note
 intent whose target the parser could not pin down (`git push -f` with no refspec) contributes
 ESCALATE with the note `unknown-target`, so it cannot slip past a `ref/main` rule as `ref/*`.
 In the same way a namespace-scoped rule escalates with `namespace-unresolved: <id>` when a
-kubectl/helm command names no namespace (or uses `-A`), and a kind- or object-based rule
+kubectl/helm/flux command names no namespace (or uses `-A`), and a kind- or object-based rule
 escalates with `manifest-not-inspected: <id>` on `kubectl … -f <file>|-`, once per file, whose
 manifest is never read ([Environment mapping](constraints.md#environment-mapping)). The note
 `target-unresolved: <id>` is the same idea for targets kubectl finds when it runs: `kubectl exec

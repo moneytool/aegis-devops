@@ -38,6 +38,7 @@ target is. Never enabled by default.
 
 import fnmatch
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -291,6 +292,35 @@ def kubeconfig_context_namespace(
     return ns if isinstance(ns, str) and ns else "default"
 
 
+_DNS1123_LABEL = re.compile(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?")
+
+
+def flux_default_namespace(
+    intent: InfrastructureIntent, environ: Mapping[str, str], home: str | Path | None = None,
+    kubeconfig: str | None = None,
+) -> str | None:
+    """The namespace flux uses when no ``-n`` is given (flux2 main.go): the kubeconfig
+    context's own namespace when ``--ns-follows-kube-context`` or
+    ``$FLUX_NS_FOLLOWS_KUBE_CONTEXT`` is set and the context names one, else
+    ``$FLUX_SYSTEM_NAMESPACE`` when it is a valid DNS label, else ``flux-system``. None
+    when flux would follow a context that cannot be read."""
+    follows = (intent.params.get("ns_follows_kube_context") is True
+               or bool(environ.get("FLUX_NS_FOLLOWS_KUBE_CONTEXT", ""))
+               or intent.params.get("namespace_follows_kubeconfig") is True)
+    if follows:
+        context = intent.metadata.get("context")
+        loaded = _load_kubeconfig(environ, home, kubeconfig)
+        if loaded is None or not isinstance(context, str) or context not in loaded[2]:
+            return None
+        ns = loaded[2][context].get("namespace")
+        if isinstance(ns, str) and ns:
+            return ns
+    from_env = environ.get("FLUX_SYSTEM_NAMESPACE", "")
+    if from_env and len(from_env) <= 63 and _DNS1123_LABEL.fullmatch(from_env):
+        return from_env
+    return "flux-system"
+
+
 def resolve_current_context(
     intent: InfrastructureIntent,
     environ: Mapping[str, str] | None = None,
@@ -301,7 +331,8 @@ def resolve_current_context(
 
     * kubernetes/helm/flux: ``context`` (and ``cluster``) from the
       kubeconfig's ``current-context``; ``kubeconfig`` from ``$KUBECONFIG``;
-      helm ``namespace`` from ``$HELM_NAMESPACE``; then, for kubernetes and
+      helm ``namespace`` from ``$HELM_NAMESPACE``; flux ``namespace`` as flux picks it
+      (:func:`flux_default_namespace`); then, for kubernetes and
       helm, a still-missing ``namespace`` from the context's ``namespace``
       (``default`` when it sets none, as kubectl does) -- never for a
       cluster-scoped kind, with ``-A``, or for a manifest that was not read.
@@ -337,6 +368,8 @@ def resolve_current_context(
                 fill("kubeconfig", path)
         if provider == "helm":
             fill("namespace", environ.get("HELM_NAMESPACE"))
+        if provider == "flux" and "namespace" not in md:
+            fill("namespace", flux_default_namespace(intent, environ, home, explicit))
         # The context's namespace is only a default: objects in a manifest
         # Aegis did not read may name their own, so it is not filled there
         # (review of #38) and the namespace stays unresolved.

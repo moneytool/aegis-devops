@@ -307,6 +307,9 @@ on `namespace` that would otherwise match escalates with the note `namespace-unr
 instead of silently not applying: `kubectl rollout restart deploy/web` escalates against a
 `namespace: prod` rule. A cluster-scoped kind (`node`, `namespace`, ...) has no namespace and is
 never affected. (Until 1.0 such a rule simply did not match; reported by a reader on dev.to.)
+A flux command without `-n` is the same: flux uses `flux-system`, or `$FLUX_SYSTEM_NAMESPACE`,
+or with `--ns-follows-kube-context` or `$FLUX_NS_FOLLOWS_KUBE_CONTEXT` the kubeconfig context's
+namespace, and the argv shows none of these variables.
 
 **Manifests are not read.** `kubectl apply|create|replace|delete -f <file>` (or a directory,
 `-k <kustomization>`, or `-f -` for stdin) is one intent on `manifest/<name>`, with one for each
@@ -324,7 +327,9 @@ explicit `--context` on the argv always wins, and the keys that were filled are 
 `metadata.resolved_from_environment`. For kubectl and helm it also fills a missing
 namespace from the context's `namespace` (`default` when the context sets none, as kubectl does;
 never for a cluster-scoped kind, with `-A`, or for a manifest that was not read, whose objects may
-name their own namespace). An explicit `--kubeconfig` on the argv is the only file consulted, and
+name their own namespace). For flux it fills the namespace flux would use: the context's
+own namespace when flux follows the context and the context names one, else
+`$FLUX_SYSTEM_NAMESPACE` when it is a valid name, else `flux-system`. An explicit `--kubeconfig` on the argv is the only file consulted, and
 if it cannot be read nothing is filled; otherwise the files in `$KUBECONFIG` are merged as kubectl
 merges them (the first to define a context wins). It is opt-in because it **trusts the invoking
 environment**: whoever controls the process environment controls what Aegis believes the

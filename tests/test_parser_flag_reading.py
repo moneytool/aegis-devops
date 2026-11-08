@@ -747,3 +747,75 @@ def test_gh_repo_delete_rule_holds(command, verdict):
 def test_gh_refuses_a_flag_it_cannot_place(command):
     with pytest.raises(ValueError):
         from_argv(command.split())
+
+
+# --- flux's namespace when no -n is given ---------------------------------------------
+# flux2 main.go: flux-system, or $FLUX_SYSTEM_NAMESPACE, or with --ns-follows-kube-context
+# or $FLUX_NS_FOLLOWS_KUBE_CONTEXT the kubeconfig context's namespace. The argv shows none
+# of these variables, so the namespace is unresolved, as it is for kubectl.
+
+
+def _flux_verdict(rule: Constraint, command: str, environ: dict | None = None,
+                  home=None) -> tuple[str, list[str]]:
+    from aegis_core.environments import resolve_current_context
+
+    store = ConstraintStore(authority_map={"admin": {"deletion"}})
+    store.add_constraint(rule)
+    interceptor = AegisInterceptor(store)
+    decisions = []
+    for intent in from_argv(command.split()):
+        if environ is not None:
+            resolve_current_context(intent, environ=environ, home=home)
+        decisions.append(interceptor.intercept(intent, now=NOW))
+    order = {"ALLOW": 0, "ESCALATE": 1, "BLOCK": 2}
+    worst = max(decisions, key=lambda d: order[d.verdict])
+    return worst.verdict, sorted({n for d in decisions for n in d.notes})
+
+
+PROD_SUSPEND = _rule("flux", "kustomization/*", ["stop"], {"namespace": "prod"}, cid="prod")
+
+
+@pytest.mark.parametrize("command,verdict", [
+    ("flux suspend ks a", "ESCALATE"),
+    ("flux suspend ks a --ns-follows-kube-context", "ESCALATE"),
+    ("flux suspend ks a -n prod", "BLOCK"),
+    ("flux suspend ks a -n dev", "ALLOW"),
+    ("flux suspend ks a -n prod --ns-follows-kube-context", "BLOCK"),  # -n wins
+])
+def test_a_flux_namespace_rule_escalates_without_a_namespace(command, verdict):
+    got, notes = _flux_verdict(PROD_SUSPEND, command)
+    assert got == verdict
+    if verdict == "ESCALATE":
+        assert "namespace-unresolved: prod" in notes
+
+
+def _kubeconfig(tmp_path, namespace: str | None) -> dict:
+    ns = f", namespace: {namespace}" if namespace else ""
+    path = tmp_path / "config"
+    path.write_text("apiVersion: v1\nkind: Config\ncurrent-context: ctx\ncontexts:\n"
+                    f"- name: ctx\n  context: {{cluster: c, user: u{ns}}}\n")
+    return {"KUBECONFIG": str(path)}
+
+
+@pytest.mark.parametrize("extra_env,flag,namespace,verdict", [
+    ({}, "", None, "ALLOW"),  # flux-system
+    ({"FLUX_SYSTEM_NAMESPACE": "prod"}, "", None, "BLOCK"),
+    ({"FLUX_SYSTEM_NAMESPACE": "Not_A_Label"}, "", None, "ALLOW"),  # flux ignores it
+    ({}, "--ns-follows-kube-context", "prod", "BLOCK"),
+    ({"FLUX_NS_FOLLOWS_KUBE_CONTEXT": "1"}, "", "prod", "BLOCK"),
+    ({"FLUX_NS_FOLLOWS_KUBE_CONTEXT": "1"}, "", None, "ALLOW"),  # context sets none
+    ({"FLUX_NS_FOLLOWS_KUBE_CONTEXT": "1", "FLUX_SYSTEM_NAMESPACE": "prod"}, "", None,
+     "BLOCK"),
+])
+def test_resolve_current_context_picks_the_namespace_flux_uses(
+        tmp_path, extra_env, flag, namespace, verdict):
+    environ = {**_kubeconfig(tmp_path, namespace), **extra_env}
+    command = f"flux suspend ks a {flag}".strip()
+    assert _flux_verdict(PROD_SUSPEND, command, environ, tmp_path)[0] == verdict
+
+
+def test_an_inline_follow_variable_is_seen_by_the_hook():
+    from aegis_core.shell import intents_from_command
+
+    intents = intents_from_command("FLUX_NS_FOLLOWS_KUBE_CONTEXT=1 flux suspend ks a")
+    assert intents[0].params["namespace_follows_kubeconfig"] is True

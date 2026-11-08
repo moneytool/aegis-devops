@@ -3123,6 +3123,10 @@ def _annotate(
             key = _ENV_METADATA_KEYS.get(var)
             if key is not None and key not in metadata:
                 metadata[key] = value
+        if intent.provider == "flux" and env.get("FLUX_NS_FOLLOWS_KUBE_CONTEXT"):
+            # flux takes the namespace from the kubeconfig context when no -n is given;
+            # resolve_current_context reads this (the namespace stays unresolved anyway)
+            intent.params["namespace_follows_kubeconfig"] = True
     if wrappers:
         metadata["wrappers"] = list(wrappers)
     if simple.redirects:
