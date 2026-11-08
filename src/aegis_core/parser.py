@@ -293,67 +293,56 @@ _RESOURCE_ALIASES = {
 # Every spelling of a built-in kind.
 _KUBECTL_BUILTIN_NAMES = frozenset(_KUBECTL_BUILTIN_KINDS) | frozenset(_RESOURCE_ALIASES)
 
-# kubectl flags that take no value token when given without "=value": the
-# boolean flags of every kubectl command (from kubectl 1.36's --help on each of
-# them), plus the flags pflag gives a default for a bare use (--cascade,
-# --validate, --embed-certs, ...). "containers" and "prefix" are strings only
-# under "set env" / "set resources", which the parser does not accept, and
-# "command" only under "kuberc set" (see _parse_flags).
-_KNOWN_BOOL_FLAGS = {
-    "all", "all-containers", "all-pods", "allow-missing-template-keys", "append-hash",
-    "append-server-path", "arguments-only", "as-current-user", "attach", "cached", "cascade",
-    "client", "command", "containers", "create-annotation", "current",
-    "delete-emptydir-data", "delete-local-data",
-    "disable-eviction", "disable-filter", "edit", "embed-certs", "enable-alpha-plugins",
-    "enable-helm", "exec-provide-cluster-info",
-    "expose", "flatten", "follow", "force", "force-conflicts", "global-default", "helm-debug",
-    "ignore-daemonsets", "ignore-errors", "ignore-not-found",
-    "insecure-skip-tls-verify-backend", "interactive", "keep-annotations",
-    "keep-init-containers", "keep-labels", "keep-liveness", "keep-readiness", "keep-startup",
-    "leave-stdin-open", "list", "local", "merge", "minify", "name-only", "namespaced",
-    "network",
-    "no-headers", "no-preserve", "now", "openapi-patch", "output-patch",
-    "output-watch-events", "overwrite", "prefix", "previous", "privileged", "prune", "quiet",
-    "record", "recursive", "remove-extra-permissions", "remove-extra-subjects", "replace",
-    "resolve", "rm", "same-node", "save-config", "server-print", "server-side",
-    "set-raw-bytes", "share-processes", "show-capacity", "show-events",
-    "show-kind", "show-labels", "show-managed-fields", "show-secrets", "show-swap", "stdin",
-    "sum", "timestamps", "tty", "use-protocol-buffers", "validate", "wait", "watch",
-    "watch-only", "windows-line-endings",
-}
+_KUBECTL_FLAGS_FILE = Path(__file__).parent / "data" / "kubectl_flags.json"
 
-# kubectl flags that always take the next token as their value, even one
-# that starts with "-" (pflag does: "--field-manager -n x" sets the field
-# manager to "-n"). Recorded in params like any other flag value. Scope,
-# selector, manifest, impersonation and discarded global flags are handled
-# by name before this table is consulted.
-_KUBECTL_VALUE_FLAGS = {
-    "accept-hosts", "accept-paths", "address", "aggregation-rule", "allowlist-entry",
-    "annotation", "annotations", "api-group", "api-prefix", "api-version", "appendarg",
-    "as-user-extra", "audience", "auth-provider", "auth-provider-arg", "bound-object-kind",
-    "bound-object-name", "bound-object-uid", "categories", "cert", "chunk-size", "class",
-    "cluster-ip", "clusterip", "clusterrole", "concurrency", "container", "copy-to", "cpu",
-    "current-replicas", "custom", "default-backend", "description", "detach-keys",
-    "docker-email", "docker-password", "docker-server", "docker-username", "duration", "env",
-    "exec-api-version", "exec-arg", "exec-command", "exec-env", "exec-interactive-mode",
-    "external-ip", "external-name", "field-manager", "for", "from", "from-env-file",
-    "from-file", "from-literal", "grace-period", "group", "hard", "helm-api-versions",
-    "helm-command", "helm-kube-version", "image", "image-pull-policy", "keepalive", "key",
-    "keys", "kuberc", "label-columns", "labels", "limit-bytes", "limits", "load-balancer-ip",
-    "load-restrictor", "max", "max-log-requests", "max-unavailable", "memory", "min",
-    "min-available", "mount", "name", "namespaces", "network-name", "node-port",
-    "non-resource-url", "option", "output-directory", "override-type", "overrides", "patch",
-    "patch-file", "pod-running-timeout", "pod-selector", "policy", "port", "preemption-policy",
-    "prependarg", "protocol", "proxy-url", "prune-allowlist", "raw", "reject-methods",
-    "reject-paths", "replicas", "requests", "resource", "resource-name", "resource-version",
-    "restart", "retries", "revision", "role", "rule", "schedule", "scopes", "section",
-    "serviceaccount", "session-affinity", "set-image", "since", "since-time",
-    "skip-wait-for-delete-timeout", "sort-by", "subresource", "tail", "target",
-    "target-port", "tcp", "template", "timeout", "to-revision", "type", "types",
-    "unix-socket", "value", "verb", "verbs", "vmodule", "www", "www-prefix",
-    # short forms: -c container, -L label-columns
-    "c", "L",
-}
+
+def _kubectl_flag_table() -> dict[str, Any]:
+    """Every kubectl command's flags (``{flag: [kind, letter]}``) and the global ones
+    (``options``), from ``kubectl <command> --help`` of kubectl 1.36
+    (scripts/gen_kubectl_flags.py)."""
+    with open(_KUBECTL_FLAGS_FILE) as f:
+        return json.load(f)
+
+
+_KUBECTL_TABLE = _kubectl_flag_table()
+_KUBECTL_TABLE_KINDS: dict[str, set[str]] = {}
+for _command, _flags in _KUBECTL_TABLE.items():
+    if not _command.startswith("_") and _command != "options":
+        for _name, (_kind, _letter) in _flags.items():
+            _KUBECTL_TABLE_KINDS.setdefault(_name, set()).add(_kind)
+_KUBECTL_OPTION_NAMES = frozenset(_KUBECTL_TABLE["options"])
+
+# Overrides of the generated table, each for a reason the help cannot show:
+# --cascade and --validate take a value but have a default for a bare use (pflag's
+# NoOptDefVal), so a bare one takes no word; --delete-local-data and --record are
+# deprecated booleans the help no longer lists.
+_KUBECTL_BARE_DEFAULT_FLAGS = frozenset({"cascade", "validate"})
+_KUBECTL_HIDDEN_BOOL_FLAGS = frozenset({"delete-local-data", "record"})
+# Flags read by name before these tables (scope, selector, manifests, dry-run,
+# impersonation and the global ones), or by command ("raw" is a value except on
+# "config view"; "command", "containers" and "prefix" are strings only under kuberc set,
+# set env and set resources, which _parse_flags handles).
+_KUBECTL_BY_NAME = frozenset({
+    "all-namespaces", "dry-run", "field-selector", "filename", "kustomize", "namespace",
+    "output", "selector", "raw"}) | _KUBECTL_OPTION_NAMES
+
+# kubectl flags that take no value token when given without "=value": every flag a
+# kubectl command lists as a boolean, and the overrides above.
+_KNOWN_BOOL_FLAGS = (
+    {name for name, kinds in _KUBECTL_TABLE_KINDS.items() if "bool" in kinds}
+    - _KUBECTL_BY_NAME) | _KUBECTL_BARE_DEFAULT_FLAGS | _KUBECTL_HIDDEN_BOOL_FLAGS
+
+# kubectl flags that always take the next token as their value, even one that starts
+# with "-" (pflag does: "--field-manager -n x" sets the field manager to "-n"):
+# every flag a kubectl command lists as taking a value, but the booleans above and those
+# read by name. --raw takes one wherever it is not config view's boolean.
+# Three global value options no other table reads are listed too (--vmodule, --kuberc,
+# --as-user-extra), and so are the letters -c and -L, which some callers look up before a
+# letter is its long flag.
+_KUBECTL_VALUE_FLAGS = (
+    {name for name, kinds in _KUBECTL_TABLE_KINDS.items() if "value" in kinds}
+    - _KUBECTL_BY_NAME - _KNOWN_BOOL_FLAGS) | {"raw", "c", "L", "vmodule", "kuberc",
+                                                 "as-user-extra"}
 
 # kubectl's integer flags (kubectl 1.36). pflag reads them with base 0, so
 # "--replicas=0x0" is 0: see _go_int. --port is a string on expose and run.
@@ -362,29 +351,38 @@ _KUBECTL_INT_FLAGS = {
     "max-log-requests", "min", "replicas", "retries", "revision",
     "skip-wait-for-delete-timeout", "tail", "to-revision",
 }
-# Every short letter of kubectl 1.36 and the long flag it is (from --help on every command),
-# so a short and a long spelling record the same. Some depend on the verb: see
-# _kubectl_short_name. -h is help, an informational probe read before this.
-_KUBECTL_SHORT_NAMES = {
-    "A": "all-namespaces", "R": "recursive", "q": "quiet", "t": "tty", "w": "watch",
-    "L": "label-columns", "c": "container", "e": "env", "f": "filename", "k": "kustomize",
-    "l": "selector", "n": "namespace", "o": "output", "s": "server", "v": "v",
-}
+@lru_cache(maxsize=256)
+def _kubectl_letters(command: str | None) -> dict[str, tuple[str, str]]:
+    """``{letter: (flag, kind)}`` on ``command`` (``logs``, ``create deployment``,
+    ``rollout restart``): the global letters (``-n``, ``-s``, ``-v``) and the command's
+    own, from its --help. For a command kubectl does not list, only the letters every
+    command that has them gives the same meaning."""
+    table = _KUBECTL_TABLE
+    out = {letter: (name, kind) for name, (kind, letter) in table["options"].items()
+           if letter}
+    entry = table.get(command or "")
+    if not isinstance(entry, dict) or command in ("options",) or (command or "")[:1] == "_":
+        meanings: dict[str, set[tuple[str, str]]] = {}
+        for key, flags in table.items():
+            if key.startswith("_") or key == "options":
+                continue
+            for name, (kind, letter) in flags.items():
+                if letter:
+                    meanings.setdefault(letter, set()).add((name, kind))
+        entry = {next(iter(m))[0]: [next(iter(m))[1], letter]
+                 for letter, m in meanings.items() if len(m) == 1}
+    out.update({letter: (name, kind) for name, (kind, letter) in entry.items() if letter})
+    return out
 
 
 def _kubectl_short_name(letter: str, verb: str | None, replicas: bool) -> str | None:
-    """The long flag kubectl's ``-<letter>`` is on ``verb``, or None when it has none."""
-    if letter == "f" and verb in _KUBECTL_FOLLOW_VERBS:
-        return "follow"  # logs -f
-    if letter == "p":
-        return {"logs": "previous", "patch": "patch"}.get(verb or "")
-    if letter == "r":
-        return "replicas" if replicas else None  # create deployment -r
-    if letter == "i":
-        return "interactive" if verb == "delete" else "stdin"
-    if letter == "l" and verb in ("run", "expose"):
-        return "labels"  # the new object's labels, not a selector
-    return _KUBECTL_SHORT_NAMES.get(letter)
+    """The long flag kubectl's ``-<letter>`` is on the command ``verb`` (from its --help),
+    or None when it has none. ``replicas`` names ``create deployment`` when only
+    ``create`` is known."""
+    command = "create deployment" if replicas and verb == "create" else verb
+    found = _kubectl_letters(command).get(letter)
+    return found[0] if found else None
+
 
 # kubectl verbs whose short "-f" is the boolean --follow, not --filename.
 _KUBECTL_FOLLOW_VERBS = {"logs"}
@@ -445,8 +443,6 @@ _KUBECTL_GLOBAL_BOOL_FLAGS = {"A", "all-namespaces"} | _DISCARD_BOOL_FLAGS
 # go on: -qnprod is -q -n prod. "f", "p" and "r" depend on the command: see
 # _unbundle_short_word. Left out on purpose: -p, -P, -u and -w's value form on proxy,
 # which the parser refuses without a target anyway.
-_KUBECTL_SHORT_VALUE_LETTERS = frozenset("Lcefklnosv")
-_KUBECTL_SHORT_BOOL_LETTERS = frozenset("ARhiqtw")
 
 # Verbs whose target is a pod by default: a bare name is a pod
 # ("exec api-0" -> pod/api-0), and "deploy/web" / "svc/web" normalise like
@@ -610,6 +606,8 @@ def _split_short_word(
     flags: list[str] = []
     rest = word[1:]
     while rest:
+        if rest.startswith("test."):
+            break  # pflag ignores the rest of the word (go test's flags: parseSingleShortArg)
         letter, rest = rest[0], rest[1:]
         if len(rest) > 1 and rest[0] == "=":
             flags.append(f"-{letter}{rest}")
@@ -1052,17 +1050,13 @@ def _go_int(text: str, flag: str, bits: int = 64) -> int:
 def _kubectl_short_letters(
     verb: str | None, *, replicas: bool = False
 ) -> tuple[frozenset[str], frozenset[str]]:
-    """kubectl's boolean and value letters on ``verb``. ``replicas`` says ``-r`` is
-    ``--replicas`` here (``create deployment``). ``proxy`` has letters of its own that
-    are not listed, and is refused without a target anyway."""
-    bools = _KUBECTL_SHORT_BOOL_LETTERS
-    values = _KUBECTL_SHORT_VALUE_LETTERS
-    if verb in _KUBECTL_FOLLOW_VERBS:  # logs -f is --follow and -p is --previous
-        bools, values = bools | {"f", "p"}, values - {"f"}
-    elif verb == "patch":
-        values = values | {"p"}
-    elif replicas:
-        values = values | {"r"}
+    """kubectl's boolean and value letters on the command ``verb`` (from its --help:
+    ``logs -f`` is the boolean --follow, ``patch -p`` takes a value). ``replicas`` names
+    ``create deployment`` when only ``create`` is known."""
+    command = "create deployment" if replicas and verb == "create" else verb
+    letters = _kubectl_letters(command)
+    bools = frozenset(k for k, (_n, kind) in letters.items() if kind == "bool") | {"h"}
+    values = frozenset(k for k, (_n, kind) in letters.items() if kind != "bool")
     return bools, values
 
 
@@ -1285,6 +1279,7 @@ _KUBECTL_SUBCOMMAND_VERBS = frozenset({"create", "set", "rollout", "config", "au
 
 def _parse_flags(
     tokens: list[str], *, verb: str | None = None, raw_copy_to: list[str] | None = None,
+    command_name: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str], list[str] | None]:
     """Walks kubectl tokens (after the verb/subverb), splitting them into
     metadata, params, positional args, the manifest files or directory they name,
@@ -1303,7 +1298,11 @@ def _parse_flags(
     # the command whose flag types to read (create deployment, set image, rollout restart)
     sub = next((t for t in tokens if not t.startswith("-")), None)
     pflag_command = f"{verb} {sub}" if verb in _KUBECTL_SUBCOMMAND_VERBS and sub else verb
-    short_bools, short_values = _kubectl_short_letters(verb, replicas=replicas_short)
+    # the letters are the command's own when kubectl lists it (apply's -f, not "apply
+    # prod"'s, when "prod" is a flag's value)
+    letters_command = next((c for c in (command_name, pflag_command)
+                            if c and c in _KUBECTL_TABLE), verb)
+    short_bools, short_values = _kubectl_short_letters(letters_command, replicas=replicas_short)
     i = 0
     n = len(tokens)
     while i < n:
@@ -1316,7 +1315,7 @@ def _parse_flags(
             if not is_long and len(tok) > 2:
                 # Here and not before the walk: "--context -nprod" is a context
                 # called "-nprod", which only the flag before it can show.
-                flags = _unbundle_short_word(tok, verb, replicas=replicas_short)
+                flags = _unbundle_short_word(tok, letters_command, replicas=replicas_short)
                 if flags != [tok]:
                     tokens[i:i + 1] = flags
                     n = len(tokens)
@@ -1324,7 +1323,7 @@ def _parse_flags(
             key, val = _split_flag(tok)
             if not is_long:
                 # a short letter is its long flag from here on: both record the same
-                long_name = _kubectl_short_name(key, verb, replicas_short)
+                long_name = _kubectl_short_name(key, letters_command, replicas_short)
                 if long_name is None:
                     raise ValueError(f"kubectl: -{key} is not a short flag the parser knows "
                                      f"on this command; write its long flag: {tokens!r}")
@@ -1679,7 +1678,9 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
 
     raw_copy_to: list[str] = []
     metadata, params, positional, manifests, command = _parse_flags(
-        tokens, verb=verb, raw_copy_to=raw_copy_to)
+        tokens, verb=verb, raw_copy_to=raw_copy_to,
+        command_name=f"{verb} {subverb}" if subverb else ("set image" if verb == "set"
+                                                          else None))
     # attach takes at most two words, and a second one after "--" is its NAME.
     attach_name_after_dash = (verb == "attach" and len(positional) == 1
                               and command is not None and len(command) == 1)
@@ -4390,8 +4391,12 @@ def _gcs_uri_intents(
     reach ``storage/bucket/*``, marked."""
     action = _GCS_LEGACY_VERB_MAP[verb]
     move = verb == "mv" or (raw_prefix == "gsutil" and verb == "cp" and params.get("M") is True)
-    # a move is recursive without -r: gcloud storage mv sets recursive itself
-    # (surface/storage/mv.py), and gsutil's cp turns recursion on for a move
+    # a move is recursive without -r when its source names a container (objects under the
+    # prefix), which only the tool sees: gcloud storage mv sets args.recursive = True itself
+    # (surface/storage/mv.py), and gsutil's mv runs "cp -M" (gslib/commands/mv.py line 161),
+    # whose cp sets recursion_requested = True "if copy_helper_opts.perform_mv and
+    # copy_object_info.names_container" (gslib/commands/cp.py lines 801-807, gsutil
+    # 368796d). The key itself may also be a single object: the prefix covers both.
     implicit = move
     from_stdin = params.get("I") is True or params.get("read_paths_from_stdin") is True
     uris = [t for t in operands if t.startswith("gs://")]

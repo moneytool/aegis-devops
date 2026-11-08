@@ -1,0 +1,3990 @@
+{
+ "_source": "kubectl v1.36.1 --help of every command, and kubectl options",
+ "annotate": {
+  "all": [
+   "bool",
+   ""
+  ],
+  "all-namespaces": [
+   "bool",
+   "A"
+  ],
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "field-selector": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "list": [
+   "bool",
+   ""
+  ],
+  "local": [
+   "bool",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "overwrite": [
+   "bool",
+   ""
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "resource-version": [
+   "value",
+   ""
+  ],
+  "selector": [
+   "value",
+   "l"
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ]
+ },
+ "api-resources": {
+  "api-group": [
+   "value",
+   ""
+  ],
+  "cached": [
+   "bool",
+   ""
+  ],
+  "categories": [
+   "value",
+   ""
+  ],
+  "namespaced": [
+   "bool",
+   ""
+  ],
+  "no-headers": [
+   "bool",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "sort-by": [
+   "value",
+   ""
+  ],
+  "verbs": [
+   "value",
+   ""
+  ]
+ },
+ "api-versions": {},
+ "apply": {
+  "all": [
+   "bool",
+   ""
+  ],
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "cascade": [
+   "value",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "force": [
+   "bool",
+   ""
+  ],
+  "force-conflicts": [
+   "bool",
+   ""
+  ],
+  "grace-period": [
+   "value",
+   ""
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "openapi-patch": [
+   "bool",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "overwrite": [
+   "bool",
+   ""
+  ],
+  "prune": [
+   "bool",
+   ""
+  ],
+  "prune-allowlist": [
+   "value",
+   ""
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "selector": [
+   "value",
+   "l"
+  ],
+  "server-side": [
+   "bool",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "subresource": [
+   "value",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "timeout": [
+   "value",
+   ""
+  ],
+  "validate": [
+   "value",
+   ""
+  ],
+  "wait": [
+   "bool",
+   ""
+  ]
+ },
+ "apply edit-last-applied": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "validate": [
+   "value",
+   ""
+  ],
+  "windows-line-endings": [
+   "bool",
+   ""
+  ]
+ },
+ "apply set-last-applied": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "create-annotation": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ]
+ },
+ "apply view-last-applied": {
+  "all": [
+   "bool",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "selector": [
+   "value",
+   "l"
+  ]
+ },
+ "attach": {
+  "container": [
+   "value",
+   "c"
+  ],
+  "detach-keys": [
+   "value",
+   ""
+  ],
+  "pod-running-timeout": [
+   "value",
+   ""
+  ],
+  "quiet": [
+   "bool",
+   "q"
+  ],
+  "stdin": [
+   "bool",
+   "i"
+  ],
+  "tty": [
+   "bool",
+   "t"
+  ]
+ },
+ "auth": {},
+ "auth can-i": {
+  "all-namespaces": [
+   "bool",
+   "A"
+  ],
+  "list": [
+   "bool",
+   ""
+  ],
+  "no-headers": [
+   "bool",
+   ""
+  ],
+  "quiet": [
+   "bool",
+   "q"
+  ],
+  "subresource": [
+   "value",
+   ""
+  ]
+ },
+ "auth reconcile": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "remove-extra-permissions": [
+   "bool",
+   ""
+  ],
+  "remove-extra-subjects": [
+   "bool",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ]
+ },
+ "auth whoami": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ]
+ },
+ "autoscale": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "cpu": [
+   "value",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "max": [
+   "value",
+   ""
+  ],
+  "memory": [
+   "value",
+   ""
+  ],
+  "min": [
+   "value",
+   ""
+  ],
+  "name": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "save-config": [
+   "bool",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ]
+ },
+ "certificate": {},
+ "certificate approve": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "force": [
+   "bool",
+   ""
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ]
+ },
+ "certificate deny": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "force": [
+   "bool",
+   ""
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ]
+ },
+ "cluster-info": {},
+ "cluster-info dump": {
+  "all-namespaces": [
+   "bool",
+   "A"
+  ],
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "namespaces": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "output-directory": [
+   "value",
+   ""
+  ],
+  "pod-running-timeout": [
+   "value",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ]
+ },
+ "config": {},
+ "config current-context": {},
+ "config delete-cluster": {},
+ "config delete-context": {},
+ "config delete-user": {},
+ "config get-clusters": {},
+ "config get-contexts": {
+  "no-headers": [
+   "bool",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ]
+ },
+ "config get-users": {},
+ "config rename-context": {},
+ "config set": {
+  "set-raw-bytes": [
+   "bool",
+   ""
+  ]
+ },
+ "config set-cluster": {
+  "certificate-authority": [
+   "value",
+   ""
+  ],
+  "embed-certs": [
+   "bool",
+   ""
+  ],
+  "insecure-skip-tls-verify": [
+   "bool",
+   ""
+  ],
+  "proxy-url": [
+   "value",
+   ""
+  ],
+  "server": [
+   "value",
+   ""
+  ],
+  "tls-server-name": [
+   "value",
+   ""
+  ]
+ },
+ "config set-context": {
+  "cluster": [
+   "value",
+   ""
+  ],
+  "current": [
+   "bool",
+   ""
+  ],
+  "namespace": [
+   "value",
+   "n"
+  ],
+  "user": [
+   "value",
+   ""
+  ]
+ },
+ "config set-credentials": {
+  "auth-provider": [
+   "value",
+   ""
+  ],
+  "auth-provider-arg": [
+   "value",
+   ""
+  ],
+  "client-certificate": [
+   "value",
+   ""
+  ],
+  "client-key": [
+   "value",
+   ""
+  ],
+  "embed-certs": [
+   "bool",
+   ""
+  ],
+  "exec-api-version": [
+   "value",
+   ""
+  ],
+  "exec-arg": [
+   "value",
+   ""
+  ],
+  "exec-command": [
+   "value",
+   ""
+  ],
+  "exec-env": [
+   "value",
+   ""
+  ],
+  "exec-interactive-mode": [
+   "value",
+   ""
+  ],
+  "exec-provide-cluster-info": [
+   "bool",
+   ""
+  ],
+  "password": [
+   "value",
+   ""
+  ],
+  "token": [
+   "value",
+   ""
+  ],
+  "username": [
+   "value",
+   ""
+  ]
+ },
+ "config unset": {},
+ "config use-context": {},
+ "config view": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "flatten": [
+   "bool",
+   ""
+  ],
+  "merge": [
+   "bool",
+   ""
+  ],
+  "minify": [
+   "bool",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "raw": [
+   "bool",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ]
+ },
+ "cordon": {
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "selector": [
+   "value",
+   "l"
+  ]
+ },
+ "cp": {
+  "container": [
+   "value",
+   "c"
+  ],
+  "no-preserve": [
+   "bool",
+   ""
+  ],
+  "retries": [
+   "value",
+   ""
+  ]
+ },
+ "create": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "edit": [
+   "bool",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "raw": [
+   "value",
+   ""
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "save-config": [
+   "bool",
+   ""
+  ],
+  "selector": [
+   "value",
+   "l"
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "validate": [
+   "value",
+   ""
+  ],
+  "windows-line-endings": [
+   "bool",
+   ""
+  ]
+ },
+ "create clusterrole": {
+  "aggregation-rule": [
+   "value",
+   ""
+  ],
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "non-resource-url": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "resource": [
+   "value",
+   ""
+  ],
+  "resource-name": [
+   "value",
+   ""
+  ],
+  "save-config": [
+   "bool",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "validate": [
+   "value",
+   ""
+  ],
+  "verb": [
+   "value",
+   ""
+  ]
+ },
+ "create clusterrolebinding": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "clusterrole": [
+   "value",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "group": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "save-config": [
+   "bool",
+   ""
+  ],
+  "serviceaccount": [
+   "value",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "user": [
+   "value",
+   ""
+  ],
+  "validate": [
+   "value",
+   ""
+  ]
+ },
+ "create configmap": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "append-hash": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "from-env-file": [
+   "value",
+   ""
+  ],
+  "from-file": [
+   "value",
+   ""
+  ],
+  "from-literal": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "save-config": [
+   "bool",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "validate": [
+   "value",
+   ""
+  ]
+ },
+ "create cronjob": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "image": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "restart": [
+   "value",
+   ""
+  ],
+  "save-config": [
+   "bool",
+   ""
+  ],
+  "schedule": [
+   "value",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "validate": [
+   "value",
+   ""
+  ]
+ },
+ "create deployment": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "image": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "port": [
+   "value",
+   ""
+  ],
+  "replicas": [
+   "value",
+   "r"
+  ],
+  "save-config": [
+   "bool",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "validate": [
+   "value",
+   ""
+  ]
+ },
+ "create ingress": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "annotation": [
+   "value",
+   ""
+  ],
+  "class": [
+   "value",
+   ""
+  ],
+  "default-backend": [
+   "value",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "rule": [
+   "value",
+   ""
+  ],
+  "save-config": [
+   "bool",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "validate": [
+   "value",
+   ""
+  ]
+ },
+ "create job": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "from": [
+   "value",
+   ""
+  ],
+  "image": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "save-config": [
+   "bool",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "validate": [
+   "value",
+   ""
+  ]
+ },
+ "create namespace": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "save-config": [
+   "bool",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "validate": [
+   "value",
+   ""
+  ]
+ },
+ "create poddisruptionbudget": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "max-unavailable": [
+   "value",
+   ""
+  ],
+  "min-available": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "save-config": [
+   "bool",
+   ""
+  ],
+  "selector": [
+   "value",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "validate": [
+   "value",
+   ""
+  ]
+ },
+ "create priorityclass": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "description": [
+   "value",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "global-default": [
+   "bool",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "preemption-policy": [
+   "value",
+   ""
+  ],
+  "save-config": [
+   "bool",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "validate": [
+   "value",
+   ""
+  ],
+  "value": [
+   "value",
+   ""
+  ]
+ },
+ "create quota": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "hard": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "save-config": [
+   "bool",
+   ""
+  ],
+  "scopes": [
+   "value",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "validate": [
+   "value",
+   ""
+  ]
+ },
+ "create role": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "resource": [
+   "value",
+   ""
+  ],
+  "resource-name": [
+   "value",
+   ""
+  ],
+  "save-config": [
+   "bool",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "validate": [
+   "value",
+   ""
+  ],
+  "verb": [
+   "value",
+   ""
+  ]
+ },
+ "create rolebinding": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "clusterrole": [
+   "value",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "group": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "role": [
+   "value",
+   ""
+  ],
+  "save-config": [
+   "bool",
+   ""
+  ],
+  "serviceaccount": [
+   "value",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "user": [
+   "value",
+   ""
+  ],
+  "validate": [
+   "value",
+   ""
+  ]
+ },
+ "create secret": {},
+ "create secret docker-registry": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "append-hash": [
+   "bool",
+   ""
+  ],
+  "docker-email": [
+   "value",
+   ""
+  ],
+  "docker-password": [
+   "value",
+   ""
+  ],
+  "docker-server": [
+   "value",
+   ""
+  ],
+  "docker-username": [
+   "value",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "from-file": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "save-config": [
+   "bool",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "validate": [
+   "value",
+   ""
+  ]
+ },
+ "create secret generic": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "append-hash": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "from-env-file": [
+   "value",
+   ""
+  ],
+  "from-file": [
+   "value",
+   ""
+  ],
+  "from-literal": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "save-config": [
+   "bool",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "type": [
+   "value",
+   ""
+  ],
+  "validate": [
+   "value",
+   ""
+  ]
+ },
+ "create secret tls": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "append-hash": [
+   "bool",
+   ""
+  ],
+  "cert": [
+   "value",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "key": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "save-config": [
+   "bool",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "validate": [
+   "value",
+   ""
+  ]
+ },
+ "create service": {},
+ "create service clusterip": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "clusterip": [
+   "value",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "save-config": [
+   "bool",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "tcp": [
+   "value",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "validate": [
+   "value",
+   ""
+  ]
+ },
+ "create service externalname": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "external-name": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "save-config": [
+   "bool",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "tcp": [
+   "value",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "validate": [
+   "value",
+   ""
+  ]
+ },
+ "create service loadbalancer": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "save-config": [
+   "bool",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "tcp": [
+   "value",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "validate": [
+   "value",
+   ""
+  ]
+ },
+ "create service nodeport": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "node-port": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "save-config": [
+   "bool",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "tcp": [
+   "value",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "validate": [
+   "value",
+   ""
+  ]
+ },
+ "create serviceaccount": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "save-config": [
+   "bool",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "validate": [
+   "value",
+   ""
+  ]
+ },
+ "create token": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "audience": [
+   "value",
+   ""
+  ],
+  "bound-object-kind": [
+   "value",
+   ""
+  ],
+  "bound-object-name": [
+   "value",
+   ""
+  ],
+  "bound-object-uid": [
+   "value",
+   ""
+  ],
+  "duration": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ]
+ },
+ "debug": {
+  "arguments-only": [
+   "bool",
+   ""
+  ],
+  "attach": [
+   "bool",
+   ""
+  ],
+  "container": [
+   "value",
+   "c"
+  ],
+  "copy-to": [
+   "value",
+   ""
+  ],
+  "custom": [
+   "value",
+   ""
+  ],
+  "env": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "image": [
+   "value",
+   ""
+  ],
+  "image-pull-policy": [
+   "value",
+   ""
+  ],
+  "keep-annotations": [
+   "bool",
+   ""
+  ],
+  "keep-init-containers": [
+   "bool",
+   ""
+  ],
+  "keep-labels": [
+   "bool",
+   ""
+  ],
+  "keep-liveness": [
+   "bool",
+   ""
+  ],
+  "keep-readiness": [
+   "bool",
+   ""
+  ],
+  "keep-startup": [
+   "bool",
+   ""
+  ],
+  "profile": [
+   "value",
+   ""
+  ],
+  "quiet": [
+   "bool",
+   "q"
+  ],
+  "replace": [
+   "bool",
+   ""
+  ],
+  "same-node": [
+   "bool",
+   ""
+  ],
+  "set-image": [
+   "value",
+   ""
+  ],
+  "share-processes": [
+   "bool",
+   ""
+  ],
+  "stdin": [
+   "bool",
+   "i"
+  ],
+  "target": [
+   "value",
+   ""
+  ],
+  "tty": [
+   "bool",
+   "t"
+  ]
+ },
+ "delete": {
+  "all": [
+   "bool",
+   ""
+  ],
+  "all-namespaces": [
+   "bool",
+   "A"
+  ],
+  "cascade": [
+   "value",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-selector": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "force": [
+   "bool",
+   ""
+  ],
+  "grace-period": [
+   "value",
+   ""
+  ],
+  "ignore-not-found": [
+   "bool",
+   ""
+  ],
+  "interactive": [
+   "bool",
+   "i"
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "now": [
+   "bool",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "raw": [
+   "value",
+   ""
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "selector": [
+   "value",
+   "l"
+  ],
+  "timeout": [
+   "value",
+   ""
+  ],
+  "wait": [
+   "bool",
+   ""
+  ]
+ },
+ "describe": {
+  "all-namespaces": [
+   "bool",
+   "A"
+  ],
+  "chunk-size": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "selector": [
+   "value",
+   "l"
+  ],
+  "show-events": [
+   "bool",
+   ""
+  ]
+ },
+ "diff": {
+  "concurrency": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "force-conflicts": [
+   "bool",
+   ""
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "prune": [
+   "bool",
+   ""
+  ],
+  "prune-allowlist": [
+   "value",
+   ""
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "selector": [
+   "value",
+   "l"
+  ],
+  "server-side": [
+   "bool",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "show-secrets": [
+   "bool",
+   ""
+  ]
+ },
+ "drain": {
+  "chunk-size": [
+   "value",
+   ""
+  ],
+  "delete-emptydir-data": [
+   "bool",
+   ""
+  ],
+  "disable-eviction": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "force": [
+   "bool",
+   ""
+  ],
+  "grace-period": [
+   "value",
+   ""
+  ],
+  "ignore-daemonsets": [
+   "bool",
+   ""
+  ],
+  "pod-selector": [
+   "value",
+   ""
+  ],
+  "selector": [
+   "value",
+   "l"
+  ],
+  "skip-wait-for-delete-timeout": [
+   "value",
+   ""
+  ],
+  "timeout": [
+   "value",
+   ""
+  ]
+ },
+ "edit": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "output-patch": [
+   "bool",
+   ""
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "save-config": [
+   "bool",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "subresource": [
+   "value",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "validate": [
+   "value",
+   ""
+  ],
+  "windows-line-endings": [
+   "bool",
+   ""
+  ]
+ },
+ "events": {
+  "all-namespaces": [
+   "bool",
+   "A"
+  ],
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "chunk-size": [
+   "value",
+   ""
+  ],
+  "for": [
+   "value",
+   ""
+  ],
+  "no-headers": [
+   "bool",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "types": [
+   "value",
+   ""
+  ],
+  "watch": [
+   "bool",
+   "w"
+  ]
+ },
+ "exec": {
+  "container": [
+   "value",
+   "c"
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "pod-running-timeout": [
+   "value",
+   ""
+  ],
+  "quiet": [
+   "bool",
+   "q"
+  ],
+  "stdin": [
+   "bool",
+   "i"
+  ],
+  "tty": [
+   "bool",
+   "t"
+  ]
+ },
+ "explain": {
+  "api-version": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ]
+ },
+ "expose": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "cluster-ip": [
+   "value",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "external-ip": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "labels": [
+   "value",
+   "l"
+  ],
+  "load-balancer-ip": [
+   "value",
+   ""
+  ],
+  "name": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "override-type": [
+   "value",
+   ""
+  ],
+  "overrides": [
+   "value",
+   ""
+  ],
+  "port": [
+   "value",
+   ""
+  ],
+  "protocol": [
+   "value",
+   ""
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "save-config": [
+   "bool",
+   ""
+  ],
+  "selector": [
+   "value",
+   ""
+  ],
+  "session-affinity": [
+   "value",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "target-port": [
+   "value",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "type": [
+   "value",
+   ""
+  ]
+ },
+ "get": {
+  "all-namespaces": [
+   "bool",
+   "A"
+  ],
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "chunk-size": [
+   "value",
+   ""
+  ],
+  "field-selector": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "ignore-not-found": [
+   "bool",
+   ""
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "label-columns": [
+   "value",
+   "L"
+  ],
+  "no-headers": [
+   "bool",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "output-watch-events": [
+   "bool",
+   ""
+  ],
+  "raw": [
+   "value",
+   ""
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "selector": [
+   "value",
+   "l"
+  ],
+  "server-print": [
+   "bool",
+   ""
+  ],
+  "show-kind": [
+   "bool",
+   ""
+  ],
+  "show-labels": [
+   "bool",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "sort-by": [
+   "value",
+   ""
+  ],
+  "subresource": [
+   "value",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "watch": [
+   "bool",
+   "w"
+  ],
+  "watch-only": [
+   "bool",
+   ""
+  ]
+ },
+ "kuberc": {},
+ "kuberc set": {
+  "allowlist-entry": [
+   "value",
+   ""
+  ],
+  "appendarg": [
+   "value",
+   ""
+  ],
+  "command": [
+   "value",
+   ""
+  ],
+  "kuberc": [
+   "value",
+   ""
+  ],
+  "name": [
+   "value",
+   ""
+  ],
+  "option": [
+   "value",
+   ""
+  ],
+  "overwrite": [
+   "bool",
+   ""
+  ],
+  "policy": [
+   "value",
+   ""
+  ],
+  "prependarg": [
+   "value",
+   ""
+  ],
+  "section": [
+   "value",
+   ""
+  ]
+ },
+ "kuberc view": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "kuberc": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ]
+ },
+ "kustomize": {
+  "as-current-user": [
+   "bool",
+   ""
+  ],
+  "enable-alpha-plugins": [
+   "bool",
+   ""
+  ],
+  "enable-helm": [
+   "bool",
+   ""
+  ],
+  "env": [
+   "value",
+   "e"
+  ],
+  "helm-api-versions": [
+   "value",
+   ""
+  ],
+  "helm-command": [
+   "value",
+   ""
+  ],
+  "helm-debug": [
+   "bool",
+   ""
+  ],
+  "helm-kube-version": [
+   "value",
+   ""
+  ],
+  "load-restrictor": [
+   "value",
+   ""
+  ],
+  "mount": [
+   "value",
+   ""
+  ],
+  "network": [
+   "bool",
+   ""
+  ],
+  "network-name": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ]
+ },
+ "label": {
+  "all": [
+   "bool",
+   ""
+  ],
+  "all-namespaces": [
+   "bool",
+   "A"
+  ],
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "field-selector": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "list": [
+   "bool",
+   ""
+  ],
+  "local": [
+   "bool",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "overwrite": [
+   "bool",
+   ""
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "resource-version": [
+   "value",
+   ""
+  ],
+  "selector": [
+   "value",
+   "l"
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ]
+ },
+ "logs": {
+  "all-containers": [
+   "bool",
+   ""
+  ],
+  "all-pods": [
+   "bool",
+   ""
+  ],
+  "container": [
+   "value",
+   "c"
+  ],
+  "follow": [
+   "bool",
+   "f"
+  ],
+  "ignore-errors": [
+   "bool",
+   ""
+  ],
+  "insecure-skip-tls-verify-backend": [
+   "bool",
+   ""
+  ],
+  "limit-bytes": [
+   "value",
+   ""
+  ],
+  "max-log-requests": [
+   "value",
+   ""
+  ],
+  "pod-running-timeout": [
+   "value",
+   ""
+  ],
+  "prefix": [
+   "bool",
+   ""
+  ],
+  "previous": [
+   "bool",
+   "p"
+  ],
+  "selector": [
+   "value",
+   "l"
+  ],
+  "since": [
+   "value",
+   ""
+  ],
+  "since-time": [
+   "value",
+   ""
+  ],
+  "tail": [
+   "value",
+   ""
+  ],
+  "timestamps": [
+   "bool",
+   ""
+  ]
+ },
+ "options": {
+  "as": [
+   "value",
+   ""
+  ],
+  "as-group": [
+   "value",
+   ""
+  ],
+  "as-uid": [
+   "value",
+   ""
+  ],
+  "as-user-extra": [
+   "value",
+   ""
+  ],
+  "cache-dir": [
+   "value",
+   ""
+  ],
+  "certificate-authority": [
+   "value",
+   ""
+  ],
+  "client-certificate": [
+   "value",
+   ""
+  ],
+  "client-key": [
+   "value",
+   ""
+  ],
+  "cluster": [
+   "value",
+   ""
+  ],
+  "context": [
+   "value",
+   ""
+  ],
+  "disable-compression": [
+   "bool",
+   ""
+  ],
+  "insecure-skip-tls-verify": [
+   "bool",
+   ""
+  ],
+  "kubeconfig": [
+   "value",
+   ""
+  ],
+  "kuberc": [
+   "value",
+   ""
+  ],
+  "log-flush-frequency": [
+   "value",
+   ""
+  ],
+  "match-server-version": [
+   "bool",
+   ""
+  ],
+  "namespace": [
+   "value",
+   "n"
+  ],
+  "password": [
+   "value",
+   ""
+  ],
+  "profile": [
+   "value",
+   ""
+  ],
+  "profile-output": [
+   "value",
+   ""
+  ],
+  "request-timeout": [
+   "value",
+   ""
+  ],
+  "server": [
+   "value",
+   "s"
+  ],
+  "tls-server-name": [
+   "value",
+   ""
+  ],
+  "token": [
+   "value",
+   ""
+  ],
+  "user": [
+   "value",
+   ""
+  ],
+  "username": [
+   "value",
+   ""
+  ],
+  "v": [
+   "value",
+   "v"
+  ],
+  "vmodule": [
+   "value",
+   ""
+  ],
+  "warnings-as-errors": [
+   "bool",
+   ""
+  ]
+ },
+ "patch": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "local": [
+   "bool",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "patch": [
+   "value",
+   "p"
+  ],
+  "patch-file": [
+   "value",
+   ""
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "subresource": [
+   "value",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "type": [
+   "value",
+   ""
+  ]
+ },
+ "plugin": {},
+ "plugin list": {
+  "name-only": [
+   "bool",
+   ""
+  ]
+ },
+ "port-forward": {
+  "address": [
+   "value",
+   ""
+  ],
+  "pod-running-timeout": [
+   "value",
+   ""
+  ]
+ },
+ "proxy": {
+  "accept-hosts": [
+   "value",
+   ""
+  ],
+  "accept-paths": [
+   "value",
+   ""
+  ],
+  "address": [
+   "value",
+   ""
+  ],
+  "api-prefix": [
+   "value",
+   ""
+  ],
+  "append-server-path": [
+   "bool",
+   ""
+  ],
+  "disable-filter": [
+   "bool",
+   ""
+  ],
+  "keepalive": [
+   "value",
+   ""
+  ],
+  "port": [
+   "value",
+   "p"
+  ],
+  "reject-methods": [
+   "value",
+   ""
+  ],
+  "reject-paths": [
+   "value",
+   ""
+  ],
+  "unix-socket": [
+   "value",
+   "u"
+  ],
+  "www": [
+   "value",
+   "w"
+  ],
+  "www-prefix": [
+   "value",
+   "P"
+  ]
+ },
+ "replace": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "cascade": [
+   "value",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "force": [
+   "bool",
+   ""
+  ],
+  "grace-period": [
+   "value",
+   ""
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "raw": [
+   "value",
+   ""
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "save-config": [
+   "bool",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "subresource": [
+   "value",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "timeout": [
+   "value",
+   ""
+  ],
+  "validate": [
+   "value",
+   ""
+  ],
+  "wait": [
+   "bool",
+   ""
+  ]
+ },
+ "rollout": {},
+ "rollout history": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "revision": [
+   "value",
+   ""
+  ],
+  "selector": [
+   "value",
+   "l"
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ]
+ },
+ "rollout pause": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "selector": [
+   "value",
+   "l"
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ]
+ },
+ "rollout restart": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "selector": [
+   "value",
+   "l"
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ]
+ },
+ "rollout resume": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "selector": [
+   "value",
+   "l"
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ]
+ },
+ "rollout status": {
+  "filename": [
+   "value",
+   "f"
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "revision": [
+   "value",
+   ""
+  ],
+  "selector": [
+   "value",
+   "l"
+  ],
+  "timeout": [
+   "value",
+   ""
+  ],
+  "watch": [
+   "bool",
+   "w"
+  ]
+ },
+ "rollout undo": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "selector": [
+   "value",
+   "l"
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "to-revision": [
+   "value",
+   ""
+  ]
+ },
+ "run": {
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "annotations": [
+   "value",
+   ""
+  ],
+  "attach": [
+   "bool",
+   ""
+  ],
+  "cascade": [
+   "value",
+   ""
+  ],
+  "command": [
+   "bool",
+   ""
+  ],
+  "detach-keys": [
+   "value",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "env": [
+   "value",
+   ""
+  ],
+  "expose": [
+   "bool",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "force": [
+   "bool",
+   ""
+  ],
+  "grace-period": [
+   "value",
+   ""
+  ],
+  "image": [
+   "value",
+   ""
+  ],
+  "image-pull-policy": [
+   "value",
+   ""
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "labels": [
+   "value",
+   "l"
+  ],
+  "leave-stdin-open": [
+   "bool",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "override-type": [
+   "value",
+   ""
+  ],
+  "overrides": [
+   "value",
+   ""
+  ],
+  "pod-running-timeout": [
+   "value",
+   ""
+  ],
+  "port": [
+   "value",
+   ""
+  ],
+  "privileged": [
+   "bool",
+   ""
+  ],
+  "quiet": [
+   "bool",
+   "q"
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "restart": [
+   "value",
+   ""
+  ],
+  "rm": [
+   "bool",
+   ""
+  ],
+  "save-config": [
+   "bool",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "stdin": [
+   "bool",
+   "i"
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "timeout": [
+   "value",
+   ""
+  ],
+  "tty": [
+   "bool",
+   "t"
+  ],
+  "wait": [
+   "bool",
+   ""
+  ]
+ },
+ "scale": {
+  "all": [
+   "bool",
+   ""
+  ],
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "current-replicas": [
+   "value",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "replicas": [
+   "value",
+   ""
+  ],
+  "resource-version": [
+   "value",
+   ""
+  ],
+  "selector": [
+   "value",
+   "l"
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "timeout": [
+   "value",
+   ""
+  ]
+ },
+ "set": {},
+ "set env": {
+  "all": [
+   "bool",
+   ""
+  ],
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "containers": [
+   "value",
+   "c"
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "env": [
+   "value",
+   "e"
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "from": [
+   "value",
+   ""
+  ],
+  "keys": [
+   "value",
+   ""
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "list": [
+   "bool",
+   ""
+  ],
+  "local": [
+   "bool",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "overwrite": [
+   "bool",
+   ""
+  ],
+  "prefix": [
+   "value",
+   ""
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "resolve": [
+   "bool",
+   ""
+  ],
+  "selector": [
+   "value",
+   "l"
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ]
+ },
+ "set image": {
+  "all": [
+   "bool",
+   ""
+  ],
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "local": [
+   "bool",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "selector": [
+   "value",
+   "l"
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ]
+ },
+ "set resources": {
+  "all": [
+   "bool",
+   ""
+  ],
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "containers": [
+   "value",
+   "c"
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "limits": [
+   "value",
+   ""
+  ],
+  "local": [
+   "bool",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "requests": [
+   "value",
+   ""
+  ],
+  "selector": [
+   "value",
+   "l"
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ]
+ },
+ "set selector": {
+  "all": [
+   "bool",
+   ""
+  ],
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "local": [
+   "bool",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "resource-version": [
+   "value",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ]
+ },
+ "set serviceaccount": {
+  "all": [
+   "bool",
+   ""
+  ],
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "local": [
+   "bool",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ]
+ },
+ "set subject": {
+  "all": [
+   "bool",
+   ""
+  ],
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "group": [
+   "value",
+   ""
+  ],
+  "kustomize": [
+   "value",
+   "k"
+  ],
+  "local": [
+   "bool",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "selector": [
+   "value",
+   "l"
+  ],
+  "serviceaccount": [
+   "value",
+   ""
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "user": [
+   "value",
+   ""
+  ]
+ },
+ "taint": {
+  "all": [
+   "bool",
+   ""
+  ],
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "field-manager": [
+   "value",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "overwrite": [
+   "bool",
+   ""
+  ],
+  "selector": [
+   "value",
+   "l"
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "validate": [
+   "value",
+   ""
+  ]
+ },
+ "top": {},
+ "top node": {
+  "no-headers": [
+   "bool",
+   ""
+  ],
+  "selector": [
+   "value",
+   "l"
+  ],
+  "show-capacity": [
+   "bool",
+   ""
+  ],
+  "show-swap": [
+   "bool",
+   ""
+  ],
+  "sort-by": [
+   "value",
+   ""
+  ],
+  "use-protocol-buffers": [
+   "bool",
+   ""
+  ]
+ },
+ "top pod": {
+  "all-namespaces": [
+   "bool",
+   "A"
+  ],
+  "containers": [
+   "bool",
+   ""
+  ],
+  "field-selector": [
+   "value",
+   ""
+  ],
+  "no-headers": [
+   "bool",
+   ""
+  ],
+  "selector": [
+   "value",
+   "l"
+  ],
+  "show-swap": [
+   "bool",
+   ""
+  ],
+  "sort-by": [
+   "value",
+   ""
+  ],
+  "sum": [
+   "bool",
+   ""
+  ],
+  "use-protocol-buffers": [
+   "bool",
+   ""
+  ]
+ },
+ "uncordon": {
+  "dry-run": [
+   "value",
+   ""
+  ],
+  "selector": [
+   "value",
+   "l"
+  ]
+ },
+ "version": {
+  "client": [
+   "bool",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ]
+ },
+ "wait": {
+  "all": [
+   "bool",
+   ""
+  ],
+  "all-namespaces": [
+   "bool",
+   "A"
+  ],
+  "allow-missing-template-keys": [
+   "bool",
+   ""
+  ],
+  "field-selector": [
+   "value",
+   ""
+  ],
+  "filename": [
+   "value",
+   "f"
+  ],
+  "for": [
+   "value",
+   ""
+  ],
+  "local": [
+   "bool",
+   ""
+  ],
+  "output": [
+   "value",
+   "o"
+  ],
+  "recursive": [
+   "bool",
+   "R"
+  ],
+  "selector": [
+   "value",
+   "l"
+  ],
+  "show-managed-fields": [
+   "bool",
+   ""
+  ],
+  "template": [
+   "value",
+   ""
+  ],
+  "timeout": [
+   "value",
+   ""
+  ]
+ }
+}

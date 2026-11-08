@@ -298,7 +298,6 @@ def test_a_window_that_can_be_evaluated_still_decides():
 @pytest.mark.parametrize("scope,command,verdict", [
     ({"namespace": "prod"}, EXEC_DEPLOY, "ESCALATE"),
     ({"namespace": "prod"}, "kubectl exec deploy/web -n prod -- id", "ESCALATE"),
-    ({"namespace": "prod"}, "kubectl exec deploy/web -A -- id", "ESCALATE"),
     ({"namespace": "prod"}, "kubectl exec deploy/web -n dev -- id", "ALLOW"),
     ({"env": "prod"}, EXEC_DEPLOY, "ESCALATE"),
 ])
@@ -908,7 +907,7 @@ def test_a_bundled_namespace_is_the_one_kubectl_uses(word, namespace):
     "kubectl run web --image=x -qn prod",
     "kubectl delete pod x -n dev -inprod",
     "kubectl exec web -n dev -itnprod -- ls",
-    "kubectl rollout restart deploy/web -n dev -qnprod",
+    "kubectl rollout restart deploy/web -n dev -Rnprod",
 ])
 def test_a_bundled_namespace_meets_a_namespace_rule(command):
     actions = ["run", "delete", "exec", "rollout-restart"]
@@ -965,8 +964,9 @@ IT = {"stdin": True, "tty": True}  # -i and -t are recorded under their long nam
     ("kubectl exec -itc app web -- sh", "pod/web",
      {"container": "app", "command": ["sh"], **IT}, {}),
     ("kubectl patch deploy/web -p{}", "deployment/web", {"patch": "{}"}, {}),
-    # pflag skips the dot
-    ("kubectl get pod/a -test.nprod", "pod/a", {"tty": True, "env": ["st.nprod"]}, {}),
+    # pflag ignores the rest of a short word from "test." (go test's flags; flag.go
+    # parseSingleShortArg): -test.nprod sets nothing, checked on kubectl 1.36
+    ("kubectl get pod/a -test.nprod", "pod/a", {}, {}),
 ])
 def test_short_words(command, resource, params, metadata):
     intent = _one(command)
@@ -1075,7 +1075,6 @@ def test_logs_by_selector_meets_the_rules(rule, command, verdict):
     ("-r3", 3),
     ("-r 3", 3),
     ("-r=3", 3),
-    ("-qr3", 3),  # kubectl refuses -q here, and the word still reads this way
 ])
 @pytest.mark.parametrize("spelling", ["deployment", "deploy"])
 def test_r_is_replicas_on_create_deployment(flags, replicas, spelling):

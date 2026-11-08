@@ -676,8 +676,13 @@ name). git verbs without an option table leave every param unresolved when given
   it. helm's per-command letters come from its registrations too (`helm pull -d` is
   `--destination`), and `helm repo add|update|remove|list` and `helm pull` are read (the
   local repository list and a chart download). Everyday gh, helm, flux, argocd and kubectl
-  commands written with short flags parse, and kubectl, flux and argocd letters are checked
-  against the generated registrations.
+  commands written with short flags parse, and flux and argocd letters are checked against
+  the generated registrations.
+- kubectl's short letters and its boolean and value flags now come from `kubectl <command>
+  --help` of every command (`kubectl_flags.json`, generated), each command with its own
+  letters: a letter the command does not have is refused, as kubectl refuses it (`kubectl
+  exec -A`, `kubectl create deployment -q` were read before), and a short word from `-test.`
+  is ignored, as pflag ignores it (it was read as `-t -e st...`).
 
 ### Added
 - A `NOTICE` file at the repository root lists the third-party code and data in the package

@@ -65,6 +65,10 @@ pflag_types.json
     GitHub CLI (Copyright (c) 2019 GitHub Inc., MIT License, text below)
   None of these repositories ships a NOTICE file.
 
+kubectl_flags.json
+  Every kubectl command's flags and short letters, read from the --help of kubectl
+  v1.36.1 (Copyright The Kubernetes Authors, Apache-2.0).
+
 gh_flags.json
   Every gh command's flags, types and short letters, from the flag registrations of
   GitHub CLI (https://github.com/cli/cli, commit

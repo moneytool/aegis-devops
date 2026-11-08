@@ -3670,7 +3670,7 @@ def test_gh_flags_come_from_gh_registrations():
 
 # commands whose letters the parser does not take from the registrations, because it
 # refuses the command (documented overrides of the generated letters)
-_REFUSED_FOR_LETTERS = {("flux", "migrate"), ("argocd", "app logs"), ("kubectl", "proxy")}
+_REFUSED_FOR_LETTERS = {("flux", "migrate"), ("argocd", "app logs")}
 
 
 def test_short_letters_agree_with_the_registrations():
@@ -3692,3 +3692,35 @@ def test_short_letters_agree_with_the_registrations():
                 continue
             for letter, flag in letters.items():
                 assert name_of(letter, key) == flag, (tool, key, letter, flag)
+
+
+# --- kubectl letters from kubectl's --help -------------------------------------------
+
+
+@pytest.mark.parametrize("command", [
+    # each a letter the command does not have: kubectl refuses it (checked on kubectl 1.36)
+    "kubectl exec deploy/web -A -- id",
+    "kubectl rollout restart deploy/web -n dev -qnprod",
+    "kubectl create deployment x -qr3 --image=i",
+    "kubectl exec -l app=web -- ls",
+    "kubectl attach -l a=b",
+])
+def test_kubectl_letters_a_command_does_not_have_are_refused(command):
+    with pytest.raises(ValueError):
+        from_argv(command.split())
+
+
+def test_kubectl_letters_come_from_each_commands_help():
+    from aegis_core.parser import _KUBECTL_TABLE, _kubectl_short_name
+
+    for command, flags in _KUBECTL_TABLE.items():
+        if command.startswith("_") or command == "options":
+            continue
+        for name, (_kind, letter) in flags.items():
+            if letter:
+                assert _kubectl_short_name(letter, command, False) == name, (command, letter)
+
+
+def test_pflag_ignores_a_short_word_from_test_dot():
+    intent = from_argv("kubectl get pod/a -test.nprod".split())[0]
+    assert "namespace" not in intent.metadata
