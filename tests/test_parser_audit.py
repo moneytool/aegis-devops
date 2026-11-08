@@ -1,4 +1,4 @@
-"""The sibling audit of review rounds 1-21 (docs/dev/parser-audit.md): one check per class
+"""The sibling audit of review rounds 1-22 (docs/dev/parser-audit.md): one check per class
 of finding and per tool where the class applies, so a fix that covers one tool and misses
 its siblings fails here. Each row is ``(class, tool, argv, check)``."""
 
@@ -422,6 +422,14 @@ AUDIT = [
      param("tags", {"env": "prod"})),
     ("C44", "gcloud", "gcloud compute instances update vm --zone z "
      "--update-labels env=prod,team=a --remove-labels team", param("labels", {"env": "prod"})),
+    # round 22
+    ("C37", "kubectl", "kubectl apply -f desired.yaml --prune -l app=web -n prod",
+     ("has", "pod/*", "delete")),
+    ("C37", "gh", "gh issue transfer 42 --repo acme/source acme/protected",
+     param("destination_repo", "acme/protected")),
+    ("C44", "az", "az group update -n rg --tags env=safe --se tags.env=prod",
+     param("tags", {"env": "prod"})),
+    ("C31", "az", "az group update -n rg --tags env=@.git", unres("tags.*")),
 ]
 
 
