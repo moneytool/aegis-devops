@@ -15,14 +15,16 @@ Values are applied in the tool's own order, and words after `--` are read as the
 them.
 What a command takes from outside its argv -- a configuration file, the environment, a file a
 value is read from, values reused from an earlier run -- is marked unresolved, so a rule it
-could affect escalates, or the command is refused; so is an ID the tool looks up from a name
+could affect escalates, or the command is refused, and a value recorded for a key that is
+marked unresolved never decides it; so is an ID the tool looks up from a name
 when it runs (an az subscription or location by name, a gcloud project by number). One value
 written several ways (a negated boolean, a URL or a number, a host-qualified name, an ARN, an
 abbreviated option, a short option or its long one, a literal or a nested key, `-` or `_`,
 a qualified or a flagged namespace) meets a rule written any of those ways, on every
 subcommand, and so does a mark that leaves it unresolved. A value decoded from JSON or YAML
-is the value the tool sends (helm's JSON numbers are float64, aws reads YAML 1.2). A target the tool expands when it runs (a selector, `--all`, a
-wildcard bucket, a recursive path, a file or stdin of objects) is marked, so a rule on anything
+is the value the tool sends (helm's JSON numbers are float64, aws reads YAML 1.2). A target the tool expands when it runs (a list, a selector, `--all`, a
+wildcard bucket, a recursive path, a file or stdin of objects) is marked, every `kind/*`
+target in one place for every parser, so a rule on anything
 it may reach escalates, and a selection's scope is never copied onto the targets named beside
 it.
 No command is read as a read unless it is one of the commands audited as only reading; any
@@ -439,6 +441,29 @@ name). git verbs without an option table leave every param unresolved when given
   argparse reads it as a positional: both are targets now. Only `ssh` takes a command after
   `--`; on a command outside the flag table `--` is refused. kubectl, helm, flux, argocd, gh
   and git read the words after `--` as arguments, and aws and az refuse them, as before.
+- `argocd app create decoy --file - --project dev --upsert` kept `project: dev` beside the
+  mark that every key is unresolved, and the store let the recorded value decide, so a rule
+  on `project: prod` allowed it; argocd does not apply `--project` to apps read from stdin.
+  The parser no longer records the line's project or app namespace for apps from a file, and
+  the store no longer lets any recorded value, in metadata or params, decide a key marked
+  unresolved (by name, `*` or `**`, through `canonical_key`): the rule escalates. A key
+  `--resolve-current-context` fills is unmarked as it is filled. aws input from a file now
+  marks exactly the options the command line does not give, which it overrides.
+- `argocd app create -f application.yaml` was refused for want of a name: a file of
+  Applications needs none, and is now `app/*`, marked. `gh secret set DECOY --env-file -`
+  and `gh variable set DECOY -f .env` set every name in the dotenv input and ignore the one
+  on the line: `secret/*` / `variable/*`, marked; `gh secret set` with no `--body` reads the
+  value from stdin, which is unresolved. kubectl `-f`, helm and flux have no file that stands
+  for a target's name; az `@file` values are unresolved (round 6). From source.
+- `gcloud storage buckets delete gs://prod` was `storage/bucket/gs://prod`. A `gs://` URI is
+  the bucket (and its object the `key`) on every gcloud storage command, as on `storage rm`,
+  wildcards marked the same way. `--read-paths-from-stdin` / `-I` on any storage command adds
+  `storage/bucket/*`. Every `kind/*` target, from any parser, now carries the runtime mark,
+  added in one place (`mark_unknown_names`), so no command can leave one unmarked:
+  `gcloud storage buckets update --read-paths-from-stdin` was an unmarked `storage/bucket/*`
+  (ALLOW against a rule on one bucket), and a list such as `kubectl get pods` is marked now
+  too. The other URI spellings were checked: aws `s3://` and s3api `--bucket` already meet,
+  az IDs and gh URLs are names already, and helm `oci://` and flux `--url` are not targets.
 - Tests that used `flux reconcile ... --dry-run`, `flux get ... --export` and `git push
   --dry-run=false`, which the tools refuse, now use commands the tools accept (`flux create ...
   --export`, `git push --dry-run --no-dry-run`).

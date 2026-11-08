@@ -335,8 +335,9 @@ same: kubeconfig `context` and `cluster`, aws `region` and `profile`, gcloud `pr
 **One value, every spelling.** A scope key matches its `-`/`_` twin (`dry-run`, `dry_run`, at
 every level of a nested key) and a boolean's negated spelling (`no-verify-ssl: true` is
 `verify-ssl: false`), and an unresolved mark in `params.unresolved_scope` meets every spelling
-the key does (`*` stands for every key the command line does not give, as for aws input read
-from a file). When a key reaches more than one value (helm's literal `a.b` beside the nested
+the key does (`*` stands for every key). A key marked unresolved is unresolved whatever value
+is recorded for it: the recorded value never decides, and the rule escalates. The one prefix
+mark, helm's `set.*`, stands for the `set.` keys the command line leaves to a values file. When a key reaches more than one value (helm's literal `a.b` beside the nested
 `a.b`), the rule matches if any of them does. `repo`, `resource_group`, `subscription` and
 `region` compare without case, as GitHub and Azure do, and so do Azure resource names and
 GitHub `repo/...` resources. An aws option is recorded under its full name however it was
