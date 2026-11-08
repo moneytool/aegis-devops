@@ -191,7 +191,13 @@ recorded as its long flag, and every long name of one option, an alias, holds it
 `{"role-name": "protected"}` meets `aws iam delete-role --role-name protected` as a rule on
 `iam/role/protected` does. Three flags are recorded under a scope key of another name, and a rule
 written with the flag's name meets that key: `location` (az and gcloud) is `region`,
-`kube-context` (helm) is `context`, `kube-apiserver` (helm) is `server`.
+`kube-context` (helm) is `context`, `kube-apiserver` (helm) is `server`. No flag is dropped:
+the only flags not recorded are each tool's no-effect flags (`parser._NO_EFFECT_FLAGS`: output
+format, verbosity, colour, pagers, rate limits, timeouts that only shorten, help), and a secret
+flag's value is recorded as `[secret]`. Impersonation from kubectl, helm and flux is one
+`params["impersonate"]` structure and an `impersonate` intent per identity (`user/<name>`,
+`group/<name>`, `uid/<id>`, provider `kubernetes`); gcloud and gsutil impersonation is an
+`impersonate` intent on `iam/service-account/<email>`.
 
 **A key with an unresolved key under it.** When a rule compares a key whole (`set.config`,
 `metadata`, `tags`) and some key under it is unresolved (an exact mark such as

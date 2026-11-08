@@ -731,6 +731,22 @@ name). git verbs without an option table leave every param unresolved when given
   read as none before, which gave 197 commands wrong long options), aws (argrename's hidden
   aliases), helm 4 (`--force`, `--atomic`, `--colour`) and gh (`--confirm`), generated from the
   registrations.
+- `helm uninstall web -n prod --kube-as-user admin` impersonates `admin`, but the flag was
+  dropped. No flag is dropped now: each is recorded, or is one of a tool's documented no-effect
+  flags (output format, verbosity, colour, rate limits, help). helm, flux and kubectl
+  impersonation is one structure with one `impersonate` intent per identity; auth, TLS,
+  endpoint and kubeconfig flags of kubectl, helm, flux, argocd and aws are recorded (a token's
+  value as `[secret]`); gsutil's `-h` headers (`x-goog-meta-*` as `metadata.*`), `-u` and `-i`
+  are recorded and `-o` leaves every key unresolved; gcloud `--impersonate-service-account`
+  and gsutil `-i` are an impersonate intent on the service account. A test checks every flag
+  of every generated table.
+- aws `modify-instance-attribute --instance-id i-1` was recorded under `instance-ids`; each flag
+  now keeps its own name.
+- aws `modify-instance-attribute --disable-api-termination` was refused: aws-cli turns that
+  `{"Value": bool}` structure into `--x`/`--no-x` switches. They are now generated from aws-cli
+  and read as aws reads them. Everyday aws commands parse.
+- az `--ids` with no ID after it and flux `--dry-run` (which flux refuses) were accepted; both
+  are refused now, as the tools refuse them.
 
 ### Added
 - A `NOTICE` file at the repository root lists the third-party code and data in the package

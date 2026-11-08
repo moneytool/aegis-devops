@@ -1,4 +1,4 @@
-"""The sibling audit of review rounds 1-19 (docs/dev/parser-audit.md): one check per class
+"""The sibling audit of review rounds 1-20 (docs/dev/parser-audit.md): one check per class
 of finding and per tool where the class applies, so a fix that covers one tool and misses
 its siblings fails here. Each row is ``(class, tool, argv, check)``."""
 
@@ -400,6 +400,16 @@ AUDIT = [
     ("C41", "az", "az compute-fleet delete --fleet-name b -g rg", param("name", "b")),
     ("C41", "aws", "aws mgn start-cutover --source-server-i-ds s-1",
      param("source-server-ids", ["s-1"])),
+    # round 20
+    ("C42", "helm", "helm uninstall web -n prod --kube-as-user admin",
+     ("has", "user/admin", "impersonate")),
+    ("C42", "gsutil", "gsutil -u billp rm gs://b/k", param("billing_project", "billp")),
+    ("C42", "kubectl", "kubectl delete pod x --insecure-skip-tls-verify",
+     param("insecure-skip-tls-verify", True)),
+    ("C40", "aws", "aws ec2 modify-instance-attribute --instance-id i-1 --instance-type t3.large",
+     param("instance-id", "i-1")),
+    ("C43", "aws", "aws ec2 modify-instance-attribute --instance-id i-1 "
+     "--disable-api-termination", param("disable-api-termination", {"Value": True})),
 ]
 
 
