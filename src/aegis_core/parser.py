@@ -119,7 +119,9 @@ import io
 import json
 import os
 import re
+import zipfile
 from collections.abc import Collection
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -1741,16 +1743,6 @@ def _aws_s3_option(command: str, key: str) -> str:
     return found[0]
 
 
-# Operations with another option whose name starts with "dry" (botocore data in aws-cli
-# 2.37). Anywhere else a prefix of --dry-run of three letters or more ("--dry") is that
-# option to argparse; here it may be the other one, so it is not read as a rehearsal.
-_AWS_OTHER_DRY_OPTIONS = frozenset({
-    ("kms", "decrypt"), ("kms", "re-encrypt"), ("opensearch", "describe-dry-run-progress"),
-    ("opensearch", "update-domain-config"), ("synthetics", "get-canary"),
-    ("synthetics", "get-canary-runs"), ("synthetics", "update-canary"),
-})
-
-
 def _aws_global_name(key: str) -> str | None:
     """The global option ``--key`` names, as argparse finds it: the exact name or the one
     global option it is a prefix of. None when it names none; ambiguous is refused."""
@@ -1762,12 +1754,107 @@ def _aws_global_name(key: str) -> str | None:
     return found[0] if found else None
 
 
+# Every option of every aws command, read from aws-cli's own argparse parsers
+# (scripts/gen_aws_cli_options.py; the archive's VERSION names the aws-cli it came from).
+# argparse takes an unambiguous prefix of an operation's option, so the parser resolves
+# each one against the operation's full list and records it under its full name.
+_AWS_OPTIONS_ARCHIVE = Path(__file__).parent / "data" / "aws_cli_options.zip"
+
+
+@lru_cache(maxsize=32)
+def _aws_command_table(service: str) -> dict[str, Any] | None:
+    """The options of ``aws <service>`` and its subcommands, or None when aws-cli has no
+    such command."""
+    try:
+        with zipfile.ZipFile(_AWS_OPTIONS_ARCHIVE) as archive:
+            return json.loads(archive.read(f"{service}.json"))
+    except KeyError:
+        return None
+
+
+def aws_cli_options_version() -> str:
+    """The aws-cli version the option table was read from."""
+    with zipfile.ZipFile(_AWS_OPTIONS_ARCHIVE) as archive:
+        return archive.read("VERSION").decode().strip()
+
+
+def _aws_operation_spec(positional: list[str]) -> dict[str, Any]:
+    """The table entry of the command ``positional`` names (``autoscaling
+    set-desired-capacity``, ``ec2 wait instance-running``). aws refuses a command it does
+    not have, and so does the parser."""
+    table = _aws_command_table(positional[0]) if "/" not in positional[0] else None
+    node = (table or {}).get("s", {}).get(positional[1])
+    if node is None:
+        raise ValueError(f"aws {positional[0]} {positional[1]}: not a command of aws-cli "
+                         f"{aws_cli_options_version()}")
+    if "s" in node:
+        if len(positional) < 3 or positional[2] not in node["s"]:
+            raise ValueError(f"aws {positional[0]} {positional[1]}: missing or unknown "
+                             f"subcommand in {positional!r}")
+        node = node["s"][positional[2]]
+    return node
+
+
+def _aws_option_name(spec: dict[str, Any], key: str) -> str:
+    """The option of the operation ``--key`` names: the exact name, or the one option it is
+    a prefix of (argparse's allow_abbrev). Anything else aws refuses, and so does the
+    parser."""
+    options = spec.get("o", {})
+    if key in options:
+        return key
+    found = [name for name in options if name.startswith(key)]
+    if len(found) != 1:
+        reason = f"is ambiguous ({', '.join(sorted(found))})" if found else "is not an option"
+        raise ValueError(f"aws: --{key} {reason} of this command, and aws refuses it")
+    return found[0]
+
+
+_AWS_NEGATIVE_NUMBER_RE = re.compile(r"^-\d+$|^-\d*\.\d+$")
+
+
+def _aws_option_like(word: str) -> bool:
+    """Whether argparse reads ``word`` as an option rather than a value: it starts with
+    ``-``, is not a negative number and has no space."""
+    return (word.startswith("-") and word != "-" and " " not in word
+            and not _AWS_NEGATIVE_NUMBER_RE.match(word))
+
+
+def _aws_take_values(tokens: list[str], i: int, tok: str, val: str | None,
+                     arity: str) -> tuple[Any, int]:
+    """The value(s) argparse gives an option of ``arity`` (see _AWS_OPTIONS_ARCHIVE) at
+    ``tokens[i]``, and the index of the last word taken."""
+    n = len(tokens)
+    if arity == "":
+        if val is not None:
+            raise ValueError(f"aws: {tok} takes no value, and aws refuses it")
+        return True, i
+    if val is not None:
+        return (_coerce(val) if arity in ("1", "?") else [val]), i
+    taken: list[str] = []
+    limit = {"1": 1, "?": 1, "*": n, "+": n}.get(arity) or int(arity)
+    while len(taken) < limit and i + 1 < n and not _aws_option_like(tokens[i + 1]):
+        i += 1
+        taken.append(tokens[i])
+    if arity == "?" and not taken:
+        return True, i
+    if (arity in ("1", "+") and not taken) or (arity.isdigit() and arity != "1"
+                                              and len(taken) != int(arity)):
+        raise ValueError(f"aws: {tok} is missing its value: {tokens!r}")
+    if arity in ("1", "?"):
+        return _coerce(taken[0]), i
+    return taken, i
+
+
 def _parse_aws_tokens(
     tokens: list[str], *, s3: str | None = None, dry_prefix: bool = True,
+    spec: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], list[str], str | None, list[str] | None,
            list[tuple[str, list[str]]], str | None]:
     """``(metadata, params, positional, id, ids, abbreviations, id_flag)``. ``s3`` names the
-    high-level ``aws s3`` command whose options to read (:data:`_AWS_S3_OPTIONS`).
+    high-level ``aws s3`` command whose options to read (:data:`_AWS_S3_OPTIONS`). ``spec``
+    is the operation's entry in the option table (:func:`_aws_operation_spec`): every
+    option is then resolved to its full name and given the words aws gives it, and one the
+    operation does not have is refused.
     ``dry_prefix`` reads a prefix of ``--dry-run`` (``--dry``) as that option.
     ``abbreviations`` are the ``(key, value)`` of options the parser does not know whose
     name starts a target flag's: argparse takes an
@@ -1791,7 +1878,20 @@ def _parse_aws_tokens(
             key, val = _split_flag(tok)
             if tok.startswith("--"):
                 key = _aws_global_name(key) or key
-            if key == "region":
+            arity = None
+            spelled = key
+            if spec is not None and key not in _AWS_GLOBAL_OPTIONS:
+                if not tok.startswith("--"):
+                    raise ValueError(f"aws: {tok} is not an option, and aws refuses it")
+                key = _aws_option_name(spec, key)
+                arity = spec["o"][key]
+            if key in ("cli-input-json", "cli-input-yaml") and spelled != key:
+                # argparse takes the abbreviation, but aws reads the input by its full name
+                # before argparse, so the input is never used (run on aws 2.37)
+                if val is None:
+                    i += 1
+                    _value_at(tokens, i, tok)
+            elif key == "region":
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
@@ -1826,7 +1926,7 @@ def _parse_aws_tokens(
                     raise ValueError(f"aws s3 {s3}: {tok} is missing its value: {tokens!r}")
             elif key == "dry-run" or (dry_prefix and len(key) >= 3 and tok.startswith("--")
                                       and "dry-run".startswith(key)):
-                # a prefix of --dry-run is that option to argparse (see _AWS_OTHER_DRY_OPTIONS)
+                # a prefix of --dry-run, before the operation is known (then its table decides)
                 _record_dry_run(params, _is_dry_run(val))
             elif key == "no-dry-run" or (len(key) >= 4 and "no-dry-run".startswith(key)):
                 # an unambiguous prefix of --no-dry-run is that option to argparse
@@ -1838,7 +1938,7 @@ def _parse_aws_tokens(
                 if key in _AWS_BOOL_FLAGS:
                     _set_bool_param(params, key, _bool_param(val))
                 # the other globals are consumed, intentionally not recorded
-            elif key in _AWS_BOOL_FLAGS:
+            elif key in _AWS_BOOL_FLAGS and arity in (None, ""):
                 _set_bool_param(params, key, _bool_param(val))
             elif key in ("cli-input-json", "cli-input-yaml"):
                 # read before argparse, so only the full name counts (checked on aws 2.37)
@@ -1872,9 +1972,16 @@ def _parse_aws_tokens(
                     i += 1
                     val = _value_at(tokens, i, tok)
                 id_value, id_flag = val, key
-            elif key.startswith("no-") and val is None and tok.startswith("--"):
+            elif key.startswith("no-") and val is None and tok.startswith("--") \
+                    and arity in (None, ""):
                 # botocore's "--no-<flag>" is a boolean's off switch: x: False
                 _set_bool_param(params, key, True)
+            elif arity is not None:
+                value, i = _aws_take_values(tokens, i, tok, val, arity)
+                if arity == "":
+                    _set_bool_param(params, key, True)
+                else:
+                    params[key] = value
             else:
                 if val is not None:
                     params[key] = _coerce(val)
@@ -2038,10 +2145,6 @@ def from_aws_multi(argv: list[str]) -> list[InfrastructureIntent]:
         raise ValueError(f"could not determine an aws service/operation in: {argv!r}")
 
     service, operation, *rest = positional
-    if (service, operation) in _AWS_OTHER_DRY_OPTIONS:
-        (metadata, params, positional, id_value, multi_ids, abbreviations,
-         id_flag) = _parse_aws_tokens(tokens, dry_prefix=False)
-
     if service == "s3":
         if operation in _AWS_S3_VERB_MAP:
             # read again with the s3 commands' own options (--recursive takes no value)
@@ -2049,7 +2152,96 @@ def from_aws_multi(argv: list[str]) -> list[InfrastructureIntent]:
             service, operation, *rest = positional
         return _from_aws_s3(operation, rest, metadata, params, argv)
 
+    # read again with the operation's own options: each is resolved to its full name
+    spec = _aws_operation_spec(positional)
+    (metadata, params, positional, id_value, multi_ids, abbreviations,
+     id_flag) = _parse_aws_tokens(tokens, spec=spec, dry_prefix=False)
     from_input = "cli_input_json" in params or "cli_input_yaml" in params
+    if from_input:
+        extra, structured, unread = _aws_input_tokens(spec, params)
+        if not unread:
+            (metadata, params, positional, id_value, multi_ids, abbreviations,
+             id_flag) = _parse_aws_tokens(extra + tokens, spec=spec, dry_prefix=False)
+            for key, value in structured.items():
+                params.setdefault(key, value)  # the command line wins over the input
+    _mark_aws_file_values(params, from_input and unread)
+    intents = _from_aws_operation(service, operation, metadata, params, id_value,
+                                  multi_ids, abbreviations, id_flag)
+    return _mark_aws_input_targets(intents) if from_input else intents
+
+
+def _aws_input_tokens(
+    spec: dict[str, Any], params: dict[str, Any],
+) -> tuple[list[str], dict[str, Any], bool]:
+    """``--cli-input-json`` / ``--cli-input-yaml`` as the options it stands for:
+    ``(words, structured, unread)``. Each member of the input (``DesiredCapacity``) is the
+    option the operation's table names for it (``--desired-capacity``); a scalar or a list
+    of scalars becomes words read in front of the command line, which overrides them as
+    it does in aws; a structure or map is returned as is. ``unread`` when the input is in
+    a file (``file://``, ``fileb://``), which is not read. A member the operation does not
+    have, two inputs, or text that is not a mapping, aws refuses, and so does the
+    parser."""
+    if "cli_input_json" in params and "cli_input_yaml" in params:
+        raise ValueError("aws: only one --cli-input- parameter may be specified")
+    yaml_input = "cli_input_yaml" in params
+    text = params["cli_input_yaml" if yaml_input else "cli_input_json"]
+    if not isinstance(text, str):
+        raise ValueError("aws: --cli-input- needs a value")
+    if text.startswith(("file://", "fileb://")):
+        return [], {}, True
+    import yaml  # local: only an aws input needs it
+
+    try:
+        data = yaml.safe_load(text) if yaml_input else json.loads(text)
+    except (ValueError, yaml.YAMLError) as exc:
+        raise ValueError(f"aws: --cli-input- is not valid input: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError("aws: --cli-input- must be a mapping of parameters")
+    members = spec.get("m", {})
+    options = spec.get("o", {})
+    words: list[str] = []
+    structured: dict[str, Any] = {}
+    for member, value in data.items():
+        option = members.get(member)
+        if option is None:
+            raise ValueError(f"aws: --cli-input- has {member!r}, not a parameter of this "
+                             "operation, and aws refuses it")
+        if options.get(option) == "":
+            if not isinstance(value, bool):
+                raise ValueError(f"aws: --cli-input- {member} must be true or false")
+            off = option[3:] if option.startswith("no-") else f"no-{option}"
+            words.append(f"--{option}" if value else f"--{off}")
+        elif isinstance(value, (str, int, float)) and not isinstance(value, bool):
+            words.append(f"--{option}={value}")
+        elif isinstance(value, list) and value and all(
+                isinstance(v, (str, int, float)) and not isinstance(v, bool)
+                and not _aws_option_like(str(v)) for v in value):
+            words.extend([f"--{option}", *map(str, value)])
+        else:
+            structured[option] = value
+    return words, structured, False
+
+
+def _mark_aws_file_values(params: dict[str, Any], every: bool) -> None:
+    """aws reads an option's value from a file when it is ``file://`` or ``fileb://``
+    (paramfile), which is not read: those options are unresolved. With ``every``, the
+    whole input is in a file: every option the command line does not give is."""
+    marks = [key for key, value in params.items()
+             if isinstance(value, str) and value.startswith(("file://", "fileb://"))
+             and not key.startswith("cli_input")]
+    if every:
+        marks.append("*")
+    if marks:
+        existing = params.setdefault("unresolved_scope", [])
+        existing.extend(m for m in marks if m not in existing)
+
+
+def _from_aws_operation(
+    service: str, operation: str, metadata: dict[str, Any], params: dict[str, Any],
+    id_value: str | None, multi_ids: list[str] | None,
+    abbreviations: list[tuple[str, list[str]]], id_flag: str | None,
+) -> list[InfrastructureIntent]:
+    """The intents of one aws operation, its options read."""
     if service in ("s3api", "s3control"):
         if id_value is None:
             found = _aws_abbreviated_target(abbreviations, None)
@@ -2067,7 +2259,7 @@ def from_aws_multi(argv: list[str]) -> list[InfrastructureIntent]:
                 with_key = {**params, "key": key} if key is not None else params
                 intents.extend(_from_aws_s3_alias(service, operation, metadata, dict(with_key),
                                                   bucket))
-        return _mark_aws_input_targets(intents) if from_input else intents
+        return intents
 
     if service == "autoscaling" and operation == "set-desired-capacity":
         params = dict(params)
@@ -2138,7 +2330,7 @@ def from_aws_multi(argv: list[str]) -> list[InfrastructureIntent]:
         intents.append(InfrastructureIntent(
             resource=_aws_resource(service, kind, name), action=action, provider="aws",
             params=target_params, metadata=target_metadata))
-    return _mark_aws_input_targets(intents) if from_input else intents
+    return intents
 
 
 def _aws_name(service: str, kind: str, name: str | None, params: dict[str, Any],

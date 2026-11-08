@@ -534,17 +534,24 @@ def test_aws_s3_copy_meets_a_rule_on_the_destination():
                     "aws s3 mv s3://staging/x s3://prod/x") == "BLOCK"
 
 
-def test_aws_cli_input_json_target_is_unknown():
+def test_aws_cli_input_json_target_is_read():
+    # B4: inline input is read into the options it stands for (run on aws 2.37)
     command = ["aws", "ec2", "terminate-instances", "--cli-input-json",
                '{"InstanceIds":["i-9"]}']
     intent = from_argv(command)[0]
-    assert intent.resource == "ec2/instance/*"
-    assert intent.params["resolved_at_runtime"] == {"from": "ec2/instance/*",
-                                                    "kinds": ["ec2/instance"]}
-    assert _verdict([_rule("aws", "ec2/instance/i-9", ["delete"])], command) == "ESCALATE"
+    assert intent.resource == "ec2/instance/i-9"
+    assert "resolved_at_runtime" not in intent.params
+    assert _verdict([_rule("aws", "ec2/instance/i-9", ["delete"])], command) == "BLOCK"
     # a flag that names the target wins over the input, as in aws
     named = command[:3] + ["--instance-ids", "i-1"] + command[3:]
     assert _verdict([_rule("aws", "ec2/instance/i-9", ["delete"])], named) == "ALLOW"
+
+
+def test_aws_cli_input_in_a_file_leaves_target_and_options_unknown():
+    command = "aws ec2 terminate-instances --cli-input-json file://in.json"
+    intent = from_argv(command.split())[0]
+    assert intent.resource == "ec2/instance/*"
+    assert _verdict([_rule("aws", "ec2/instance/i-9", ["delete"])], command) == "ESCALATE"
 
 
 @pytest.mark.parametrize("command", [
@@ -831,21 +838,20 @@ def test_an_inline_follow_variable_is_seen_by_the_hook():
 
 @pytest.mark.parametrize("command,resources", [
     # argparse reads a prefix of the flag that named the target as that flag, and keeps
-    # the last value (run with aws 2.37: DeleteRole b, TerminateInstances i-2 i-3); every
-    # spelling is a target, so neither is dropped
-    ("aws iam delete-role --role-name a --role b", ["iam/role/a", "iam/role/b"]),
-    ("aws iam delete-role --role b --role-name a", ["iam/role/a", "iam/role/b"]),
+    # the last value, as aws reads it (run with aws 2.37: DeleteRole b, TerminateInstances
+    # i-2 i-3): each abbreviation is resolved to its option against the operation's list
+    ("aws iam delete-role --role-name a --role b", ["iam/role/b"]),
+    ("aws iam delete-role --role b --role-name a", ["iam/role/a"]),
     ("aws ec2 terminate-instances --instance-ids i-1 --instance i-2 i-3",
-     ["ec2/instance/i-1", "ec2/instance/i-2", "ec2/instance/i-3"]),
+     ["ec2/instance/i-2", "ec2/instance/i-3"]),
     ("aws eks delete-nodegroup --cluster-name c --nodegroup-name ng-1 --nodegroup ng-2",
-     ["eks/nodegroup/ng-1", "eks/nodegroup/ng-2"]),
-    ("aws s3api delete-object --bucket a --buck b --key k",
-     ["s3/object/a/k", "s3/object/b/k"]),
+     ["eks/nodegroup/ng-2"]),
+    ("aws s3api delete-object --bucket a --buck b --key k", ["s3/object/b/k"]),
     # a prefix of another flag than the one that named the target adds nothing
     ("aws lambda create-function --function-name f --role arn:r --runtime python3.12",
      ["lambda/function/f"]),
 ])
-def test_aws_full_flag_and_abbreviation_are_both_read(command, resources):
+def test_aws_abbreviation_is_the_option_aws_resolves(command, resources):
     assert [i.resource for i in from_argv(command.split())] == resources
 
 
@@ -1602,4 +1608,59 @@ def test_git_push_refuses_what_git_refuses(command):
     (_rule("git", "tag/*", ["delete"]), "git push --mirror origin", "BLOCK"),
 ])
 def test_git_push_tag_rules_hold(rule, command, verdict):
+    assert _verdict([rule], command) == verdict
+
+
+@pytest.mark.parametrize("command,key,value", [
+    # B3: every option resolved by prefix against the operation's full list (aws-cli
+    # 2.37 tables), recorded under its full name (run on aws 2.37)
+    ("aws autoscaling set-desired-capacity --auto-scaling-group-name g --desired-cap 0",
+     "desired_capacity", 0),
+    ("aws autoscaling set-desired-capacity --auto-scaling-group-name g --desired 0",
+     "desired_capacity", 0),
+    ("aws autoscaling set-desired-capacity --auto-scaling-group-name g "
+     "--desired-capacity -1", "desired_capacity", -1),  # a negative number is a value
+    ("aws ec2 terminate-instances --instance-ids i-1 --dry", "dry_run", True),
+    ("aws lambda update-function-configuration --function-name f --timeo 30",
+     "timeout", 30),
+])
+def test_aws_option_prefix_is_the_full_option(command, key, value):
+    assert from_argv(command.split())[0].params[key] == value
+
+
+@pytest.mark.parametrize("command", [
+    "aws autoscaling set-desired-capacity --auto-scaling-group-name g --no-such 1",
+    "aws ec2 terminate-instances --instance-ids i-1 --cli-input x",  # json or yaml
+    "aws autoscaling no-such-operation --x 1",
+    "aws autoscaling set-desired-capacity --auto-scaling-group-name g -x",
+    "aws ec2 terminate-instances --cli-input-json {\"Bogus\":1}",
+    "aws ec2 terminate-instances --cli-input-json {} --cli-input-yaml {}",
+    "aws ec2 terminate-instances --cli-input-json [1]",
+])
+def test_aws_refuses_unknown_options_and_inputs(command):
+    with pytest.raises(ValueError):
+        from_argv(command.split())
+
+
+@pytest.mark.parametrize("command,verdict", [
+    ("aws autoscaling set-desired-capacity --auto-scaling-group-name g --desired-cap 0",
+     "BLOCK"),
+    (["aws", "autoscaling", "set-desired-capacity", "--cli-input-json",
+      '{"AutoScalingGroupName":"g","DesiredCapacity":0}'], "BLOCK"),
+    (["aws", "autoscaling", "set-desired-capacity", "--cli-input-yaml",
+      "{AutoScalingGroupName: g, DesiredCapacity: 0}"], "BLOCK"),
+    (["aws", "autoscaling", "set-desired-capacity", "--cli-input-json",
+      '{"AutoScalingGroupName":"g","DesiredCapacity":0}', "--desired-capacity", "3"],
+     "ALLOW"),  # the command line wins, as in aws
+    # aws reads the input by its full name only: an abbreviation is never used
+    (["aws", "autoscaling", "set-desired-capacity", "--cli-input-j",
+      '{"DesiredCapacity":3}', "--auto-scaling-group-name", "g", "--desired-capacity", "0"],
+     "BLOCK"),
+    ("aws autoscaling set-desired-capacity --cli-input-json file://in.json", "ESCALATE"),
+    ("aws autoscaling set-desired-capacity --auto-scaling-group-name g "
+     "--desired-capacity file://n.txt", "ESCALATE"),
+])
+def test_aws_desired_capacity_rule_holds_in_every_spelling(command, verdict):
+    rule = _rule("aws", "autoscaling/auto-scaling-group/*", ["scale"],
+                 {"desired_capacity": 0})
     assert _verdict([rule], command) == verdict

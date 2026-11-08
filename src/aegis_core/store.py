@@ -866,7 +866,8 @@ def namespace_unresolved(intent: InfrastructureIntent) -> bool:
 def param_unresolved(key: str, intent: InfrastructureIntent) -> bool:
     """Whether a parser marked scope ``key`` as unknown (``params["unresolved_scope"]``):
     ``set.replicaCount`` when helm --set-file sets it from a file nobody read, and
-    ``set.*`` for every ``set.`` key the command line leaves to a values file. A mark
+    ``set.*`` for every ``set.`` key the command line leaves to a values file, ``*`` for
+    every key it leaves to a file (``aws --cli-input-json file://...``). A mark
     meets every spelling of the key that matching would meet (:func:`canonical_key`,
     and a boolean's negated side)."""
     marks = intent.params.get("unresolved_scope")
@@ -879,6 +880,8 @@ def param_unresolved(key: str, intent: InfrastructureIntent) -> bool:
         canon = canonical_key(mark)
         if canon in spellings:
             return True
+        if canon == "*" and not _dig_all(intent.params, key):
+            return True  # every key the command line does not give (aws input in a file)
         if (canon.endswith(".*") and any(s.startswith(canon[:-1]) for s in spellings)
                 and not _dig_all(intent.params, key)):
             return True
