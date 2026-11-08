@@ -2600,3 +2600,89 @@ def test_az_option_known_only_from_the_signature_is_accepted():
     # aks scale's --nodepool-name comes from aks_scale's signature, not _params.py
     intent = from_argv("az aks scale -g rg -n c --nodepool-name np1 --node-count 2".split())[0]
     assert intent.params["nodepool-name"] == "np1"
+
+
+# --- review round 9 ------------------------------------------------------------------
+
+
+def test_argocd_delete_selector_is_not_narrowed_by_the_namespace():
+    # delete lists the selector's apps in every namespace (getAppNamesBySelector)
+    command = "argocd app delete -l team=payments -N dev -y"
+    picked = from_argv(command.split())[-1]
+    assert picked.resource == "app/*" and "app_namespace" not in picked.metadata
+    rule = _rule("argocd", "app/*", ["delete"], {"app_namespace": "prod"})
+    assert _verdict([rule], command) == "ESCALATE"
+    # sync passes -N to its List, so there the selection is in that namespace
+    synced = from_argv("argocd app sync -l team=payments -N dev".split())[-1]
+    assert synced.metadata["app_namespace"] == "dev"
+
+
+@pytest.mark.parametrize("command,resource", [
+    ("git branch -f @{-1} HEAD~1", "branch/*"),
+    ("git branch -m @{-1} new", "branch/*"),
+    ("git branch -c @{-1} copy", "branch/copy"),
+    ("git branch -u origin/x @{-1}", "branch/*"),
+    ("git tag -f @{-1}", "tag/*"),
+    ("git branch -d -", "branch/*"),
+    ("git push origin HEAD:@{push}", "ref/*"),
+])
+def test_every_git_name_operand_git_resolves_is_unknown(command, resource):
+    resources = [i.resource for i in from_argv(command.split())]
+    assert resource in resources
+    assert not any("@{" in r for r in resources)
+
+
+@pytest.mark.parametrize("command", ["git rebase origin/main", "git reset --hard HEAD~1",
+                                     "git commit --amend -m x"])
+def test_git_rewrites_reach_the_current_branch(command):
+    rule = _rule("git", "history/main", ["rewrite"])
+    assert _verdict([rule], command) == "ESCALATE"
+
+
+@pytest.mark.parametrize("command", [
+    "gcloud storage rm gs://prod/secret#123456789",
+    "gsutil rm gs://prod/secret#123456789",
+])
+def test_gcs_generation_is_not_part_of_the_key(command):
+    intent = from_argv(command.split())[0]
+    assert intent.params["key"] == "secret"
+    assert intent.params["generation"] == 123456789
+    rule = _rule("gcp", "storage/bucket/prod", ["delete"], {"key": "secret"})
+    assert _verdict([rule], command) == "BLOCK"
+
+
+def test_gcs_generation_on_a_copy_source():
+    intents = from_argv("gcloud storage cp gs://a/x#5 gs://b/dir/".split())
+    assert [i.params["key"] for i in intents] == ["x", "dir/x"]
+
+
+@pytest.mark.parametrize("command,keys", [
+    ("gcloud compute instances delete web --project acme-prod", ["zone", "region", "account"]),
+    ("kubectl delete pod x -n prod", ["context", "cluster", "user"]),
+    ("helm uninstall r -n prod", ["context", "cluster", "user"]),
+    ("flux suspend ks a -n prod", ["context", "cluster", "user"]),
+    ("aws ec2 terminate-instances --instance-ids i-1", ["region", "profile", "account"]),
+    ("az vm delete -n v --yes", ["subscription", "resource_group", "region"]),
+    ("argocd app delete a -y", ["server", "project", "app_namespace"]),
+    ("gh repo delete o/r --yes", ["github_host"]),
+    ("git push origin main", []),
+    ("git push", ["remote"]),
+])
+def test_every_config_scope_key_is_marked_when_absent(command, keys):
+    marks = from_argv(command.split())[0].params.get("unresolved_scope", [])
+    assert all(k in marks for k in keys), marks
+
+
+def test_gcloud_zone_rule_escalates_without_a_zone():
+    rule = _rule("gcp", "compute/instance/*", ["delete"], {"zone": "us-east1-b"})
+    assert _verdict([rule], "gcloud compute instances delete web --project p") == "ESCALATE"
+
+
+@pytest.mark.parametrize("command,key", [
+    ("kubectl delete pod x --user admin", "user"),
+    ("flux suspend ks a --user admin", "user"),
+])
+def test_the_kubeconfig_user_is_recorded(command, key):
+    intent = from_argv(command.split())[0]
+    assert intent.metadata[key] == "admin"
+    assert key not in intent.params.get("unresolved_scope", [])

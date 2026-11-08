@@ -982,6 +982,12 @@ def _parse_flags(
                     imp.setdefault("groups", []).append(val)
                 else:
                     imp["user" if key == "as" else "uid"] = val
+            elif key == "user":
+                # the kubeconfig user the request runs as: a scope a rule may name
+                if val is None:
+                    i += 1
+                    val = _value_at(tokens, i, tok)
+                metadata["user"] = val
             elif key in _DISCARD_VALUE_FLAGS:
                 if val is None:
                     i += 1
@@ -3345,7 +3351,14 @@ def _gcs_target(uri: str, params: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     the intent is marked with the pattern's literal prefix, so a rule on any bucket the
     pattern may match escalates."""
     bucket, _, key = uri[len("gs://"):].partition("/")
-    intent_params = {**params, "key": key} if key else dict(params)
+    intent_params = dict(params)
+    head, hash_sign, generation = key.rpartition("#")
+    if hash_sign and generation.isdigit():
+        # gs://b/o#123 is generation 123 of object o: the key is o (gcloud storage, gsutil)
+        key = head
+        intent_params["generation"] = int(generation)
+    if key:
+        intent_params["key"] = key
     recursive = any(params.get(k) is True for k in ("r", "R", "recursive"))
     if recursive or _GLOB_CHARS_RE.search(key):
         _mark_unresolved(intent_params, "key")
@@ -3370,6 +3383,9 @@ def _copy_destination_key(params: dict[str, Any], sources: list[str], many: bool
         _mark_unresolved(params, "key")
         return
     base = sources[0].rstrip("/").rsplit("/", 1)[-1]
+    head, hash_sign, generation = base.rpartition("#")
+    if sources[0].startswith("gs://") and hash_sign and generation.isdigit():
+        base = head  # a generation is not part of the object's name
     if key == "" or key.endswith("/"):
         if not base or _GLOB_CHARS_RE.search(base):
             _mark_unresolved(params, "key")
@@ -4435,7 +4451,12 @@ def _from_argocd_multi(argv: list[str]) -> list[InfrastructureIntent]:
         selector = params.get("selector")
         projects = params.get("projects", []) if subverb == "sync" else []
         for project in projects or ([None] if selector is not None else []):
-            where = {**metadata, "project": project} if project is not None else metadata
+            where = {**metadata, "project": project} if project is not None else dict(metadata)
+            if subverb == "delete":
+                # delete lists the selector's apps in every namespace (getAppNamesBySelector
+                # passes no AppNamespace) and deletes each by its qualified name: -N does
+                # not narrow it. sync passes -N to its List, so there it does.
+                where.pop("app_namespace", None)
             picked.append(({**params, "resolved_at_runtime": {"from": "app/*",
                                                                "kinds": ["app"]}}, where))
 
@@ -4532,7 +4553,7 @@ _FLUX_GLOBAL_BOOL_FLAGS = {
 # timeout") and lands there whichever side of the verb it's on. --username and
 # --password are also flags of "create source git" and others, and stay recorded.
 _FLUX_DISCARD_VALUE_FLAGS = _FLUX_GLOBAL_VALUE_FLAGS - {
-    "n", "namespace", "context", "timeout", "username", "password"}
+    "n", "namespace", "context", "timeout", "username", "password", "user"}
 
 # Every long flag of every flux command, read from flux2 v2.10 cmd/flux (and the globals
 # above). A flag that takes a value takes the next word whatever it looks like (#80).
@@ -4706,6 +4727,11 @@ def _parse_flux_tokens(
                     i += 1
                     val = _value_at(tokens, i, tok)
                 metadata["context"] = val
+            elif key == "user":
+                if val is None:
+                    i += 1
+                    val = _value_at(tokens, i, tok)
+                metadata["user"] = val  # the kubeconfig user, a scope a rule may name
             elif key in _FLUX_DISCARD_VALUE_FLAGS:
                 if val is None:
                     i += 1
@@ -5217,6 +5243,13 @@ def _git_push_intent(
     )
 
 
+def _git_name(kind: str, name: str) -> str:
+    """``kind/name`` for a branch, tag or ref name on a git command line, or ``kind/*`` when
+    git resolves the name when it runs (:func:`_git_resolved_name`): which one, only git
+    knows. The one helper every git name operand goes through."""
+    return f"{kind}/*" if _git_resolved_name(name) else f"{kind}/{name}"
+
+
 def _git_resolved_name(name: str) -> bool:
     """Whether git resolves ``name`` to a ref when it runs: ``@{upstream}``, ``@{push}``,
     ``@{-1}`` and the like, ``-`` (the previous branch), ``HEAD`` and ``@``."""
@@ -5415,24 +5448,31 @@ def from_git_multi(argv: list[str]) -> list[InfrastructureIntent]:
             if not positional:
                 raise ValueError(f"could not find a {verb} name in: {argv!r}")
             # git deletes every one it is given; a name git resolves (-, @{-1}) is marked
-            return _mark_open_targets([one(f"{verb}/*" if _git_resolved_name(name)
-                                           else f"{verb}/{name}", "delete")
+            return _mark_open_targets([one(_git_name(verb, name), "delete")
                                        for name in dict.fromkeys(positional)])
         if params.get("rename") or params.get("copy"):
             return _git_branch_move(positional, one, params, argv)
         return _git_branch_or_tag(verb, positional, params, one)
 
     if verb == "rebase":
-        # "git rebase <upstream> <branch>" rewrites <branch>: both are targets
+        # "git rebase <upstream> <branch>" rewrites <branch>: both are targets. With no
+        # <branch> it rewrites the current branch, which only git knows (history/*,
+        # marked), as is a name git resolves (HEAD, @{-1}, -)
         targets = positional[:2] or ["HEAD"]
-        return [one(f"history/{target}", "rewrite") for target in targets]
+        intents = [one(f"history/{target}", "rewrite") for target in targets]
+        if len(positional) < 2 or any(_git_resolved_name(t) for t in targets):
+            intents.append(one("history/*", "rewrite"))
+        return _mark_open_targets(intents)
 
     if verb == "reset" and params.get("hard"):
+        # reset --hard moves the current branch to <commit>: the branch is only known to
+        # git (history/*, marked)
         target = positional[0] if positional else "HEAD"
-        return [one(f"history/{target}", "rewrite")]
+        return _mark_open_targets([one(f"history/{target}", "rewrite"),
+                                   one("history/*", "rewrite")])
 
     if verb == "commit" and params.get("amend"):
-        return [one("history/HEAD", "rewrite")]
+        return _mark_open_targets([one("history/HEAD", "rewrite"), one("history/*", "rewrite")])
 
     if verb == "filter-branch":
         # rev-list arguments pick the refs it rewrites, behind options the parser does not
@@ -5524,7 +5564,8 @@ def _git_branch_or_tag(verb: str, positional: list[str], params: dict[str, Any],
     keys = {canonical_key(k) for k, v in params.items() if v not in (None, False)}
     if verb == "branch" and keys & {"set-upstream-to", "unset-upstream", "edit-description",
                                     "set-upstream"}:
-        return [one(f"branch/{positional[0] if positional else '*'}", "update")]
+        return _mark_open_targets([one(_git_name("branch", positional[0]) if positional
+                                       else "branch/*", "update")])
     if verb == "tag" and "verify" in keys:
         return [one(f"tag/{name}", "read") for name in positional or ["*"]]
     if verb == "branch" and "show-current" in keys:
@@ -5533,16 +5574,16 @@ def _git_branch_or_tag(verb: str, positional: list[str], params: dict[str, Any],
         return [one(f"{verb}/{name}", "read") for name in positional or ["*"]]
     if verb == "branch" and keys & {"all", "remotes"}:
         raise ValueError("git branch: -a and -r do not take a branch name (git refuses it)")
-    name = positional[0]
-    intents = [one(f"{verb}/{name}", "create")]
+    target = _git_name(verb, positional[0])
+    intents = [one(target, "create")]
     if params.get("force") is True:
-        replaced = one(f"{verb}/{name}", "update")
+        replaced = one(target, "update")
         replaced.params["force"] = True
         intents.append(replaced)
         if verb == "branch":
             # git branch -f <name> [<start>] resets an existing branch to <start>
-            intents.append(one(f"branch/{name}", "delete"))
-    return intents
+            intents.append(one(target, "delete"))
+    return _mark_open_targets(intents)
 
 
 def _git_branch_move(positional, one, params, argv) -> list[InfrastructureIntent]:
@@ -5553,16 +5594,16 @@ def _git_branch_move(positional, one, params, argv) -> list[InfrastructureIntent
     rule on one branch escalates."""
     if not positional or len(positional) > 2:
         raise ValueError(f"could not find the branch names in: {argv!r}")
-    new = positional[-1]
-    intents = [one(f"branch/{new}", "create")]
+    new = _git_name("branch", positional[-1])
+    intents = [one(new, "create")]
     if params.get("force"):
-        intents.append(one(f"branch/{new}", "delete"))
+        intents.append(one(new, "delete"))
     if params.get("rename"):
         if len(positional) == 2:
-            intents.append(one(f"branch/{positional[0]}", "delete"))
+            intents.append(one(_git_name("branch", positional[0]), "delete"))
         else:
-            intents.extend(_mark_open_targets([one("branch/*", "delete")]))
-    return intents
+            intents.append(one("branch/*", "delete"))
+    return _mark_open_targets(intents)
 
 
 def from_git(argv: list[str]) -> InfrastructureIntent:
@@ -6699,21 +6740,24 @@ def informational_intent(argv: list[str]) -> InfrastructureIntent | None:
 
 
 # Scope keys each tool takes from its configuration or environment when the argv does
-# not give them: the kubeconfig's context and cluster, aws's region and profile
-# (~/.aws/config, $AWS_REGION, $AWS_PROFILE), gcloud's project and region (the active
-# configuration, $CLOUDSDK_*), az's subscription, resource group and location (az account,
-# az config defaults), argocd's server and project and the Application's namespace
-# (~/.config/argocd, the app itself), and the remote git pushes to (branch.*.pushRemote,
-# remote.pushDefault). gh's repository is marked by from_gh, flux's and kubectl's
-# namespace by the store.
+# not give them: the kubeconfig's context, cluster and user (kubectl, helm and flux; the
+# namespace is the store's, see namespace_unresolved), aws's region, profile and account
+# (~/.aws/config, $AWS_REGION, $AWS_PROFILE, the credentials), gcloud's project, region,
+# zone and account (the active configuration's core/project, compute/region, compute/zone
+# and core/account, $CLOUDSDK_*), az's subscription, resource group and location (az
+# account, az config defaults), argocd's server and project and the Application's
+# namespace (~/.config/argocd, the app itself), gh's repository and host (the current
+# directory, $GH_REPO, $GH_HOST) and the remote git pushes to (branch.*.pushRemote,
+# remote.pushDefault).
 _CONFIG_SCOPE_KEYS = {
-    "kubernetes": ("context", "cluster"),
-    "helm": ("context", "cluster"),
-    "flux": ("context", "cluster"),
-    "aws": ("region", "profile"),
-    "gcp": ("project", "region"),
+    "kubernetes": ("context", "cluster", "user"),
+    "helm": ("context", "cluster", "user"),
+    "flux": ("context", "cluster", "user"),
+    "aws": ("region", "profile", "account"),
+    "gcp": ("project", "region", "zone", "account"),
     "azure": ("subscription", "resource_group", "region"),
     "argocd": ("server", "project", "app_namespace"),
+    "github": ("repo", "github_host"),
     "git": ("remote",),
 }
 
