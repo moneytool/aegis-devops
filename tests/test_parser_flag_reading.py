@@ -2812,3 +2812,42 @@ def test_multi_value_options_take_every_value(command, key, value):
 ])
 def test_a_rule_meets_one_value_of_a_multi_value_option(rule, command):
     assert _verdict([rule], command) == "BLOCK"
+
+
+# --- typed values: one normalizer for the parser's side and the rule's side -----------
+
+
+@pytest.mark.parametrize("rule_value", ["5m", "300s", "5m0s", 300, "300s"])
+def test_a_duration_rule_meets_every_spelling(rule_value):
+    rule = _rule("helm", "release/*", ["update"], {"timeout": rule_value})
+    assert _verdict([rule], "helm upgrade r ./c --timeout 300s") == "BLOCK"
+    assert _verdict([rule], "helm upgrade r ./c --timeout 5m") == "BLOCK"
+    assert _verdict([rule], "helm upgrade r ./c --timeout 6m") == "ALLOW"
+
+
+@pytest.mark.parametrize("rule_value,command,verdict", [
+    ("0x0", "helm upgrade r ./c --history-max 0", "BLOCK"),
+    (0, "helm upgrade r ./c --history-max 0x0", "BLOCK"),
+    ("010", "helm upgrade r ./c --history-max 8", "BLOCK"),  # Go base 0: octal
+    ("10", "helm upgrade r ./c --history-max 0xa", "BLOCK"),
+])
+def test_an_int_rule_is_read_as_go_reads_it(rule_value, command, verdict):
+    rule = _rule("helm", "release/*", ["update"], {"history-max": rule_value})
+    assert _verdict([rule], command) == verdict
+
+
+@pytest.mark.parametrize("rule_value", [False, "false", "False", "0", "f", 0])
+def test_a_bool_rule_meets_every_spelling(rule_value):
+    rule = _rule("helm", "release/*", ["update"], {"install": rule_value})
+    assert _verdict([rule], "helm upgrade r ./c --install=false") == "BLOCK"
+
+
+def test_a_map_rule_meets_a_string_to_string_value():
+    rule = _rule("helm", "release/*", ["update"], {"labels": "a=1,b=2"})
+    assert _verdict([rule], "helm upgrade r ./c --labels b=2,a=1") == "BLOCK"
+
+
+def test_a_rule_value_its_type_cannot_hold_escalates():
+    # neither a match nor a miss: the rule escalates, as an unknown value does
+    rule = _rule("helm", "release/*", ["update"], {"timeout": "soon"})
+    assert _verdict([rule], "helm upgrade r ./c --timeout 300s") == "ESCALATE"

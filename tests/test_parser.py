@@ -35,7 +35,7 @@ def test_from_kubectl_scale_with_namespace_flag():
     assert intent.resource == "deployment/x"
     assert intent.action == "scale"
     assert intent.provider == "kubernetes"
-    assert intent.params == {"replicas": 5}
+    assert intent.params == {"replicas": 5, "value_types": {"replicas": "int"}}
     assert intent.metadata == {"namespace": "prod"}
 
 
@@ -203,12 +203,12 @@ def test_from_kubectl_multiple_boolean_flags():
 
 def test_from_kubectl_replicas_space_separated():
     intent = from_kubectl(["kubectl", "scale", "deployment/x", "--replicas", "5"])
-    assert intent.params == {"replicas": 5}
+    assert intent.params == {"replicas": 5, "value_types": {"replicas": "int"}}
 
 
 def test_from_kubectl_replicas_equals_form():
     intent = from_kubectl(["kubectl", "scale", "deployment/x", "--replicas=5"])
-    assert intent.params == {"replicas": 5}
+    assert intent.params == {"replicas": 5, "value_types": {"replicas": "int"}}
 
 
 # --- kubectl: apply/create/replace/delete via manifest -----------------------
@@ -1536,7 +1536,7 @@ def test_kubectl_glued_manifest_and_kustomize_flags():
 
 def test_kubectl_scale_with_glued_namespace_keeps_replicas():
     intent = from_kubectl(["kubectl", "scale", "deployment/api-server", "--replicas=5", "-nprod"])
-    assert intent.params == {"replicas": 5}
+    assert intent.params == {"replicas": 5, "value_types": {"replicas": "int"}}
     assert intent.metadata == {"namespace": "prod"}
 
 
@@ -3135,12 +3135,13 @@ def test_the_category_all_is_one_intent_per_kind(command, action, extra):
     intents = from_kubectl_multi(command.split())
     assert [i.resource for i in intents] == ["all/*", *_ALL]
     assert {i.action for i in intents} == {action}
-    marked = {k: v for k, v in intents[0].params.items() if k != "resolved_at_runtime"}
+    marked = {k: v for k, v in intents[0].params.items()
+              if k not in ("resolved_at_runtime", "value_types")}
     assert marked == extra
     assert intents[0].params["resolved_at_runtime"] == {
         "from": "all", "kinds": [r.removesuffix("/*") for r in _ALL], "custom_kinds": True}
     for intent in intents[1:]:
-        assert intent.params == extra
+        assert {k: v for k, v in intent.params.items() if k != "value_types"} == extra
 
 
 @pytest.mark.parametrize("command,targets", [

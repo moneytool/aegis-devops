@@ -337,7 +337,15 @@ every level of a nested key) and a boolean's negated spelling (`no-verify-ssl: t
 `verify-ssl: false`), and an unresolved mark in `params.unresolved_scope` meets every spelling
 the key does (`*` stands for every key). A key marked unresolved is unresolved whatever value
 is recorded for it: the recorded value never decides, and the rule escalates. The one prefix
-mark, helm's `set.*`, stands for the `set.` keys the command line leaves to a values file. When a key reaches more than one value (helm's literal `a.b` beside the nested
+mark, helm's `set.*`, stands for the `set.` keys the command line leaves to a values file.
+
+**Typed values.** A flag's value is recorded by its type (`params.value_types`): a duration
+in seconds (`--timeout 5m` and `--timeout 300s` are both `300`), an integer as Go reads it
+(`0x10` is 16), a float, a boolean, a key=value map. A rule's value for that key is read the
+same way, so `timeout: "5m"`, `"300s"`, `"5m0s"` and `300` all match `--timeout 300s`, and
+`install: "0"` matches `--install=false`. A rule value the type cannot hold (`timeout:
+"soon"`) escalates with `<key>-unresolved`; it is not rejected when the rule is loaded,
+because a scope key has no type until an intent gives it one. When a key reaches more than one value (helm's literal `a.b` beside the nested
 `a.b`), the rule matches if any of them does. `repo`, `resource_group`, `subscription` and
 `region` compare without case, as GitHub and Azure do, and so do Azure resource names and
 GitHub `repo/...` resources. An aws option is recorded under its full name however it was

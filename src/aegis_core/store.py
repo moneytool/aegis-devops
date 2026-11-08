@@ -107,7 +107,7 @@ import yaml
 from aegis_core.gitsource import GIT_PREFIX, SourceNotChecked, SourceRejected
 from aegis_core.gitsource import REASON_MESSAGES as GIT_REASON_MESSAGES
 from aegis_core.intent import InfrastructureIntent, canonical_key
-from aegis_core.parser import _KUBECTL_BUILTIN_NAMES
+from aegis_core.parser import _KUBECTL_BUILTIN_NAMES, normalize_typed
 from aegis_core.provenance import (
     CachingSourceFetcher,
     SourceFetcher,
@@ -542,15 +542,35 @@ def _dig(mapping: dict[str, Any], key: str) -> tuple[bool, Any]:
 
 
 def _as_bool(value: Any) -> bool | None:
+    """A boolean as Go's strconv.ParseBool reads it (``true``/``false`` in any case, ``1``,
+    ``t``, ``0``, ``f``), the spellings every tool here accepts."""
     if isinstance(value, bool):
         return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
     if isinstance(value, str):
         lowered = value.strip().lower()
-        if lowered == "true":
+        if lowered in ("true", "1", "t"):
             return True
-        if lowered == "false":
+        if lowered in ("false", "0", "f"):
             return False
     return None
+
+
+def _typed_expected(key: str, expected: Any, params: dict[str, Any]) -> tuple[bool, Any]:
+    """A rule's value for ``key`` read as the intent's value for it was read
+    (``params["value_types"]``, through :func:`canonical_key`): ``(ok, value)``; not ok
+    when the rule's value cannot be that type (a duration key given ``"soon"``)."""
+    types = params.get("value_types")
+    kind = types.get(canonical_key(key)) if isinstance(types, dict) else None
+    if kind is None:
+        return True, expected
+    try:
+        if isinstance(expected, list):
+            return True, [normalize_typed(kind, e) for e in expected]
+        return True, normalize_typed(kind, expected)
+    except ValueError:
+        return False, expected
 
 
 def scope_value_matches(expected: Any, actual: Any) -> bool:
@@ -588,6 +608,9 @@ def scope_matches(
     ``params`` when ``metadata`` lacks it entirely. A key absent from both
     never matches."""
     for key, expected in scope.items():
+        ok, expected = _typed_expected(key, expected, params)
+        if not ok:
+            return False  # unresolved, not a match: see scope_unresolved
         actuals = _dig_all(metadata, key) or _dig_all(params, key)
         # A flag given several times (a StringArray or StringSlice) holds a list: each of
         # its values counts, as each is applied
@@ -905,6 +928,10 @@ def scope_unresolved(scope: dict[str, Any], intent: InfrastructureIntent) -> lis
     if "namespace" in scope and namespace_unresolved(intent):
         unknown.add("namespace")
     unknown.update(key for key in scope if param_unresolved(key, intent))
+    # a rule's value its key's type cannot hold (a duration key given "soon") neither
+    # matches nor fails to: it escalates, as an unknown value does
+    unknown.update(key for key, expected in scope.items()
+                   if not _typed_expected(key, expected, intent.params)[0])
     if not unknown:
         return []
     gone = {canonical_key(k) for k in unknown}

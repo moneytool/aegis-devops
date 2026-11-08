@@ -972,7 +972,8 @@ def test_short_words(command, resource, params, metadata):
     intent = _one(command)
     assert intent.resource == resource
     assert intent.metadata == metadata
-    recorded = {k: v for k, v in intent.params.items() if k != "resolved_at_runtime"}
+    recorded = {k: v for k, v in intent.params.items()
+                if k not in ("resolved_at_runtime", "value_types")}
     assert recorded == params
 
 
@@ -1294,7 +1295,8 @@ def test_an_unknown_flag_that_shows_its_reading_is_kept(command, resource, param
 ])
 def test_flags_kubectl_has_are_read(command, resource, params, metadata):
     intent = next(i for i in from_kubectl_multi(command.split()) if i.resource == resource)
-    recorded = {k: v for k, v in intent.params.items() if k != "resolved_at_runtime"}
+    recorded = {k: v for k, v in intent.params.items()
+                if k not in ("resolved_at_runtime", "value_types")}
     assert recorded == params
     assert intent.metadata == metadata
 

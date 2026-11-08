@@ -521,7 +521,15 @@ name). git verbs without an option table leave every param unresolved when given
   StringSlice every value split as CSV, an Int is read with base 0, a Duration with
   time.ParseDuration and recorded in seconds (`--timeout 5m` and `300s` are both 300), a
   Float with ParseFloat, a StringToString as a map, a Count counts; what pflag refuses is
-  refused. The store meets a rule against each value of a repeated flag. From source.
+  refused. The store meets a rule against each value of a repeated flag, and reads a rule's
+  value for a typed flag with the same normalizer the parser used (`normalize_typed`,
+  matched through `canonical_key`): a rule `timeout: "5m"` (or `"300s"`, `"5m0s"`, `300`)
+  blocks `--timeout 300s`, `history-max: "0x0"` meets 0, `install: "0"` meets
+  `--install=false`, and `labels: "a=1,b=2"` meets the same map. A rule value the flag's
+  type cannot hold (`timeout: "soon"`) is neither a match nor a miss: the rule escalates, as
+  for any value the store cannot decide (scope values are not typed when a rule is loaded,
+  so it is not rejected then). Booleans now read Go's spellings (`1`, `t`, `0`, `f`) on both
+  sides. From source.
 - `git -c remote.origin.push=+refs/heads/safe:refs/heads/prod push origin safe` was a push to
   `ref/safe`: git maps a refspec with no destination through `remote.<name>.push` (with its
   `+`) or push.default's upstream, from any config file (push.c refspec_append_mapped). A

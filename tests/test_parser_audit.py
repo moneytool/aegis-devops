@@ -113,6 +113,15 @@ AUDIT = [
     ("C5", "kubectl", "kubectl logs web --since 2m", param("since", 120)),
     ("C5", "argocd", "argocd app sync a --timeout 0x10", param("timeout", 16)),
     ("C5", "gh", "gh run list -R o/r --limit 0x10", param("limit", 16)),
+    # C5 (rule side): a rule's value is read as the flag's value was
+    ("C5", "helm", "helm upgrade r ./c --timeout 300s",
+     ("verdict_block", "helm", "release/*", "update", {"timeout": "5m"})),
+    ("C5", "helm", "helm upgrade r ./c --history-max 0",
+     ("verdict_block", "helm", "release/*", "update", {"history-max": "0x0"})),
+    ("C5", "kubectl", "kubectl scale deploy web --replicas 0",
+     ("verdict_block", "kubernetes", "deployment/*", "scale", {"replicas": "0x0"})),
+    ("C5", "helm", "helm upgrade r ./c --install=false",
+     ("verdict_block", "helm", "release/*", "update", {"install": "0"})),
     # C6 repeated flags accumulate exactly where pflag's type does
     ("C6", "argocd", "argocd app sync a --resource g:K:x --resource g:K:y",
      param("resource", ["g:K:x", "g:K:y"])),
@@ -302,6 +311,12 @@ def _check(intents, check):
         return all(i.metadata.get("all_namespaces") for i in intents[1:])
     if kind == "has":
         return any(i.resource == check[1] and i.action == check[2] for i in intents)
+    if kind == "verdict_block":
+        rule = _rule(check[1], check[2], [check[3]], check[4])
+        store = ConstraintStore(authority_map={"admin": {"deletion"}})
+        store.add_constraint(rule)
+        interceptor = AegisInterceptor(store)
+        return any(interceptor.intercept(i, now=NOW).verdict == "BLOCK" for i in intents)
     if kind == "first_marked_destination":
         return first.params.get("resolved_at_runtime", {}).get("destination") is True
     if kind == "last_param":

@@ -695,6 +695,68 @@ def _go_float(text: str, flag: str) -> float | int:
     return int(value) if value.is_integer() else value
 
 
+_GO_TRUE = frozenset({"1", "t", "T", "TRUE", "true", "True"})
+_GO_FALSE = frozenset({"0", "f", "F", "FALSE", "false", "False"})
+
+
+def normalize_typed(kind: str, value: Any) -> Any:
+    """One value of a typed flag in its one representation, for the parser's side and a
+    rule's side alike: ``duration`` in seconds (Go's time.ParseDuration: ``5m``, ``300s``
+    and ``5m0s`` are 300; a number is already seconds), ``int`` as Go's
+    strconv.ParseInt(s, 0, 64) reads it (``0x0`` is 0, ``010`` is 8), ``float`` as
+    ParseFloat, ``bool`` as ParseBool (``1``, ``t``, ``TRUE``, ``0``, ``f``, ``False``
+    ...), ``map`` as a dict (``k=v,k2=v2``). A value the type cannot hold is a
+    ValueError."""
+    if kind == "duration":
+        if isinstance(value, bool):
+            raise ValueError(f"{value!r} is not a duration")
+        if isinstance(value, (int, float)):
+            return int(value) if float(value).is_integer() else value
+        return _go_duration(str(value), "duration")
+    if kind == "int":
+        if isinstance(value, bool):
+            raise ValueError(f"{value!r} is not an integer")
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        return _go_int(str(value), "int", 64)
+    if kind == "float":
+        if isinstance(value, bool):
+            raise ValueError(f"{value!r} is not a number")
+        if isinstance(value, (int, float)):
+            return int(value) if float(value).is_integer() else value
+        return _go_float(str(value), "float")
+    if kind == "bool":
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int) and value in (0, 1):
+            return bool(value)
+        text = str(value)
+        if text in _GO_TRUE:
+            return True
+        if text in _GO_FALSE:
+            return False
+        raise ValueError(f"{value!r} is not a boolean Go reads")
+    if kind == "map":
+        if isinstance(value, dict):
+            return {str(k): str(v) for k, v in value.items()}
+        pairs: dict[str, str] = {}
+        for item in _read_string_slice(str(value)):
+            k, sep, v = item.partition("=")
+            if not sep:
+                raise ValueError(f"{item!r} must be key=value")
+            pairs[k] = v
+        return pairs
+    return value
+
+
+def _mark_type(params: dict[str, Any], key: str, kind: str) -> None:
+    """Records that ``params[key]`` is a ``kind`` value (:func:`normalize_typed`), so the
+    store reads a rule's value for that key the same way."""
+    params.setdefault("value_types", {})[canonical_key(key)] = kind
+
+
 def _pflag_store(params: dict[str, Any], tool: str, flag: str, key: str, value: Any,
                  command: str | None = None) -> None:
     """Records ``--flag value`` under ``key`` as pflag reads it (:data:`_PFLAG_TYPES_FILE`):
@@ -731,6 +793,7 @@ def _pflag_store(params: dict[str, Any], tool: str, flag: str, key: str, value: 
                 raise ValueError(f"{tool} --{flag}: {item!r} must be key=value")
             pairs[k] = v
         params[key] = pairs
+        _mark_type(params, key, "map")
         return
     if kinds <= set(_PFLAG_INTS):
         bits = min(_PFLAG_INTS[k] for k in kinds)
@@ -738,15 +801,19 @@ def _pflag_store(params: dict[str, Any], tool: str, flag: str, key: str, value: 
         if all(k.startswith("Uint") for k in kinds) and number < 0:
             raise ValueError(f"{tool} --{flag}: {value!r} is not an unsigned number")
         params[key] = number
+        _mark_type(params, key, "int")
         return
     if kinds == {"Count"}:
         params[key] = _go_int(value, f"{tool} --{flag}", 64)
+        _mark_type(params, key, "int")
         return
     if kinds == {"Duration"}:
         params[key] = _go_duration(value, f"{tool} --{flag}")
+        _mark_type(params, key, "duration")
         return
     if kinds <= _PFLAG_FLOATS:
         params[key] = _go_float(value, f"{tool} --{flag}")
+        _mark_type(params, key, "float")
         return
     params[key] = _coerce(value)  # a String, as before: a number-looking value compares
 
@@ -1144,6 +1211,7 @@ def _parse_flags(
                     # or Int64; --port is a string on expose and run
                     bits = 32 if replicas_short and name in ("replicas", "port") else 64
                     params[name] = _go_int(val, f"kubectl {tok}", bits)
+                    _mark_type(params, name, "int")
                 else:
                     _pflag_store(params, "kubectl", name, name, val, pflag_command)
                 if key == "copy-to" and raw_copy_to is not None:
