@@ -1128,7 +1128,9 @@ def test_gh_repo_resolves_from_gh_repo():
 ])
 def test_git_push_marks_every_ref_the_argv_does_not_name(command, targets):
     intents = [i for i in from_argv(command.split())
-               if i.resource != "tag/*" and "resolved_at_runtime" not in i.params]
+               if i.resource != "tag/*" and ("resolved_at_runtime" not in i.params
+                                             or i.params["resolved_at_runtime"].get(
+                                                 "destination"))]
     assert [(i.resource, i.action) for i in intents] == targets
     for intent in intents:
         assert (intent.resource == "ref/*") == (intent.params.get("unknown_target") is True)
@@ -1366,7 +1368,10 @@ def test_git_push_may_send_tags_unless_told_not_to(command, tags):
 
 @pytest.mark.parametrize("rule,command,verdict", [
     # only a rule on tags is about the tags config may add
-    (_rule("git", "ref/main", ["push"]), "git push origin feature", "ALLOW"),
+    # a source-only refspec's destination is mapped when git runs (round 10): a rule on
+    # another ref may be about it, and escalates
+    (_rule("git", "ref/main", ["push"]), "git push origin feature", "ESCALATE"),
+    (_rule("git", "ref/main", ["push"]), "git push origin feature:feature", "ALLOW"),
     (_rule("git", "tag/v*", ["push"]), "git push origin feature", "ESCALATE"),
     (_rule("git", "tag/v*", ["push"]), "git push origin feature --no-follow-tags", "ALLOW"),
     (_rule("git", "tag/v1", ["push"]), "git push origin refs/tags/v1 --no-follow-tags",
@@ -2686,3 +2691,25 @@ def test_the_kubeconfig_user_is_recorded(command, key):
     intent = from_argv(command.split())[0]
     assert intent.metadata[key] == "admin"
     assert key not in intent.params.get("unresolved_scope", [])
+
+
+# --- review round 10 -----------------------------------------------------------------
+
+
+def test_git_push_mapping_on_the_line_is_applied():
+    # push.c refspec_append_mapped: a remote.<name>.push refspec maps a source-only push
+    command = "git -c remote.origin.push=+refs/heads/safe:refs/heads/prod push origin safe"
+    intents = from_argv(command.split())
+    prod = [i for i in intents if i.resource == "ref/prod"][0]
+    assert prod.params["force"] is True
+    assert _verdict([_rule("git", "ref/prod", ["push"], {"force": True})], command) == "BLOCK"
+
+
+@pytest.mark.parametrize("command,verdict", [
+    # with no destination, config files may map it: the source is known, the destination not
+    ("git push origin safe", "ESCALATE"),
+    ("git push origin safe:safe", "ALLOW"),
+    ("git push origin refs/heads/safe:refs/heads/safe", "ALLOW"),
+])
+def test_git_push_destination_unknown_without_a_full_refspec(command, verdict):
+    assert _verdict([_rule("git", "ref/prod", ["push"])], command) == verdict

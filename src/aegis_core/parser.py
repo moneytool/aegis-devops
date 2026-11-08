@@ -5275,6 +5275,52 @@ def _git_config(leading: list[str]) -> dict[str, str | None]:
     return config
 
 
+def _git_push_mappings(leading: list[str], remote: str | None) -> list[str | None]:
+    """The ``remote.<remote>.push`` refspecs given with ``-c`` in front of the verb, in
+    order (section and key without case, the remote's name with it, as git compares
+    them); None for one ``--config-env`` takes from the environment."""
+    if remote is None or _git_remote_is_url(remote):
+        return []
+    found: list[str | None] = []
+    i = 0
+    while i < len(leading):
+        word = leading[i]
+        if word in ("-c", "--config-env") and i + 1 < len(leading):
+            name, sep, value = leading[i + 1].partition("=")
+            section, _, rest = name.partition(".")
+            subsection, _, key = rest.rpartition(".")
+            if section.lower() == "remote" and key.lower() == "push" and subsection == remote:
+                found.append(None if word == "--config-env" else (value if sep else None))
+            i += 2
+            continue
+        i += 1
+    return found
+
+
+def _git_push_mapped(mappings: list[str | None], src: str) -> tuple[str, bool] | None:
+    """The destination (and whether it forces) of the first push refspec in ``mappings``
+    whose source matches ``src`` (``safe`` or ``refs/heads/safe``), with a ``*`` in it
+    standing for the same text on both sides; None when none does or one is unknown."""
+    candidates = {src, f"refs/heads/{src}"} if not src.startswith("refs/") else {src}
+    for mapping in mappings:
+        if mapping is None:
+            return None
+        force = mapping.startswith("+")
+        msrc, sep, mdst = mapping.lstrip("+").partition(":")
+        if not sep:
+            mdst = msrc
+        for candidate in candidates:
+            if "*" in msrc:
+                head, _, tail = msrc.partition("*")
+                if candidate.startswith(head) and candidate.endswith(tail) and \
+                        len(candidate) >= len(head) + len(tail):
+                    middle = candidate[len(head):len(candidate) - len(tail)]
+                    return mdst.replace("*", middle, 1), force
+            elif candidate == msrc:
+                return mdst, force
+    return None
+
+
 def _git_config_true(value: str | None) -> bool:
     """git's boolean config: true, yes, on, 1 (or unknown, which can only be stricter)."""
     return value is None or value.strip().lower() in ("true", "yes", "on", "1")
@@ -5283,6 +5329,7 @@ def _git_config_true(value: str | None) -> bool:
 def _from_git_push(
     positional: list[str], params: dict[str, Any], metadata: dict[str, Any],
     options: list[tuple[str, Any]], config: dict[str, str | None],
+    leading: list[str] | None = None,
 ) -> list[InfrastructureIntent]:
     """One intent per refspec: ``git push origin a +b :c`` pushes a, force-pushes b and
     deletes c. Refs the argv does not name are one more intent on ``ref/*``, marked
@@ -5312,7 +5359,24 @@ def _from_git_push(
         # in git's config decide what a push with no refspec sends, and whether it forces
         params = {**params, "unresolved_scope": [*params.get("unresolved_scope", []), "force"]}
     intents = [_git_push_intent(refspec, params, metadata) for refspec in refspecs or [None]]
-    for refspec, intent in zip(refspecs, intents, strict=False):
+    mappings = _git_push_mappings(leading or [], remote)
+    for refspec, intent in list(zip(refspecs, intents, strict=False)):
+        spec = refspec.lstrip("+")
+        if (":" not in spec and intent.action == "push"
+                and not intent.params.get("unknown_target")):
+            # A refspec with no destination is mapped when git runs: a remote.<name>.push
+            # refspec that matches it (with its +), or push.default's upstream, in any
+            # config file git reads (push.c refspec_append_mapped). The source is known;
+            # the destination is not, so a rule on any ref may be about it.
+            intent.params["resolved_at_runtime"] = {"from": intent.resource, "kinds": ["ref"],
+                                                    "destination": True}
+            mapped = _git_push_mapped(mappings, spec)
+            if mapped is not None:
+                # -c remote.<name>.push on the line maps it as git does (a config file's
+                # earlier entry could still win: the mark stays)
+                dst, force = mapped
+                intents.append(_git_push_intent(f"{'+' if force or refspec.startswith('+') else ''}"
+                                                f"{spec}:{dst}", params, metadata))
         dst = refspec.lstrip("+").rpartition(":")[2]
         if dst.startswith("refs/tags/"):
             intents.append(_git_push_tag(dst[len("refs/tags/"):], refspec, intent.action,
@@ -5441,7 +5505,8 @@ def from_git_multi(argv: list[str]) -> list[InfrastructureIntent]:
                                     params=dict(params), metadata=dict(metadata))
 
     if verb == "push":
-        return _from_git_push(positional, params, metadata, options, _git_config(leading))
+        return _from_git_push(positional, params, metadata, options, _git_config(leading),
+                              leading)
 
     if verb in ("branch", "tag"):
         if params.get("delete"):
@@ -5611,7 +5676,8 @@ def from_git(argv: list[str]) -> InfrastructureIntent:
     :func:`from_git_multi`). Raises ValueError for ``git push origin a b``."""
     # The tags and deletes a push may send that the argv does not name (marked) are left
     # out here: from_git is the one named target.
-    intents = [i for i in from_git_multi(argv) if "resolved_at_runtime" not in i.params]
+    intents = [i for i in from_git_multi(argv) if "resolved_at_runtime" not in i.params
+               or i.params["resolved_at_runtime"].get("destination")]
     if len(intents) != 1:
         raise ValueError(f"expected exactly one git target, found {len(intents)}: {argv!r}")
     return intents[0]

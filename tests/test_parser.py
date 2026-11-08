@@ -1469,7 +1469,9 @@ def test_git_launcher_options_are_not_recorded_in_params():
     assert intent.resource == "ref/main"
     # a short name may be a tag, as only git knows when it runs
     assert intent.params == {"force": True, "raw_action": "push",
-                             "possible_resources": ["tag/main"]}
+                             "possible_resources": ["tag/main"],
+                             "resolved_at_runtime": {"from": "ref/main", "kinds": ["ref"],
+                                                     "destination": True}}
 
 
 def test_helm_kube_context_before_verb_lands_in_metadata():
