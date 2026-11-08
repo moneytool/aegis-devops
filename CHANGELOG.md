@@ -656,6 +656,28 @@ name). git verbs without an option table leave every param unresolved when given
   `image` meets any container, and gcloud's misplacements (a container flag before the first
   `--container`, another flag inside one) are refused. A rule on a key of a repeated group
   now meets each group (`create-disk.image`, `network-interface.network`).
+- `helm upgrade -f values.yaml --set 'hosts[0]=safe'` keeps the file's other hosts (helm sets
+  one list index into the file's list), but `set.hosts` was read as `[safe]` and known. With
+  values files, reused values or a rollback, every list a `--set` writes an index into and
+  every map it writes a nested key into is now unresolved as a whole; a value set whole (a
+  scalar, a `{a,b}` list) stays known.
+- `git push -o a -o b` kept only `b`. git options given several times now keep every value:
+  push `-o`/`--push-option` and `--force-with-lease`, commit and tag `-m` and `--trailer`,
+  branch and tag filters and `--sort`, rebase `-x` and `-X`.
+- `gsutil mv gs://prod/oldprefix gs://archive/newprefix` moves everything under the prefix
+  (a move is recursive without `-r`, in gsutil and in gcloud storage), but only the key
+  `oldprefix` was read. A recursive or wildcard key is now a prefix: a rule on a key that may
+  start with it escalates, and a rule on an unrelated key no longer does (gsutil, gcloud
+  storage, aws s3 `--recursive` and sync, before every key escalated). The destination of a
+  recursive move or copy is a prefix too.
+- `gh pr create -t Fix -b Desc` and `gh pr edit 42 -t Fix` were refused: gh's short letters
+  came from a hand table of a few commands. Every gh command's flags and letters now come
+  from cli/cli's own registrations (`gh_flags.json`, generated), `-R` only where gh registers
+  it. helm's per-command letters come from its registrations too (`helm pull -d` is
+  `--destination`), and `helm repo add|update|remove|list` and `helm pull` are read (the
+  local repository list and a chart download). Everyday gh, helm, flux, argocd and kubectl
+  commands written with short flags parse, and kubectl, flux and argocd letters are checked
+  against the generated registrations.
 
 ### Added
 - A `NOTICE` file at the repository root lists the third-party code and data in the package

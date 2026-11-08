@@ -65,6 +65,12 @@ pflag_types.json
     GitHub CLI (Copyright (c) 2019 GitHub Inc., MIT License, text below)
   None of these repositories ships a NOTICE file.
 
+gh_flags.json
+  Every gh command's flags, types and short letters, from the flag registrations of
+  GitHub CLI (https://github.com/cli/cli, commit
+  736c68f674113337685e3eb1f908602a03b8f99b). Copyright (c) 2019 GitHub Inc.
+  MIT License (text below).
+
 ======================================================================
 3. Logic ported (reimplemented in Python from permissively licensed code)
 ======================================================================

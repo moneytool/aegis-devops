@@ -1,4 +1,4 @@
-"""The sibling audit of review rounds 1-15 (docs/dev/parser-audit.md): one check per class
+"""The sibling audit of review rounds 1-16 (docs/dev/parser-audit.md): one check per class
 of finding and per tool where the class applies, so a fix that covers one tool and misses
 its siblings fails here. Each row is ``(class, tool, argv, check)``."""
 
@@ -233,7 +233,7 @@ AUDIT = [
     # C18 wildcard targets are marked
     ("C18", "gcloud", "gcloud storage rm gs://prod-*/x", marked("storage/bucket/prod-*")),
     ("C18", "gsutil", "gsutil rm gs://prod-*/x", marked("storage/bucket/prod-*")),
-    ("C18", "aws", "aws s3 rm s3://b/logs --recursive", unres("key")),
+    ("C18", "aws", "aws s3 rm s3://b/logs --recursive", ("prefix", "key", "logs")),
     ("C18", "git", "git push origin +refs/heads/*:refs/heads/*", param("unknown_target", True)),
     # C19 normalization after every path
     ("C19", "argocd", "argocd app actions run prod/payments restart --kind Deployment",
@@ -279,7 +279,7 @@ AUDIT = [
     ("C27", "flux", "flux create source git a --url u --branch 001", param("branch", "001")),
     ("C27", "argocd", "argocd app set a --revision 001", param("revision", "001")),
     ("C27", "gh", "gh release create 001 -R o/r --title 007", param("title", "007")),
-    ("C27", "git", "git push --push-option 007 origin main", param("push_option", "007")),
+    ("C27", "git", "git push --push-option 007 origin main", param("push_option", ["007"])),
     # C28 custom pflag Values, and slice element types
     ("C28", "helm", "helm upgrade r ./c --wait=false", param("wait", "hookOnly")),
     ("C28", "argocd", "argocd app sync a --source-positions 0x2", param("source_positions", [2])),
@@ -359,6 +359,18 @@ AUDIT = [
      REFUSE),
     ("C35", "kubectl", "kubectl set image deploy/web c1=a c2=b -n prod",
      param("images", {"c1": "a", "c2": "b"})),
+    # round 16
+    ("C36", "helm", "helm upgrade web ./c -f values.yaml --set hosts[0]=safe",
+     unres("set.hosts")),
+    ("C6", "git", "git push -o a -o b origin main", param("push_option", ["a", "b"])),
+    ("C6", "git", "git commit -m one -m two", param("message", ["one", "two"])),
+    ("C18", "gsutil", "gsutil mv gs://prod/oldprefix gs://archive/newprefix",
+     ("prefix", "key", "oldprefix")),
+    ("C18", "gcloud", "gcloud storage mv gs://prod/oldprefix gs://archive/newprefix",
+     ("prefix", "key", "oldprefix")),
+    ("C1", "gh", "gh pr create -t Fix -b Desc", param("title", "Fix")),
+    ("C1", "gh", "gh pr edit 42 -t Fix", param("title", "Fix")),
+    ("C1", "helm", "helm pull bitnami/nginx -d /tmp", param("destination", "/tmp")),
 ]
 
 
@@ -406,6 +418,8 @@ def _check(intents, check):
         return any(interceptor.intercept(i, now=NOW).verdict == "BLOCK" for i in intents)
     if kind == "first_marked_destination":
         return first.params.get("resolved_at_runtime", {}).get("destination") is True
+    if kind == "prefix":
+        return first.params.get("unresolved_prefix", {}).get(check[1]) == check[2]
     if kind == "last_param":
         return intents[-1].params.get(check[1]) == check[2]
     raise AssertionError(kind)
