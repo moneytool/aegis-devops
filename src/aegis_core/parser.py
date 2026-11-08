@@ -2032,9 +2032,15 @@ def _from_aws_s3(
     params = {**params, "raw_action": f"s3-{operation}"}
     intents: list[InfrastructureIntent] = []
 
+    # --recursive (and sync, which always is) reaches every key under the path, picked by
+    # --include/--exclude filters when aws runs: the key is then only a prefix
+    many = operation == "sync" or params.get("recursive") is True
+
     def add(uri: str, action: str) -> None:
         bucket, _, key = uri[len("s3://") :].partition("/")
         intent_params = {**params, "key": key} if key else dict(params)
+        if many:
+            _mark_unresolved(intent_params, "key")
         intents.append(InfrastructureIntent(resource=f"s3/bucket/{bucket}", action=action,
                                             provider="aws", params=intent_params,
                                             metadata=dict(metadata)))
@@ -3074,6 +3080,23 @@ def _gcloud_name(name: str, metadata: dict[str, Any]) -> str:
     return parts[-1]
 
 
+_GLOB_CHARS_RE = re.compile(r"[*?\[]")
+
+
+def _glob_literal_prefix(name: str) -> str | None:
+    """The text before the first wildcard character of ``name``, or None when it has none.
+    Every name the pattern matches starts with it, so a rule that cannot match anything
+    starting with it cannot be about the pattern's targets."""
+    match = _GLOB_CHARS_RE.search(name)
+    return None if match is None else name[:match.start()]
+
+
+def _mark_unresolved(params: dict[str, Any], key: str) -> None:
+    marks = params.setdefault("unresolved_scope", [])
+    if key not in marks:
+        marks.append(key)
+
+
 def _gcs_uri_intents(
     verb: str,
     operands: list[str],
@@ -3099,11 +3122,23 @@ def _gcs_uri_intents(
     if move:
         sources = operands[:-1] if len(operands) > 1 else []
         targets.extend((src, "delete") for src in sources if src.startswith("gs://"))
+    recursive = any(params.get(k) is True for k in ("r", "R", "recursive"))
     for uri, act in targets:
         bucket, _, key = uri[len("gs://") :].partition("/")
+        intent_params = {**params, "key": key} if key else dict(params)
+        if recursive or _GLOB_CHARS_RE.search(key):
+            # a wildcard (*, **, ?, [...]) or -r reaches every key it matches
+            _mark_unresolved(intent_params, "key")
+        prefix = _glob_literal_prefix(bucket)
+        if prefix is not None:
+            # gcloud and gsutil expand a wildcard bucket name when they run: which buckets,
+            # only they know. A rule on any bucket the pattern may match escalates.
+            intent_params["resolved_at_runtime"] = {"from": f"storage/bucket/{bucket}",
+                                                    "kinds": ["storage/bucket"],
+                                                    "name_prefix": prefix}
         intents.append(InfrastructureIntent(
             resource=f"storage/bucket/{bucket}", action=act, provider="gcp",
-            params={**params, "key": key} if key else dict(params), metadata=dict(metadata)))
+            params=intent_params, metadata=dict(metadata)))
     if from_stdin and (verb == "rm" or move):
         intents.append(InfrastructureIntent(
             resource="storage/bucket/*", action="delete", provider="gcp",

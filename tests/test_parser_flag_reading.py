@@ -1926,3 +1926,41 @@ def test_kubectl_unknown_verb_keeps_its_name():
 ])
 def test_rules_on_writes_that_were_reads_now_block(rule, command):
     assert _verdict([rule], command) == "BLOCK"
+
+
+# --- 4: wildcard targets ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize("rule,command,verdict", [
+    # gcloud storage and gsutil expand a wildcard bucket when they run
+    (_rule("gcp", "storage/bucket/prod-logs", ["delete"]),
+     "gcloud storage rm gs://prod-*/secret", "ESCALATE"),
+    (_rule("gcp", "storage/bucket/prod-logs", ["delete"]),
+     "gsutil rm gs://prod-*/secret", "ESCALATE"),
+    (_rule("gcp", "storage/bucket/prod-logs", ["delete"]),
+     "gcloud storage rm gs://prod-?ogs/x", "ESCALATE"),
+    (_rule("gcp", "storage/bucket/prod-logs", ["delete"]),
+     "gcloud storage rm gs://[pq]rod-logs/x", "ESCALATE"),
+    (_rule("gcp", "storage/bucket/dev-logs", ["delete"]),
+     "gcloud storage rm gs://prod-*/secret", "ALLOW"),  # no name can match both
+    (_rule("gcp", "storage/bucket/*", ["delete"]),
+     "gcloud storage rm gs://prod-*/secret", "BLOCK"),
+    (_rule("gcp", "storage/bucket/prod-*", ["delete"]),
+     "gcloud storage rm gs://prod-*/secret", "BLOCK"),
+    # a wildcard key, or -r, reaches every key it matches
+    (_rule("gcp", "storage/bucket/b", ["delete"], {"key": "secret"}),
+     "gcloud storage rm gs://b/se*", "ESCALATE"),
+    (_rule("gcp", "storage/bucket/b", ["delete"], {"key": "logs/secret"}),
+     "gsutil rm -r gs://b/logs", "ESCALATE"),
+    (_rule("gcp", "storage/bucket/b", ["delete"], {"key": "secret"}),
+     "gcloud storage rm gs://b/other", "ALLOW"),
+    # aws s3 --recursive and sync reach every key under the path, by --include/--exclude
+    (_rule("aws", "s3/bucket/b", ["delete"], {"key": "logs/secret"}),
+     "aws s3 rm s3://b/logs --recursive --exclude * --include secret*", "ESCALATE"),
+    (_rule("aws", "s3/bucket/b", ["put"], {"key": "app/config"}),
+     "aws s3 sync ./dist s3://b/app", "ESCALATE"),
+    (_rule("aws", "s3/bucket/b", ["delete"], {"key": "logs/secret"}),
+     "aws s3 rm s3://b/logs", "ALLOW"),  # one object, named
+])
+def test_wildcard_targets_escalate_every_rule_they_may_match(rule, command, verdict):
+    assert _verdict([rule], command) == verdict
