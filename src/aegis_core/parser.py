@@ -117,6 +117,7 @@ import csv
 import hashlib
 import io
 import json
+import os
 import re
 from collections.abc import Collection
 from pathlib import Path
@@ -5300,7 +5301,8 @@ def from_terraform_argv(argv: list[str]) -> list[InfrastructureIntent] | None:
     rest = argv[1:]
     while rest and rest[0].startswith("-"):
         if rest[0].startswith("-chdir="):
-            chdir = rest[0].split("=", 1)[1]
+            # one directory, one spelling: ./infra, infra/ and infra are the same
+            chdir = os.path.normpath(rest[0].split("=", 1)[1])
         rest = rest[1:]
     if not rest:
         return None

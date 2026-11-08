@@ -1462,3 +1462,46 @@ def test_an_argocd_app_has_one_name_and_its_namespace(command, namespace):
     intent = from_argv(command.split())[0]
     assert intent.resource == "app/web"
     assert intent.metadata["app_namespace"] == namespace
+
+
+# --- variables in front of the command, read only by the tool that reads them ----------
+
+
+@pytest.mark.parametrize("command,key,value", [
+    ("HELM_NAMESPACE=prod helm uninstall web", "namespace", "prod"),
+    ("HELM_KUBECONTEXT=prod helm uninstall web -n x", "context", "prod"),
+    ("GH_REPO=github.com/Acme/Web gh workflow run d.yml", "repo", "acme/web"),
+    ("AZURE_DEFAULTS_GROUP=prod-rg az vm delete -n v --yes", "resource_group", "prod-rg"),
+    ("AWS_DEFAULT_REGION=a AWS_REGION=b aws ec2 terminate-instances --instance-ids i-1",
+     "region", "b"),
+])
+def test_an_inline_variable_sets_the_scope_of_the_tool_that_reads_it(command, key, value):
+    from aegis_core.shell import intents_from_command
+    assert intents_from_command(command)[0].metadata[key] == value
+
+
+def test_kubectl_does_not_read_helms_namespace_variable():
+    from aegis_core.shell import intents_from_command
+    intent = intents_from_command("HELM_NAMESPACE=prod kubectl delete pod x")[0]
+    assert "namespace" not in intent.metadata
+
+
+@pytest.mark.parametrize("command", [
+    "ARGOCD_OPTS='--server prod' argocd app sync web",
+    "KUBERC=./kuberc kubectl delete pod x -n dev",
+])
+def test_variables_that_add_flags_are_refused(command):
+    from aegis_core.shell import intents_from_command
+    with pytest.raises(ValueError):
+        intents_from_command(command)
+
+
+def test_kuberc_off_is_fine():
+    from aegis_core.shell import intents_from_command
+    assert intents_from_command("KUBERC=off kubectl delete pod x -n dev")
+
+
+@pytest.mark.parametrize("chdir", ["infra", "./infra", "infra/", "./infra/"])
+def test_terraform_chdir_has_one_spelling(chdir):
+    assert from_argv(["terraform", f"-chdir={chdir}", "destroy"])[0].resource == \
+        "workspace/infra"
