@@ -2327,3 +2327,33 @@ def test_git_verbs_without_a_table_record_no_option_as_written(command):
     intent = from_argv(command.split())[0]
     assert "dry_run" not in intent.params
     assert intent.params["unresolved_scope"][0] == "*"
+
+
+@pytest.mark.parametrize("command,resources", [
+    # argparse reads the words after "--" as positionals: they are targets
+    ("gcloud compute instances delete safe -- prod",
+     ["compute/instance/safe", "compute/instance/prod"]),
+    ("gcloud storage rm gs://a -- gs://b", ["storage/bucket/a", "storage/bucket/b"]),
+])
+def test_gcloud_words_after_dashes_are_targets(command, resources):
+    assert [i.resource for i in from_argv(command.split())] == resources
+    rule = _rule("gcp", resources[-1], ["delete"])
+    assert _verdict([rule], command) == "BLOCK"
+
+
+def test_gcloud_dashes_on_an_unknown_command_are_refused():
+    with pytest.raises(ValueError):
+        from_argv("gcloud compute networks delete a -- b".split())
+
+
+@pytest.mark.parametrize("command,last", [
+    # every other tool reads the words after "--" as its arguments, targets included
+    ("kubectl delete pod safe -- prod", "pod/prod"),
+    ("helm uninstall safe -- prod", "release/prod"),
+    ("flux delete ks safe -- prod", "kustomization/prod"),
+    ("argocd app delete safe -- prod", "app/prod"),
+    ("gh repo delete -- o/prod", "repo/o/prod"),
+    ("git branch -d safe -- prod", "branch/prod"),
+])
+def test_words_after_dashes_are_targets_on_every_tool(command, last):
+    assert from_argv(command.split())[-1].resource == last

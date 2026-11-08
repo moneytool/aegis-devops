@@ -3122,13 +3122,14 @@ def _gcloud_flag_table(command: str) -> dict[str, Any] | None:
 def _parse_gcloud_tokens(
     tokens: list[str], *, storage: bool = False,
     table: dict[str, Any] | None = None, strict: bool = False,
-    lenient: bool = False,
+    lenient: bool = False, passthrough: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     """``(metadata, params, positional)``. gcloud takes no abbreviated flag (calliope
     disables argparse's prefixes) and never a word starting with "-" as a value. A flag in
     no table followed by a word is refused (see :data:`_GCLOUD_VALUE_FLAGS`). A ``--no-``
     flag is gcloud's off switch of a boolean and takes no value. Words after ``--`` go to
-    the command gcloud runs (``compute ssh``), and are kept in ``params["passthrough"]``.
+    the command gcloud runs on a command that has one (``compute ssh``, ``passthrough``),
+    kept in ``params["passthrough"]``; anywhere else argparse reads them as positionals.
     ``storage`` reads ``gcloud storage``, whose targets are only ``gs://`` paths: there an
     unknown flag may take a word that is not a path. ``table`` is the command's flags
     (:func:`_gcloud_flag_table`), which decide each flag they list; with ``strict`` a flag
@@ -3149,7 +3150,10 @@ def _parse_gcloud_tokens(
     while i < n:
         tok = tokens[i]
         if tok == "--":
-            params["passthrough"] = tokens[i + 1:]
+            if passthrough:
+                params["passthrough"] = tokens[i + 1:]  # the command gcloud runs (ssh)
+            else:
+                positional.extend(tokens[i + 1:])  # argparse: positionals, targets too
             break
         if tok.startswith("-") and tok != "-":
             key, val = _split_flag(tok)
@@ -3421,8 +3425,18 @@ def _from_gcloud_multi(argv: list[str]) -> list[InfrastructureIntent]:
     table = _gcloud_flag_table(command) if command else None
     # alpha and beta may have flags the (GA) table does not list: those keep the old rule
     strict = table is not None and words[:1] not in (["alpha"], ["beta"])
+    # Only ssh takes a command after "--" (its reference page: "[-- SSH_ARGS ...]"). On a
+    # command in the table the words after it are positionals, targets included; on any
+    # other command which it is is not known, and the command is refused.
+    before = tokens[:tokens.index("--")] if "--" in tokens else tokens
+    passthrough = (command.split()[-1] == "ssh" if command else
+                   "ssh" in [w for w in before if not w.startswith("-")])
+    if "--" in tokens and not passthrough and table is None:
+        raise ValueError(f"gcloud: whether this command takes a command after '--' is not "
+                         f"known, and the words after it may be targets: {argv!r}")
     metadata, params, positional = _parse_gcloud_tokens(tokens, storage=storage,
-                                                        table=table, strict=strict)
+                                                        table=table, strict=strict,
+                                                        passthrough=passthrough)
 
     release_track = None
     if positional and positional[0] in ("alpha", "beta"):
@@ -3434,7 +3448,8 @@ def _from_gcloud_multi(argv: list[str]) -> list[InfrastructureIntent]:
         and positional[1] in _GCS_LEGACY_VERB_MAP
     ):
         metadata, params, positional = _parse_gcloud_tokens(tokens, storage=True,
-                                                            table=table, strict=strict)
+                                                            table=table, strict=strict,
+                                                            passthrough=passthrough)
         if release_track:
             positional.remove(release_track)
             params["release_track"] = release_track
