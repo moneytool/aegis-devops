@@ -4571,7 +4571,8 @@ _GH_GLOBAL_VALUE_FLAGS = {"R", "repo"}
 
 # Groups whose first token is a subcommand ("gh workflow run ..."); the
 # rest ("gh api ...", "gh issue ...") take their flags directly.
-_GH_SUBVERB_GROUPS = {"workflow", "release", "pr", "repo", "secret", "variable"}
+_GH_SUBVERB_GROUPS = {"workflow", "release", "pr", "repo", "secret", "variable", "issue",
+                      "run"}
 
 
 def _gh_fold_globals(group: str, tokens: list[str], leading: list[str]) -> list[str]:
@@ -4630,6 +4631,15 @@ _GH_COMMAND_FLAGS: dict[tuple[str, str], tuple[frozenset[str], frozenset[str], d
         frozenset({"json"}), frozenset({"field", "raw-field", "ref"}),
         {"F": "field", "f": "raw-field", "r": "ref"},
     ),
+    ("issue", "delete"): (frozenset({"confirm", "yes"}), frozenset(), {}),
+    ("issue", "close"): (frozenset(), frozenset({"comment", "duplicate-of", "reason"}),
+                         {"c": "comment", "r": "reason"}),
+    ("run", "delete"): (frozenset(), frozenset(), {}),
+    ("run", "cancel"): (frozenset({"force"}), frozenset(), {}),
+    ("run", "rerun"): (frozenset({"failed", "debug"}), frozenset({"job"}),
+                       {"d": "debug", "j": "job"}),
+    ("workflow", "enable"): (frozenset(), frozenset(), {}),
+    ("workflow", "disable"): (frozenset(), frozenset(), {}),
     ("api", ""): (
         frozenset({"allow-escape-sequences", "include", "paginate", "silent", "slurp",
                    "verbose"}),
@@ -4642,6 +4652,80 @@ _GH_COMMAND_FLAGS: dict[tuple[str, str], tuple[frozenset[str], frozenset[str], d
 _GH_COMMON_BOOLS = frozenset({"help"})
 _GH_COMMON_VALUES = frozenset({"repo"})
 _GH_COMMON_SHORTS = {"R": "repo", "h": "help"}
+
+
+_GH_REPO_SPEC_RE = re.compile(
+    r"^(?:(?:https?|ssh|git)://(?:[^@/]+@)?|[^@/]+@)?"
+    r"(?:(?P<host>[^/:]+)[/:])?(?P<owner>[^/:]+)/(?P<repo>[^/]+?)(?:\.git)?/?$")
+
+
+def _gh_repo(spec: str) -> tuple[str, str | None]:
+    """A repository as gh takes it -- ``OWNER/REPO``, ``HOST/OWNER/REPO``, a URL or an
+    ``git@HOST:OWNER/REPO.git`` -- as ``(repo, host)``: ``owner/repo`` lower-cased (GitHub
+    compares them without case), and the host when it is not github.com. On another host
+    the repo is ``host/owner/repo``, so a rule written for a github.com repository never
+    takes a GitHub Enterprise one of the same name for it."""
+    m = _GH_REPO_SPEC_RE.match(spec.strip())
+    if not m:
+        raise ValueError(f"gh: {spec!r} is not a repository gh accepts")
+    host = (m.group("host") or "github.com").lower()
+    repo = f"{m.group('owner')}/{m.group('repo')}".lower()
+    if host in ("github.com", "www.github.com"):
+        return repo, None
+    return f"{host}/{repo}", host
+
+
+def _gh_set_repo(metadata: dict[str, Any], spec: str) -> None:
+    repo, host = _gh_repo(spec)
+    metadata["repo"] = repo
+    if host:
+        metadata["github_host"] = host
+
+
+_GH_NUMBER_URL_RE = re.compile(
+    r"^https?://(?P<host>[^/]+)/(?P<owner>[^/]+)/(?P<repo>[^/]+)/(?P<kind>pull|issues)/"
+    r"(?P<number>\d+)(?:[/?#].*)?$")
+_GH_FULL_REF_RE = re.compile(r"^(?P<owner>[^/]+)/(?P<repo>[^/#]+)#(?P<number>\d+)$")
+
+
+def _gh_number(selector: str | None, metadata: dict[str, Any]) -> str | None:
+    """The number a pull request or issue selector names, as gh's finder reads it: ``42``,
+    ``#42``, ``OWNER/REPO#42`` or a ``.../pull/42`` / ``.../issues/42`` URL, whose
+    repository then is the one gh acts on. None for a branch name or no selector: gh finds
+    the pull request of that branch, or of the current one, when it runs."""
+    if selector is None:
+        return None
+    if re.fullmatch(r"#?[+-]?[0-9]+", selector):
+        return str(int(selector.lstrip("#")))
+    m = _GH_NUMBER_URL_RE.match(selector) or _GH_FULL_REF_RE.match(selector)
+    if m:
+        host = m.groupdict().get("host") or "github.com"
+        _gh_set_repo(metadata, f"{host}/{m.group('owner')}/{m.group('repo')}")
+        return str(int(m.group("number")))
+    return None
+
+
+def _gh_selected(kind: str, selector: str | None, metadata: dict[str, Any],
+                 params: dict[str, Any]) -> str:
+    """``kind/<number>``, or ``kind/*`` marked when gh picks the object when it runs."""
+    number = _gh_number(selector, metadata)
+    if number is not None:
+        return f"{kind}/{number}"
+    if selector is not None:
+        params["branch"] = selector
+    params["resolved_at_runtime"] = {"from": f"{kind}/*", "kinds": [kind]}
+    return f"{kind}/*"
+
+
+def _gh_workflow(selector: str, params: dict[str, Any]) -> str:
+    """A workflow by file name is ``workflow/<file>``. gh also takes its display name or
+    its ID, which name the same workflow another way: then which file it is is only
+    known when gh runs, and the intent is marked."""
+    base = selector.rsplit("/", 1)[-1]
+    if base.endswith((".yml", ".yaml")):
+        return f"workflow/{base}"
+    params["resolved_at_runtime"] = {"from": f"workflow/{selector}", "kinds": ["workflow"]}
+    return f"workflow/{selector}"
 
 
 def _parse_gh_tokens(
@@ -4664,7 +4748,7 @@ def _parse_gh_tokens(
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
-                metadata["repo"] = val
+                _gh_set_repo(metadata, val)
             elif key in ("r", "ref"):
                 if val is None:
                     i += 1
@@ -4752,12 +4836,16 @@ def _parse_gh_command_tokens(
                 i += 1
                 val = _value_at(tokens, i, tok)
             if name == "repo":
-                metadata["repo"] = val
+                _gh_set_repo(metadata, val)
             elif name == "ref":
                 metadata["ref"] = val
             elif name in ("field", "raw-field"):
                 k, _sep, v = val.partition("=")
                 params.setdefault("inputs", {})[k] = _coerce(v)
+                if name == "field" and v.startswith("@"):
+                    # -F k=@file reads the value from a file (or stdin), not on the argv
+                    marks = params.setdefault("unresolved_scope", [])
+                    marks.append(f"inputs.{k}")
             elif name == "method":
                 params["_method"] = val.upper()
             else:
@@ -4859,14 +4947,20 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
             if not positional:
                 raise ValueError(f"could not find a workflow name in: {argv!r}")
             params["raw_action"] = "workflow-run"
+            marks = params.setdefault("unresolved_scope", [])
+            if "ref" not in metadata:
+                marks.append("ref")  # the repository's default branch
+            if params.get("json") is True:
+                marks.append("inputs.*")  # --json reads the inputs from stdin
             return InfrastructureIntent(
-                resource=f"workflow/{positional[0]}", action="run", provider="github",
-                params=params, metadata=metadata,
+                resource=_gh_workflow(positional[0], params), action="run",
+                provider="github", params=params, metadata=metadata,
             )
         params["raw_action"] = f"workflow-{subverb}"
-        name = positional[0] if positional else "*"
+        action = {"enable": "start", "disable": "stop"}.get(subverb, "read")
+        resource = _gh_workflow(positional[0], params) if positional else "workflow/*"
         return InfrastructureIntent(
-            resource=f"workflow/{name}", action="read", provider="github",
+            resource=resource, action=action, provider="github",
             params=params, metadata=metadata,
         )
 
@@ -4889,10 +4983,38 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
         subverb, *rest = tokens
         metadata, params, positional = _parse_gh_tokens(rest, ("pr", subverb))
         params["raw_action"] = f"pr-{subverb}"
-        number = positional[0] if positional else "*"
+        resource = _gh_selected("pr", positional[0] if positional else None, metadata, params)
         action = {"merge": "merge", "close": "stop"}.get(subverb, "read")
         return InfrastructureIntent(
-            resource=f"pr/{number}", action=action, provider="github",
+            resource=resource, action=action, provider="github",
+            params=params, metadata=metadata,
+        )
+
+    if group == "issue" and tokens:
+        subverb, *rest = tokens
+        metadata, params, positional = _parse_gh_tokens(rest, ("issue", subverb))
+        params["raw_action"] = f"issue-{subverb}"
+        resource = _gh_selected("issue", positional[0] if positional else None, metadata,
+                                params)
+        action = {"delete": "delete", "close": "stop"}.get(subverb, "read")
+        return InfrastructureIntent(
+            resource=resource, action=action, provider="github",
+            params=params, metadata=metadata,
+        )
+
+    if group == "run" and tokens:
+        subverb, *rest = tokens
+        metadata, params, positional = _parse_gh_tokens(rest, ("run", subverb))
+        params["raw_action"] = f"run-{subverb}"
+        run_id = positional[0] if positional else None
+        if run_id is not None and re.fullmatch(r"[0-9]+", run_id):
+            resource = f"run/{int(run_id)}"
+        else:  # no ID: gh asks which run, or picks it, when it runs
+            resource = "run/*"
+            params["resolved_at_runtime"] = {"from": "run/*", "kinds": ["run"]}
+        action = {"delete": "delete", "cancel": "stop", "rerun": "run"}.get(subverb, "read")
+        return InfrastructureIntent(
+            resource=resource, action=action, provider="github",
             params=params, metadata=metadata,
         )
 
@@ -4902,10 +5024,20 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
         subverb, *rest = tokens
         metadata, params, positional = _parse_gh_tokens(rest, ("repo", subverb))
         params["raw_action"] = f"repo-{subverb}"
-        name = positional[0] if positional else "*"
         action = "delete" if subverb == "delete" else "read"
+        spec = positional[0] if positional else None
+        if spec is not None and ("/" in spec or ":" in spec):
+            _gh_set_repo(metadata, spec)
+            resource = f"repo/{metadata['repo']}"
+        elif spec is not None:
+            # REPO alone: the owner is the signed-in user, which the argv does not show
+            resource = f"repo/*/{spec.lower()}"
+            params["resolved_at_runtime"] = {"from": resource, "kinds": ["repo"]}
+        else:  # the current directory's repository
+            resource = "repo/*"
+            params["resolved_at_runtime"] = {"from": "repo/*", "kinds": ["repo"]}
         return InfrastructureIntent(
-            resource=f"repo/{name}", action=action, provider="github",
+            resource=resource, action=action, provider="github",
             params=params, metadata=metadata,
         )
 
@@ -4915,7 +5047,7 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
         subverb, *rest = tokens
         metadata, params, positional = _parse_gh_tokens(rest, ("secret", subverb))
         params["raw_action"] = f"secret-{subverb}"
-        name = positional[0] if positional else "*"
+        name = positional[0].upper() if positional else "*"  # GitHub upper-cases names
         action = {"set": "put", "delete": "delete"}.get(subverb, "read")
         return InfrastructureIntent(
             resource=f"secret/{name}", action=action, provider="github",
@@ -4928,7 +5060,7 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
         subverb, *rest = tokens
         metadata, params, positional = _parse_gh_tokens(rest, ("variable", subverb))
         params["raw_action"] = f"variable-{subverb}"
-        name = positional[0] if positional else "*"
+        name = positional[0].upper() if positional else "*"  # GitHub upper-cases names
         action = "put" if subverb == "set" else "read"
         return InfrastructureIntent(
             resource=f"variable/{name}", action=action, provider="github",
@@ -4942,6 +5074,9 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
         method = params.pop("_method", None)
         if method is None:
             method = "POST" if params.get("inputs") or params.get("input") else "GET"
+        if params.get("input") is not None:
+            # --input: the body is a file (or stdin), so are the fields in it
+            params.setdefault("unresolved_scope", []).extend(["inputs.*", "ref"])
         action = _GH_METHOD_ACTION.get(method, "read")
         params["raw_action"] = f"api-{method.lower()}"
         path = _gh_api_normalise_path(positional[0]) if positional else "*"
@@ -4952,7 +5087,8 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
         path = _GH_API_PLACEHOLDER_RE.sub("*", path)
         repo_match = _GH_API_REPO_RE.match(path)
         if repo_match and "repo" not in metadata and not unknown:
-            metadata["repo"] = f"{repo_match.group(1)}/{repo_match.group(2)}"
+            host = params.get("hostname") or "github.com"
+            _gh_set_repo(metadata, f"{host}/{repo_match.group(1)}/{repo_match.group(2)}")
         resource = f"api/{path}"
         for pattern, by_method in _GH_API_ROUTES:
             match = pattern.match(path)
@@ -4962,11 +5098,16 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
             if route is None:
                 break
             resource_template, action = route
-            resource = resource_template.format(*match.groups())
+            groups = list(match.groups())
+            groups[:2] = [g.lower() for g in groups[:2]]  # owner/repo, without case
+            resource = resource_template.format(*groups)
             if resource.startswith("workflow/"):
                 ref = (params.get("inputs") or {}).get("ref")
-                if ref is not None and "ref" not in metadata:
+                from_file = "inputs.ref" in params.get("unresolved_scope", [])
+                if ref is not None and "ref" not in metadata and not from_file:
                     metadata["ref"] = ref
+                elif "ref" not in metadata and "ref" not in params.get("unresolved_scope", []):
+                    params.setdefault("unresolved_scope", []).append("ref")
             break
         if unknown and "*" in resource:
             kind = resource.partition("/")[0]

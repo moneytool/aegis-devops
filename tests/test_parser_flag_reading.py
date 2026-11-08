@@ -1268,3 +1268,57 @@ def test_all_namespaces_is_one_key(command, every):
     assert intent.metadata.get("all_namespaces", False) is every
     rule = _rule(intent.provider, "*", ["read"], {"namespace": "prod"})
     assert _verdict([rule], command) == ("ESCALATE" if every else "ALLOW")
+
+
+# --- gh selectors and repositories (cli v2.103 pr/shared/finder.go, issue/shared) -----
+
+
+@pytest.mark.parametrize("command,resource,repo,marked", [
+    ("gh pr merge https://github.com/o/r/pull/42 --squash", "pr/42", "o/r", False),
+    ("gh pr merge 42 -R o/r", "pr/42", "o/r", False),
+    ("gh pr merge #42 -R O/R", "pr/42", "o/r", False),
+    ("gh pr merge O/R#42", "pr/42", "o/r", False),
+    ("gh pr merge 42 -R github.com/o/r", "pr/42", "o/r", False),
+    ("gh pr merge 42 -R https://github.com/o/r.git", "pr/42", "o/r", False),
+    ("gh pr merge 42 -R git@github.com:o/r.git", "pr/42", "o/r", False),
+    ("gh pr merge 42 -R ghe.corp.com/o/r", "pr/42", "ghe.corp.com/o/r", False),
+    # a branch, or the current branch: gh finds the pull request when it runs
+    ("gh pr merge feature -R o/r", "pr/*", "o/r", True),
+    ("gh pr merge -R o/r", "pr/*", "o/r", True),
+    ("gh issue delete https://github.com/o/r/issues/7 --yes", "issue/7", "o/r", False),
+    ("gh issue close 7 -R o/r", "issue/7", "o/r", False),
+    ("gh run cancel 123 -R o/r", "run/123", "o/r", False),
+    ("gh run rerun -R o/r", "run/*", "o/r", True),
+    ("gh workflow run .github/workflows/deploy.yml -R o/r -r main", "workflow/deploy.yml",
+     "o/r", False),
+    ("gh workflow run Deploy -R o/r", "workflow/Deploy", "o/r", True),  # a display name
+    ("gh repo delete O/R --yes", "repo/o/r", "o/r", False),
+    ("gh repo delete https://github.com/o/r --yes", "repo/o/r", "o/r", False),
+    ("gh secret set token -b x -R o/r", "secret/TOKEN", "o/r", False),
+])
+def test_gh_selectors_and_repositories_have_one_spelling(command, resource, repo, marked):
+    intent = from_argv(command.split())[0]
+    assert intent.resource == resource
+    assert intent.metadata["repo"] == repo
+    assert ("resolved_at_runtime" in intent.params) is marked
+
+
+@pytest.mark.parametrize("command,verdict", [
+    ("gh pr merge https://github.com/acme/web/pull/42 --squash", "BLOCK"),
+    ("gh pr merge 42 -R github.com/Acme/Web --squash", "BLOCK"),
+    ("gh pr merge 42 -R ghe.corp.com/acme/web --squash", "ALLOW"),  # another host
+    ("gh pr merge feature -R acme/web --squash", "ESCALATE"),
+])
+def test_a_rule_on_one_pull_request_holds_on_every_spelling(command, verdict):
+    rule = _rule("github", "pr/42", ["merge"], {"repo": "acme/web"})
+    assert _verdict([rule], command) == verdict
+
+
+@pytest.mark.parametrize("command,mark", [
+    ("gh api repos/o/r/actions/workflows/d.yml/dispatches -F ref=@ref.txt", "ref"),
+    ("gh api repos/o/r/actions/workflows/d.yml/dispatches --input body.json", "ref"),
+    ("gh workflow run d.yml -R o/r --json", "inputs.*"),
+    ("gh workflow run d.yml -R o/r", "ref"),  # the default branch
+])
+def test_gh_values_from_files_or_defaults_are_unresolved(command, mark):
+    assert mark in from_argv(command.split())[0].params["unresolved_scope"]
