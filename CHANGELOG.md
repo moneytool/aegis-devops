@@ -620,9 +620,12 @@ name). git verbs without an option table leave every param unresolved when given
   and the logic ported from other projects, with their copyright notices and the license
   texts that require it: aws-cli's shorthand parser (which keeps aws-cli's copyright header,
   followed by a note of what was changed), the botocore, azure-cli, Google Cloud SDK and pflag
-  registration data, and logic ported from Helm strvals, Go strconv and time, pflag, gcloud
-  calliope, azure-cli, knack, GitHub CLI, kubectl and git. It ships in the sdist and wheel
-  (`license-files`).
+  registration data, and logic ported from permissively licensed code (Helm strvals, Go
+  strconv and time, pflag, gcloud calliope, azure-cli, GitHub CLI). Behaviour taken from
+  documentation or from running a tool (kubectl, aws-cli, knack, git) is listed separately:
+  no git code is included or translated. It ships in the sdist and wheel (`license-files`).
+  The generated `pflag_types.json` records its sources as upstream repository and tag or
+  commit, and its generator refuses to write a local path.
 
 ## [1.3.4] — 2026-11-07
 

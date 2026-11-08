@@ -66,52 +66,55 @@ pflag_types.json
   None of these repositories ships a NOTICE file.
 
 ======================================================================
-3. Logic ported (reimplemented in Python, no source lines copied)
+3. Logic ported (reimplemented in Python from permissively licensed code)
 ======================================================================
 
-The parser reads command lines the way each tool does. Where that meant following a
-tool's own code, the logic was rewritten in Python. These are listed so the origin
-of the behaviour is clear.
+Where reading a tool exactly meant following its own algorithm, that algorithm was
+rewritten in Python from the source below. No source lines were copied. All of these
+are under the Apache License 2.0, the MIT License or the BSD-3-Clause license.
 
 Helm (https://github.com/helm/helm), pkg/strvals: --set/--set-string/--set-json
   value parsing and typedVal. Copyright The Helm Authors. Apache-2.0.
 
-Go standard library (https://go.dev), strconv ParseInt (base 0), ParseFloat,
+Go standard library (https://go.dev): strconv ParseInt (base 0), ParseFloat and
   ParseBool, and time.ParseDuration. Copyright 2009 The Go Authors.
   BSD-3-Clause (text below).
 
-spf13/pflag (https://github.com/spf13/pflag): flag syntax, short-letter groups,
-  value types (StringSlice CSV splitting, StringArray, StringToString, Count).
+spf13/pflag (https://github.com/spf13/pflag): how short-letter groups and
+  StringSlice (CSV), StringArray, StringToString and Count values are read.
   Copyright (c) 2012 Alex Ogier, Copyright (c) 2012 The Go Authors.
   BSD-3-Clause (text below).
 
-kubectl and cli-runtime (https://github.com/kubernetes/kubernetes): argument
-  handling per verb (for example logs.go Complete). The Kubernetes Authors.
-  Apache-2.0.
-
-aws-cli (version 2.37.4), awscli/argprocess.py and awscli/paramfile.py: how a value
-  is unpacked as JSON or shorthand and when it is read from a file.
-  Copyright Amazon.com, Inc. or its affiliates. Apache-2.0.
-
 Google Cloud SDK, googlecloudsdk/calliope/arg_parsers.py and
-  googlecloudsdk/core/util/iso_duration.py: ArgList, ArgDict, BinarySize,
-  Duration, Boolean and the ^DELIM^ syntax. Copyright Google LLC. Apache-2.0.
+  googlecloudsdk/core/util/iso_duration.py: BinarySize, Duration (ISO 8601 and
+  gcloud's short form), Boolean, ArgList/ArgDict and the ^DELIM^ syntax.
+  Copyright Google LLC. Apache-2.0.
 
 azure-cli (https://github.com/Azure/azure-cli): validate_tags,
-  get_three_state_flag, get_enum_type. Copyright (c) Microsoft Corporation.
+  get_three_state_flag and get_enum_type. Copyright (c) Microsoft Corporation.
   MIT License (text below).
 
-knack (https://github.com/microsoft/knack): @file argument preprocessing.
-  Copyright (c) Microsoft Corporation. MIT License (text below).
-
-GitHub CLI (https://github.com/cli/cli): gh api field and host handling.
+GitHub CLI (https://github.com/cli/cli): gh api -F value typing.
   Copyright (c) 2019 GitHub Inc. MIT License (text below).
 
-git (https://git-scm.com): which refspecs a push builds, branch and tag filter
-  options, parse-options abbreviation rules. git is licensed under GPL-2.0. No git
-  source is included: the behaviour was reimplemented in Python, with git's
-  documentation and source (builtin/push.c, builtin/branch.c, builtin/tag.c,
-  parse-options.c) used as a reference for what git does.
+======================================================================
+4. Behaviour modelled (no code ported)
+======================================================================
+
+The parser also follows behaviour of these tools: which flags exist, which value wins,
+what a command acts on. These facts were taken from each tool's documentation, from
+running the tool, and from reading its source for facts. No code from them is
+included or translated.
+
+kubectl and cli-runtime 1.36 (for example a logs container given as a second word),
+  Argo CD, Flux and Helm command arguments. Apache-2.0.
+aws-cli 2.37.4 argprocess and paramfile (when a value is JSON, shorthand or read from
+  a file). Apache-2.0.
+knack (@file and @- argument values). MIT.
+GitHub CLI commands other than the -F typing above (hosts, repositories, flags). MIT.
+git: command-line behaviour modelled from git's documentation and from running
+  git 2.52; no git source code is included or translated (its source was read only
+  to confirm facts, such as which refs a push sends).
 
 ======================================================================
 License texts

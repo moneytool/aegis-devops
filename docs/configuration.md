@@ -31,7 +31,7 @@ directory:
 
 ```
 $ cd /tmp && aegis check kubectl -- kubectl get pods
-aegis: error: no config found (searched: /tmp/.aegis, /Users/you/.config/aegis, /etc/aegis); run 'aegis init <dir>'
+aegis: error: no config found (searched: /tmp/.aegis, /home/you/.config/aegis, /etc/aegis); run 'aegis init <dir>'
 ```
 
 `aegis init <dir>` seeds a fresh directory with the packaged example policy files (the same
@@ -41,7 +41,7 @@ with `data/` and is checked by `tests/test_config.py`) and prints next steps:
 
 ```
 $ aegis init ~/.config/aegis
-aegis: wrote 38 file(s) to /Users/you/.config/aegis
+aegis: wrote 38 file(s) to /home/you/.config/aegis
 Next steps:
   1. Generate a real signing key:  aegis keygen --out ~/.config/aegis/aegis-signing.key
   2. Sign your policy files:       aegis sign --key file:~/.config/aegis/aegis-signing.key ~/.config/aegis/*.yaml ~/.config/aegis/sources

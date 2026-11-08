@@ -6094,7 +6094,8 @@ def _from_git_push(
                 and not intent.params.get("unknown_target")):
             # A refspec with no destination is mapped when git runs: a remote.<name>.push
             # refspec that matches it (with its +), or push.default's upstream, in any
-            # config file git reads (push.c refspec_append_mapped). The source is known;
+            # config file git reads (git-push(1), git-config(1) remote.<name>.push and
+            # push.default). The source is known;
             # the destination is not, so a rule on any ref may be about it.
             intent.params["resolved_at_runtime"] = {"from": intent.resource, "kinds": ["ref"],
                                                     "destination": True}
@@ -6145,30 +6146,29 @@ def _from_git_push(
 
 
 def _git_push_refspecs(words: list[str], delete: bool) -> list[str]:
-    """The refspecs git builds from the words after the remote (builtin/push.c
-    set_refspecs): ``tag <name>`` is ``refs/tags/<name>``, and with ``--delete`` every
-    name is ``:<name>``; git refuses ``--delete`` with a ``:`` in a name, an empty name,
-    no name at all, or ``tag`` with no name after it."""
-    refspecs: list[str] = []
-    i = 0
-    while i < len(words):
-        ref = words[i]
-        if ref == "tag":
-            i += 1
-            if i >= len(words):
-                raise ValueError("git push: tag shorthand without <tag>")
-            ref = f"refs/tags/{words[i]}"
-            refspecs.append(f":{ref}" if delete else ref)
-        elif delete:
-            if ":" in ref or not ref:
-                raise ValueError("git push: --delete only accepts plain target ref names")
-            refspecs.append(f":{ref}")
+    """The refspecs a push sends for the words after the remote. git-push(1): ``tag <tag>``
+    is ``refs/tags/<tag>``, and ``--delete`` deletes every listed ref, the same as a colon
+    in front of each. Checked by running git 2.52 against a local bare repository: git
+    refuses ``tag`` with nothing after it, ``--delete`` with no refs, and ``--delete`` with
+    an empty name or one that holds a colon."""
+    names: list[str] = []
+    pending_tag = False
+    for word in words:
+        if pending_tag:
+            names.append(f"refs/tags/{word}")
+            pending_tag = False
+        elif word == "tag":
+            pending_tag = True
         else:
-            refspecs.append(ref)
-        i += 1
-    if delete and not refspecs:
-        raise ValueError("git push: --delete doesn't make sense without any refs")
-    return refspecs
+            if delete and (not word or ":" in word):
+                raise ValueError(f"git push --delete takes ref names only, which {word!r} "
+                                 "is not (git refuses it)")
+            names.append(word)
+    if pending_tag:
+        raise ValueError("git push: 'tag' needs a tag name after it (git refuses it)")
+    if delete and not names:
+        raise ValueError("git push --delete needs at least one ref (git refuses it)")
+    return [f":{name}" for name in names] if delete else names
 
 
 def _git_remote_is_url(remote: str) -> bool:
@@ -6327,7 +6327,7 @@ def _git_reads_only(verb: str, positional: list[str], tokens: list[str]) -> bool
 
 
 # The filters that put git branch and git tag in list mode whatever else is given
-# (builtin/branch.c and builtin/tag.c, git 2.52): --contains/--with, --no-contains/--without,
+# (git-branch(1), git-tag(1), and running git 2.52): --contains/--with, --no-contains/--without,
 # --merged, --no-merged and --points-at, each a value, never a boolean's negation.
 _GIT_LIST_FILTERS = ("contains", "with", "no_contains", "without", "merged", "no_merged",
                      "points_at")

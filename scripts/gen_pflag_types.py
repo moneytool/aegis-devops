@@ -191,8 +191,34 @@ def _resolve_custom(tool: str, flags: dict[str, str]) -> dict[str, str]:
     return out
 
 
+def _git(path: Path, *args: str) -> str:
+    import subprocess
+
+    result = subprocess.run(["git", "-C", str(path), *args], capture_output=True, text=True,
+                            check=False)
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def upstream(directory: str) -> str:
+    """``directory`` as its upstream identifier, ``<repo URL>@<tag or commit>/<subpath>``,
+    from the git checkout it is in. The JSON ships in the package, so a local path is never
+    written: a directory outside a git checkout with an https origin is refused."""
+    path = Path(directory).resolve()
+    top = _git(path, "rev-parse", "--show-toplevel")
+    url = _git(path, "config", "remote.origin.url")
+    if not top or not url.startswith("https://"):
+        raise SystemExit(f"{directory}: not a git checkout with an https origin; the "
+                         "generator records upstream identifiers only, never local paths")
+    url = re.sub(r"^https://[^@/]+@", "https://", url).removesuffix(".git")
+    rev = _git(path, "describe", "--tags", "--exact-match") or _git(path, "rev-parse", "HEAD")
+    sub = path.relative_to(Path(top).resolve()).as_posix()
+    return f"{url}@{rev}" + ("" if sub == "." else f"/{sub}")
+
+
 def main(out: str, specs: list[str]) -> None:
-    data = {"_source": "pflag registrations in each tool's source: " + "; ".join(specs)}
+    named = [f"{tool}=" + ",".join(upstream(d) for d in dirs.split(","))
+             for tool, _, dirs in (spec.partition("=") for spec in specs)]
+    data = {"_source": "pflag registrations in each tool's source: " + "; ".join(named)}
     for spec in specs:
         tool, _, dirs = spec.partition("=")
         flags, commands = scan(dirs.split(","), tool)

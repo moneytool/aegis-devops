@@ -413,3 +413,28 @@ def test_attribution_notice_ships_and_aws_header_is_kept():
         assert name in notice, name
     pyproject = (root / "pyproject.toml").read_text()
     assert 'license-files = ["LICENSE", "NOTICE"]' in pyproject
+
+
+def test_shipped_files_hold_no_local_paths():
+    # the package data, NOTICE and docs ship or are published: a path on the machine that
+    # generated them (a home directory, a temp or scratch directory) must never be in them
+    import re
+    import zipfile
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    local = re.compile(r"/Users/|/home/[a-z]|/private/tmp|/private/var|/tmp/|vampiremac|"
+                       r"scratchpad|[A-Z]:\\\\Users", re.I)
+    texts: dict[str, str] = {}
+    for path in (root / "src/aegis_core/data").iterdir():
+        if path.suffix == ".zip":
+            with zipfile.ZipFile(path) as archive:
+                for name in archive.namelist():
+                    texts[f"{path.name}:{name}"] = archive.read(name).decode("utf-8", "replace")
+        else:
+            texts[path.name] = path.read_text()
+    for path in [root / "NOTICE", root / "src/aegis_core/aws_shorthand.py"]:
+        texts[path.name] = path.read_text()
+    for name, text in texts.items():
+        found = local.search(text)
+        assert found is None, (name, text[max(0, found.start() - 40):found.end() + 40])
