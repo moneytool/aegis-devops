@@ -891,3 +891,44 @@ def test_a_rule_against_deleting_main_holds_on_renames(command, verdict):
 def test_git_branch_rename_takes_at_most_two_names():
     with pytest.raises(ValueError):
         from_argv("git branch -m a b c".split())
+
+
+# --- helm values a rule can read, and kubectl create deployment --port ---------------
+
+
+@pytest.mark.parametrize("flags,verdict", [
+    ("--set replicaCount=0", "BLOCK"),
+    ("--set-json replicaCount=0", "BLOCK"),  # read as JSON, before --set
+    (["--set-json", '{"replicaCount": 0}'], "BLOCK"),
+    ("--set-json replicaCount=0 --set replicaCount=3", "ALLOW"),  # --set comes after
+    ("--set replicaCount=3", "ALLOW"),
+    # a file nobody read: its key, or any key the command line leaves to it
+    ("--set replicaCount=3 --set-file replicaCount=r.txt", "ESCALATE"),
+    ("--set-file replicaCount=r.txt --set-literal replicaCount=3", "ALLOW"),
+    ("-f values.yaml", "ESCALATE"),
+    ("-f values.yaml --set replicaCount=3", "ALLOW"),
+    ("--reuse-values", "ESCALATE"),
+])
+def test_a_helm_values_rule_sees_every_way_the_value_is_set(flags, verdict):
+    rule = _rule("helm", "release/*", ["update"], {"set.replicaCount": 0})
+    extra = flags.split() if isinstance(flags, str) else flags
+    assert _verdict([rule], ["helm", "upgrade", "api", "./c", *extra]) == verdict
+
+
+def test_helm_set_json_refuses_what_helm_refuses():
+    with pytest.raises(ValueError):
+        from_argv(["helm", "upgrade", "api", "./c", "--set-json", "a=notjson"])
+
+
+@pytest.mark.parametrize("flags,port", [
+    # create deployment's --port is an Int32 read with base 0 (run on kubectl 1.36)
+    ("--port=0x50", 80), ("--port 80", 80),
+])
+def test_create_deployment_port_is_read_as_kubectl_reads_it(flags, port):
+    intent = from_argv(f"kubectl create deployment web --image=x {flags}".split())[0]
+    assert intent.params["port"] == port
+
+
+def test_create_deployment_refuses_a_port_kubectl_refuses():
+    with pytest.raises(ValueError):
+        from_argv("kubectl create deployment web --image=x --port=080".split())

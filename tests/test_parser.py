@@ -2479,7 +2479,9 @@ def test_from_helm_set_file_and_set_json_are_recorded_raw():
     )
     assert intent.params["set_file"] == ["cert=./cert.pem"]
     assert intent.params["set_json"] == ['labels={"team":"x"}']
-    assert "set" not in intent.params
+    # --set-json is read as JSON; --set-file's value is a file nobody read
+    assert intent.params["set"] == {"labels.team": "x"}
+    assert intent.params["unresolved_scope"] == ["set.cert"]
 
 
 def test_from_helm_nested_dotted_set_key_is_kept_as_a_single_string_key():
@@ -3831,11 +3833,14 @@ def test_the_last_dry_run_decides_in_the_other_tools(argv, rehearsal):
     ("helm upgrade api ./c -i", "release/api", {"install": True, "chart": "./c"}, {}),
     ("helm upgrade api ./c -i=false", "release/api", {"install": False, "chart": "./c"}, {}),
     ("helm upgrade -if v.yaml api ./c", "release/api",
-     {"install": True, "values_files": ["v.yaml"], "chart": "./c"}, {}),
+     {"install": True, "values_files": ["v.yaml"], "chart": "./c",
+      "unresolved_scope": ["set.*"]}, {}),
     ("helm upgrade api ./c -f v.yaml", "release/api",
-     {"values_files": ["v.yaml"], "chart": "./c"}, {}),
+     {"values_files": ["v.yaml"], "chart": "./c",
+      "unresolved_scope": ["set.*"]}, {}),
     ("helm upgrade api ./c -fv.yaml", "release/api",
-     {"values_files": ["v.yaml"], "chart": "./c"}, {}),
+     {"values_files": ["v.yaml"], "chart": "./c",
+      "unresolved_scope": ["set.*"]}, {}),
     ("helm upgrade api ./c -nprod", "release/api", {"chart": "./c"}, {"namespace": "prod"}),
     ("helm upgrade api ./c -n=prod", "release/api", {"chart": "./c"}, {"namespace": "prod"}),
     ("helm -nprod upgrade api ./c", "release/api", {"chart": "./c"}, {"namespace": "prod"}),

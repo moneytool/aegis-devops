@@ -226,7 +226,11 @@ A constraint's `scope: {...}` (and a plan selector's `scope`) is matched against
 - **Dotted paths.** A scope key with a `.` (e.g. `set.replicaCount`) first tries a literal key of that
   exact name, then walks the dots into nested dicts (`params["set"]["replicaCount"]`) — this is what
   makes `helm --set replicaCount=0` (parsed into `params["set"] = {"replicaCount": 0}`) expressible as
-  `scope: {set.replicaCount: 0}`.
+  `scope: {set.replicaCount: 0}`. `--set-json`, `--set-string` and `--set-literal` land there too,
+  merged in helm's order. A key set by `--set-file`, or left to a values file (`-f`) or
+  `--reuse-values`, comes from a file nobody read, so a rule scoped on it escalates with
+  `set.<key>-unresolved: <id>`. The chart's own defaults are not read either: `set.*` is what the
+  command line sets.
 - **`actions: ["*"]`.** A per-intent constraint (or plan selector, where `actions` is already an
   "any of these" list) may include the literal string `"*"` in its `actions` set to mean "any action".
   It is otherwise an ordinary string: no special validation, and no effect on the constraint's

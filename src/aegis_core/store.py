@@ -779,6 +779,22 @@ def namespace_unresolved(intent: InfrastructureIntent) -> bool:
     return "namespace" not in intent.metadata and "namespace" not in intent.params
 
 
+def param_unresolved(key: str, intent: InfrastructureIntent) -> bool:
+    """Whether a parser marked scope ``key`` as unknown (``params["unresolved_scope"]``):
+    ``set.replicaCount`` when helm --set-file sets it from a file nobody read, and
+    ``set.*`` for every ``set.`` key the command line leaves to a values file."""
+    marks = intent.params.get("unresolved_scope")
+    if not isinstance(marks, list):
+        return False
+    for mark in marks:
+        if mark == key:
+            return True
+        if (isinstance(mark, str) and mark.endswith(".*") and key.startswith(mark[:-1])
+                and not _dig(intent.params, key)[0]):
+            return True
+    return False
+
+
 def scope_unresolved(scope: dict[str, Any], intent: InfrastructureIntent) -> list[str]:
     """The scope keys of ``scope`` that this intent leaves unresolved
     (``env`` without a resolved environment; ``namespace`` per
@@ -791,6 +807,7 @@ def scope_unresolved(scope: dict[str, Any], intent: InfrastructureIntent) -> lis
         unknown.add("env")
     if "namespace" in scope and namespace_unresolved(intent):
         unknown.add("namespace")
+    unknown.update(key for key in scope if param_unresolved(key, intent))
     if not unknown:
         return []
     rest = {k: v for k, v in scope.items() if k not in unknown}

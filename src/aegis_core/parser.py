@@ -934,9 +934,10 @@ def _parse_flags(
                     i += 1
                     val = _value_at(tokens, i, tok)
                 name = _KUBECTL_SHORT_VALUE_NAMES.get(key, key)
-                if name in _KUBECTL_INT_FLAGS:
-                    # create deployment's --replicas is an Int32, the others Int or Int64
-                    bits = 32 if replicas_short and name == "replicas" else 64
+                if name in _KUBECTL_INT_FLAGS or (name == "port" and replicas_short):
+                    # create deployment's --replicas and --port are Int32, the others Int
+                    # or Int64; --port is a string on expose and run
+                    bits = 32 if replicas_short and name in ("replicas", "port") else 64
                     params[name] = _go_int(val, f"kubectl {tok}", bits)
                 else:
                     params[name] = _coerce(val)
@@ -2882,7 +2883,8 @@ def _parse_helm_tokens(
     long_values, long_bools = _helm_long_flags(verb)
     # helm merges --set, then --set-string, then --set-literal, whatever their order on
     # the line, so a later kind wins over an earlier one (pkg/cli/values MergeValues).
-    sets: dict[str, list[str]] = {"set": [], "set-string": [], "set-literal": []}
+    sets: dict[str, list[str]] = {"set-json": [], "set": [], "set-string": [], "set-file": [],
+                                  "set-literal": []}
 
     tokens = list(tokens)  # short words are split in place as the walk reaches them
     i = 0
@@ -2934,7 +2936,7 @@ def _parse_helm_tokens(
                     i += 1
                     val = _value_at(tokens, i, tok)
                 params.setdefault("values_files", []).extend(_read_string_slice(val))
-            elif key in sets:
+            elif key in ("set", "set-string", "set-literal"):
                 # REVIEW-4 T2.5: comma-separated `k=v` pairs (Helm's own
                 # splitting rule, see _split_helm_set_pairs); nested keys
                 # like `image.tag=v2` are kept as the dotted string key --
@@ -2945,12 +2947,13 @@ def _parse_helm_tokens(
                     val = _value_at(tokens, i, tok)
                 sets[key].append(val)
             elif key in ("set-file", "set-json"):
-                # Recorded raw (not parsed) -- see module docs.
+                # Kept as written too; merged into params["set"] below.
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
                 dest = "set_file" if key == "set-file" else "set_json"
                 params.setdefault(dest, []).append(val)
+                sets[key].append(val)
             elif is_long and key in long_bools:
                 params[key.replace("-", "_")] = _bool_param(val)
             elif not is_long and key in short_bools:
@@ -2971,19 +2974,72 @@ def _parse_helm_tokens(
             positional.append(tok)
         i += 1
 
-    if any(sets.values()):
-        target = params.setdefault("set", {})
-        for kind in ("set", "set-string"):
-            for value in sets[kind]:
+    _merge_helm_values(params, sets)
+    return metadata, params, positional
+
+
+def _flatten_json(value: Any, prefix: str, out: dict[str, Any]) -> None:
+    """``{"image": {"tag": "v2"}}`` as ``{"image.tag": "v2"}``, the shape --set gives."""
+    if isinstance(value, dict) and value:
+        for k, v in value.items():
+            _flatten_json(v, f"{prefix}.{k}" if prefix else str(k), out)
+    elif prefix:
+        out[prefix] = value
+
+
+def _merge_helm_values(params: dict[str, Any], sets: dict[str, list[str]]) -> None:
+    """``params["set"]``: the values the command line sets, merged in helm's order
+    (pkg/cli/values MergeValues): --set-json, --set, --set-string, --set-file and
+    --set-literal, a later kind winning over an earlier one, whatever their order on the
+    line. A --set-file value is the file's content, which is not read, and a values file
+    (-f) or --reuse-values can set any key the command line does not: those keys are in
+    ``params["unresolved_scope"]`` (``set.<key>``, or ``set.*`` for every key not set),
+    so a rule scoped on them escalates instead of not applying."""
+    target: dict[str, Any] = {}
+    unresolved: list[str] = []
+    for value in sets["set-json"]:
+        stripped = value.strip()
+        try:
+            if stripped.startswith("{"):
+                _flatten_json(json.loads(stripped), "", target)
+            else:
                 for pair in _split_helm_set_pairs(value):
                     k, _sep, v = pair.partition("=")
                     if k:
-                        target[k] = v if kind == "set-string" else _coerce(v)
-        for value in sets["set-literal"]:  # one pair, the rest of the word its value
-            k, _sep, v = value.partition("=")
+                        target.pop(k, None)
+                        parsed = json.loads(v)
+                        if isinstance(parsed, dict) and parsed:
+                            _flatten_json(parsed, k, target)
+                        else:
+                            target[k] = parsed
+        except json.JSONDecodeError as err:
+            raise ValueError(f"helm: --set-json {value!r} is not JSON helm accepts: {err}") \
+                from err
+    for kind in ("set", "set-string"):
+        for value in sets[kind]:
+            for pair in _split_helm_set_pairs(value):
+                k, _sep, v = pair.partition("=")
+                if k:
+                    target[k] = v if kind == "set-string" else _coerce(v)
+    for value in sets["set-file"]:
+        for pair in _split_helm_set_pairs(value):
+            k, _sep, _path = pair.partition("=")
             if k:
-                target[k] = v
-    return metadata, params, positional
+                target.pop(k, None)
+                unresolved.append(f"set.{k}")
+    for value in sets["set-literal"]:  # one pair, the rest of the word its value
+        k, _sep, v = value.partition("=")
+        if k:
+            target[k] = v
+            if f"set.{k}" in unresolved:
+                unresolved.remove(f"set.{k}")
+    if target:
+        params["set"] = target
+    if params.get("values_files") or params.get("reuse_values") is True or \
+            params.get("reset_then_reuse_values") is True:
+        unresolved.append("set.*")
+    if unresolved:
+        params["unresolved_scope"] = unresolved
 
 
 def from_helm_multi(argv: list[str]) -> list[InfrastructureIntent]:
