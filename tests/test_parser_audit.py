@@ -1,4 +1,4 @@
-"""The sibling audit of review rounds 1-18 (docs/dev/parser-audit.md): one check per class
+"""The sibling audit of review rounds 1-19 (docs/dev/parser-audit.md): one check per class
 of finding and per tool where the class applies, so a fix that covers one tool and misses
 its siblings fails here. Each row is ``(class, tool, argv, check)``."""
 
@@ -391,6 +391,15 @@ AUDIT = [
     ("C39", "gcloud", "gcloud storage buckets update gs://b --update-labels env=prod",
      param("update-labels", {"env": "prod"})),
     ("C39", "gcloud", "gcloud compute firewall-rules create fw --rules tcp:22", unres("rules")),
+    # round 19
+    ("C40", "aws", "aws iam delete-role --role-name protected", param("role-name", "protected")),
+    ("C40", "az", "az vm delete -n vm1 -g rg", param("name", "vm1")),
+    ("C41", "git", "git push --receive-pack=Y --exec=X origin main", param("receive_pack", "X")),
+    ("C41", "helm", "helm upgrade r ./c --force", param("force_replace", True)),
+    ("C41", "gh", "gh repo delete a/b --confirm", param("yes", True)),
+    ("C41", "az", "az compute-fleet delete --fleet-name b -g rg", param("name", "b")),
+    ("C41", "aws", "aws mgn start-cutover --source-server-i-ds s-1",
+     param("source-server-ids", ["s-1"])),
 ]
 
 

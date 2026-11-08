@@ -180,6 +180,24 @@ identity also becomes an intent of its own, `impersonate` on `user/<name>`, `gro
 
 ### Metadata vocabulary
 
+**Where a flag's value is, for a rule written with the flag's name.** One mechanism for every
+tool: a scope key is looked up in `metadata`, then in `params`, by `canonical_key` (`-` and `_` are
+one). Every flag the command line gives is in `params` under its long name (a short letter is
+recorded as its long flag, and every long name of one option, an alias, holds its value), or in
+`metadata` under a key of the same name (`namespace`, `context`, `cluster`, `user`, `repo`,
+`resource_group`, `subscription`, `app_namespace`, `project`, `zone`, `region`, `profile`,
+`server`). A flag that names the target is in `params` too, with that target's value (aws
+`--role-name`, `--instance-ids`, `--bucket`, az `--name` and the name an `--ids` path gives), so
+`{"role-name": "protected"}` meets `aws iam delete-role --role-name protected` as a rule on
+`iam/role/protected` does. Three flags are recorded under a scope key of another name, and a rule
+written with the flag's name meets that key: `location` (az and gcloud) is `region`,
+`kube-context` (helm) is `context`, `kube-apiserver` (helm) is `server`.
+
+**A key with an unresolved key under it.** When a rule compares a key whole (`set.config`,
+`metadata`, `tags`) and some key under it is unresolved (an exact mark such as
+`set.config.secret`, or a prefix mark such as `metadata.*`), the key is unresolved too: its
+value includes one nobody read. This holds for every tool (`store.param_unresolved`).
+
 Every parser in `aegis_core.parser` fills `Intent.metadata` with operator-derived context (not
 agent-controlled — see the scope semantics below) parsed from the argv itself. `aegis_core.environments`
 fills in the rest (`env`, and any of `context`/`cluster`/`project`/`account`/`subscription`/

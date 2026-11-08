@@ -716,6 +716,21 @@ name). git verbs without an option table leave every param unresolved when given
   the SDK disagreed on its shape. The SDK's map or list type now wins, a shape still in doubt
   is unresolved (compute firewall-rules `--rules`), and the generator fails on a disagreement
   left without a resolution (32 flags disagreed; 30 follow the SDK now).
+- `helm upgrade --reset-values --set config.public=safe --set-file config.secret=/dev/null`
+  recorded `set.config` as `{public: safe}`, and a rule comparing `set.config` whole was
+  decided on it. A key with any unresolved key under it is now unresolved when a rule compares
+  it, or any key above it, whole, for every tool.
+- `aws iam delete-role --role-name protected` did not meet a rule on `role-name`: the flag
+  named the target and was not kept. A flag that names the target is now in params too (aws
+  target and id flags, az `--name` and the name of an `--ids` path), and a rule written with
+  `location`, `kube-context` or `kube-apiserver` meets the scope key those are recorded under
+  (`region`, `context`, `server`). docs/constraints.md describes the one mechanism.
+- `git push --exec=X --receive-pack=Y` kept both: they are one option. Several names of one
+  option are now one key, the values in order, every name holding it: git (`--exec`, `--with`,
+  `--without`), az (each options_list's long names, generated; a one-string options_list was
+  read as none before, which gave 197 commands wrong long options), aws (argrename's hidden
+  aliases), helm 4 (`--force`, `--atomic`, `--colour`) and gh (`--confirm`), generated from the
+  registrations.
 
 ### Added
 - A `NOTICE` file at the repository root lists the third-party code and data in the package
