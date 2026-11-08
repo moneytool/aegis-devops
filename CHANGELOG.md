@@ -52,6 +52,12 @@ name). git verbs without an option table leave every param unresolved when given
   now never matches definitively; the rule escalates whether the recorded value equals the
   rule's or not. A recursive storage key still decides for the literal key the command names
   (`gsutil mv gs://b/logs` moves `logs` itself). Found in review of #82.
+- A scope key marked unresolved because the argv left it to the configuration stayed marked
+  when an inline or exported variable gave it, so `AWS_REGION=us-east-1 aws ec2
+  terminate-instances …` escalated a BLOCK on `region: us-east-1` that `--region us-east-1`
+  denies (the same for `AWS_PROFILE`, and every variable the hook reads into a scope key). The
+  variable now lifts that mark; a mark set for another reason, such as `--endpoint-url`
+  leaving the region unknown, stays. Found in review of #82.
 - helm and flux read a long flag with no entry in the parser as a flag with no value, so the
   word after it was read as flags: `helm upgrade api ./c -n prod --description -ndev` was read
   as namespace `dev`, and helm runs it in `prod` with the description `-ndev` (#80). `flux create

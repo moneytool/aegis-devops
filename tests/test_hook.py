@@ -3740,6 +3740,61 @@ def _scoped(project, config_dir, command):
     return hook.decide(command, config_dir, ["--resolve-current-context"], cwd=project)
 
 
+@pytest.fixture
+def region_scope_project(opted_in_project, monkeypatch):
+    """A signed policy that blocks EC2 instance deletes in us-east-1 and in profile prod."""
+    import yaml
+
+    from aegis_core.provenance import compute_provenance_hash
+    from aegis_core.signing import load_key, sign_file, sign_tree
+
+    project = opted_in_project
+    config_dir = project / ".aegis"
+    rules = []
+    for rid, scope in (("no-delete-us-east-1", {"region": "us-east-1"}),
+                       ("no-delete-prod-profile", {"profile": "prod"})):
+        rule = dict(provider="aws", resource_pattern="ec2/instance/*", actions=["delete"],
+                    scope=scope, time_window=None, effect="BLOCK",
+                    constraint_class="deletion", principal="admin", source_ref=f"git-{rid}",
+                    source_timestamp="2026-03-18T10:00:00+00:00", rule_text=f"Block {rid}.")
+        rules.append({"id": rid, **rule, "provenance_hash": compute_provenance_hash(**rule)})
+        (config_dir / "sources" / f"git-{rid}.json").write_text(json.dumps(rule))
+    constraints = config_dir / "constraints.yaml"
+    constraints.write_text(yaml.safe_dump({"constraints": rules}, sort_keys=False))
+    principals = config_dir / "sources" / "PRINCIPALS.yaml"
+    principals.write_text(principals.read_text().replace(
+        "principals:\n", "principals:\n" + "".join(
+            f"  git-{r['id']}: admin\n" for r in rules), 1))
+    for old in (config_dir / "sources").glob("*.sig"):
+        old.unlink()
+    key = load_key(f"file:{EXAMPLE_SIGNING_KEY_PATH}")
+    sign_tree(config_dir / "sources", key)
+    sign_file(constraints, key)
+    for var in ("AWS_REGION", "AWS_DEFAULT_REGION", "AWS_PROFILE"):
+        monkeypatch.delenv(var, raising=False)
+    return project, config_dir
+
+
+@pytest.mark.parametrize("command", [
+    "aws ec2 terminate-instances --instance-ids i-1 --region us-east-1",
+    "AWS_REGION=us-east-1 aws ec2 terminate-instances --instance-ids i-1",
+    "export AWS_REGION=us-east-1; aws ec2 terminate-instances --instance-ids i-1",
+    "aws ec2 terminate-instances --instance-ids i-1 --profile prod",
+    "AWS_PROFILE=prod aws ec2 terminate-instances --instance-ids i-1",
+])
+def test_an_inline_variable_gives_the_scope_the_flag_would(region_scope_project, command):
+    # PR #82 review: the configuration mark set before the inline variable was read made a
+    # matching BLOCK an ESCALATE; the variable gives the value, so both spellings deny
+    assert _scoped(*region_scope_project, command).decision == "deny"
+
+
+def test_an_endpoint_override_keeps_the_region_unknown(region_scope_project):
+    # --endpoint-url leaves the region unresolved for a reason the variable does not lift
+    command = ("AWS_REGION=us-east-1 aws ec2 terminate-instances --instance-ids i-1 "
+               "--endpoint-url https://example.test")
+    assert _scoped(*region_scope_project, command).decision == "ask"
+
+
 _RM = "aws s3 rm s3://bucket/key"
 
 

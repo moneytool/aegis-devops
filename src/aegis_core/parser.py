@@ -8896,8 +8896,32 @@ def mark_config_scope(intents: list[InfrastructureIntent]) -> list[Infrastructur
         missing = [key for key in keys if canonical_key(key) not in given]
         if missing:
             marks = intent.params.setdefault("unresolved_scope", [])
-            marks.extend(key for key in missing if key not in marks)
+            # the keys marked only because the argv leaves them to the configuration: an
+            # inline or exported variable that gives one later lifts its mark (shell.py
+            # _annotate); a key already marked for another reason (--endpoint-url) is not
+            newly = [key for key in missing if key not in marks]
+            marks.extend(newly)
+            if newly:
+                config = intent.params.setdefault("config_unresolved", [])
+                config.extend(key for key in newly if key not in config)
     return intents
+
+
+def lift_config_mark(intent: InfrastructureIntent, key: str) -> None:
+    """Removes ``key``'s mark when :func:`mark_config_scope` set it only because the argv
+    left ``key`` to the configuration, and something the hook can see (an inline or
+    exported variable) has now given it. A mark set for any other reason stays."""
+    config = intent.params.get("config_unresolved")
+    if not isinstance(config, list) or key not in config:
+        return
+    config.remove(key)
+    if not config:
+        intent.params.pop("config_unresolved")
+    marks = intent.params.get("unresolved_scope")
+    if isinstance(marks, list) and key in marks:
+        marks.remove(key)
+        if not marks:
+            intent.params.pop("unresolved_scope")
 
 
 def from_argv(argv: list[str]) -> list[InfrastructureIntent]:

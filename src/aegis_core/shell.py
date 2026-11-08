@@ -3148,12 +3148,17 @@ def _annotate(
         for var in _ENV_METADATA_BY_PROVIDER.get(intent.provider, ()):
             key = _ENV_METADATA_KEYS[var]
             if var in env and key not in metadata:
-                if var == "GH_REPO":
-                    from aegis_core.parser import _gh_set_repo
+                from aegis_core.parser import _gh_set_repo, lift_config_mark
 
+                if var == "GH_REPO":
                     _gh_set_repo(metadata, env[var])
                 else:
                     metadata[key] = env[var]
+                # the value is now known: a mark set only because the argv left it to the
+                # configuration no longer applies (a mark for another reason stays)
+                for given in {key, *(("github_host",) if var == "GH_REPO" else ())}:
+                    if given in metadata:
+                        lift_config_mark(intent, given)
         if intent.provider == "flux" and env.get("FLUX_NS_FOLLOWS_KUBE_CONTEXT"):
             # flux takes the namespace from the kubeconfig context when no -n is given;
             # resolve_current_context reads this (the namespace stays unresolved anyway)
