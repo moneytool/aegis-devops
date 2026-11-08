@@ -2496,6 +2496,7 @@ _GCLOUD_GROUP_MAP = {
     ("sql", "instances"): "sql/instance",
     ("storage", "buckets"): "storage/bucket",
     ("functions",): "functions/function",
+    ("run",): "run/service",  # gcloud run deploy SERVICE
     ("run", "services"): "run/service",
     ("iam", "service-accounts"): "iam/service-account",
     ("projects",): "project/project",
@@ -2505,7 +2506,33 @@ _GCLOUD_GROUP_MAP = {
 _GCS_LEGACY_VERB_MAP = {"rm": "delete", "rb": "delete", "cp": "put", "mv": "put"}
 
 # gcloud global booleans: never swallow the group/verb token after them.
-_GCLOUD_BOOL_FLAGS = {"log-http", "no-user-output-enabled", "user-output-enabled"}
+_GCLOUD_BOOL_FLAGS = {
+    "log-http", "no-user-output-enabled", "user-output-enabled", "help",
+    # The boolean flags of the commands that change something most often, from the gcloud
+    # reference: each is a plain switch (with its --no- form, which the parser reads as a
+    # boolean by its name). Add one here only when its reference page shows no value; one
+    # that takes a value would make that value a name, an extra target, never a lost one.
+    # container clusters create/update and node-pools create
+    "enable-autoscaling", "enable-autorepair", "enable-autoupgrade", "enable-ip-alias",
+    "enable-private-nodes", "enable-private-endpoint", "enable-master-authorized-networks",
+    "enable-network-policy", "enable-shielded-nodes", "enable-vertical-pod-autoscaling",
+    "enable-image-streaming", "enable-dataplane-v2", "enable-legacy-authorization",
+    "enable-intra-node-visibility", "enable-autoprovisioning", "enable-gvnic",
+    "enable-stackdriver-kubernetes", "enable-binauthz", "enable-kubernetes-alpha",
+    "enable-tpu", "enable-l4-ilb-subsetting", "enable-service-externalips",
+    "enable-identity-service", "spot", "preemptible",
+    # compute instances create
+    "can-ip-forward", "deletion-protection", "shielded-secure-boot", "shielded-vtpm",
+    "shielded-integrity-monitoring", "boot-disk-auto-delete", "restart-on-failure",
+    "require-csek-key-create", "enable-display-device", "confidential-compute",
+    "enable-nested-virtualization",
+    # sql instances create/patch
+    "assign-ip", "enable-bin-log", "enable-point-in-time-recovery", "require-ssl",
+    "storage-auto-increase", "enable-google-private-path",
+    # run deploy, functions deploy
+    "allow-unauthenticated", "use-http2", "cpu-boost", "cpu-throttling", "session-affinity",
+    "trigger-http", "gen2", "retry",
+}
 
 # The boolean options of "gcloud storage cp/mv/rm/rb" (and their short letters), so that
 # "--recursive gs://b" leaves gs://b a path. From the gcloud storage documentation, not
@@ -2556,6 +2583,13 @@ _GCLOUD_VALUE_FLAGS = frozenset({
     # run, functions, sql
     "platform", "memory", "cpu", "port", "set-env-vars", "update-env-vars", "runtime",
     "entry-point", "source", "tier", "database-version", "storage-size",
+    "concurrency", "max-instances", "min-instances", "timeout", "vpc-connector",
+    "env-vars-file", "ingress", "command", "args", "trigger-topic", "trigger-bucket",
+    "root-password", "availability-type", "edition", "storage-type",
+    # more of container and compute
+    "disk-size", "disk-type", "release-channel", "subnetwork", "workload-pool",
+    "node-locations", "metadata-from-file", "network-interface", "provisioning-model",
+    "maintenance-policy", "accelerator", "create-disk", "disk", "address",
 })
 
 # gcloud zone -> region: a zone is "<region>-<letter>" (e.g. "us-east1-b" ->
@@ -2667,21 +2701,33 @@ def _gcs_uri_intents(
     raw_prefix: str,
 ) -> list[InfrastructureIntent]:
     """One intent per ``gs://`` path: ``rm a b`` deletes both, ``cp`` and ``mv`` write the
-    destination (the source is kept as before), and ``mv`` also deletes its source."""
+    destination (each source is kept as before), and ``mv`` (and gsutil ``cp -M``) also
+    deletes every source, all words but the last. With ``-I`` / ``--read-paths-from-stdin``
+    the paths come from stdin, which the argv does not show: ``rm`` and a move then also
+    reach ``storage/bucket/*``, marked."""
     action = _GCS_LEGACY_VERB_MAP[verb]
+    move = verb == "mv" or (raw_prefix == "gsutil" and verb == "cp" and params.get("M") is True)
+    from_stdin = params.get("I") is True or params.get("read_paths_from_stdin") is True
     uris = [t for t in operands if t.startswith("gs://")]
-    if not uris:
+    if not uris and not (from_stdin and verb in ("rm", "cp", "mv")):
         raise ValueError(f"could not find a gs:// target in: {argv!r}")
     params = {**params, "raw_action": f"{raw_prefix}-{verb}"}
     intents = []
     targets = [(uri, action) for uri in uris]
-    if verb == "mv" and operands and operands[0].startswith("gs://"):
-        targets.append((operands[0], "delete"))
+    if move:
+        sources = operands[:-1] if len(operands) > 1 else []
+        targets.extend((src, "delete") for src in sources if src.startswith("gs://"))
     for uri, act in targets:
         bucket, _, key = uri[len("gs://") :].partition("/")
         intents.append(InfrastructureIntent(
             resource=f"storage/bucket/{bucket}", action=act, provider="gcp",
             params={**params, "key": key} if key else dict(params), metadata=dict(metadata)))
+    if from_stdin and (verb == "rm" or move):
+        intents.append(InfrastructureIntent(
+            resource="storage/bucket/*", action="delete", provider="gcp",
+            params={**params, "resolved_at_runtime": {"from": "storage/bucket/*",
+                                                       "kinds": ["storage/bucket"]}},
+            metadata=dict(metadata)))
     return intents
 
 

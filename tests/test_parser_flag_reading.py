@@ -1117,3 +1117,55 @@ def test_git_push_marks_every_ref_the_argv_does_not_name(command, targets):
 ])
 def test_a_tag_rule_escalates_on_tags_the_argv_does_not_name(command):
     assert _verdict([_rule("git", "ref/v1.0", ["push"])], command) == "ESCALATE"
+
+
+# --- gcloud storage and gsutil moves, and gcloud create commands with a space --------
+
+
+@pytest.mark.parametrize("command,deleted", [
+    ("gcloud storage mv gs://staging/a gs://prod/b gs://archive/",
+     ["storage/bucket/staging", "storage/bucket/prod"]),
+    ("gsutil mv gs://staging/a gs://prod/b gs://archive/",
+     ["storage/bucket/staging", "storage/bucket/prod"]),
+    ("gsutil cp -M gs://prod/a gs://archive/a", ["storage/bucket/prod"]),  # cp -M moves
+    ("gsutil cp gs://prod/a gs://archive/a", []),
+    ("gsutil -m rm -I", ["storage/bucket/*"]),  # the paths come from stdin
+    ("gcloud storage rm -I", ["storage/bucket/*"]),
+    ("gcloud storage mv -I gs://archive/", ["storage/bucket/*"]),
+])
+def test_every_moved_source_is_deleted(command, deleted):
+    intents = from_argv(command.split())
+    assert [i.resource for i in intents if i.action == "delete"] == deleted
+
+
+def test_a_delete_rule_on_the_second_source_holds():
+    rule = _rule("gcp", "storage/bucket/prod", ["delete"])
+    assert _verdict([rule], "gcloud storage mv gs://staging/a gs://prod/b gs://archive/") == \
+        "BLOCK"
+    assert _verdict([rule], "gsutil cp -M gs://prod/a gs://archive/a") == "BLOCK"
+
+
+@pytest.mark.parametrize("command", [
+    # rsync with deletes is not read, so it is refused
+    "gsutil rsync -d gs://a gs://b",
+    "gcloud storage rsync gs://a gs://b --delete-unmatched-destination-objects",
+])
+def test_storage_rsync_is_refused(command):
+    with pytest.raises(ValueError):
+        from_argv(command.split())
+
+
+@pytest.mark.parametrize("command,resource", [
+    ("gcloud container clusters create --enable-autoscaling demo --zone us-central1-a "
+     "--num-nodes 3 --min-nodes 1 --max-nodes 5", "container/cluster/demo"),
+    ("gcloud compute instances create --preemptible web --machine-type e2-small "
+     "--image-family debian-12 --image-project debian-cloud", "compute/instance/web"),
+    ("gcloud run deploy --allow-unauthenticated svc --image gcr.io/p/i --region us-central1",
+     "run/service/svc"),
+    ("gcloud functions deploy fn --gen2 --trigger-http --runtime python312 --source .",
+     "functions/function/fn"),
+    ("gcloud sql instances create db --database-version POSTGRES_15 --tier db-f1-micro "
+     "--deletion-protection", "sql/instance/db"),
+])
+def test_common_gcloud_creates_with_spaces_are_read(command, resource):
+    assert [i.resource for i in from_argv(command.split())] == [resource]
