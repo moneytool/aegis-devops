@@ -933,7 +933,7 @@ def test_from_helm_bool_flags_and_set_and_values():
          "--atomic", "--wait", "--create-namespace"]
     )
     assert intent.params["values_files"] == ["values.yaml"]
-    assert intent.params["set"] == {"image.tag": "v2"}
+    assert intent.params["set"] == {"image": {"tag": "v2"}}
     assert intent.params["atomic"] is True
     assert intent.params["wait"] is True
     assert intent.params["create_namespace"] is True
@@ -2450,11 +2450,15 @@ def test_from_helm_set_splits_comma_separated_pairs():
     assert intent.params["set"] == {"a": 1, "b": 2}
 
 
-def test_from_helm_set_keeps_bracketed_and_quoted_commas_intact():
+def test_from_helm_set_reads_a_list_and_an_escaped_comma():
+    # helm's strvals: {a,b,c} is a list, and a comma is kept only when escaped (quotes
+    # are not special: helm refuses 's="x,y"', since 'y"' has no value)
     intent = from_helm(
-        ["helm", "install", "api", "./chart", "--set", 'list={a,b,c},s="x,y",c=3']
+        ["helm", "install", "api", "./chart", "--set", r"list={a,b,c},s=x\,y,c=3"]
     )
-    assert intent.params["set"] == {"list": "{a,b,c}", "s": '"x,y"', "c": 3}
+    assert intent.params["set"] == {"list": ["a", "b", "c"], "s": "x,y", "c": 3}
+    with pytest.raises(ValueError):
+        from_helm(["helm", "install", "api", "./chart", "--set", 's="x,y"'])
 
 
 def test_from_helm_set_string_does_not_coerce_values():
@@ -2480,15 +2484,16 @@ def test_from_helm_set_file_and_set_json_are_recorded_raw():
     assert intent.params["set_file"] == ["cert=./cert.pem"]
     assert intent.params["set_json"] == ['labels={"team":"x"}']
     # --set-json is read as JSON; --set-file's value is a file nobody read
-    assert intent.params["set"] == {"labels.team": "x"}
+    assert intent.params["set"] == {"labels": {"team": "x"}}
     assert intent.params["unresolved_scope"] == ["set.cert"]
 
 
-def test_from_helm_nested_dotted_set_key_is_kept_as_a_single_string_key():
+def test_from_helm_nested_dotted_set_key_is_a_nested_map():
+    # the shape helm gives the chart, which a dotted scope key (set.image.tag) walks
     intent = from_helm(
         ["helm", "upgrade", "api", "./chart", "--set", "image.tag=v2,replicaCount=0"]
     )
-    assert intent.params["set"] == {"image.tag": "v2", "replicaCount": 0}
+    assert intent.params["set"] == {"image": {"tag": "v2"}, "replicaCount": 0}
 
 
 def test_helm_set_replica_count_zero_expressible_as_a_scope_rule():

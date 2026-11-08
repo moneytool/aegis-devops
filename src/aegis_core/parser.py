@@ -2837,43 +2837,6 @@ def _helm_long_flags(verb: str | None) -> tuple[frozenset[str], frozenset[str]]:
     return _HELM_VALUE_FLAGS, _HELM_BOOL_ONLY_FLAGS | {"server-side"}
 
 
-def _split_helm_set_pairs(value: str) -> list[str]:
-    """Splits a ``--set``/``--set-string`` value on top-level commas --
-    i.e. commas outside ``[...]``/``{...}`` and quotes -- the same rule
-    Helm itself uses, so ``--set a=1,b=2`` yields two pairs while
-    ``--set list={a,b,c}`` or ``--set s="a,b"`` keep their bracketed/quoted
-    comma intact (REVIEW-4 T2.5). A backslash escapes the next character
-    (Helm's own ``\\,`` escape) so it is never treated as a delimiter."""
-    pairs: list[str] = []
-    depth = 0
-    quote: str | None = None
-    start = 0
-    i = 0
-    n = len(value)
-    while i < n:
-        ch = value[i]
-        if ch == "\\" and i + 1 < n:
-            i += 2
-            continue
-        if quote:
-            if ch == quote:
-                quote = None
-        elif ch in "'\"":
-            quote = ch
-        elif ch in "[{":
-            depth += 1
-        elif ch in "]}":
-            depth = max(0, depth - 1)
-        elif ch == "," and depth == 0:
-            pairs.append(value[start:i])
-            start = i + 1
-            i += 1
-            continue
-        i += 1
-    pairs.append(value[start:])
-    return pairs
-
-
 def _parse_helm_tokens(
     tokens: list[str], verb: str | None = None
 ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
@@ -2938,11 +2901,9 @@ def _parse_helm_tokens(
                     val = _value_at(tokens, i, tok)
                 params.setdefault("values_files", []).extend(_read_string_slice(val))
             elif key in ("set", "set-string", "set-literal"):
-                # REVIEW-4 T2.5: comma-separated `k=v` pairs (Helm's own
-                # splitting rule, see _split_helm_set_pairs); nested keys
-                # like `image.tag=v2` are kept as the dotted string key --
-                # the store's dotted-path scope matching handles them.
-                # `--set-string` and `--set-literal` values are never coerced.
+                # Read as helm's strvals reads them (see _merge_helm_values):
+                # `image.tag=v2` is {"image": {"tag": "v2"}}, which a rule's
+                # dotted scope key walks.
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
@@ -2979,63 +2940,244 @@ def _parse_helm_tokens(
     return metadata, params, positional
 
 
-def _flatten_json(value: Any, prefix: str, out: dict[str, Any]) -> None:
-    """``{"image": {"tag": "v2"}}`` as ``{"image.tag": "v2"}``, the shape --set gives."""
-    if isinstance(value, dict) and value:
+# --- helm values from the command line --------------------------------------------------
+# A port of helm's pkg/strvals (helm 4.3.1 and 3.21.1), which reads --set, --set-string,
+# --set-json, --set-file and --set-literal into one nested map, so params["set"] has the
+# shape helm gives the chart and a rule's dotted scope key (set.securityContext.privileged)
+# walks it. What helm refuses is a ValueError.
+
+_HELM_MAX_INDEX = 65536
+_HELM_MAX_NESTED = 30
+# The value of a --set-file key: the content of a file nobody read.
+_HELM_FILE_VALUE = object()
+
+
+class _StrvalsParser:
+    def __init__(self, text: str, mode: str) -> None:
+        self.s = text
+        self.i = 0
+        self.mode = mode  # "typed", "string", "json", "file" or "literal"
+
+    def error(self, message: str) -> ValueError:
+        return ValueError(f"helm cannot parse {self.s!r}: {message}")
+
+    def until(self, stop: str) -> tuple[str, str | None]:
+        """Characters up to one in ``stop`` (consumed and returned), with ``\\`` escaping
+        the next character except in literal mode; None at the end."""
+        out = []
+        while self.i < len(self.s):
+            ch = self.s[self.i]
+            self.i += 1
+            if ch in stop:
+                return "".join(out), ch
+            if ch == "\\" and self.mode != "literal":
+                if self.i >= len(self.s):
+                    return "".join(out), None
+                out.append(self.s[self.i])
+                self.i += 1
+                continue
+            out.append(ch)
+        return "".join(out), None
+
+    def typed(self, raw: str) -> Any:
+        if self.mode == "file":
+            return _HELM_FILE_VALUE
+        if self.mode in ("string", "literal"):
+            return raw
+        low = raw.lower()
+        if low in ("true", "false"):
+            return low == "true"
+        if low == "null":
+            return None
+        if raw == "0":
+            return 0
+        if raw and raw[0] != "0" and re.fullmatch(r"[+-]?[0-9]+", raw):
+            value = int(raw)
+            if -(1 << 63) <= value < (1 << 63):
+                return value
+        return raw
+
+    def parse(self, data: dict[str, Any]) -> None:
+        while self.i < len(self.s):
+            self.key(data, 0)
+
+    def value(self) -> Any:
+        """The value after "=": JSON, a {a,b} list, or one word up to the next comma."""
+        if self.mode == "literal":
+            rest, self.i = self.s[self.i:], len(self.s)
+            return rest
+        if self.mode == "json":
+            while self.i < len(self.s) and self.s[self.i].isspace():
+                self.i += 1
+            if self.i >= len(self.s) or self.s[self.i] == ",":
+                self.i += 1
+                return None
+            try:
+                value, end = json.JSONDecoder().raw_decode(self.s, self.i)
+            except json.JSONDecodeError as err:
+                raise self.error(f"not JSON: {err}") from err
+            self.i = end
+            while self.i < len(self.s) and self.s[self.i].isspace():
+                self.i += 1
+            if self.i < len(self.s):
+                if self.s[self.i] != ",":
+                    raise self.error("unexpected text after a JSON value")
+                self.i += 1
+            return value
+        if self.i < len(self.s) and self.s[self.i] == "{":
+            self.i += 1
+            items = []
+            while True:
+                word, last = self.until(",}")
+                if last is None:
+                    raise self.error("list must terminate with '}'")
+                items.append(self.typed(word))
+                if last == "}":
+                    if self.i < len(self.s) and self.s[self.i] == ",":
+                        self.i += 1
+                    return items
+        word, _last = self.until(",")
+        return self.typed(word)
+
+    def key(self, data: dict[str, Any], level: int) -> None:
+        stop = "=[." if self.mode == "literal" else "=[,."
+        name, last = self.until(stop)
+        if last is None:
+            if name:
+                raise self.error(f"key {name!r} has no value")
+            return
+        if last == ",":
+            raise self.error(f"key {name!r} has no value")
+        if last == "=":
+            if name:
+                data[name] = self.value()
+            else:
+                self.value()
+            return
+        if last == "[":
+            existing = data.get(name, [])
+            if not isinstance(existing, list):
+                raise self.error(f"{name!r} is not a list")
+            items = self.list_item(list(existing), self.index(), level)
+            if name:
+                data[name] = items
+            return
+        # "."
+        level += 1
+        if level > _HELM_MAX_NESTED:
+            raise self.error("names nested too deep")
+        existing = data.get(name, {})
+        if not isinstance(existing, dict):
+            raise self.error(f"{name!r} is not a map")  # helm panics, and refuses
+        inner = dict(existing)
+        self.key(inner, level)
+        if not inner:
+            raise self.error(f"key map {name!r} has no value")
+        if name:
+            data[name] = inner
+
+    def index(self) -> int:
+        word, last = self.until("]")
+        if last is None or not re.fullmatch(r"[+-]?[0-9]+", word):
+            raise self.error(f"bad list index {word!r}")
+        index = int(word)
+        if index < 0 or index > _HELM_MAX_INDEX:
+            raise self.error(f"list index {index} out of range")
+        return index
+
+    @staticmethod
+    def set_index(items: list[Any], index: int, value: Any) -> list[Any]:
+        if len(items) <= index:
+            items.extend([None] * (index + 1 - len(items)))
+        items[index] = value
+        return items
+
+    def list_item(self, items: list[Any], index: int, level: int) -> list[Any]:
+        word, last = self.until("[.=")
+        if word:
+            raise self.error(f"unexpected {word!r} after a list index")
+        if last is None:
+            raise self.error("a list index has no value")
+        if last == "=":
+            return self.set_index(items, index, self.value())
+        if last == "[":
+            current = items[index] if index < len(items) else None
+            if current is not None and not isinstance(current, list):
+                raise self.error("not a list")
+            return self.set_index(items, index,
+                                  self.list_item(list(current or []), self.index(), level))
+        current = items[index] if index < len(items) else None
+        inner = dict(current) if isinstance(current, dict) else {}
+        self.key(inner, level)
+        return self.set_index(items, index, inner)
+
+
+def _helm_merge_maps(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
+    """helm's MergeMaps: a map in ``b`` merges into a map in ``a``; anything else replaces."""
+    out = dict(a)
+    for k, v in b.items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _helm_merge_maps(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+def _contains_file_value(value: Any) -> bool:
+    if value is _HELM_FILE_VALUE:
+        return True
+    if isinstance(value, dict):
+        return any(_contains_file_value(v) for v in value.values())
+    if isinstance(value, list):
+        return any(_contains_file_value(v) for v in value)
+    return False
+
+
+def _strip_file_values(value: Any, path: str, out: list[str]) -> Any:
+    """``value`` without the --set-file leaves, whose dotted paths go to ``out``. A list
+    holding one is dropped whole: a dotted scope key cannot index into a list."""
+    if value is _HELM_FILE_VALUE or (isinstance(value, list) and _contains_file_value(value)):
+        out.append(path)
+        return _HELM_FILE_VALUE
+    if isinstance(value, dict):
+        kept = {}
         for k, v in value.items():
-            _flatten_json(v, f"{prefix}.{k}" if prefix else str(k), out)
-    elif prefix:
-        out[prefix] = value
+            stripped = _strip_file_values(v, f"{path}.{k}", out)
+            if stripped is not _HELM_FILE_VALUE:
+                kept[k] = stripped
+        return kept
+    return value
 
 
 def _merge_helm_values(params: dict[str, Any], sets: dict[str, list[str]]) -> None:
-    """``params["set"]``: the values the command line sets, merged in helm's order
-    (pkg/cli/values MergeValues): --set-json, --set, --set-string, --set-file and
-    --set-literal, a later kind winning over an earlier one, whatever their order on the
-    line. A --set-file value is the file's content, which is not read, and a values file
-    (-f) or --reuse-values can set any key the command line does not: those keys are in
-    ``params["unresolved_scope"]`` (``set.<key>``, or ``set.*`` for every key not set),
-    so a rule scoped on them escalates instead of not applying."""
-    target: dict[str, Any] = {}
-    unresolved: list[str] = []
+    """``params["set"]``: the values the command line sets, as one nested map, merged in
+    helm's order (pkg/cli/values MergeValues): --set-json, --set, --set-string, --set-file
+    and --set-literal, a later one replacing an earlier one at the same key, a map
+    replacing a scalar only through --set-json. A --set-file value is the file's content,
+    which is not read, and a values file (-f) or --reuse-values can set any key the command
+    line does not: those keys are in ``params["unresolved_scope"]`` (``set.<key>``, or
+    ``set.*`` for every key not set), so a rule scoped on them escalates."""
+    base: dict[str, Any] = {}
     for value in sets["set-json"]:
         stripped = value.strip()
-        try:
-            if stripped.startswith("{"):
-                _flatten_json(json.loads(stripped), "", target)
-            else:
-                for pair in _split_helm_set_pairs(value):
-                    k, _sep, v = pair.partition("=")
-                    if k:
-                        target.pop(k, None)
-                        parsed = json.loads(v)
-                        if isinstance(parsed, dict) and parsed:
-                            _flatten_json(parsed, k, target)
-                        else:
-                            target[k] = parsed
-        except json.JSONDecodeError as err:
-            raise ValueError(f"helm: --set-json {value!r} is not JSON helm accepts: {err}") \
-                from err
-    for kind in ("set", "set-string"):
+        if stripped.startswith("{"):
+            try:
+                loaded = json.loads(stripped)
+            except json.JSONDecodeError as err:
+                raise ValueError(f"helm: --set-json {value!r} is not JSON: {err}") from err
+            if not isinstance(loaded, dict):
+                raise ValueError(f"helm: --set-json {value!r} is not a JSON object")
+            base = _helm_merge_maps(base, loaded)
+        else:
+            _StrvalsParser(value, "json").parse(base)
+    for kind, mode in (("set", "typed"), ("set-string", "string"), ("set-file", "file"),
+                       ("set-literal", "literal")):
         for value in sets[kind]:
-            for pair in _split_helm_set_pairs(value):
-                k, _sep, v = pair.partition("=")
-                if k:
-                    target[k] = v if kind == "set-string" else _coerce(v)
-    for value in sets["set-file"]:
-        for pair in _split_helm_set_pairs(value):
-            k, _sep, _path = pair.partition("=")
-            if k:
-                target.pop(k, None)
-                unresolved.append(f"set.{k}")
-    for value in sets["set-literal"]:  # one pair, the rest of the word its value
-        k, _sep, v = value.partition("=")
-        if k:
-            target[k] = v
-            if f"set.{k}" in unresolved:
-                unresolved.remove(f"set.{k}")
-    if target:
-        params["set"] = target
+            _StrvalsParser(value, mode).parse(base)
+    unresolved: list[str] = []
+    cleaned = _strip_file_values(base, "set", unresolved)
+    if cleaned:
+        params["set"] = cleaned
     if params.get("values_files") or params.get("reuse_values") is True or \
             params.get("reset_then_reuse_values") is True:
         unresolved.append("set.*")

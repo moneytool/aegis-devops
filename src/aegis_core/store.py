@@ -484,16 +484,20 @@ _GLOB_CHARS = frozenset("*?[")
 
 def _dig(mapping: dict[str, Any], key: str) -> tuple[bool, Any]:
     """``(found, value)`` for ``key`` in ``mapping`` -- a literal key first,
-    then a dotted path (``set.replicaCount`` -> ``mapping["set"]["replicaCount"]``)."""
+    then a dotted path (``set.replicaCount`` -> ``mapping["set"]["replicaCount"]``),
+    where each level may also hold a key with dots in it (``labels.app.kubernetes.io/name``
+    -> ``mapping["labels"]["app.kubernetes.io/name"]``, helm's ``--set a\\.b=1``)."""
     if key in mapping:
         return True, mapping[key]
-    if "." in key:
-        current: Any = mapping
-        for part in key.split("."):
-            if not isinstance(current, dict) or part not in current:
-                return False, None
-            current = current[part]
-        return True, current
+    start = key.find(".")
+    while start != -1:
+        head, rest = key[:start], key[start + 1:]
+        inner = mapping.get(head)
+        if isinstance(inner, dict):
+            found, value = _dig(inner, rest)
+            if found:
+                return True, value
+        start = key.find(".", start + 1)
     return False, None
 
 

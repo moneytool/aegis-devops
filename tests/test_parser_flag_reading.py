@@ -932,3 +932,57 @@ def test_create_deployment_port_is_read_as_kubectl_reads_it(flags, port):
 def test_create_deployment_refuses_a_port_kubectl_refuses():
     with pytest.raises(ValueError):
         from_argv("kubectl create deployment web --image=x --port=080".split())
+
+
+# --- helm values as one nested map (helm's pkg/strvals) ---------------------------------
+
+
+@pytest.mark.parametrize("flags,expected", [
+    # every kind gives the nested map helm gives the chart
+    (["--set-json", 'securityContext={"privileged":true}'],
+     {"securityContext": {"privileged": True}}),
+    (["--set", "securityContext.privileged=true"], {"securityContext": {"privileged": True}}),
+    (["--set-string", "a.b=1"], {"a": {"b": "1"}}),
+    (["--set-literal", "a.b=x,y=z"], {"a": {"b": "x,y=z"}}),
+    # --set-json is merged first whatever its place, then --set into the same map
+    (["--set", "a.b=1", "--set-json", 'a={"c":2}'], {"a": {"c": 2, "b": 1}}),
+    (["--set-json", '{"a":{"c":2}}', "--set", "a.b=1"], {"a": {"c": 2, "b": 1}}),
+    # a later scalar replaces an earlier map
+    (["--set", "a.b=2", "--set", "a=1"], {"a": 1}),
+    (["--set", "a.b=2,a=1"], {"a": 1}),
+    # --set-json is read before --set, and --set-string after --set
+    (["--set", "a=1", "--set-json", "a={}"], {"a": 1}),
+    (["--set-string", "n=1", "--set", "n=2"], {"n": "1"}),
+    # helm's typing: no floats, a leading zero stays text, null is null
+    (["--set", "f=1.5,n=010,m=+5,z=null,t=TRUE"],
+     {"f": "1.5", "n": "010", "m": 5, "z": None, "t": True}),
+    (["--set", "l={a,b},x[1]=y"], {"l": ["a", "b"], "x": [None, "y"]}),
+])
+def test_helm_values_are_one_nested_map(flags, expected):
+    assert from_helm(["helm", "upgrade", "api", "./c", *flags]).params["set"] == expected
+
+
+def test_helm_refuses_a_map_under_a_scalar_set_by_set():
+    # helm's strvals panics on it and reports an error
+    with pytest.raises(ValueError):
+        from_helm("helm upgrade api ./c --set a=1 --set a.b=2".split())
+
+
+@pytest.mark.parametrize("flags,verdict", [
+    (["--set-json", 'securityContext={"privileged":true}'], "BLOCK"),
+    (["--set", "securityContext.privileged=true"], "BLOCK"),
+    (["--set-json", '{"securityContext":{"privileged":true}}'], "BLOCK"),
+    (["--set", "securityContext.privileged=false"], "ALLOW"),
+    (["--set-file", "securityContext.privileged=p.txt"], "ESCALATE"),
+])
+def test_a_nested_helm_values_rule_holds(flags, verdict):
+    rule = _rule("helm", "release/*", ["update"],
+                 {"namespace": "prod", "set.securityContext.privileged": True})
+    command = ["helm", "upgrade", "api", "./c", "-n", "prod", *flags]
+    assert _verdict([rule], command) == verdict
+
+
+def test_a_scope_key_with_dots_in_one_level_is_found():
+    from aegis_core.store import scope_matches
+    assert scope_matches({"labels.app.kubernetes.io/name": "x"}, {},
+                         {"labels": {"app.kubernetes.io/name": "x"}})
