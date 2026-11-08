@@ -12,17 +12,22 @@ Every parser reads flags the way its tool does: a flag that takes a value takes 
 whatever it looks like, and a flag the parser cannot place is refused instead of guessed (#80).
 What a command takes from outside its argv -- a configuration file, the environment, a file a
 value is read from, values reused from an earlier run -- is marked unresolved, so a rule it
-could affect escalates, or the command is refused. One value written several ways (a negated
-boolean, a URL or a number, a host-qualified name, an ARN, a literal or a nested key) meets a
-rule written any of those ways. Commands that act on several objects are one intent per
+could affect escalates, or the command is refused; so is an ID the tool looks up from a name
+when it runs (an az subscription or location by name, a gcloud project by number). One value
+written several ways (a negated boolean, a URL or a number, a host-qualified name, an ARN, an
+abbreviated option, a literal or a nested key, `-` or `_`) meets a rule written any of those
+ways, and so does a mark that leaves it unresolved. Commands that act on several objects are one intent per
 object, which can raise a plan rule's count (`max_intents`) or change a `ratio`.
 
 What the hook cannot see and does not mark: a helm chart's own default values (`set.*` is what
 the command line, files and reuse can set, not what the chart ships); kubectl's kuberc and an
 argocd `$ARGOCD_OPTS` set in the environment rather than in front of the command; aliases a
-tool reads from its own configuration (`aws` cli aliases, `gh alias`, `git` aliases); a gcloud
-project given by number where a rule names its ID; and the key a KMS alias or the secret a
-Secrets Manager name stands for, which are marked rather than resolved.
+tool reads from its own configuration (`aws` cli aliases, `gh alias`, `git` aliases); and the
+key a KMS alias or the secret a Secrets Manager name stands for, which are marked rather than
+resolved. The aws option table is aws-cli 2.37.4's, so an option or command added later is
+refused until the table is regenerated; the gcloud flag table covers the commands the parser
+names resources for, and other gcloud commands, and alpha and beta, keep the rule that an
+unknown flag before a word is refused.
 
 ### Fixed
 - helm and flux read a long flag with no entry in the parser as a flag with no value, so the
@@ -265,6 +270,66 @@ Secrets Manager name stands for, which are marked rather than resolved.
   set`/`delete`, `variable set`, `workflow run`, `api`) now have tables of their flags from
   cli/cli v2.103 source (not run), read as pflag reads them, and a flag in no table is refused
   as on the other pflag tools.
+- An unresolved mark was compared with a rule's key letter for letter, while matching treats
+  `-` and `_` as one: `helm upgrade api ./c --set-file replica-count=r.txt` left
+  `set.replica-count` unknown, and a rule on `set.replica_count: 0` allowed it. One function
+  (`canonical_key`) now decides key equality for matching, at every level of a nested key, for
+  the unresolved marks (with a boolean's negated side) and for the configuration marks, so
+  that command escalates, as does argocd's `app_namespace` against `app-namespace`.
+- `flux reconcile ks app -n dev --with-source` gave the source intents namespace `dev`, but a
+  source reference may name its own namespace (reconcile_with_source.go). The source intents
+  now cover every namespace, so a rule scoped to `prod` escalates. The other intents derived
+  from a parent were checked: kubectl's `exec deploy/x` pod and `run --expose` service live in
+  the parent's namespace, argocd's selector picks have their namespace unresolved unless
+  `--app-namespace` is given, and gh and git targets keep the repository and remote they act on.
+- git: `git push origin tag v1` is `refs/tags/v1` (builtin/push.c), and was read as two
+  refspecs, `tag` and `v1`. A deleted tag (`git push --delete origin refs/tags/v1`, `git push
+  origin :refs/tags/v1`, `--delete ... tag v1`) was `tag/v1` with action `push`; it is now a
+  delete. `--mirror` and `--prune` also delete `tag/*`, `--mirror` sends every tag even with
+  `--no-follow-tags`, and a push that only deletes sends none. A short name (`git push origin
+  v1.2.0`) is a tag when the local or remote ref of that name is one, which only git knows: the
+  intent now carries `tag/v1.2.0` as a possible resource, so a rule on it escalates. `--delete`
+  with a `:` in a name, with no name, or with `--tags`/`--all`/`--mirror`, and `tag` with no name,
+  are refused as git refuses them. Run on git 2.52 against a local bare remote.
+- aws read an abbreviated option under the abbreviation: `aws autoscaling set-desired-capacity
+  --desired-cap 0` recorded `desired-cap`, so a rule on `desired_capacity: 0` allowed it. Every
+  option of every aws command is now resolved as argparse resolves it, against the operation's
+  full option list read from aws-cli 2.37.4's own parsers (`src/aegis_core/data/
+  aws_cli_options.zip`, written by `scripts/gen_aws_cli_options.py`), and recorded under its
+  full name; each option takes the words aws gives it, a negative number included. An
+  ambiguous or unknown option, a single-dash word, or a command aws-cli does not have is
+  refused. An abbreviation and the full option it stands for were both kept as targets
+  (`--role-name a --role b`); the last one is now the target, as in aws.
+- aws `--cli-input-json '{"DesiredCapacity":0}'` and `--cli-input-yaml` were not read, and
+  `set-desired-capacity` returned before the input target was marked. Inline input is now read
+  into the options it stands for, by the operation's member names, before the command line,
+  which overrides it as in aws, for every operation; a member the operation does not have, two
+  inputs, or input that is not a mapping is refused, and an abbreviated `--cli-input-j` is
+  ignored, as aws ignores it. Input in a `file://` file leaves every option the command line
+  does not give unresolved (and the target marked), and so does any option whose value is read
+  from `file://` or `fileb://`. Each case was run with aws 2.37 against a closed local port.
+- gcloud gave every resource path the last path's project and zone: `gcloud compute instances
+  delete projects/p1/.../a projects/p2/.../b` was two deletes in `p2`. Each path now keeps its
+  own. A project given by number is `project_number`, with `project` unresolved and not filled
+  from `$CLOUDSDK_CORE_PROJECT`, so a rule on a project ID escalates; an environment map entry
+  matches either.
+- gcloud refused `gcloud compute instances update --clear-labels web`, its boolean tables being
+  hand-made and partial. Every flag of each command the parser names resources for (compute
+  instances, disks and firewall rules, container clusters and node pools, sql instances,
+  import and export, storage buckets and `cp`/`mv`/`rm`, functions, run, iam service accounts,
+  projects, pubsub topics) is now read from its gcloud reference page
+  (`src/aegis_core/data/gcloud_flags.json`, written by `scripts/gen_gcloud_flags.py`, which
+  records the date): a boolean, a value, or an optional value, which takes the next word. A
+  flag such a command does not have is refused, as gcloud refuses it. gcloud was not run.
+- az `--subscription Production` recorded `subscription: Production`, where a rule may name the
+  subscription ID, and `--location "East US"` recorded `region: East US`, which az turns into
+  `eastus` from the subscription's location list when it runs (core commands/parameters.py).
+  A subscription that is not a GUID is now `subscription_name` and a location with a space is
+  `location_display_name`; `subscription` and `region` are then unresolved and not filled from
+  the environment. Locations compare without case, as resource groups and subscriptions do.
+  With `--ids`, az takes the subscription and resource group of each ID and ignores
+  `--subscription` and `-g` (core commands/arm.py); the flags used to win. From azure-cli
+  source; az was not run.
 - Tests that used `flux reconcile ... --dry-run`, `flux get ... --export` and `git push
   --dry-run=false`, which the tools refuse, now use commands the tools accept (`flux create ...
   --export`, `git push --dry-run --no-dry-run`).

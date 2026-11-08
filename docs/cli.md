@@ -385,12 +385,20 @@ the tool registers it and put it in the matching set, with a test that reads it:
 - git: `git <verb> -h` and `git <verb> --git-completion-helper-all` (in a repository) for
   `_GIT_OPTION_SPECS`: `<arg>` is `=`, `[=<arg>]` is `?`, `[no-]` is `!`.
 - aws: the global options in `awscli/data/cli.json` (`_AWS_GLOBAL_OPTIONS`) and the s3
-  options in `awscli/customizations/s3` (`_AWS_S3_BOOL_FLAGS`).
+  options in `awscli/customizations/s3` (`_AWS_S3_OPTIONS`). Every other command's options
+  are in `src/aegis_core/data/aws_cli_options.zip`, read from aws-cli's own parsers: run
+  `scripts/gen_aws_cli_options.py` with the Python of an installed aws-cli v2 to regenerate it
+  (its `VERSION` names the aws-cli). An option is resolved by prefix against the operation's
+  list, as argparse does, and one the operation does not have is refused.
 - az: the short letters in every `command_modules/*/_params.py` of azure-cli: a letter on a
   `store_true` argument goes in `_AZ_SHORT_BOOL_LETTERS`, and every letter in
   `_AZ_SHORT_KNOWN_LETTERS`.
-- gcloud: a flag whose reference page shows `--flag=VALUE` may go in `_GCLOUD_VALUE_FLAGS`;
-  never a boolean, which would take the name after it as its value.
+- gcloud: the flags of the commands the parser names resources for are in
+  `src/aegis_core/data/gcloud_flags.json`, read from their reference pages by
+  `scripts/gen_gcloud_flags.py` (add a command to its `COMMANDS` and run it); a flag such a
+  command does not have is refused. For other commands, and alpha and beta, a flag whose
+  reference page shows `--flag=VALUE` may go in `_GCLOUD_VALUE_FLAGS`; never a boolean, which
+  would take the name after it as its value.
 
 Inside a pipeline an unknown binary (`| grep x`) produces nothing; on its own it produces a
 synthetic `shell` / `binary/<name>` / `exec` intent that `--fail-closed` escalates. When that

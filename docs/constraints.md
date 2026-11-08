@@ -127,9 +127,12 @@ namespace in the rule's scope still counts (`-n staging` passes a rule scoped to
 The same holds where other tools pick their targets when they run: `argocd app sync -l` or
 `--project` and `argocd app delete -l` (`app/*`, beside any app named), `flux suspend|resume
 <kind> --all` (`<kind>/*`), `flux reconcile --with-source` (the source kinds the object can
-reference), `helm install --generate-name` (`release/*`), `git filter-repo` (`history/*`) and an
-aws command whose target is in `--cli-input-json` (`<service>/<kind>/*`). A rule on one of them
-escalates with `target-unresolved: <id>`.
+reference, in any namespace), `helm install --generate-name` (`release/*`), `git filter-repo`
+(`history/*`) and an aws command whose target is in a `--cli-input-json file://` file
+(`<service>/<kind>/*`; inline input is read). A rule on one of them escalates with
+`target-unresolved: <id>`. So does a rule on a resource the intent may turn out to be
+(`params.possible_resources`): `git push origin v1.2.0` pushes `ref/v1.2.0`, which is
+`tag/v1.2.0` when the local ref of that name is a tag.
 
 `kubectl describe TYPE NAME` describes the object called NAME, and if there is none, every object
 whose name starts with NAME. So `kubectl describe pod pay` is `pod/pay`, and a `describe` rule that
@@ -187,12 +190,12 @@ ones it filled in `metadata["resolved_from_environment"]`. This table is generat
 | `context` | kubectl (`--context`), helm (`--kube-context`), argocd (`--server`/context resolution), flux (`--context`) | `gke_acme_prod` |
 | `cluster` | kubectl (`--cluster`) | `prod-us-east` |
 | `kubeconfig` | accepted as a global flag by kubectl/helm/flux/argocd so it never leaks into `resource`/`action`, but its value is **discarded** — not recorded in `metadata` or `params` by any parser | *(not recorded)* |
-| `region` | terraform (from `values`/`planned_values`/`provider_config`), aws (`--region`), az (`-l`/`--location`), gcloud (`--region`, or derived from `--zone` — see below) | `us-east-1` |
+| `region` | terraform (from `values`/`planned_values`/`provider_config`), aws (`--region`), az (`-l`/`--location`; a display name with a space is `location_display_name`, leaving `region` unresolved), gcloud (`--region`, or derived from `--zone` — see below) | `us-east-1` |
 | `zone` | gcloud (`--zone`) | `us-east1-b` |
-| `project` | gcloud (`--project`) | `acme-prod` |
+| `project` | gcloud (`--project`, or a resource path's `projects/<id>`; a number is `project_number`, leaving `project` unresolved) | `acme-prod` |
 | `account` | not emitted by any parser directly; resolved only via `EnvironmentMap`/`--resolve-current-context` (`AWS_PROFILE`) | `123456789012` |
 | `profile` | aws (`--profile`) | `prod-admin` |
-| `subscription` | az (`--subscription`) | `00000000-0000-0000-0000-000000000000` |
+| `subscription` | az (`--subscription` given as a GUID, or an `--ids` path; a name is `subscription_name`, leaving `subscription` unresolved) | `00000000-0000-0000-0000-000000000000` |
 | `resource_group` | az (`--resource-group`/`-g`, and parsed out of an ARM `--ids` path) | `rg-prod` |
 | `repo` | gh (`--repo`/`-R`, or parsed from a `.../repos/<owner>/<name>/...` API path) | `acme/infra` |
 | `ref` | gh (`--ref`, or parsed from a workflow-dispatch API path) | `main` |
@@ -326,11 +329,15 @@ same: kubeconfig `context` and `cluster`, aws `region` and `profile`, gcloud `pr
 `params.unresolved_scope`, and a rule scoped on one of them escalates with
 `<key>-unresolved: <id>` until the argv or `--resolve-current-context` gives it.
 
-**One value, every spelling.** A scope key matches its `-`/`_` twin (`dry-run`, `dry_run`) and a
-boolean's negated spelling (`no-verify-ssl: true` is `verify-ssl: false`). When a key reaches
-more than one value (helm's literal `a.b` beside the nested `a.b`), the rule matches if any of
-them does. `repo`, `resource_group` and `subscription` compare without case, as GitHub and
-Azure do, and so do Azure resource names and GitHub `repo/...` resources.
+**One value, every spelling.** A scope key matches its `-`/`_` twin (`dry-run`, `dry_run`, at
+every level of a nested key) and a boolean's negated spelling (`no-verify-ssl: true` is
+`verify-ssl: false`), and an unresolved mark in `params.unresolved_scope` meets every spelling
+the key does (`*` stands for every key the command line does not give, as for aws input read
+from a file). When a key reaches more than one value (helm's literal `a.b` beside the nested
+`a.b`), the rule matches if any of them does. `repo`, `resource_group`, `subscription` and
+`region` compare without case, as GitHub and Azure do, and so do Azure resource names and
+GitHub `repo/...` resources. An aws option is recorded under its full name however it was
+abbreviated, and `--cli-input-json`/`--cli-input-yaml` members under the options they stand for.
 
 **Manifests are not read.** `kubectl apply|create|replace|delete -f <file>` (or a directory,
 `-k <kustomization>`, or `-f -` for stdin) is one intent on `manifest/<name>`, with one for each
