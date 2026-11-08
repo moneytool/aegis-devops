@@ -60,6 +60,9 @@ behaviour.
   `manifest/y.yaml` over all intents with `max: 0.75` went from BLOCK to ALLOW, because 1/1 became
   1/2. `from_kubectl` now raises `ValueError` on two files. Use `from_kubectl_multi`.
 
+  An empty value adds no file, as pflag reads it, so `kubectl delete --filename= -f x.yaml` is only
+  `manifest/x.yaml`, and `--filename=` alone is refused, as kubectl refuses it.
+
 ## [1.3.3] — 2026-11-07
 
 `kubectl run --expose` now meets the rules on the Service it creates.

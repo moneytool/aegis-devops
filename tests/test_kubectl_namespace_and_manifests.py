@@ -1140,6 +1140,33 @@ def test_each_manifest_meets_a_rule_on_it(flags):
     assert _decide([rule], f"kubectl delete {flags} --dry-run=client".split())[0] == "ALLOW"
 
 
+@pytest.mark.parametrize("argv", [
+    ["kubectl", "delete", "--filename=", "-f", "x.yaml"],
+    ["kubectl", "delete", "-f", "x.yaml", "--filename="],
+    ["kubectl", "delete", "-f", "", "-f", "x.yaml"],
+    ["kubectl", "delete", "--filename", "", "--filename=x.yaml"],
+])
+def test_an_empty_filename_adds_no_manifest(argv):
+    """pflag reads an empty StringSlice value as no entries, so kubectl deletes only x.yaml."""
+    intents = from_kubectl_multi(argv)
+    assert [i.resource for i in intents] == ["manifest/x.yaml"]
+    assert from_kubectl(argv).resource == "manifest/x.yaml"
+
+
+@pytest.mark.parametrize("argv", [
+    ["kubectl", "delete", "--filename="],
+    ["kubectl", "apply", "-f", ""],
+])
+def test_only_an_empty_filename_is_refused(argv):
+    with pytest.raises(ValueError):
+        from_kubectl_multi(argv)
+
+
+def test_an_empty_filename_leaves_a_named_target():
+    argv = ["kubectl", "delete", "--filename=", "pod", "x"]
+    assert [i.resource for i in from_kubectl_multi(argv)] == ["pod/x"]
+
+
 def test_a_kind_rule_still_escalates_on_every_manifest():
     verdict, notes = _decide([_rule("no-pods", "pod/*", ["delete"])],
                              "kubectl delete -f x.yaml -f y.yaml".split())
