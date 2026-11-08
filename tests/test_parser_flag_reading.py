@@ -555,3 +555,104 @@ def test_aws_cli_input_json_target_is_unknown():
 def test_aws_refuses_what_aws_refuses(command):
     with pytest.raises(ValueError):
         from_argv(command.split())
+
+
+# --- az ------------------------------------------------------------------------------
+# azure-cli parses with Python's argparse (knack and azure-cli-core leave its defaults),
+# from source; az was not run.
+
+
+@pytest.mark.parametrize("command,resource,metadata,params", [
+    # argparse reads -nNAME, -n=NAME and bundled -y as Python reads them
+    ("az vm delete -nprod-vm -grg --yes", "compute/vm/prod-vm", {"resource_group": "rg"},
+     {"yes": True}),
+    ("az vm delete -n=prod-vm -g rg -y", "compute/vm/prod-vm", {"resource_group": "rg"},
+     {"yes": True}),
+    ("az vm delete -ynprod-vm -g rg", "compute/vm/prod-vm", {"resource_group": "rg"},
+     {"yes": True}),
+    ("az vm create -n v -g rg -lwestus", "compute/vm/v", {"resource_group": "rg",
+                                                         "region": "westus"}, {}),
+    ("az sql db delete -sserver -n db -g rg", "sql/db/db", {"resource_group": "rg"},
+     {"s": "server"}),
+    ("az ad user delete --id x", "iam/user/*", {}, {"id": "x"}),
+])
+def test_az_short_words(command, resource, metadata, params):
+    intent = from_argv(command.split())[0]
+    assert intent.resource == resource
+    assert intent.metadata == metadata
+    assert {k: v for k, v in intent.params.items() if k in params} == params
+
+
+@pytest.mark.parametrize("command", [
+    # a prefix of --name, --resource-group, --location, --subscription or --ids
+    "az vm delete --na prod-vm -g rg",
+    "az vm delete -n prod-vm --resource-gr rg",
+    "az group delete --n prod",
+    "az vm create -n v -g rg --loc westus",
+    # -s depends on the command; if it is a boolean, -n takes "prod"
+    "az sql db delete -snprod -g rg",
+    "az vm delete -n x -g rg -- y",
+])
+def test_az_refuses_what_it_cannot_read(command):
+    with pytest.raises(ValueError):
+        from_argv(command.split())
+
+
+def test_an_az_name_rule_holds_on_a_glued_name():
+    rule = _rule("azure", "compute/vm/prod-vm", ["delete"])
+    assert _verdict([rule], "az vm delete -nprod-vm -g rg --yes") == "BLOCK"
+    assert _verdict([rule], "az vm delete -ynprod-vm -g rg") == "BLOCK"
+
+
+# --- gcloud and gsutil ---------------------------------------------------------------
+# gcloud's calliope turns off argparse's prefixes (parser_extensions.py); from source,
+# gcloud was not run.
+
+
+@pytest.mark.parametrize("command,resources", [
+    # every name is a target
+    ("gcloud compute instances delete a b --zone us-east1-b",
+     ["compute/instance/a", "compute/instance/b"]),
+    # a --no- flag takes no value, so the word after it is the name
+    ("gcloud compute instances delete --no-graceful-shutdown web-1",
+     ["compute/instance/web-1"]),
+    # an unknown flag may be a boolean: the word after it may be the name
+    ("gcloud compute instances delete --keep-disks boot web-1",
+     ["compute/instance/boot", "compute/instance/web-1"]),
+    ("gcloud compute instances create web --machine-type e2-small",
+     ["compute/instance/web"]),
+    ("gcloud sql import sql prod-db gs://b/f.sql", ["sql/instance/prod-db"]),
+    ("gcloud projects set-iam-policy p1 policy.json", ["project/project/p1"]),
+    # storage reads its own booleans and every path
+    ("gcloud storage rm --recursive gs://a gs://b",
+     ["storage/bucket/a", "storage/bucket/b"]),
+    ("gsutil -m rm -r gs://b", ["storage/bucket/b"]),
+    ("gsutil rm -rf gs://a gs://b", ["storage/bucket/a", "storage/bucket/b"]),
+])
+def test_gcloud_reads_every_target(command, resources):
+    assert [i.resource for i in from_argv(command.split())] == resources
+
+
+def test_gcloud_words_after_dashes_go_to_the_command_it_runs():
+    intent = from_argv("gcloud compute ssh vm -- rm -rf /".split())[0]
+    assert intent.params["passthrough"] == ["rm", "-rf", "/"]
+
+
+@pytest.mark.parametrize("command,verdict", [
+    ("gcloud compute instances delete web-1 prod-1", "BLOCK"),
+    ("gcloud compute instances delete --no-graceful-shutdown prod-1", "BLOCK"),
+    ("gcloud storage rm --recursive gs://logs gs://prod-1", None),
+    ("gcloud compute instances delete web-1", "ALLOW"),
+])
+def test_gcloud_rule_on_one_name_holds(command, verdict):
+    rule = _rule("gcp", "compute/instance/prod-1", ["delete"])
+    if verdict is None:
+        rule = _rule("gcp", "storage/bucket/prod-1", ["delete"])
+        verdict = "BLOCK"
+    assert _verdict([rule], command) == verdict
+
+
+def test_gsutil_refuses_an_option_it_does_not_know():
+    with pytest.raises(ValueError):
+        from_argv("gsutil rm -x gs://b".split())
+

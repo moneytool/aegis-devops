@@ -2076,6 +2076,19 @@ _AZ_VERBS = {
 
 _AZ_BOOL_FLAGS = {"yes", "y", "no-wait", "debug", "verbose", "only-show-errors"}
 
+# The az options the parser reads into the target or its scope. az parses with Python's
+# argparse (knack), which takes an unambiguous prefix of a long option, so "--resource-gr
+# rg" is the resource group. Whether a prefix is one depends on the command's other options,
+# which the parser does not have, so a prefix of one of these is refused. --id and
+# --resource are full options of their own on many commands.
+_AZ_SCOPE_OPTIONS = ("name", "resource-group", "location", "subscription", "ids")
+_AZ_OWN_OPTIONS = frozenset({"id", "resource"})
+# The short options every az command has with one meaning: -n, -g and -l name the target and
+# its scope, -o is the output format, and -y (--yes) takes no value.
+_AZ_SHORT_VALUE_LETTERS = frozenset("nglo")
+_AZ_SHORT_BOOL_LETTERS = frozenset("yh")
+
+
 _AZ_GROUP_MAP = {
     ("vm",): "compute/vm",
     ("vmss",): "compute/vmss",
@@ -2096,6 +2109,32 @@ _AZ_GROUP_MAP = {
 }
 
 
+def _split_az_short_word(word: str) -> list[str]:
+    """One short-option word as argparse reads it: ``-nweb`` is ``-n web``, ``-n=web`` is
+    ``-n web`` and ``-ynweb`` is ``-y -n web``. A word that starts with a letter whose
+    meaning depends on the command (``-sserver``) is kept whole, unless a later ``n``, ``g``
+    or ``l`` could be read as the name, resource group or location: that is refused."""
+    if word.startswith("--") or len(word) <= 2:
+        return [word]
+    flags: list[str] = []
+    rest = word[1:]
+    while rest:
+        letter, rest = rest[0], rest[1:]
+        if letter in _AZ_SHORT_VALUE_LETTERS:
+            value = rest[1:] if rest.startswith("=") and not flags else rest
+            flags.append(f"-{letter}={value}" if rest else f"-{letter}")
+            return flags
+        if letter in _AZ_SHORT_BOOL_LETTERS:
+            flags.append(f"-{letter}")
+            continue
+        if any(c in "ngl" for c in rest):
+            raise ValueError(f"az: cannot tell what {word!r} means: -{letter} depends on the "
+                             f"command, and {rest!r} follows it")
+        flags.append(f"-{letter}={rest}")  # -sserver: -s with the value "server"
+        return flags
+    return flags
+
+
 def _parse_az_tokens(
     tokens: list[str],
 ) -> tuple[dict[str, Any], dict[str, Any], list[str], str | None, list[str]]:
@@ -2105,12 +2144,25 @@ def _parse_az_tokens(
     name_value: str | None = None
     ids_values: list[str] = []
 
+    tokens = list(tokens)  # short words are split in place as the walk reaches them
     i = 0
     n = len(tokens)
     while i < n:
         tok = tokens[i]
+        if tok == "--":
+            raise ValueError(f"az: words after '--' are not options az reads: {tokens!r}")
         if tok.startswith("-") and tok != "-":
+            if not tok.startswith("--") and len(tok) > 2 and tok[2] != "=":
+                flags = _split_az_short_word(tok)
+                if flags != [tok]:
+                    tokens[i:i + 1] = flags
+                    n = len(tokens)
+                    continue
             key, val = _split_flag(tok)
+            if (tok.startswith("--") and key not in _AZ_OWN_OPTIONS
+                    and any(o != key and o.startswith(key) for o in _AZ_SCOPE_OPTIONS)):
+                raise ValueError(f"az: {tok} may be an abbreviation of an option that names "
+                                 f"the target or its scope; write the option in full")
             if key in ("l", "location"):
                 if val is None:
                     i += 1
@@ -2147,6 +2199,7 @@ def _parse_az_tokens(
             elif val is not None:
                 params[key] = _coerce(val)
             elif i + 1 < n and not tokens[i + 1].startswith("-"):
+                # argparse never takes a word starting with "-" as a value
                 i += 1
                 params[key] = _coerce(tokens[i])
             else:
@@ -2334,10 +2387,30 @@ _GCLOUD_GROUP_MAP = {
     ("pubsub", "topics"): "pubsub/topic",
 }
 
-_GCS_LEGACY_VERB_MAP = {"rm": "delete", "rb": "delete", "cp": "put"}
+_GCS_LEGACY_VERB_MAP = {"rm": "delete", "rb": "delete", "cp": "put", "mv": "put"}
 
 # gcloud global booleans: never swallow the group/verb token after them.
 _GCLOUD_BOOL_FLAGS = {"log-http", "no-user-output-enabled", "user-output-enabled"}
+
+# The boolean options of "gcloud storage cp/mv/rm/rb" (and their short letters), so that
+# "--recursive gs://b" leaves gs://b a path. From the gcloud storage reference.
+_GCLOUD_STORAGE_BOOL_FLAGS = frozenset({
+    "recursive", "r", "R", "all-versions", "a", "continue-on-error", "c",
+    "read-paths-from-stdin", "I", "no-clobber", "n", "daisy-chain", "D", "do-not-decompress",
+    "ignore-symlinks", "preserve-posix", "P", "print-created-message", "v",
+    "skip-unsupported", "U", "exclude-managed-folders", "preserve-acl", "p",
+    "include-managed-folders", "skip-if-dest-has-newer-mtime", "u",
+})
+
+# gsutil's getopt letters: in front of the command, and on rm, rb, cp and mv. A letter in a
+# "values" set takes the rest of its word or the next word.
+_GSUTIL_TOP_BOOLS, _GSUTIL_TOP_VALUES = frozenset("mqdDv"), frozenset("hoiu")
+_GSUTIL_VERB_LETTERS = {
+    "rm": (frozenset("afIrR"), frozenset()),
+    "rb": (frozenset("f"), frozenset()),
+    "cp": (frozenset("AcDeIMNnpPrRtUvZJ"), frozenset("asjzL")),
+    "mv": (frozenset("AcDeIMNnpPrRtUvZJ"), frozenset("asjzL")),
+}
 
 # gcloud zone -> region: a zone is "<region>-<letter>" (e.g. "us-east1-b" ->
 # "us-east1"); strip the trailing "-<letter>" component (REVIEW-4 T2.5).
@@ -2348,10 +2421,20 @@ def _region_from_zone(zone: str) -> str:
     return _ZONE_SUFFIX.sub("", zone)
 
 
-def _parse_gcloud_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+def _parse_gcloud_tokens(
+    tokens: list[str], *, storage: bool = False,
+) -> tuple[dict[str, Any], dict[str, Any], list[str], list[tuple[int, str]]]:
+    """``(metadata, params, positional, maybe_operands)``. gcloud takes no abbreviated flag
+    (calliope disables argparse's prefixes) and never a word starting with "-" as a value.
+    A flag the parser does not know may be a boolean, and then the word after it is an
+    operand, not its value: each such word is in ``maybe_operands`` with the number of
+    operands before it. A ``--no-`` flag is gcloud's off switch of a boolean and takes no
+    value. Words after ``--`` go to the command gcloud runs (``compute ssh``), and are
+    kept in ``params["passthrough"]``."""
     metadata: dict[str, Any] = {}
     params: dict[str, Any] = {}
     positional: list[str] = []
+    maybe_operands: list[tuple[int, str]] = []
     # --zone derives metadata["region"] unless --region is given explicitly
     # -- explicit wins regardless of which flag comes first on the argv
     # (REVIEW-4 T2.5), so both are tracked separately and reconciled once
@@ -2363,6 +2446,9 @@ def _parse_gcloud_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, A
     n = len(tokens)
     while i < n:
         tok = tokens[i]
+        if tok == "--":
+            params["passthrough"] = tokens[i + 1:]
+            break
         if tok.startswith("-") and tok != "-":
             key, val = _split_flag(tok)
             if key == "region":
@@ -2391,13 +2477,19 @@ def _parse_gcloud_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, A
                 params.pop("dry_run", None)
             elif key == "async":
                 params["async"] = _bool_param(val)
-            elif key in _GCLOUD_BOOL_FLAGS:
+            elif key in _GCLOUD_BOOL_FLAGS or (storage and key in _GCLOUD_STORAGE_BOOL_FLAGS):
                 params[key.replace("-", "_")] = _bool_param(val)
             elif val is not None:
                 params[key] = _coerce(val)
+            elif key.startswith("no-") and tok.startswith("--"):
+                params[key] = True
             elif i + 1 < n and not tokens[i + 1].startswith("-"):
-                i += 1
-                params[key] = _coerce(tokens[i])
+                if storage and tokens[i + 1].startswith("gs://"):
+                    params[key] = True  # a path stays a path
+                else:
+                    i += 1
+                    params[key] = _coerce(tokens[i])
+                    maybe_operands.append((len(positional), tokens[i]))
             else:
                 params[key] = True
         else:
@@ -2409,46 +2501,92 @@ def _parse_gcloud_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, A
     elif zone_derived_region is not None:
         metadata["region"] = zone_derived_region
 
-    return metadata, params, positional
+    return metadata, params, positional, maybe_operands
 
 
-def _gcs_uri_intent(
+def _gcs_uri_intents(
     verb: str,
-    uri_candidates: list[str],
+    operands: list[str],
     metadata: dict[str, Any],
     params: dict[str, Any],
     argv: list[str],
     raw_prefix: str,
-) -> InfrastructureIntent:
+) -> list[InfrastructureIntent]:
+    """One intent per ``gs://`` path: ``rm a b`` deletes both, ``cp`` and ``mv`` write the
+    destination (the source is kept as before), and ``mv`` also deletes its source."""
     action = _GCS_LEGACY_VERB_MAP[verb]
-    uri = next((t for t in uri_candidates if t.startswith("gs://")), None)
-    if uri is None:
+    uris = [t for t in operands if t.startswith("gs://")]
+    if not uris:
         raise ValueError(f"could not find a gs:// target in: {argv!r}")
-    bucket, _, key = uri[len("gs://") :].partition("/")
-    params = dict(params)
-    params["raw_action"] = f"{raw_prefix}-{verb}"
-    if key:
-        params["key"] = key
-    resource = f"storage/bucket/{bucket}"
-    return InfrastructureIntent(
-        resource=resource, action=action, provider="gcp", params=params, metadata=metadata
-    )
+    params = {**params, "raw_action": f"{raw_prefix}-{verb}"}
+    intents = []
+    targets = [(uri, action) for uri in uris]
+    if verb == "mv" and operands and operands[0].startswith("gs://"):
+        targets.append((operands[0], "delete"))
+    for uri, act in targets:
+        bucket, _, key = uri[len("gs://") :].partition("/")
+        intents.append(InfrastructureIntent(
+            resource=f"storage/bucket/{bucket}", action=act, provider="gcp",
+            params={**params, "key": key} if key else dict(params), metadata=dict(metadata)))
+    return intents
 
 
-def _from_gsutil(argv: list[str]) -> InfrastructureIntent:
+def _from_gsutil(argv: list[str]) -> list[InfrastructureIntent]:
+    """gsutil reads its options with getopt: letters bundle (``-rf``), and a letter that
+    takes a value takes the rest of its word or the next word. Options in front of the
+    command are gsutil's own (``-m``, ``-o key=value``)."""
     tokens = argv[1:]
-    metadata, params, positional = _parse_gcloud_tokens(tokens)
-    if not positional or positional[0] not in _GCS_LEGACY_VERB_MAP:
+    words: list[str] = []
+    i = 0
+    verb: str | None = None
+    bools, values = _GSUTIL_TOP_BOOLS, _GSUTIL_TOP_VALUES
+    params: dict[str, Any] = {}
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok == "--":
+            words.extend(tokens[i + 1:])
+            break
+        if tok.startswith("-") and tok != "-" and not tok.startswith("--"):
+            rest = tok[1:]
+            while rest:
+                letter, rest = rest[0], rest[1:]
+                if letter in values:
+                    if not rest:
+                        i += 1
+                        rest = _value_at(tokens, i, tok)
+                    params[letter] = rest
+                    break
+                if letter not in bools:
+                    raise ValueError(f"gsutil: -{letter} is not an option the parser knows "
+                                     f"here: {argv!r}")
+                params[letter] = True
+        elif tok.startswith("--"):
+            raise ValueError(f"gsutil: unsupported option {tok!r}: {argv!r}")
+        elif verb is None:
+            verb = tok
+            if verb not in _GSUTIL_VERB_LETTERS:
+                raise ValueError(f"unsupported gsutil invocation: {argv!r}")
+            bools, values = _GSUTIL_VERB_LETTERS[verb]
+        else:
+            words.append(tok)
+        i += 1
+    if verb is None:
         raise ValueError(f"unsupported gsutil invocation: {argv!r}")
-    verb = positional[0]
-    return _gcs_uri_intent(verb, positional[1:], metadata, params, argv, "gsutil")
+    if params.get("o") is not None or params.get("h") is not None:
+        params = {k: v for k, v in params.items() if k not in ("o", "h")}
+    return _gcs_uri_intents(verb, words, {}, params, argv, "gsutil")
 
 
-def from_gcloud(argv: list[str]) -> InfrastructureIntent:
+def from_gcloud_multi(argv: list[str]) -> list[InfrastructureIntent]:
     """Parses a ``gcloud`` (or legacy ``gsutil``) CLI invocation, e.g.:
 
     ``gcloud compute instances start web-1 --zone us-central1-a``
       -> resource "compute/instance/web-1", action "start"
+
+    One intent per name: ``gcloud compute instances delete a b`` deletes both. A word an
+    unknown flag may have taken as its value, between the verb and the first name, is a
+    name too, since that flag may be a boolean (``--no-graceful-shutdown`` is one by its
+    name, and takes none).
     """
     if not argv:
         raise ValueError("empty argv")
@@ -2460,17 +2598,25 @@ def from_gcloud(argv: list[str]) -> InfrastructureIntent:
         raise ValueError(f"not a recognizable gcloud invocation: {argv!r}")
 
     tokens = argv[1:]
-    metadata, params, positional = _parse_gcloud_tokens(tokens)
+    metadata, params, positional, maybe = _parse_gcloud_tokens(tokens)
 
+    release_track = None
     if positional and positional[0] in ("alpha", "beta"):
-        params["release_track"] = positional.pop(0)
+        release_track = positional.pop(0)
+        maybe = [(p - 1, w) for p, w in maybe]
 
     if (
         len(positional) >= 2
         and positional[0] == "storage"
         and positional[1] in _GCS_LEGACY_VERB_MAP
     ):
-        return _gcs_uri_intent(positional[1], positional[2:], metadata, params, argv, "storage")
+        metadata, params, positional, _maybe = _parse_gcloud_tokens(tokens, storage=True)
+        if release_track:
+            positional.remove(release_track)
+            params["release_track"] = release_track
+        return _gcs_uri_intents(positional[1], positional[2:], metadata, params, argv, "storage")
+    if release_track:
+        params["release_track"] = release_track
 
     verb_idx = next((i for i, t in enumerate(positional) if t in _GCLOUD_VERBS), None)
     if verb_idx is None:
@@ -2480,20 +2626,39 @@ def from_gcloud(argv: list[str]) -> InfrastructureIntent:
     if not group_words:
         raise ValueError(f"could not determine a gcloud resource group in: {argv!r}")
     verb = positional[verb_idx]
-    name_value = positional[verb_idx + 1] if verb_idx + 1 < len(positional) else None
-
+    names = positional[verb_idx + 1:]
     resource_prefix = _GCLOUD_GROUP_MAP.get(tuple(group_words))
+    if group_words == ["sql"] and verb in ("import", "export") and names[:1] in (
+            ["sql"], ["csv"], ["bak"], ["tde"]):
+        # gcloud sql import|export <format> INSTANCE URI
+        resource_prefix, names = "sql/instance", names[1:2]
+    elif verb in _GCLOUD_IAM_BINDING_VERBS or verb in ("get-credentials", "ssh"):
+        names = names[:1]  # set-iam-policy NAME POLICY_FILE
+    if not names:
+        # a word a flag may have taken while being a boolean, right after the verb
+        names = [w for p, w in maybe if p == verb_idx + 1][:1]
+    else:
+        names = [w for p, w in maybe if p == verb_idx + 1] + names
     if resource_prefix is None:
         *head, last = group_words
         resource_prefix = "/".join([*head, _singularize(last)])
 
     action = "update" if verb in _GCLOUD_IAM_BINDING_VERBS else _normalize_verb(verb)
     params["raw_action"] = verb
-    resource = f"{resource_prefix}/{name_value}" if name_value else f"{resource_prefix}/*"
+    resources = [f"{resource_prefix}/{name}" for name in dict.fromkeys(names)] or [
+        f"{resource_prefix}/*"]
+    return [InfrastructureIntent(resource=r, action=action, provider="gcp",
+                                 params=dict(params), metadata=dict(metadata))
+            for r in resources]
 
-    return InfrastructureIntent(
-        resource=resource, action=action, provider="gcp", params=params, metadata=metadata
-    )
+
+def from_gcloud(argv: list[str]) -> InfrastructureIntent:
+    """Parses a ``gcloud`` or ``gsutil`` invocation with exactly one target (see
+    :func:`from_gcloud_multi`). Raises ValueError for ``gcloud ... delete a b``."""
+    intents = from_gcloud_multi(argv)
+    if len(intents) != 1:
+        raise ValueError(f"expected exactly one gcloud target, found {len(intents)}: {argv!r}")
+    return intents[0]
 
 
 # --- Helm -----------------------------------------------------------------
@@ -4469,7 +4634,7 @@ def from_argv(argv: list[str]) -> list[InfrastructureIntent]:
     if name == "az":
         return from_az_multi(argv)
     if name in ("gcloud", "gsutil"):
-        return [from_gcloud(argv)]
+        return from_gcloud_multi(argv)
     if name == "helm":
         return from_helm_multi(argv)
     if name == "argocd":
