@@ -155,9 +155,9 @@ _VERB_NORMALIZE = {
     "get": "read",
     "show": "read",
     "ls": "read",
-    "ssh": "read",
+    "ssh": "exec",  # runs commands on the machine
     "get-credentials": "read",
-    "export": "read",
+    "export": "export",  # writes the data out (gcloud sql export, aws ec2 export-image)
     "attach": "attach",
     "detach": "detach",
     "cp": "put",
@@ -2796,6 +2796,7 @@ _GCLOUD_IAM_BINDING_VERBS = {
 }
 
 _GCLOUD_GROUP_MAP = {
+    ("compute",): "compute/instance",  # gcloud compute ssh INSTANCE
     ("compute", "instances"): "compute/instance",
     ("compute", "disks"): "compute/disk",
     ("compute", "firewall-rules"): "compute/firewall-rule",
@@ -4056,6 +4057,10 @@ def _from_argocd_multi(argv: list[str]) -> list[InfrastructureIntent]:
     metadata, params, positional = _parse_argocd_tokens(tokens, subverb)
     params["raw_action"] = subverb
     action = _ARGOCD_ACTION_MAP[subverb]
+    if action == "read" and (params.get("refresh") is True or params.get("hard_refresh") is True
+                             or params.get("hard-refresh") is True):
+        # --refresh / --hard-refresh patch the Application's refresh annotation (app.go)
+        action = "update"
 
     # The apps a selector or a project picks, which argocd lists when it runs.
     picked: list[tuple[dict[str, Any], dict[str, Any]]] = []
@@ -5025,11 +5030,7 @@ def from_git_multi(argv: list[str]) -> list[InfrastructureIntent]:
             return [one(f"{verb}/{name}", "delete") for name in dict.fromkeys(positional)]
         if params.get("rename") or params.get("copy"):
             return _git_branch_move(positional, one, params, argv)
-        if verb == "branch" and params.get("force") and positional:
-            # git branch -f <name> [<start>] resets an existing branch to <start>
-            return [one(f"branch/{positional[0]}", "create"),
-                    one(f"branch/{positional[0]}", "delete")]
-        return [one(f"{verb}/{positional[0] if positional else '*'}", "read")]
+        return _git_branch_or_tag(verb, positional, params, one)
 
     if verb == "rebase":
         # "git rebase <upstream> <branch>" rewrites <branch>: both are targets
@@ -5051,9 +5052,95 @@ def from_git_multi(argv: list[str]) -> list[InfrastructureIntent]:
         # git filter-repo rewrites every ref of the repository, whatever it is given
         return _mark_open_targets([one("history/*", "rewrite")])
 
-    # checkout, switch, log, status, diff, fetch, pull, commit (no --amend),
-    # add, show, reset (no --hard), ... -- local/read-ish, nothing to gate.
-    return [one("history/*", "read")]
+    if verb in _GIT_READ_VERBS or _git_reads_only(verb, positional, tokens):
+        return [one("history/*", "read")]
+    # Anything else changes the repository (commit, checkout, merge, pull, fetch, clean,
+    # stash, config --set, remote add, update-ref, ...) or is a command the parser does not
+    # know: never a read. Its action is the verb, as kubectl's are.
+    return [one("history/*", verb)]
+
+
+# git commands that change nothing, from their documentation: they read the repository
+# and print. Every other command is a write (see from_git_multi).
+_GIT_READ_VERBS = frozenset({
+    "status", "log", "diff", "show", "blame", "annotate", "grep", "ls-files", "ls-tree",
+    "ls-remote", "rev-parse", "rev-list", "describe", "shortlog", "cat-file", "show-ref",
+    "for-each-ref", "name-rev", "whatchanged", "help", "version", "var", "count-objects",
+    "cherry", "diff-tree", "diff-files", "diff-index", "merge-base", "check-ignore",
+    "check-attr", "check-ref-format", "verify-commit", "verify-tag", "range-diff",
+})
+
+# Commands whose subcommand decides: these subcommands (or none) only read.
+_GIT_READ_SUBCOMMANDS = {
+    "remote": {None, "show", "get-url"},
+    "stash": {"list", "show"},
+    "worktree": {"list"},
+    "notes": {"list", "show"},
+    "reflog": {None, "show", "exists"},
+    "submodule": {"status", "summary"},
+}
+
+_GIT_CONFIG_READ_OPTIONS = frozenset({
+    "--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l",
+    "--get-color", "--get-colorbool",
+})
+
+
+def _git_reads_only(verb: str, positional: list[str], tokens: list[str]) -> bool:
+    """Whether a git command with subcommands only reads (``git remote -v``, ``git stash
+    list``, ``git config --get x``, ``git config --list``)."""
+    if verb in _GIT_READ_SUBCOMMANDS:
+        sub = next((t for t in tokens if not t.startswith("-")), None)
+        return sub in _GIT_READ_SUBCOMMANDS[verb]
+    if verb == "config":
+        if any(t in _GIT_CONFIG_READ_OPTIONS for t in tokens):
+            return True
+        names = [t for t in tokens if not t.startswith("-")]
+        # "git config name" reads the value; "git config name value" sets it
+        return len(names) == 1 and not any(t.startswith("--") and t not in (
+            "--global", "--system", "--local") for t in tokens)
+    return False
+
+
+# Options that make git branch / git tag list rather than create (their documentation):
+# with one of them, the names given are patterns to list.
+_GIT_BRANCH_LIST_OPTIONS = frozenset({
+    "list", "all", "remotes", "verbose", "contains", "no-contains", "with", "without",
+    "merged", "no-merged", "points-at", "show-current", "format", "sort", "column",
+    "omit-empty", "ignore-case",
+})
+_GIT_TAG_LIST_OPTIONS = frozenset({
+    "list", "n", "contains", "no-contains", "with", "without", "merged", "no-merged",
+    "points-at", "format", "sort", "column", "omit-empty", "ignore-case",
+})
+
+
+def _git_branch_or_tag(verb: str, positional: list[str], params: dict[str, Any],
+                       one) -> list[InfrastructureIntent]:
+    """``git branch`` / ``git tag`` with no delete, rename or copy: a list when no name is
+    given or a list option is (``-l``, ``--contains``, ...), ``git tag -v`` verifies, and
+    otherwise the name is created, at the commit given or HEAD; ``-f`` replaces one that
+    exists (an update, forced). ``git branch -u`` / ``--unset-upstream`` /
+    ``--edit-description`` change the branch's configuration (an update)."""
+    keys = {canonical_key(k) for k in params}
+    lists = _GIT_BRANCH_LIST_OPTIONS if verb == "branch" else _GIT_TAG_LIST_OPTIONS
+    if verb == "branch" and keys & {"set-upstream-to", "unset-upstream", "edit-description",
+                                    "set-upstream"}:
+        return [one(f"branch/{positional[0] if positional else '*'}", "update")]
+    if verb == "tag" and "verify" in keys:
+        return [one(f"tag/{name}", "read") for name in positional or ["*"]]
+    if not positional or keys & {canonical_key(k) for k in lists}:
+        return [one(f"{verb}/{name}", "read") for name in positional or ["*"]]
+    name = positional[0]
+    intents = [one(f"{verb}/{name}", "create")]
+    if params.get("force") is True:
+        replaced = one(f"{verb}/{name}", "update")
+        replaced.params["force"] = True
+        intents.append(replaced)
+        if verb == "branch":
+            # git branch -f <name> [<start>] resets an existing branch to <start>
+            intents.append(one(f"branch/{name}", "delete"))
+    return intents
 
 
 def _git_branch_move(positional, one, params, argv) -> list[InfrastructureIntent]:
@@ -5487,7 +5574,7 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
                 provider="github", params=params, metadata=metadata,
             )
         params["raw_action"] = f"workflow-{subverb}"
-        action = {"enable": "start", "disable": "stop"}.get(subverb, "read")
+        action = _gh_action("workflow", subverb)
         resource = _gh_workflow(positional[0], params) if positional else "workflow/*"
         return InfrastructureIntent(
             resource=resource, action=action, provider="github",
@@ -5501,7 +5588,7 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
         metadata, params, positional = _parse_gh_tokens(rest, ("release", subverb))
         params["raw_action"] = f"release-{subverb}"
         tag = positional[0] if positional else "*"
-        action = {"create": "create", "delete": "delete"}.get(subverb, "read")
+        action = _gh_action("release", subverb)
         return InfrastructureIntent(
             resource=f"release/{tag}", action=action, provider="github",
             params=params, metadata=metadata,
@@ -5514,7 +5601,7 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
         metadata, params, positional = _parse_gh_tokens(rest, ("pr", subverb))
         params["raw_action"] = f"pr-{subverb}"
         resource = _gh_selected("pr", positional[0] if positional else None, metadata, params)
-        action = {"merge": "merge", "close": "stop"}.get(subverb, "read")
+        action = _gh_action("pr", subverb)
         return InfrastructureIntent(
             resource=resource, action=action, provider="github",
             params=params, metadata=metadata,
@@ -5526,7 +5613,7 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
         params["raw_action"] = f"issue-{subverb}"
         resource = _gh_selected("issue", positional[0] if positional else None, metadata,
                                 params)
-        action = {"delete": "delete", "close": "stop"}.get(subverb, "read")
+        action = _gh_action("issue", subverb)
         return InfrastructureIntent(
             resource=resource, action=action, provider="github",
             params=params, metadata=metadata,
@@ -5542,7 +5629,7 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
         else:  # no ID: gh asks which run, or picks it, when it runs
             resource = "run/*"
             params["resolved_at_runtime"] = {"from": "run/*", "kinds": ["run"]}
-        action = {"delete": "delete", "cancel": "stop", "rerun": "run"}.get(subverb, "read")
+        action = _gh_action("run", subverb)
         return InfrastructureIntent(
             resource=resource, action=action, provider="github",
             params=params, metadata=metadata,
@@ -5554,7 +5641,7 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
         subverb, *rest = tokens
         metadata, params, positional = _parse_gh_tokens(rest, ("repo", subverb))
         params["raw_action"] = f"repo-{subverb}"
-        action = "delete" if subverb == "delete" else "read"
+        action = _gh_action("repo", subverb)
         spec = positional[0] if positional else None
         if spec is not None and ("/" in spec or ":" in spec):
             _gh_set_repo(metadata, spec)
@@ -5578,7 +5665,7 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
         metadata, params, positional = _parse_gh_tokens(rest, ("secret", subverb))
         params["raw_action"] = f"secret-{subverb}"
         name = positional[0].upper() if positional else "*"  # GitHub upper-cases names
-        action = {"set": "put", "delete": "delete"}.get(subverb, "read")
+        action = _gh_action("secret", subverb)
         return InfrastructureIntent(
             resource=f"secret/{name}", action=action, provider="github",
             params=params, metadata=metadata,
@@ -5591,7 +5678,7 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
         metadata, params, positional = _parse_gh_tokens(rest, ("variable", subverb))
         params["raw_action"] = f"variable-{subverb}"
         name = positional[0].upper() if positional else "*"  # GitHub upper-cases names
-        action = "put" if subverb == "set" else "read"
+        action = _gh_action("variable", subverb)
         return InfrastructureIntent(
             resource=f"variable/{name}", action=action, provider="github",
             params=params, metadata=metadata,
@@ -5647,14 +5734,71 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
             params=params, metadata=metadata,
         )
 
-    # pr/repo view|list, issue, gist, auth, ... -- everything else is a read.
+    # every other group: a read only where the table says so
     metadata, params, positional = _parse_gh_tokens(tokens)
     params["raw_action"] = group
+    # gh <group> <command> ...: the resource keeps the command word, as before
+    subverb = positional[0] if (group, None) not in _GH_ACTIONS and positional else None
+    action = _gh_action(group, subverb)
     target = positional[0] if positional else "*"
     return InfrastructureIntent(
-        resource=f"{group}/{target}", action="read", provider="github",
+        resource=f"{group}/{target}", action=action, provider="github",
         params=params, metadata=metadata,
     )
+
+
+# The action of each gh command (cli v2.103 manual, https://cli.github.com/manual/). A
+# command is a read only if it is listed as one here: it shows or lists and changes
+# nothing on GitHub. Any command not in the table, a new one included, takes its
+# subcommand (or group) as its action, never "read".
+_GH_ACTIONS: dict[tuple[str, str | None], str] = {
+    **{("pr", v): "read" for v in ("view", "list", "status", "diff", "checks")},
+    ("pr", "merge"): "merge", ("pr", "close"): "stop", ("pr", "reopen"): "start",
+    ("pr", "create"): "create", ("pr", "edit"): "update", ("pr", "ready"): "update",
+    ("pr", "review"): "update", ("pr", "comment"): "update", ("pr", "lock"): "update",
+    ("pr", "unlock"): "update", ("pr", "update-branch"): "update",
+    ("pr", "revert"): "create",
+    **{("issue", v): "read" for v in ("view", "list", "status")},
+    ("issue", "delete"): "delete", ("issue", "close"): "stop", ("issue", "reopen"): "start",
+    ("issue", "create"): "create", ("issue", "edit"): "update",
+    ("issue", "comment"): "update", ("issue", "transfer"): "update",
+    ("issue", "pin"): "update", ("issue", "unpin"): "update", ("issue", "lock"): "update",
+    ("issue", "unlock"): "update", ("issue", "develop"): "create",
+    **{("release", v): "read" for v in ("view", "list", "verify", "verify-asset")},
+    ("release", "create"): "create", ("release", "delete"): "delete",
+    ("release", "edit"): "update", ("release", "upload"): "put",
+    ("release", "delete-asset"): "delete",
+    **{("repo", v): "read" for v in ("view", "list")},
+    ("repo", "delete"): "delete", ("repo", "create"): "create", ("repo", "edit"): "update",
+    ("repo", "rename"): "update", ("repo", "archive"): "update",
+    ("repo", "unarchive"): "update", ("repo", "fork"): "create", ("repo", "sync"): "update",
+    **{("run", v): "read" for v in ("view", "list", "watch")},
+    ("run", "delete"): "delete", ("run", "cancel"): "stop", ("run", "rerun"): "run",
+    **{("workflow", v): "read" for v in ("view", "list")},
+    ("workflow", "run"): "run", ("workflow", "enable"): "start",
+    ("workflow", "disable"): "stop",
+    ("secret", "list"): "read", ("secret", "set"): "put", ("secret", "delete"): "delete",
+    ("variable", "list"): "read", ("variable", "get"): "read", ("variable", "set"): "put",
+    ("variable", "delete"): "delete",
+    **{("search", v): "read" for v in ("repos", "issues", "prs", "code", "commits")},
+    ("status", None): "read", ("browse", None): "read",
+    **{("gist", v): "read" for v in ("view", "list")},
+    ("label", "list"): "read", ("cache", "list"): "read",
+    **{("ruleset", v): "read" for v in ("list", "view", "check")},
+    ("org", "list"): "read", ("auth", "status"): "read", ("auth", "token"): "read",
+    **{("extension", v): "read" for v in ("list", "search", "browse")},
+    **{("project", v): "read" for v in ("list", "view", "field-list", "item-list")},
+    ("config", "get"): "read", ("config", "list"): "read", ("alias", "list"): "read",
+    ("gpg-key", "list"): "read", ("ssh-key", "list"): "read",
+    ("help", None): "read", ("version", None): "read",
+}
+
+
+def _gh_action(group: str, subverb: str | None) -> str:
+    """The action of ``gh <group> <subverb>`` (:data:`_GH_ACTIONS`): a command not in the
+    table is never a read; its subcommand, or its group, is its action."""
+    action = _GH_ACTIONS.get((group, subverb))
+    return action if action is not None else (subverb or group)
 
 
 # --- generic dispatcher --------------------------------------------------------

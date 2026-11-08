@@ -1189,15 +1189,19 @@ def test_from_git_rebase_reset_hard_amend_are_rewrite():
 
 def test_from_git_read_verbs():
     for argv in (
-        ["git", "checkout", "main"],
-        ["git", "switch", "main"],
         ["git", "log"],
         ["git", "status"],
         ["git", "diff"],
+    ):
+        assert from_git(argv).action == "read"
+    # commands that change the local repository are never reads: the verb is the action
+    for argv in (
+        ["git", "checkout", "main"],
+        ["git", "switch", "main"],
         ["git", "fetch"],
         ["git", "pull"],
     ):
-        assert from_git(argv).action == "read"
+        assert from_git(argv).action == argv[1]
 
 
 def test_from_git_raw_action_preserved():

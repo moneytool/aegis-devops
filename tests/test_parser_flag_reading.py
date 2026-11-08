@@ -404,8 +404,8 @@ def test_git_force_push_rule_holds(command, verdict):
 @pytest.mark.parametrize("command,resource,action", [
     ("git commit --amen -m x", "history/HEAD", "rewrite"),
     ("git commit -n --amend -m x", "history/HEAD", "rewrite"),  # -n is --no-verify here
-    ("git commit --amend --no-amend -m x", "history/*", "read"),
-    ("git commit -am x", "history/*", "read"),
+    ("git commit --amend --no-amend -m x", "history/*", "commit"),
+    ("git commit -am x", "history/*", "commit"),
     ("git reset --har HEAD~3", "history/HEAD~3", "rewrite"),
     ("git reset --ha HEAD", "history/HEAD", "rewrite"),
     ("git rebase -x make main", "history/main", "rewrite"),
@@ -889,8 +889,9 @@ def test_aws_rule_on_the_abbreviated_name_holds():
     ("git branch -c a b", [("branch/b", "create")]),
     ("git branch -C a main", [("branch/main", "create"), ("branch/main", "delete")]),
     # -f resets an existing branch
-    ("git branch -f main HEAD~3", [("branch/main", "create"), ("branch/main", "delete")]),
-    ("git branch side", [("branch/side", "read")]),
+    ("git branch -f main HEAD~3",
+     [("branch/main", "create"), ("branch/main", "update"), ("branch/main", "delete")]),
+    ("git branch side", [("branch/side", "create")]),
 ])
 def test_git_branch_rename_copy_and_force(command, targets):
     assert [(i.resource, i.action) for i in from_argv(command.split())] == targets
@@ -1803,3 +1804,125 @@ def test_az_ids_subscription_name_is_normalized_too():
     assert intent.metadata["subscription_name"] == "Production"
     rule = _rule("azure", "compute/vm/*", ["delete"], {"subscription": GUID})
     assert _verdict([rule], command) == "ESCALATE"
+
+
+# --- 2 and 3: every command that maps to read, audited ---------------------------------
+# Each entry was checked against the tool's documentation: it shows, lists or prints and
+# changes nothing. A verb added to any table as a read fails these tests until it is added
+# here, and an unknown verb is refused or keeps its own name as the action, never "read".
+
+
+def test_the_verbs_that_read_are_the_audited_ones():
+    from aegis_core import parser as p
+
+    reads = lambda table: {k for k, v in table.items() if v == "read"}  # noqa: E731
+    # aws, az, gcloud: describe/list/get/show/ls read; ssh runs commands (exec) and export
+    # writes the data out, so neither is a read
+    assert reads(p._VERB_NORMALIZE) == {"describe", "list", "get", "show", "ls",
+                                         "get-credentials", "wait"}
+    assert reads(p._AWS_S3_VERB_MAP) == {"ls"}
+    assert reads(p._GCS_LEGACY_VERB_MAP) == set()
+    # argocd: get, list, diff, history (get/diff --refresh are updates, tested below)
+    assert reads(p._ARGOCD_ACTION_MAP) == {"get", "list", "diff", "history"}
+    assert p._HELM_READ_VERBS == {"history", "status", "list", "get"}
+    assert p._FLUX_READ_VERBS == {"get", "logs", "export"}  # flux export prints YAML
+    assert p._GIT_READ_VERBS == {
+        "status", "log", "diff", "show", "blame", "annotate", "grep", "ls-files", "ls-tree",
+        "ls-remote", "rev-parse", "rev-list", "describe", "shortlog", "cat-file",
+        "show-ref", "for-each-ref", "name-rev", "whatchanged", "help", "version", "var",
+        "count-objects", "cherry", "diff-tree", "diff-files", "diff-index", "merge-base",
+        "check-ignore", "check-attr", "check-ref-format", "verify-commit", "verify-tag",
+        "range-diff"}
+    assert p._GIT_READ_SUBCOMMANDS == {
+        "remote": {None, "show", "get-url"}, "stash": {"list", "show"},
+        "worktree": {"list"}, "notes": {"list", "show"},
+        "reflog": {None, "show", "exists"}, "submodule": {"status", "summary"}}
+    assert reads(p._GH_ACTIONS) == {
+        *(("pr", v) for v in ("view", "list", "status", "diff", "checks")),
+        *(("issue", v) for v in ("view", "list", "status")),
+        *(("release", v) for v in ("view", "list", "verify", "verify-asset")),
+        ("repo", "view"), ("repo", "list"), ("run", "view"), ("run", "list"),
+        ("run", "watch"), ("workflow", "view"), ("workflow", "list"), ("secret", "list"),
+        ("variable", "list"), ("variable", "get"),
+        *(("search", v) for v in ("repos", "issues", "prs", "code", "commits")),
+        ("status", None), ("browse", None), ("gist", "view"), ("gist", "list"),
+        ("label", "list"), ("cache", "list"), ("ruleset", "list"), ("ruleset", "view"),
+        ("ruleset", "check"), ("org", "list"), ("auth", "status"), ("auth", "token"),
+        ("extension", "list"), ("extension", "search"), ("extension", "browse"),
+        *(("project", v) for v in ("list", "view", "field-list", "item-list")),
+        ("config", "get"), ("config", "list"), ("alias", "list"), ("gpg-key", "list"),
+        ("ssh-key", "list"), ("help", None), ("version", None)}
+
+
+@pytest.mark.parametrize("command,targets", [
+    # 2: git tag and git branch with a name create it; -f replaces one (an update)
+    ("git tag -f v1 HEAD", [("tag/v1", "create"), ("tag/v1", "update")]),
+    ("git tag v1", [("tag/v1", "create")]),
+    ("git tag -a v1 -m release", [("tag/v1", "create")]),
+    ("git tag", [("tag/*", "read")]),
+    ("git tag -l v*", [("tag/v*", "read")]),
+    ("git tag -n v*", [("tag/v*", "read")]),
+    ("git tag -v v1", [("tag/v1", "read")]),
+    ("git branch side", [("branch/side", "create")]),
+    ("git branch --list a*", [("branch/a*", "read")]),
+    ("git branch -u origin/main", [("branch/*", "update")]),
+    ("git branch --unset-upstream side", [("branch/side", "update")]),
+    # every other git command changes the repository unless documented as a read
+    ("git status", [("history/*", "read")]),
+    ("git remote -v", [("history/*", "read")]),
+    ("git remote add o https://x", [("history/*", "remote")]),
+    ("git config --get user.name", [("history/*", "read")]),
+    ("git config user.name x", [("history/*", "config")]),
+    ("git stash list", [("history/*", "read")]),
+    ("git stash", [("history/*", "stash")]),
+    ("git clean -fdx", [("history/*", "clean")]),
+    ("git update-ref -d refs/heads/x", [("history/*", "update-ref")]),
+    ("git frobnicate", [("history/*", "frobnicate")]),
+    # 3: gh commands that change something
+    ("gh release edit v1 --draft=false", [("release/v1", "update")]),
+    ("gh pr edit 1 --title x", [("pr/1", "update")]),
+    ("gh repo edit o/r --visibility public", [("repo/o/r", "update")]),
+    ("gh issue edit 3 --title x", [("issue/3", "update")]),
+    ("gh pr view 1", [("pr/1", "read")]),
+    ("gh label create bug", [("label/create", "create")]),
+    ("gh frob x", [("frob/x", "x")]),
+    # argocd --refresh patches the Application
+    ("argocd app get a --hard-refresh", [("app/a", "update")]),
+    ("argocd app get a", [("app/a", "read")]),
+    # cloud: ssh runs commands, export writes data out
+    ("gcloud compute ssh vm --zone us-east1-b", [("compute/instance/vm", "exec")]),
+    ("gcloud sql export sql db gs://b/f.sql", [("sql/instance/db", "export")]),
+    ("gcloud compute instances update web --clear-labels", [("compute/instance/web",
+                                                              "update")]),
+    ("az vm update -g rg -n vm1 --set x=y", [("compute/vm/vm1", "update")]),
+    ("aws ec2 modify-instance-attribute --instance-id i-1 --no-disable-api-termination",
+     [("ec2/instance-attribute/i-1", "update")]),
+    ("aws ec2 create-tags --resources i-1 --tags Key=a,Value=b", [("ec2/tag/*", "create")]),
+    ("kubectl annotate pod web a=b", [("pod/web", "annotate")]),
+    ("kubectl label pod web a=b", [("pod/web", "label")]),
+])
+def test_commands_that_change_something_are_never_read(command, targets):
+    got = [(i.resource, i.action) for i in from_argv(command.split())]
+    assert got[:len(targets)] == targets
+
+
+@pytest.mark.parametrize("command", [
+    "aws ec2 frobnicate-things", "helm frob x", "flux frob ks a", "argocd app frob a",
+    "az vm frob -n a -g b", "gcloud compute instances frob a",
+])
+def test_an_unknown_verb_is_refused(command):
+    with pytest.raises(ValueError):
+        from_argv(command.split())
+
+
+def test_kubectl_unknown_verb_keeps_its_name():
+    assert from_argv("kubectl frobnicate x".split())[0].action == "frobnicate"
+
+
+@pytest.mark.parametrize("rule,command", [
+    (_rule("git", "tag/v1", ["update"], {"force": True}), "git tag -f v1 HEAD"),
+    (_rule("git", "tag/v*", ["create"]), "git tag v1"),
+    (_rule("github", "release/*", ["update"]), "gh release edit v1 --draft=false"),
+])
+def test_rules_on_writes_that_were_reads_now_block(rule, command):
+    assert _verdict([rule], command) == "BLOCK"
