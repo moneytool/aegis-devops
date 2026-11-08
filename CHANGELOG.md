@@ -683,6 +683,24 @@ name). git verbs without an option table leave every param unresolved when given
   letters: a letter the command does not have is refused, as kubectl refuses it (`kubectl
   exec -A`, `kubectl create deployment -q` were read before), and a short word from `-test.`
   is ignored, as pflag ignores it (it was read as `-t -e st...`).
+- `kubectl expose deployment harmless --name=protected` creates the Service `protected`, but
+  only `deployment/harmless` was read. expose now also yields a Service create intent and
+  autoscale a HorizontalPodAutoscaler one (named by `--name` or after the source, in its
+  namespace; `--overrides` leaves every key unresolved), create token a ServiceAccount one,
+  and `gh pr merge --delete-branch` a delete of the head branch, marked, since the argv does
+  not name it.
+- `gh pr merge --merge --squash --squash=false` was read as a squash. gh's method now comes
+  from each flag's final value, and flags gh allows only one of (`--merge`/`--rebase`/
+  `--squash`, `--auto`/`--disable-auto`/`--admin`, repo create's visibility) are refused
+  together. helm `--atomic` and `--rollback-on-failure` leave `wait` unresolved, since they
+  turn waiting on.
+- `gcloud run deploy --args forbidden --args safe` kept only `safe`. Each gcloud flag's
+  argparse action is now read from the SDK and applied: UpdateAction keeps every value (and
+  refuses a repeated one), `append` keeps each, StoreOnceAction refuses a repeat, and a plain
+  store keeps the last (a repeated map flag was a list before).
+- `gcloud ... --accelerator type=nvidia-tesla-t4,count=01` kept `count` as `01`. ArgDict members
+  are now typed by the SDK's spec, on the rule side too, and a member the spec does not
+  declare, or a missing required one, is refused.
 
 ### Added
 - A `NOTICE` file at the repository root lists the third-party code and data in the package

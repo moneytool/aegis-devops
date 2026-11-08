@@ -1,4 +1,4 @@
-"""The sibling audit of review rounds 1-16 (docs/dev/parser-audit.md): one check per class
+"""The sibling audit of review rounds 1-17 (docs/dev/parser-audit.md): one check per class
 of finding and per tool where the class applies, so a fix that covers one tool and misses
 its siblings fails here. Each row is ``(class, tool, argv, check)``."""
 
@@ -371,6 +371,18 @@ AUDIT = [
     ("C1", "gh", "gh pr create -t Fix -b Desc", param("title", "Fix")),
     ("C1", "gh", "gh pr edit 42 -t Fix", param("title", "Fix")),
     ("C1", "helm", "helm pull bitnami/nginx -d /tmp", param("destination", "/tmp")),
+    # round 17
+    ("C37", "kubectl", "kubectl expose deployment harmless -n prod --port=80 --name=protected",
+     ("has", "service/protected", "create")),
+    ("C37", "kubectl", "kubectl autoscale deployment web -n prod --max=5",
+     ("has", "horizontalpodautoscaler/web", "create")),
+    ("C37", "gh", "gh pr merge 42 -s -d", ("has", "branch/*", "delete")),
+    ("C38", "gh", "gh pr merge 42 --merge --squash --squash=false", param("method", "merge")),
+    ("C38", "helm", "helm upgrade r ./c --atomic", unres("wait")),
+    ("C6", "gcloud", "gcloud run deploy s --region r --image i --args a --args b",
+     param("args", ["a", "b"])),
+    ("C27", "gcloud", "gcloud compute instances create vm --zone z "
+     "--accelerator type=t4,count=01", param("accelerator", {"type": "t4", "count": 1})),
 ]
 
 

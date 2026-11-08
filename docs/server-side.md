@@ -252,7 +252,9 @@ client decides on it too, for the objects behind a name as well (`kubectl exec d
 web --expose` against a `service/*` `run` rule; see
 [Kubernetes resource names](constraints.md#kubernetes-resource-names)). Commands the hook cannot
 parse are refused on the client, so they are not listed: `set env` and the other `set` subcommands
-except `set image`, `diff -f`, `proxy`.
+except `set image`, `diff -f`, `proxy`. Nor are `expose` and `autoscale` on a `create` rule for
+services or HorizontalPodAutoscalers: the client reads them as creating that object (the Service
+named by `--name` or after the source), so the rule holds there too.
 
 ### Guardrails
 
