@@ -292,9 +292,11 @@ def test_flux_create_export_is_the_rehearsal():
     ("argocd app set a --nameprefix -y", {"nameprefix": "-y"}),
 ])
 def test_argocd_flags_are_read_as_pflag_reads_them(command, params):
-    intent = from_argv(command.split())[0]
-    assert intent.resource == "app/a"
-    assert {k: v for k, v in intent.params.items() if k in params} == params
+    intents = from_argv(command.split())
+    assert intents[0].resource == "app/a"
+    # a selector is read onto the apps it picks (app/*), never the app named
+    got = {k: v for i in intents for k, v in i.params.items() if k in params}
+    assert got == params
 
 
 @pytest.mark.parametrize("command", [
@@ -2216,3 +2218,37 @@ def test_gh_issue_edit_selector_keeps_its_own_repository():
 def test_gh_refuses_argument_counts_gh_refuses(command):
     with pytest.raises(ValueError):
         from_argv(command.split())
+
+
+# --- review round 6 ------------------------------------------------------------------
+
+
+def test_argocd_create_from_a_file_has_unknown_targets():
+    # --file reads the Applications from a file or stdin; the name on the line is ignored
+    command = "argocd app create decoy --file - --upsert"
+    intent = from_argv(command.split())[0]
+    assert intent.resource == "app/*"
+    assert intent.params["resolved_at_runtime"] == {"from": "app/*", "kinds": ["app"]}
+    assert _verdict([_rule("argocd", "app/payments", ["create"])], command) == "ESCALATE"
+    rule = _rule("argocd", "app/*", ["create"], {"project": "prod", "sync_policy": "auto"})
+    # the file's fields are unknown; a flag given on the line overrides the file's
+    assert _verdict([rule], "argocd app create decoy -f a.yaml") == "ESCALATE"
+
+
+def test_argocd_project_selection_is_not_the_named_apps_project():
+    command = "argocd app sync payments --project dev"
+    named, picked = from_argv(command.split())
+    assert "project" not in named.metadata and "project" in named.params["unresolved_scope"]
+    assert picked.metadata["project"] == "dev"
+    rule = _rule("argocd", "app/payments", ["sync"], {"project": "prod"})
+    assert _verdict([rule], command) == "ESCALATE"
+
+
+def test_az_value_read_from_a_file_is_unresolved():
+    intent = from_argv("az vm update -g rg -n v --set @-".split())[0]
+    assert "set" in intent.params["unresolved_scope"]
+
+
+def test_kubectl_run_l_is_labels():
+    intent = from_argv("kubectl run web --image x -l app=web".split())[0]
+    assert intent.params["labels"] == "app=web" and "selector" not in intent.params

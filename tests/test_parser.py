@@ -1011,7 +1011,9 @@ def test_argocd_sync_with_a_project_also_syncs_every_app_in_it():
     intents = from_argocd_multi(
         ["argocd", "app", "sync", "prod-web", "--project", "platform", "--grpc-web"])
     assert [i.resource for i in intents] == ["app/prod-web", "app/*"]
-    assert all(i.metadata == {"project": "platform"} for i in intents)
+    # --project picks the added apps; the app named keeps its own (unknown) project
+    assert intents[0].metadata == {}
+    assert intents[1].metadata == {"project": "platform"}
     assert intents[1].params["resolved_at_runtime"] == {"from": "app/*", "kinds": ["app"]}
 
 
@@ -3318,11 +3320,8 @@ def test_a_category_keeps_its_own_mark_and_its_kinds_need_none():
     ("kubectl delete deploy web", "deployment/web"),
     ("kubectl delete deploy/web", "deployment/web"),
     ("kubectl get pod web", "pod/web"),
-    # kubectl refuses these (checked on kind): the name is all there is to decide on
-    ("kubectl delete deploy web -l a=b", "deployment/web"),
+    # kubectl refuses this (checked on kind): the name is all there is to decide on
     ("kubectl delete deploy/web --all", "deployment/web"),
-    ("kubectl get deploy/web -l a=b", "deployment/web"),
-    ("kubectl rollout restart deploy/web -l a=b", "deployment/web"),
     # --all with a name acts on the name only (checked on kind)
     ("kubectl label deploy/web a=b --all", "deployment/web"),
     ("kubectl scale deploy/web --replicas=1 --all", "deployment/web"),
@@ -3929,3 +3928,15 @@ def test_helm_a_takes_a_value_on_template_only():
 def test_refused_helm_and_flux_short_words(argv):
     with pytest.raises(ValueError):
         from_argv(argv.split())
+
+
+@pytest.mark.parametrize("command", [
+    # a name and a selector: kubectl refuses them (kubectl 1.36: "selectors and the all
+    # flag cannot be used when passing resource/name arguments"), and so does the parser
+    "kubectl delete deploy web -l a=b",
+    "kubectl get deploy/web -l a=b",
+    "kubectl rollout restart deploy/web -l a=b",
+])
+def test_a_name_with_a_selector_is_refused(command):
+    with pytest.raises(ValueError):
+        from_argv(command.split())

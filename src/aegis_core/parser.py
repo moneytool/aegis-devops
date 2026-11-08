@@ -382,6 +382,8 @@ def _kubectl_short_name(letter: str, verb: str | None, replicas: bool) -> str | 
         return "replicas" if replicas else None  # create deployment -r
     if letter == "i":
         return "interactive" if verb == "delete" else "stdin"
+    if letter == "l" and verb in ("run", "expose"):
+        return "labels"  # the new object's labels, not a selector
     return _KUBECTL_SHORT_NAMES.get(letter)
 
 # kubectl verbs whose short "-f" is the boolean --follow, not --filename.
@@ -1160,6 +1162,23 @@ def _default_kind_targets(positional: list[str], kind: str) -> list[str]:
 
 
 def from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
+    """Parses a kubectl invocation (see :func:`_from_kubectl_impersonating`). A selector beside
+    names kubectl refuses ("name cannot be provided when a selector is specified", checked
+    on kubectl 1.36), and so does the parser: the selector's scope is never read as the
+    named objects'."""
+    intents = _from_kubectl_impersonating(argv)
+    for intent in intents:
+        if (intent.params.get("selector") is not None
+                and intent.action not in ("run", "expose", "create", "taint")
+                and not intent.resource.endswith("/*")
+                and not intent.resource.startswith("manifest/")
+                and "resolved_at_runtime" not in intent.params):
+            raise ValueError(f"kubectl: a name and a selector together, which kubectl "
+                             f"refuses: {argv!r}")
+    return intents
+
+
+def _from_kubectl_impersonating(argv: list[str]) -> list[InfrastructureIntent]:
     """Parses a kubectl invocation into one InfrastructureIntent per target
     resource (kubectl commands may name more than one, e.g.
     ``kubectl delete pod/a pod/b``).
@@ -2742,7 +2761,11 @@ def _parse_az_tokens(
             positional.append(tok)
         i += 1
 
-    # az reads an argument value "@path" from that file (knack's argument preprocessing):
+    # az reads an argument value "@path" from that file (knack's argument preprocessing),
+    # "@-" from stdin: any other option read that way is unresolved
+    for key, value in list(params.items()):
+        if isinstance(value, str) and value.startswith("@"):
+            _mark_unresolved(params, key)
     # the target or its scope would then be a file nobody read
     for value in (name_value, *ids_values, metadata.get("region"),
                   metadata.get("location_display_name"), metadata.get("resource_group"),
@@ -4291,8 +4314,23 @@ def _from_argocd_multi(argv: list[str]) -> list[InfrastructureIntent]:
             raise ValueError(f"could not find an argocd app name in: {argv!r}")
         apps = [positional[0]]
 
+    if subverb == "create" and params.get("file") is not None:
+        # --file reads the Applications (one or more) from a file, a URL or stdin, and
+        # the name on the line is ignored: which apps, in which project and namespace,
+        # only argocd knows when it reads them
+        params["resolved_at_runtime"] = {"from": "app/*", "kinds": ["app"]}
+        params["unresolved_scope"] = [*params.get("unresolved_scope", []), "*"]
+        apps = ["*"]
+    # A selector or a project adds the apps it picks; it says nothing about the apps named,
+    # whose project stays unknown (it is the app's own) and which no selector picked.
+    named_params, named_metadata = dict(params), dict(metadata)
+    if picked:
+        for key in ("selector", "projects"):
+            named_params.pop(key, None)
+        if subverb == "sync":
+            named_metadata.pop("project", None)
     intents = [InfrastructureIntent(resource=f"app/{app}", action=action, provider="argocd",
-                                    params=dict(params), metadata=dict(metadata))
+                                    params=dict(named_params), metadata=dict(named_metadata))
                for app in apps]
     intents.extend(
         InfrastructureIntent(resource="app/*", action=action, provider="argocd",
