@@ -739,7 +739,10 @@ name). git verbs without an option table leave every param unresolved when given
   value as `[secret]`); gsutil's `-h` headers (`x-goog-meta-*` as `metadata.*`), `-u` and `-i`
   are recorded and `-o` leaves every key unresolved; gcloud `--impersonate-service-account`
   and gsutil `-i` are an impersonate intent on the service account. A test checks every flag
-  of every generated table.
+  of every generated table, on every command of the gh, az, aws and gcloud tables (over 230,000
+  flag uses); it found az options that are another command's `-n`, `-g` or `-l` (`--service-name`)
+  read as the name but not kept under their own names, and aws s3control `--bucket`, hidden
+  aliases and autoscaling `--auto-scaling-group-name` not kept; all are now.
 - aws `modify-instance-attribute --instance-id i-1` was recorded under `instance-ids`; each flag
   now keeps its own name.
 - aws `modify-instance-attribute --disable-api-termination` was refused: aws-cli turns that

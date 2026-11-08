@@ -423,6 +423,9 @@ _NO_EFFECT_FLAGS: dict[str, dict[str, str]] = {
         "redis-compress": "compression of the cache it reads",
         "prompts-enabled": "whether it asks before acting (the command line decides anyway)",
     },
+    "gh": {
+        "help": "prints the usage; the command does not run",
+    },
     "aws": {
         "output": "how the result is printed", "query": "which part of the result is printed",
         "color": "colour of the output", "no-cli-pager": "paging of the output",
@@ -2819,6 +2822,7 @@ def _parse_aws_tokens(
     multi_ids: list[str] | None = None
     abbreviations: list[tuple[str, list[str]]] = []
     id_flag: str | None = None  # the full flag that gave id_value
+    aliases_used: dict[str, str] = {}  # hidden alias -> the argument it copies
 
     i = 0
     n = len(tokens)
@@ -2838,7 +2842,9 @@ def _parse_aws_tokens(
                 key = _aws_option_name(spec, key)
                 arity = spec["o"][key]
                 # a hidden alias (argrename.HIDDEN_ALIASES) is the argument it copies
-                key = spec.get("al", {}).get(key, key)
+                if key in spec.get("al", {}):
+                    aliases_used[key] = spec["al"][key]
+                    key = spec["al"][key]
             if key in ("cli-input-json", "cli-input-yaml") and spelled != key:
                 # argparse takes the abbreviation, but aws reads the input by its full name
                 # before argparse, so the input is never used (run on aws 2.37)
@@ -3011,6 +3017,9 @@ def _parse_aws_tokens(
             positional.append(tok)
         i += 1
 
+    for alias, kept in aliases_used.items():  # every name of the argument holds its value
+        if kept in params:
+            params[alias] = params[kept]
     return metadata, params, positional, id_value, multi_ids, abbreviations, id_flag
 
 
@@ -3106,10 +3115,10 @@ def _from_aws_s3_alias(
     params["raw_action"] = operation
     params["raw_service"] = service
     key = params.pop("key", None)
+    if id_value is not None:
+        params["bucket"] = id_value  # --bucket, a param too (a rule on bucket)
     if service == "s3api":
         bucket = id_value or "*"
-        if id_value is not None:
-            params["bucket"] = id_value  # the flag is a param too (a rule on bucket)
         if key is not None:
             params["key"] = key
             resource = f"s3/object/{bucket}/{key}"
@@ -3348,6 +3357,8 @@ def _from_aws_operation(
         params["raw_action"] = operation
         if "desired-capacity" in params:
             params["desired_capacity"] = params.pop("desired-capacity")
+        if id_value is not None and id_flag:
+            params[id_flag] = id_value  # the flag that named the group, under its name
         resource = _aws_resource("autoscaling", "auto-scaling-group", id_value)
         return [
             InfrastructureIntent(
@@ -3826,11 +3837,16 @@ def _parse_az_tokens(
                                          f"knows on this command; write its long option: "
                                          f"{tokens!r}")
                     key = aliases.get(key) or _AZ_GLOBAL_SHORTS[key]
+                role_of = key if roles.get(key, key) != key else None
                 key = roles.get(key, key)
+            else:
+                role_of = None
             if key in ("l", "location"):
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
+                if role_of:
+                    params[role_of] = val  # --x-location is also a param under its name
                 if " " in val:
                     # a display name ("East US"): az looks up the location it names in the
                     # subscription's list when it runs (core commands/parameters.py)
@@ -3855,10 +3871,14 @@ def _parse_az_tokens(
                     i += 1
                     val = _value_at(tokens, i, tok)
                 metadata["resource_group"] = val
+                if role_of:
+                    params[role_of] = val  # --resource-group-name is also a param
             elif key in ("n", "name"):
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
+                if role_of:
+                    params[role_of] = val  # --service-name, the -n here, is also a param
                 name_value = val
                 params["name"] = val  # also a param: a rule on name meets it
             elif nargs is not None and key in nargs and key not in ("ids",):
