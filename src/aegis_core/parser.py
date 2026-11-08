@@ -1639,6 +1639,9 @@ _AWS_TARGET_FLAGS = {
 
 _AWS_TARGET_FLAG_NAMES = frozenset(_AWS_TARGET_FLAGS.values()) - _AWS_SINGLE_ID_FLAGS
 
+# Every flag that names a target, which an abbreviation can stand for.
+_AWS_ID_FLAG_NAMES = _AWS_SINGLE_ID_FLAGS | _AWS_TARGET_FLAG_NAMES | {"instance-ids"}
+
 _AWS_S3_VERB_MAP = {
     "rm": "delete",
     "rb": "delete",
@@ -1649,22 +1652,66 @@ _AWS_S3_VERB_MAP = {
     "mb": "create",
 }
 
+# The aws CLI's global options (aws-cli 2.37 awscli/data/cli.json), with whether each takes
+# a value. argparse reads them first, over the whole line, and takes any unambiguous
+# prefix of one, so "--reg us-west-2" is the region wherever it is (checked by running
+# aws 2.37 against a closed local port).
+_AWS_GLOBAL_OPTIONS = {
+    "debug": False, "endpoint-url": True, "no-verify-ssl": False, "no-paginate": False,
+    "output": True, "query": True, "profile": True, "region": True, "version": False,
+    "color": True, "no-sign-request": False, "ca-bundle": True, "cli-read-timeout": True,
+    "cli-connect-timeout": True, "cli-binary-format": True, "no-cli-pager": False,
+    "cli-auto-prompt": False, "no-cli-auto-prompt": False, "cli-error-format": True,
+}
+
+# The options of "aws s3 cp/mv/rm/sync/..." that take no value (awscli/customizations/s3
+# subcommands.py and syncstrategy). --grants takes one or more words, --tags two, and the
+# rest one each. --dryrun is that command's rehearsal.
+_AWS_S3_BOOL_FLAGS = frozenset({
+    "recursive", "human-readable", "summarize", "dryrun", "quiet", "force", "follow-symlinks",
+    "no-follow-symlinks", "no-guess-mime-type", "only-show-errors", "no-progress",
+    "progress-multiline", "ignore-glacier-warnings", "force-glacier-transfer", "no-overwrite",
+    "delete", "exact-timestamps", "size-only", "validate-same-s3-paths",
+})
+
+
+def _aws_global_name(key: str) -> str | None:
+    """The global option ``--key`` names, as argparse finds it: the exact name or the one
+    global option it is a prefix of. None when it names none; ambiguous is refused."""
+    if key in _AWS_GLOBAL_OPTIONS:
+        return key
+    found = [name for name in _AWS_GLOBAL_OPTIONS if name.startswith(key)]
+    if len(found) > 1:
+        raise ValueError(f"aws: --{key} is ambiguous ({', '.join(found)}), and aws refuses it")
+    return found[0] if found else None
+
 
 def _parse_aws_tokens(
-    tokens: list[str],
-) -> tuple[dict[str, Any], dict[str, Any], list[str], str | None, list[str] | None]:
+    tokens: list[str], *, s3: bool = False,
+) -> tuple[dict[str, Any], dict[str, Any], list[str], str | None, list[str] | None,
+           list[tuple[str, list[str]]]]:
+    """``(metadata, params, positional, id, ids, abbreviations)``. ``s3`` reads the options
+    of the high-level ``aws s3`` commands. ``abbreviations`` are the ``(key, value)`` of
+    options the parser does not know whose name starts a target flag's: argparse takes an
+    unambiguous prefix of an operation's option too (``--role`` is ``--role-name`` on
+    ``iam delete-role``), so a missing target may be in one of them."""
     metadata: dict[str, Any] = {}
     params: dict[str, Any] = {}
     positional: list[str] = []
     id_value: str | None = None
     multi_ids: list[str] | None = None
+    abbreviations: list[tuple[str, list[str]]] = []
 
     i = 0
     n = len(tokens)
     while i < n:
         tok = tokens[i]
+        if tok == "--":
+            raise ValueError(f"aws: aws refuses the words after '--': {tokens!r}")
         if tok.startswith("-") and tok != "-":
             key, val = _split_flag(tok)
+            if tok.startswith("--"):
+                key = _aws_global_name(key) or key
             if key == "region":
                 if val is None:
                     i += 1
@@ -1675,30 +1722,56 @@ def _parse_aws_tokens(
                     i += 1
                     val = _value_at(tokens, i, tok)
                 metadata["profile"] = val
-            elif key == "dry-run":
+            elif key == "dry-run" or (s3 and key == "dryrun"):
                 _record_dry_run(params, _is_dry_run(val))
-            elif key == "no-dry-run":
+            elif key == "no-dry-run" or (len(key) >= 4 and "no-dry-run".startswith(key)):
+                # an unambiguous prefix of --no-dry-run is that option to argparse
                 params.pop("dry_run", None)  # explicitly a real run
+            elif key in _AWS_GLOBAL_OPTIONS:
+                if _AWS_GLOBAL_OPTIONS[key] and val is None:
+                    i += 1
+                    val = _value_at(tokens, i, tok)
+                if key in _AWS_BOOL_FLAGS:
+                    params[key] = _bool_param(val)
+                # the other globals are consumed, intentionally not recorded
+            elif s3 and key in _AWS_S3_BOOL_FLAGS:
+                params[key] = _bool_param(val)
+            elif s3 and val is None and key in ("grants", "tags"):
+                count = n if key == "grants" else 2
+                values: list[str] = []
+                while len(values) < count and i + 1 < n and not tokens[i + 1].startswith("-"):
+                    i += 1
+                    values.append(tokens[i])
+                params[key] = values
+            elif s3 and val is None:
+                # every other s3 option takes one word (--sse and --request-payer take the
+                # next one too, when it is not an option)
+                if i + 1 < n and not tokens[i + 1].startswith("-"):
+                    i += 1
+                    params[key] = tokens[i]
+                else:
+                    params[key] = True
             elif key in _AWS_BOOL_FLAGS:
                 params[key] = _bool_param(val)
-            elif key in _AWS_DISCARD_VALUE_FLAGS:
+            elif key in ("cli-input-json", "cli-input-yaml"):
+                # read before argparse, so only the full name counts (checked on aws 2.37)
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
-                # consumed, intentionally not recorded
-            elif key == "cli-input-json":
-                if val is None:
-                    i += 1
-                    val = _value_at(tokens, i, tok)
-                params["cli_input_json"] = val
-            elif key == "instance-ids":
+                params[key.replace("-", "_")] = val
+            elif key in ("instance-ids", "instance-id"):
+                # nargs "+": every word up to the next option; "--instance-id" is that
+                # option abbreviated on terminate-instances and others (checked on aws 2.37)
                 if val is not None:
-                    multi_ids = [val]
+                    ids = [val]
                 else:
-                    ids: list[str] = []
+                    ids = []
                     while i + 1 < n and not tokens[i + 1].startswith("-"):
                         i += 1
                         ids.append(tokens[i])
+                if key == "instance-id" and len(ids) == 1:
+                    id_value = ids[0]
+                else:
                     multi_ids = ids
             elif key in _AWS_TARGET_FLAG_NAMES:
                 # a resource name is a string, never coerced: "001", "123",
@@ -1712,18 +1785,31 @@ def _parse_aws_tokens(
                     i += 1
                     val = _value_at(tokens, i, tok)
                 id_value = val
-            elif val is not None:
-                params[key] = _coerce(val)
-            elif i + 1 < n and not tokens[i + 1].startswith("-"):
-                i += 1
-                params[key] = _coerce(tokens[i])
             else:
-                params[key] = True
+                if val is not None:
+                    params[key] = _coerce(val)
+                elif i + 1 < n and not tokens[i + 1].startswith("-"):
+                    # argparse never takes a word starting with "-" as a value
+                    i += 1
+                    val = tokens[i]
+                    params[key] = _coerce(val)
+                else:
+                    params[key] = True
+                if val is not None and "instance-ids".startswith(key):
+                    # a prefix of --instance-ids takes every word up to the next option
+                    values = [val]
+                    while i + 1 < n and not tokens[i + 1].startswith("-"):
+                        i += 1
+                        values.append(tokens[i])
+                    params[key] = values if len(values) > 1 else params[key]
+                    abbreviations.append((key, values))
+                elif val is not None and any(flag.startswith(key) for flag in _AWS_ID_FLAG_NAMES):
+                    abbreviations.append((key, [val]))
         else:
             positional.append(tok)
         i += 1
 
-    return metadata, params, positional, id_value, multi_ids
+    return metadata, params, positional, id_value, multi_ids, abbreviations
 
 
 def _aws_resource(service: str, kind: str, name: str | None) -> str:
@@ -1737,23 +1823,32 @@ def _from_aws_s3(
     params: dict[str, Any],
     argv: list[str],
 ) -> list[InfrastructureIntent]:
+    """One intent per ``s3://`` path: ``cp`` and ``sync`` write the destination (and the
+    source is kept as before), ``mv`` also deletes its source, and ``sync --delete``
+    deletes in the destination."""
     if operation not in _AWS_S3_VERB_MAP:
         raise ValueError(f"unsupported 'aws s3' subcommand: {argv!r}")
     action = _AWS_S3_VERB_MAP[operation]
-    uri = next((t for t in rest if t.startswith("s3://")), None)
-    if uri is None:
+    uris = [t for t in rest if t.startswith("s3://")]
+    if not uris:
         raise ValueError(f"could not find an s3:// target in: {argv!r}")
-    bucket, _, key = uri[len("s3://") :].partition("/")
-    params = dict(params)
-    params["raw_action"] = f"s3-{operation}"
-    if key:
-        params["key"] = key
-    resource = f"s3/bucket/{bucket}"
-    return [
-        InfrastructureIntent(
-            resource=resource, action=action, provider="aws", params=params, metadata=metadata
-        )
-    ]
+    params = {**params, "raw_action": f"s3-{operation}"}
+    intents: list[InfrastructureIntent] = []
+
+    def add(uri: str, action: str) -> None:
+        bucket, _, key = uri[len("s3://") :].partition("/")
+        intent_params = {**params, "key": key} if key else dict(params)
+        intents.append(InfrastructureIntent(resource=f"s3/bucket/{bucket}", action=action,
+                                            provider="aws", params=intent_params,
+                                            metadata=dict(metadata)))
+
+    for uri in uris:
+        add(uri, action)
+    if operation == "mv" and rest and rest[0].startswith("s3://"):
+        add(rest[0], "delete")
+    if operation == "sync" and params.get("delete") is True and rest[-1:] == uris[-1:]:
+        add(uris[-1], "delete")
+    return intents
 
 
 _IAM_PRIVILEGE_OPERATIONS = {
@@ -1817,14 +1912,36 @@ def _from_aws_s3_alias(
     ]
 
 
+def _aws_abbreviated_target(
+    abbreviations: list[tuple[str, list[str]]], target_flag: str | None,
+) -> tuple[str | None, list[str]] | None:
+    """``(flag, names)`` for a target the command names only through an abbreviated flag:
+    argparse reads ``--role x`` as ``--role-name x`` on ``iam delete-role`` and ``--instance
+    i-1 i-2`` as ``--instance-ids`` (checked on aws 2.37). Which option such a prefix
+    stands for depends on the operation's other options, which the parser does not have,
+    so this is used only where no full flag names the target: a name in place of ``*``
+    can only make a rule on one name match."""
+    for key, values in abbreviations:
+        if target_flag and target_flag.startswith(key):
+            return target_flag, values[:1]
+        if "instance-ids".startswith(key) or any(flag.startswith(key)
+                                                 for flag in _AWS_SINGLE_ID_FLAGS):
+            return None, values
+    return None
+
+
 def from_aws_multi(argv: list[str]) -> list[InfrastructureIntent]:
     """Parses an ``aws`` CLI invocation into one InfrastructureIntent per
-    target resource (``--instance-ids`` may name more than one)."""
+    target resource (``--instance-ids`` may name more than one).
+
+    With ``--cli-input-json`` or ``--cli-input-yaml`` and no flag naming the target, the
+    target is in that input, which is not read: the intent is marked
+    ``resolved_at_runtime``, so a rule on one name escalates."""
     if not argv or _basename(argv[0]) != "aws":
         raise ValueError(f"not a recognizable aws invocation: {argv!r}")
 
     tokens = argv[1:]
-    metadata, params, positional, id_value, multi_ids = _parse_aws_tokens(tokens)
+    metadata, params, positional, id_value, multi_ids, abbreviations = _parse_aws_tokens(tokens)
 
     if len(positional) < 2:
         raise ValueError(f"could not determine an aws service/operation in: {argv!r}")
@@ -1832,10 +1949,20 @@ def from_aws_multi(argv: list[str]) -> list[InfrastructureIntent]:
     service, operation, *rest = positional
 
     if service == "s3":
+        if operation in _AWS_S3_VERB_MAP:
+            # read again with the s3 commands' own options (--recursive takes no value)
+            metadata, params, positional, *_ = _parse_aws_tokens(tokens, s3=True)
+            service, operation, *rest = positional
         return _from_aws_s3(operation, rest, metadata, params, argv)
 
+    from_input = "cli_input_json" in params or "cli_input_yaml" in params
     if service in ("s3api", "s3control"):
-        return _from_aws_s3_alias(service, operation, metadata, params, id_value)
+        if id_value is None:
+            found = _aws_abbreviated_target(abbreviations, None)
+            if found:
+                id_value = found[1][0]
+        intents = _from_aws_s3_alias(service, operation, metadata, params, id_value)
+        return _mark_aws_input_targets(intents) if from_input else intents
 
     if service == "autoscaling" and operation == "set-desired-capacity":
         params = dict(params)
@@ -1872,6 +1999,18 @@ def from_aws_multi(argv: list[str]) -> list[InfrastructureIntent]:
         params["privilege"] = True
 
     target_flag = _AWS_TARGET_FLAGS.get((service, kind))
+    if target_flag and not multi_ids and not isinstance(params.get(target_flag), str):
+        # "--nodegroup ng-1" beside "--cluster-name c": the target's own flag, abbreviated
+        found = _aws_abbreviated_target(abbreviations, target_flag)
+        if found and found[0] is not None:
+            params[target_flag] = found[1][0]
+    named = (multi_ids or id_value is not None
+             or (target_flag is not None and isinstance(params.get(target_flag), str)))
+    if not named:
+        found = _aws_abbreviated_target(abbreviations, None)
+        if found:
+            multi_ids = found[1] if len(found[1]) > 1 else None
+            id_value = found[1][0]
     if not multi_ids and target_flag and isinstance(params.get(target_flag), str):
         # the target's own flag wins; a parent id taken from a generic flag
         # (--cluster, --cluster-name) is kept as a parameter
@@ -1880,12 +2019,22 @@ def from_aws_multi(argv: list[str]) -> list[InfrastructureIntent]:
         id_value = params[target_flag]
     names = multi_ids if multi_ids else [id_value]
     resources = [_aws_resource(service, kind, n) for n in names]
-    return [
+    intents = [
         InfrastructureIntent(
             resource=r, action=action, provider="aws", params=dict(params), metadata=dict(metadata)
         )
         for r in resources
     ]
+    return _mark_aws_input_targets(intents) if from_input else intents
+
+
+def _mark_aws_input_targets(intents: list[InfrastructureIntent]) -> list[InfrastructureIntent]:
+    """Marks the intents whose name is ``*`` because the target is in --cli-input-json."""
+    for intent in intents:
+        if intent.resource.endswith("/*"):
+            intent.params["resolved_at_runtime"] = {"from": intent.resource,
+                                                    "kinds": [intent.resource[:-2]]}
+    return intents
 
 
 def from_aws(argv: list[str]) -> InfrastructureIntent:

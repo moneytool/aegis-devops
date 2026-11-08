@@ -448,3 +448,110 @@ def test_git_branch_delete_of_two_meets_a_rule_on_the_second():
 def test_git_refuses_what_git_refuses(command):
     with pytest.raises(ValueError):
         from_argv(command.split())
+
+
+# --- aws -----------------------------------------------------------------------------
+# Each spelling below was run with aws-cli 2.37 against a closed local port, with fake
+# keys, and the request it built (operation, parameters, region) was read from --debug.
+
+
+@pytest.mark.parametrize("command,resources,region", [
+    # argparse reads the global options first and takes a prefix of one
+    ("aws ec2 terminate-instances --instance-ids i-1 --regio us-west-1",
+     ["ec2/instance/i-1"], "us-west-1"),
+    ("aws --reg us-west-2 ec2 terminate-instances --instance-ids i-1",
+     ["ec2/instance/i-1"], "us-west-2"),
+    ("aws s3 rm s3://bucket-a/x --re us-west-2", ["s3/bucket/bucket-a"], "us-west-2"),
+    # and a prefix of an operation's option, here the one that names the target
+    ("aws ec2 terminate-instances --instance-id i-1 i-2",
+     ["ec2/instance/i-1", "ec2/instance/i-2"], None),
+    ("aws ec2 terminate-instances --instance i-1 i-2",
+     ["ec2/instance/i-1", "ec2/instance/i-2"], None),
+    ("aws iam delete-role --role prod-admin", ["iam/role/prod-admin"], None),
+    ("aws lambda delete-function --function prod-fn", ["lambda/function/prod-fn"], None),
+    ("aws ec2 delete-volume --vol vol-1", ["ec2/volume/vol-1"], None),
+    ("aws s3api delete-bucket --buck prod-b", ["s3/bucket/prod-b"], None),
+    ("aws eks delete-nodegroup --cluster-name c --nodegroup ng-1", ["eks/nodegroup/ng-1"],
+     None),
+    # a full flag that names the target wins over a prefix of another
+    ("aws lambda create-function --function-name f --role arn:r --runtime python3.12",
+     ["lambda/function/f"], None),
+])
+def test_aws_reads_prefixes_as_argparse_does(command, resources, region):
+    intents = from_argv(command.split())
+    assert [i.resource for i in intents] == resources
+    assert all(i.metadata.get("region") == region for i in intents)
+
+
+@pytest.mark.parametrize("command,verdict", [
+    ("aws ec2 terminate-instances --instance-ids i-1 --regio us-west-1", "BLOCK"),
+    ("aws ec2 terminate-instances --instance-ids i-1 --region us-east-1", "ALLOW"),
+    ("aws --reg us-west-1 ec2 terminate-instances --instance-ids i-1", "BLOCK"),
+])
+def test_an_aws_region_rule_holds_on_an_abbreviated_region(command, verdict):
+    rule = _rule("aws", "ec2/instance/*", ["delete"], {"region": "us-west-1"})
+    assert _verdict([rule], command) == verdict
+
+
+@pytest.mark.parametrize("command", [
+    "aws ec2 terminate-instances --instance-id prod-1 i-2",
+    "aws ec2 terminate-instances --instance i-2 prod-1",
+])
+def test_an_abbreviated_instance_list_meets_a_rule_on_each(command):
+    assert _verdict([_rule("aws", "ec2/instance/prod-1", ["delete"])], command) == "BLOCK"
+
+
+@pytest.mark.parametrize("command,dry_run", [
+    ("aws ec2 terminate-instances --instance-ids i-1 --dry-run --no-d", False),
+    ("aws ec2 terminate-instances --instance-ids i-1 --dry-run --no-dry", False),
+    ("aws ec2 terminate-instances --instance-ids i-1 --dry-run", True),
+    ("aws s3 rm s3://bucket-a/x --dryrun", True),
+])
+def test_aws_rehearsals(command, dry_run):
+    assert from_argv(command.split())[0].params.get("dry_run", False) is dry_run
+
+
+@pytest.mark.parametrize("command,targets", [
+    # the s3 commands' own options: --recursive takes no value
+    ("aws s3 rm --recursive s3://bucket-a", [("s3/bucket/bucket-a", "delete")]),
+    ("aws s3 cp --recursive ./d s3://bucket-b/", [("s3/bucket/bucket-b", "put")]),
+    # every s3 path: cp writes the destination, mv also deletes its source
+    ("aws s3 cp s3://bucket-a/x s3://bucket-b/x",
+     [("s3/bucket/bucket-a", "put"), ("s3/bucket/bucket-b", "put")]),
+    ("aws s3 mv s3://bucket-a/x s3://bucket-b/x",
+     [("s3/bucket/bucket-a", "put"), ("s3/bucket/bucket-b", "put"),
+      ("s3/bucket/bucket-a", "delete")]),
+    ("aws s3 sync ./d s3://bucket-b --delete",
+     [("s3/bucket/bucket-b", "put"), ("s3/bucket/bucket-b", "delete")]),
+])
+def test_aws_s3_reads_every_path(command, targets):
+    assert [(i.resource, i.action) for i in from_argv(command.split())] == targets
+
+
+def test_aws_s3_copy_meets_a_rule_on_the_destination():
+    rule = _rule("aws", "s3/bucket/prod", ["put"])
+    assert _verdict([rule], "aws s3 cp s3://staging/x s3://prod/x") == "BLOCK"
+    assert _verdict([_rule("aws", "s3/bucket/staging", ["delete"])],
+                    "aws s3 mv s3://staging/x s3://prod/x") == "BLOCK"
+
+
+def test_aws_cli_input_json_target_is_unknown():
+    command = ["aws", "ec2", "terminate-instances", "--cli-input-json",
+               '{"InstanceIds":["i-9"]}']
+    intent = from_argv(command)[0]
+    assert intent.resource == "ec2/instance/*"
+    assert intent.params["resolved_at_runtime"] == {"from": "ec2/instance/*",
+                                                    "kinds": ["ec2/instance"]}
+    assert _verdict([_rule("aws", "ec2/instance/i-9", ["delete"])], command) == "ESCALATE"
+    # a flag that names the target wins over the input, as in aws
+    named = command[:3] + ["--instance-ids", "i-1"] + command[3:]
+    assert _verdict([_rule("aws", "ec2/instance/i-9", ["delete"])], named) == "ALLOW"
+
+
+@pytest.mark.parametrize("command", [
+    "aws ec2 terminate-instances --instance-ids i-1 --no",  # ambiguous global prefix
+    "aws ec2 terminate-instances --instance-ids i-1 -- i-2",  # aws refuses words after --
+])
+def test_aws_refuses_what_aws_refuses(command):
+    with pytest.raises(ValueError):
+        from_argv(command.split())
