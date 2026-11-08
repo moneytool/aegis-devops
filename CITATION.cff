@@ -18,6 +18,9 @@ identifiers:
     value: "10.5281/zenodo.22950337"
     description: "Concept DOI: all versions, resolves to the latest."
   - type: doi
+    value: "10.5281/zenodo.24054496"
+    description: "v1.4.0 (every parser reads a command as its tool does, or refuses it)"
+  - type: doi
     value: "10.5281/zenodo.24046401"
     description: "v1.3.4 (kubectl, helm and flux flag spellings read as the tools read them)"
   - type: doi
