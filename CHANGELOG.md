@@ -700,7 +700,9 @@ name). git verbs without an option table leave every param unresolved when given
   store keeps the last (a repeated map flag was a list before).
 - `gcloud ... --accelerator type=nvidia-tesla-t4,count=01` kept `count` as `01`. ArgDict members
   are now typed by the SDK's spec, on the rule side too, and a member the spec does not
-  declare, or a missing required one, is refused.
+  declare, or a missing required one, is refused. Where the spec is not read statically
+  (`container clusters create --addons`, `update --update-addons`), the flag and every member
+  are unresolved.
 
 ### Added
 - A `NOTICE` file at the repository root lists the third-party code and data in the package

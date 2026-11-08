@@ -4128,8 +4128,16 @@ def _gcloud_dict_members(params: dict[str, Any], key: str, value: dict[str, Any]
     (``value_types`` under ``<flag>.<member>``). With a spec, a member it does not declare,
     a missing required key, or a key with no value where the spec does not allow one is
     refused, as gcloud refuses it. A member whose type is not read statically (or a list
-    inside the map) is unresolved; a spec that is not read statically leaves the members as
-    text."""
+    inside the map) is unresolved; with a spec that is not read statically, the members are
+    recorded and the flag and every member are unresolved."""
+    if spec == "unresolved":
+        # a spec the SDK builds in a way not read statically: the members are recorded, but
+        # what type each has is not known, so the map and every member are unresolved
+        _mark_unresolved(params, key)
+        _mark_unresolved(params, f"{key}.*")
+        for member in value:  # a recorded member is unresolved too (".*" spares those)
+            _mark_unresolved(params, f"{key}.{member}")
+        return value
     if not isinstance(spec, dict):
         return value
     members = spec.get("members", {})

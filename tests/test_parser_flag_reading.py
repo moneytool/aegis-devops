@@ -3834,3 +3834,20 @@ def test_gcloud_argdict_member_outside_the_spec_is_refused():
     with pytest.raises(ValueError):
         from_argv("gcloud compute instances create vm --zone z --accelerator type=t4,bogus=1"
                   .split())
+
+
+@pytest.mark.parametrize("command,key", [
+    # their ArgDict spec is built in a way not read statically: the type of each member is
+    # not known, so the flag and every member are unresolved
+    ("gcloud container clusters create c --region r --addons HttpLoadBalancing=ENABLED",
+     "addons"),
+    ("gcloud container clusters update c --region r --update-addons HttpLoadBalancing=DISABLED",
+     "update-addons"),
+])
+def test_gcloud_argdict_with_an_unread_spec_is_unresolved(command, key):
+    intent = from_argv(command.split())[0]
+    assert intent.params[key]
+    assert {key, f"{key}.*"} <= set(intent.params["unresolved_scope"])
+    rule = _rule("gcp", "container/cluster/*", ["create", "update"],
+                 {f"{key}.HttpLoadBalancing": "x"})
+    assert _verdict([rule], command) == "ESCALATE"
