@@ -1837,6 +1837,8 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
             basename = manifest if manifest == "-" else Path(manifest).name
             with_file = {**params, "file": manifest, "manifest_not_inspected": True}
             intents.extend(_make_intents([f"manifest/{basename}"], verb, with_file, metadata))
+        if verb == "apply" and params.get("prune") is True:
+            intents.extend(_kubectl_prune_intents(argv, params, metadata))
         return intents
 
     if verb == "rollout":
@@ -2015,6 +2017,45 @@ def _kubectl_created_objects(
                     resource=f"serviceaccount/{name}", action="create", provider="kubernetes",
                     params={**params, "subresource": "token"}, metadata=dict(metadata)))
     return out
+
+
+# The kinds kubectl apply --prune considers when no --prune-allowlist is given (kubectl
+# 1.36 util/prune GetRESTMappings: the default namespaced and cluster-scoped resources).
+_KUBECTL_PRUNE_DEFAULT_KINDS = (
+    "configmap", "endpoints", "namespace", "persistentvolumeclaim", "persistentvolume", "pod",
+    "replicationcontroller", "secret", "service", "job", "cronjob", "ingress", "daemonset",
+    "deployment", "replicaset", "statefulset",
+)
+
+
+def _kubectl_prune_intents(argv: list[str], params: dict[str, Any],
+                           metadata: dict[str, Any]) -> list[InfrastructureIntent]:
+    """``kubectl apply --prune`` also deletes every object it applied before that matches
+    the selector (``-l``, or ``--all``) and is not in the manifest, of the
+    ``--prune-allowlist`` kinds (or kubectl's default ones), in the namespaces of the
+    objects applied. The manifest is not read: one ``kind/*`` delete per kind, marked, with
+    its namespace unresolved, so a delete rule on any object of those kinds escalates.
+    ``--applyset`` prunes the members of an ApplySet, of any kind the set has recorded,
+    which only the cluster knows: refused. kubectl refuses --prune without -l or --all."""
+    if params.get("applyset") is not None:
+        raise ValueError(f"kubectl apply --prune --applyset deletes the ApplySet's other "
+                         f"members, which only the cluster knows: {argv!r}")
+    if params.get("selector") is None and params.get("all") is not True:
+        raise ValueError(f"kubectl apply --prune needs -l or --all, and kubectl refuses it "
+                         f"otherwise: {argv!r}")
+    allowlist = params.get("prune-allowlist")
+    entries = allowlist if isinstance(allowlist, list) else [allowlist] if allowlist else []
+    kinds = [_split_resource_token(f"{entry.rsplit('/', 1)[-1].lower()}/x")[0]
+             for entry in entries] or list(_KUBECTL_PRUNE_DEFAULT_KINDS)
+    pruned = {k: v for k, v in params.items()
+              if k not in ("file", "manifest_not_inspected", "prune")}
+    pruned["pruned_by"] = "apply"
+    where = {k: v for k, v in metadata.items() if k not in ("namespace", "all_namespaces")}
+    intents = [InfrastructureIntent(resource=f"{kind}/*", action="delete",
+                                    provider="kubernetes", params=dict(pruned),
+                                    metadata=dict(where))
+               for kind in dict.fromkeys(kinds)]
+    return _mark_open_targets(intents)
 
 
 def _namespace_cascade_intents(
@@ -3757,29 +3798,24 @@ def _az_roles(aliases: dict[str, str]) -> dict[str, str]:
     return roles
 
 
-def _az_generic_update(params: dict[str, Any], tokens: list[str]) -> None:
+def _az_reads_file(word: Any) -> bool:
+    """Whether az reads this argument value from a file (or stdin) when it runs. az splits
+    each value at its first ``=`` and loads an ``@file`` on the right as well as a whole
+    ``@file`` (azure-cli core commands/__init__.py), so ``env=@.git`` reads ``.git``. Every
+    spelling of an option reaches this one check: ``--tags=@f`` gives the value ``@f``."""
+    if not isinstance(word, str):
+        return False
+    return word.startswith("@") or word.partition("=")[2].startswith("@")
+
+
+def _az_generic_update(params: dict[str, Any], ops: list[tuple[str, list[str]]]) -> None:
     """az's generic update (azure-cli core commands/arm.py): after the typed arguments,
     each ``--set path=value``, ``--add path value...`` and ``--remove path [index]`` changes
-    the resource's properties, in the order given. A path into the tags (``tags.env``)
-    is the ``--tags`` map's key: --set writes it, --remove deletes it. Any other path, a
-    list index, or --add (whose value az parses its own way) names a property the parser
-    cannot map to a recorded key with certainty: that key and every key under it are
-    unresolved."""
-    ops: list[tuple[str, list[str]]] = []
-    i = 0
-    while i < len(tokens):
-        word = tokens[i]
-        name = word[2:].partition("=")[0] if word.startswith("--") else None
-        if name in ("set", "add", "remove"):
-            values = [word.partition("=")[2]] if "=" in word else []
-            while not values or (i + 1 < len(tokens) and not _aws_option_like(tokens[i + 1])
-                                 and "=" not in word):
-                if i + 1 >= len(tokens) or _aws_option_like(tokens[i + 1]):
-                    break
-                i += 1
-                values.append(tokens[i])
-            ops.append((name, values))
-        i += 1
+    the resource's properties, in the order given (``ops``: the operations the parser read,
+    each option as argparse resolved it). A path into the tags (``tags.env``) is the
+    ``--tags`` map's key: --set writes it, --remove deletes it. Any other path, a list
+    index, or --add (whose value az parses its own way) names a property the parser cannot
+    map to a recorded key with certainty: that key and every key under it are unresolved."""
     for op, values in ops:
         if not values:
             continue
@@ -3787,7 +3823,13 @@ def _az_generic_update(params: dict[str, Any], tokens: list[str]) -> None:
             for item in values:
                 path, sep, value = item.partition("=")
                 head, dot, rest = path.partition(".")
-                if (head == "tags" and dot and rest and "[" not in path and sep
+                if _az_reads_file(item):
+                    # the value is a file's: the property and its keys are unknown
+                    root = path.split(".")[0].split("[")[0]
+                    _mark_unresolved(params, root)
+                    _mark_unresolved(params, f"{root}.*")
+                    _mark_unresolved(params, path)
+                elif (head == "tags" and dot and rest and "[" not in path and sep
                         and isinstance(params.get("tags"), dict)):
                     params["tags"][rest] = value
                 elif head == "tags" and dot and rest and "[" not in path and sep:
@@ -3880,6 +3922,7 @@ def _parse_az_tokens(
     spelled."""
     roles = _az_roles(aliases) if aliases is not None else None
     long_aliases = long_aliases or {}
+    generic_ops: list[tuple[str, list[str]]] = []
     metadata: dict[str, Any] = {}
     params: dict[str, Any] = {}
     positional: list[str] = []
@@ -3984,6 +4027,10 @@ def _parse_az_tokens(
                         if isinstance(params.get(key), list) else values
                 else:
                     params[key] = values
+                if key in ("set", "add", "remove"):
+                    # the generic update's operations, as argparse resolved them (an
+                    # abbreviation such as --se included), in the order given
+                    generic_ops.append((key, values))
             elif key in ("what-if", "dry-run"):
                 _record_dry_run(params, _is_dry_run(val))
             elif key in _AZ_BOOL_FLAGS:
@@ -4020,18 +4067,18 @@ def _parse_az_tokens(
     from_file: set[str] = set()
     for key, value in list(params.items()):
         words = value if isinstance(value, list) else [value]
-        if any(isinstance(w, str) and w.startswith("@") for w in words):
+        if any(_az_reads_file(w) for w in words):
             from_file.add(key)
             _mark_unresolved(params, key)
             _mark_unresolved(params, f"{key}.*")
     if nargs is not None:
         _az_convert(params, nargs, tokens, skip=from_file)
-    _az_generic_update(params, tokens)
+    _az_generic_update(params, generic_ops)
     # the target or its scope would then be a file nobody read
     for value in (name_value, *ids_values, metadata.get("region"),
                   metadata.get("location_display_name"), metadata.get("resource_group"),
                   metadata.get("subscription"), metadata.get("subscription_name")):
-        if isinstance(value, str) and value.startswith("@"):
+        if _az_reads_file(value):
             raise ValueError(f"az: {value!r} is read from a file when az runs, and names the "
                              f"target or its scope: {tokens!r}")
     # every long name of one argument holds its value, so a rule written with any of them
@@ -8106,12 +8153,10 @@ def _gh_secondary_changes(intent: InfrastructureIntent,
     out: list[InfrastructureIntent] = []
     if raw in ("pr-merge", "pr-close") and intent.params.get("delete_branch"):
         out.append(marked("branch/*", "delete"))
-    elif raw == "issue-transfer":
-        words = [w for w in argv[3:] if not w.startswith("-")]
-        if len(words) >= 2:
-            target: dict[str, Any] = {}
-            _gh_set_repo(target, words[1])
-            out.append(marked("issue/*", "create", target))
+    elif raw == "issue-transfer" and intent.params.get("destination_repo"):
+        target: dict[str, Any] = {}
+        _gh_set_repo(target, intent.params["destination_repo"])
+        out.append(marked("issue/*", "create", target))
     elif raw == "release-delete" and intent.params.get("cleanup_tag"):
         out.append(marked(f"tag/{intent.resource.partition('/')[2]}", "delete"))
     elif raw == "label" and intent.resource == "label/clone":
@@ -8232,6 +8277,10 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
         subverb, *rest = tokens
         metadata, params, positional = _parse_gh_tokens(rest, ("issue", subverb))
         params["raw_action"] = f"issue-{subverb}"
+        if subverb == "transfer" and len(positional) == 2:
+            # transfer.go: the second argument is the destination repository (flags such
+            # as --repo were consumed by the parser above)
+            params["destination_repo"] = positional[1]
         if len(positional) > 1 and subverb == "edit":
             # gh issue edit takes several issues and edits each (cobra MinimumNArgs(1))
             params["_more_selectors"] = (positional[1:], metadata.get("repo"))

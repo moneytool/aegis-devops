@@ -4270,3 +4270,56 @@ def test_aws_command_line_wins_over_cli_input_json():
     command = ["aws", "autoscaling", "set-desired-capacity", "--cli-input-json",
                '{"AutoScalingGroupName": "g", "DesiredCapacity": 1}', "--desired-capacity", "3"]
     assert from_argv(command)[0].params["desired_capacity"] == 3
+
+
+# --- review round 22 (the reviewers' commands) ----------------------------------------
+
+
+def test_kubectl_apply_prune_escalates_a_delete_rule():
+    rule = _rule("kubernetes", "pod/protected", ["delete"], {"namespace": "prod"})
+    assert _verdict([rule], "kubectl apply -f desired.yaml --prune -l app=web -n prod") == \
+        "ESCALATE"
+    assert _verdict([rule], "kubectl apply -f desired.yaml -n prod") == "ALLOW"
+
+
+@pytest.mark.parametrize("command,kinds", [
+    ("kubectl apply -f d.yaml --prune -l a=b --prune-allowlist core/v1/ConfigMap",
+     ["configmap/*"]),
+    ("kubectl apply -f d.yaml --prune --all", None),  # kubectl's default kinds
+])
+def test_kubectl_apply_prune_deletes_the_kinds_it_may_prune(command, kinds):
+    deletes = [i.resource for i in from_argv(command.split()) if i.action == "delete"]
+    if kinds is None:
+        assert "pod/*" in deletes and "deployment/*" in deletes
+    else:
+        assert deletes == kinds
+
+
+@pytest.mark.parametrize("command", [
+    "kubectl apply -f d.yaml --prune --applyset=configmaps/set1 -n prod",
+    "kubectl apply -f d.yaml --prune -n prod",  # kubectl needs -l or --all
+])
+def test_kubectl_apply_prune_forms_refused(command):
+    with pytest.raises(ValueError):
+        from_argv(command.split())
+
+
+def test_gh_issue_transfer_destination_from_the_parsed_words():
+    rule = _rule("github", "issue/*", ["create"], {"repo": "acme/protected"})
+    assert _verdict([rule], "gh issue transfer 42 --repo acme/source acme/protected") == \
+        "BLOCK"
+
+
+def test_az_generic_update_abbreviation_is_applied():
+    rule = _rule("azure", "resource/group/rg", ["update"], {"tags.env": "prod"})
+    assert _verdict([rule], "az group update -n rg --tags env=safe --se tags.env=prod") == \
+        "BLOCK"
+
+
+@pytest.mark.parametrize("command", [
+    "az group update -n rg --tags env=@.git",
+    "az group update -n rg --tags=@tags.txt",
+])
+def test_az_file_expansion_after_equals_escalates(command):
+    rule = _rule("azure", "resource/group/rg", ["update"], {"tags.env": "gitdir: x"})
+    assert _verdict([rule], command) == "ESCALATE"

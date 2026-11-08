@@ -566,6 +566,11 @@ def test_client_parity_lists_a_verb_whose_flag_changes_the_request(tmp_path, pat
     store.add_constraint(rule)
     gate = AegisInterceptor(store)
     intents = from_kubectl_multi(["kubectl", *spelled.split()])
+    if "--prune" in spelled:
+        # the client reads the prune as deletes of the kinds it may prune (review round 22):
+        # a delete rule on them holds there too
+        assert {gate.intercept(i).verdict for i in intents} != {"ALLOW"}
+        return
     assert {gate.intercept(i).verdict for i in intents} == {"ALLOW"}
 
 
