@@ -1699,8 +1699,8 @@ def _aws_global_name(key: str) -> str | None:
 def _parse_aws_tokens(
     tokens: list[str], *, s3: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any], list[str], str | None, list[str] | None,
-           list[tuple[str, list[str]]]]:
-    """``(metadata, params, positional, id, ids, abbreviations)``. ``s3`` reads the options
+           list[tuple[str, list[str]]], str | None]:
+    """``(metadata, params, positional, id, ids, abbreviations, id_flag)``. ``s3`` reads the options
     of the high-level ``aws s3`` commands. ``abbreviations`` are the ``(key, value)`` of
     options the parser does not know whose name starts a target flag's: argparse takes an
     unambiguous prefix of an operation's option too (``--role`` is ``--role-name`` on
@@ -1711,6 +1711,7 @@ def _parse_aws_tokens(
     id_value: str | None = None
     multi_ids: list[str] | None = None
     abbreviations: list[tuple[str, list[str]]] = []
+    id_flag: str | None = None  # the full flag that gave id_value
 
     i = 0
     n = len(tokens)
@@ -1780,7 +1781,7 @@ def _parse_aws_tokens(
                         i += 1
                         ids.append(tokens[i])
                 if key == "instance-id" and len(ids) == 1:
-                    id_value = ids[0]
+                    id_value, id_flag = ids[0], "instance-ids"
                 else:
                     multi_ids = ids
             elif key in _AWS_TARGET_FLAG_NAMES:
@@ -1794,7 +1795,7 @@ def _parse_aws_tokens(
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
-                id_value = val
+                id_value, id_flag = val, key
             else:
                 if val is not None:
                     params[key] = _coerce(val)
@@ -1819,7 +1820,7 @@ def _parse_aws_tokens(
             positional.append(tok)
         i += 1
 
-    return metadata, params, positional, id_value, multi_ids, abbreviations
+    return metadata, params, positional, id_value, multi_ids, abbreviations, id_flag
 
 
 def _aws_resource(service: str, kind: str, name: str | None) -> str:
@@ -1951,7 +1952,8 @@ def from_aws_multi(argv: list[str]) -> list[InfrastructureIntent]:
         raise ValueError(f"not a recognizable aws invocation: {argv!r}")
 
     tokens = argv[1:]
-    metadata, params, positional, id_value, multi_ids, abbreviations = _parse_aws_tokens(tokens)
+    (metadata, params, positional, id_value, multi_ids, abbreviations,
+     id_flag) = _parse_aws_tokens(tokens)
 
     if len(positional) < 2:
         raise ValueError(f"could not determine an aws service/operation in: {argv!r}")
@@ -1971,7 +1973,18 @@ def from_aws_multi(argv: list[str]) -> list[InfrastructureIntent]:
             found = _aws_abbreviated_target(abbreviations, None)
             if found:
                 id_value = found[1][0]
-        intents = _from_aws_s3_alias(service, operation, metadata, params, id_value)
+        # an abbreviation of the flag that named the bucket (or of --key) is that option to
+        # argparse as well, and the last one counts there: every spelling is a target
+        buckets = [id_value, *(v for k, vals in abbreviations
+                               if id_flag and id_flag.startswith(k) for v in vals)]
+        keys = [params.get("key"), *(v for k, vals in abbreviations if "key".startswith(k)
+                                      and k != "key" for v in vals)]
+        intents = []
+        for bucket in dict.fromkeys(buckets):
+            for key in dict.fromkeys(keys):
+                with_key = {**params, "key": key} if key is not None else params
+                intents.extend(_from_aws_s3_alias(service, operation, metadata, dict(with_key),
+                                                  bucket))
         return _mark_aws_input_targets(intents) if from_input else intents
 
     if service == "autoscaling" and operation == "set-desired-capacity":
@@ -2009,6 +2022,13 @@ def from_aws_multi(argv: list[str]) -> list[InfrastructureIntent]:
         params["privilege"] = True
 
     target_flag = _AWS_TARGET_FLAGS.get((service, kind))
+    # The flag a full spelling named the target with: an abbreviation of that same flag is
+    # that option to argparse too (the last one counts there), so both names are targets.
+    full_flag = ("instance-ids" if multi_ids else
+                 target_flag if target_flag and isinstance(params.get(target_flag), str) else
+                 id_flag)
+    also = [value for key, values in abbreviations
+            if full_flag and full_flag.startswith(key) for value in values]
     if target_flag and not multi_ids and not isinstance(params.get(target_flag), str):
         # "--nodegroup ng-1" beside "--cluster-name c": the target's own flag, abbreviated
         found = _aws_abbreviated_target(abbreviations, target_flag)
@@ -2028,6 +2048,7 @@ def from_aws_multi(argv: list[str]) -> list[InfrastructureIntent]:
             params.setdefault("parent", id_value)
         id_value = params[target_flag]
     names = multi_ids if multi_ids else [id_value]
+    names = list(dict.fromkeys([*names, *also]))
     resources = [_aws_resource(service, kind, n) for n in names]
     intents = [
         InfrastructureIntent(

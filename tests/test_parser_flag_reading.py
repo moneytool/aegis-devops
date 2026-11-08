@@ -828,3 +828,28 @@ def test_an_inline_follow_variable_is_seen_by_the_hook():
 
     intents = intents_from_command("FLUX_NS_FOLLOWS_KUBE_CONTEXT=1 flux suspend ks a")
     assert intents[0].params["namespace_follows_kubeconfig"] is True
+
+
+@pytest.mark.parametrize("command,resources", [
+    # argparse reads a prefix of the flag that named the target as that flag, and keeps
+    # the last value (run with aws 2.37: DeleteRole b, TerminateInstances i-2 i-3); every
+    # spelling is a target, so neither is dropped
+    ("aws iam delete-role --role-name a --role b", ["iam/role/a", "iam/role/b"]),
+    ("aws iam delete-role --role b --role-name a", ["iam/role/a", "iam/role/b"]),
+    ("aws ec2 terminate-instances --instance-ids i-1 --instance i-2 i-3",
+     ["ec2/instance/i-1", "ec2/instance/i-2", "ec2/instance/i-3"]),
+    ("aws eks delete-nodegroup --cluster-name c --nodegroup-name ng-1 --nodegroup ng-2",
+     ["eks/nodegroup/ng-1", "eks/nodegroup/ng-2"]),
+    ("aws s3api delete-object --bucket a --buck b --key k",
+     ["s3/object/a/k", "s3/object/b/k"]),
+    # a prefix of another flag than the one that named the target adds nothing
+    ("aws lambda create-function --function-name f --role arn:r --runtime python3.12",
+     ["lambda/function/f"]),
+])
+def test_aws_full_flag_and_abbreviation_are_both_read(command, resources):
+    assert [i.resource for i in from_argv(command.split())] == resources
+
+
+def test_aws_rule_on_the_abbreviated_name_holds():
+    assert _verdict([_rule("aws", "iam/role/b", ["delete"])],
+                    "aws iam delete-role --role-name a --role b") == "BLOCK"
