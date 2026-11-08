@@ -5,6 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "aegis-devops"
 license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 dynamic = ["version"]
 description = "Provenance-backed, authority-aware policy verifier for agentic DevOps actions."
 authors = [{ name = "Vamshidher Reddy Jannapu Reddy" }]

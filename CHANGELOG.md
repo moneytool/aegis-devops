@@ -592,6 +592,37 @@ name). git verbs without an option table leave every param unresolved when given
 - Tests that used `flux reconcile ... --dry-run`, `flux get ... --export` and `git push
   --dry-run=false`, which the tools refuse, now use commands the tools accept (`flux create ...
   --export`, `git push --dry-run --no-dry-run`).
+- `kubectl logs web secret -c public` reads container `secret`: kubectl takes a second word
+  as the container over `-c` (logs.go Complete). It was read as `public`. A third word is
+  refused, as kubectl refuses it. From kubectl 1.36 source.
+- `gh api --hostname staging.example https://api.github.com/repos/acme/prod/...` acts on
+  github.com's `acme/prod`: an absolute URL names the host and the repository whatever
+  `--hostname` says. `gh api` has no `-R`/`--repo` and gh refuses it; the parser read it as
+  the repository over the path's, and now refuses it too. Another host is a GitHub Enterprise Server, so
+  `https://ghe.corp/api/v3/repos/acme/prod/...` is `ghe.corp/acme/prod` and no longer meets a
+  rule on github.com's `acme/prod`.
+- kubectl `--server`/`-s`, helm `--kube-apiserver` and flux `--server` send the request to
+  that URL, whatever cluster the context or `--cluster` names. The URL is recorded as `server`
+  and the cluster is unresolved; `resolve_current_context` no longer fills it from the
+  kubeconfig then. aws `--endpoint-url` (and `$AWS_ENDPOINT_URL`, `$AWS_ENDPOINT_URL_<SVC>`
+  when filling from the environment) leaves account and region unresolved, since the endpoint
+  need not be the region's.
+- az `--tags @tags.txt` was converted as the literal tag `@tags.txt` before the `@file` check,
+  and a rule on `tags.env` did not escalate. A value az reads from a file or stdin is now
+  found first, the key and every key nested in it (`tags.*`) are unresolved, and only literal
+  values are converted. aws reads `file://` before JSON or shorthand on a list option too
+  (`--tags file://t.json` was refused as bad shorthand), marking the key and its nested keys,
+  and kubectl `create configmap|secret --from-file`/`--from-env-file` leave `data` and
+  `data.*` unresolved.
+
+### Added
+- A `NOTICE` file at the repository root lists the third-party code and data in the package
+  and the logic ported from other projects, with their copyright notices and the license
+  texts that require it: aws-cli's shorthand parser (which keeps aws-cli's copyright header,
+  followed by a note of what was changed), the botocore, azure-cli, Google Cloud SDK and pflag
+  registration data, and logic ported from Helm strvals, Go strconv and time, pflag, gcloud
+  calliope, azure-cli, knack, GitHub CLI, kubectl and git. It ships in the sdist and wheel
+  (`license-files`).
 
 ## [1.3.4] — 2026-11-07
 

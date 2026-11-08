@@ -1,4 +1,4 @@
-"""The sibling audit of review rounds 1-9 (docs/dev/parser-audit.md): one check per class
+"""The sibling audit of review rounds 1-13 (docs/dev/parser-audit.md): one check per class
 of finding and per tool where the class applies, so a fix that covers one tool and misses
 its siblings fails here. Each row is ``(class, tool, argv, check)``."""
 
@@ -301,6 +301,29 @@ AUDIT = [
     ("C25", "git", "git branch --no-column -f prod HEAD~1", res("branch/prod", "branch/prod",
                                                                "branch/prod")),
     ("C25", "git", "git tag --no-column v1", res("tag/v1")),
+    # round 13
+    ("C29", "kubectl", "kubectl logs web secret -c public -n prod", param("container", "secret")),
+    ("C29", "kubectl", "kubectl logs web a b -n prod", REFUSE),
+    ("C29", "gh", "gh api -R a/b -X DELETE repos/o/r", REFUSE),
+    ("C30", "gh", "gh api --hostname staging.example "
+     "https://api.github.com/repos/acme/prod/actions/secrets/X -X DELETE",
+     meta("github_host", "github.com")),
+    ("C30", "gh", "gh api https://ghe.corp/api/v3/repos/acme/prod/actions/secrets/X -X DELETE",
+     meta("repo", "ghe.corp/acme/prod")),
+    ("C30", "kubectl", "kubectl delete pod x --server https://p:6443 --cluster dev -n a",
+     unres("cluster")),
+    ("C30", "helm", "helm uninstall web --kube-apiserver https://p:6443 -n a", unres("cluster")),
+    ("C30", "flux", "flux suspend kustomization app --server https://p:6443 -n a",
+     unres("cluster")),
+    ("C30", "aws", "aws ec2 terminate-instances --instance-ids i-1 --region us-east-1 "
+     "--endpoint-url https://x", unres("region")),
+    ("C31", "az", "az group update -n rg --tags @tags.txt", unres("tags.*")),
+    ("C31", "aws", "aws ec2 create-tags --resources i-1 --tags file://t.json", unres("tags.*")),
+    ("C31", "kubectl", "kubectl create configmap cm --from-file=c.yaml -n prod",
+     unres("data.*")),
+    ("C31", "gh", "gh api repos/a/b -F name=@n.txt -X PATCH", unres("inputs.name")),
+    ("C31", "helm", "helm upgrade web ./c --set-file replicaCount=r.txt",
+     unres("set.replicaCount")),
 ]
 
 
@@ -371,3 +394,22 @@ def test_c13_unresolved_beats_recorded():
     rule = _rule("argocd", "app/*", ["create"], {"project": "prod"})
     assert _verdict(rule, shlex.split("argocd app create d --file - --project dev")) == \
         "ESCALATE"
+
+
+def test_attribution_notice_ships_and_aws_header_is_kept():
+    # aws_shorthand.py is aws-cli's file: its upstream header stays first, verbatim, and
+    # the repository NOTICE (listed as a license file, so it is in the sdist and wheel)
+    # names it and every source whose logic was ported
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    header = (root / "src/aegis_core/aws_shorthand.py").read_text().splitlines()
+    assert header[0] == "# Copyright 2015 Amazon.com, Inc. or its affiliates. All Rights Reserved."
+    assert header[11] == "# language governing permissions and limitations under the License."
+    assert header[13].startswith("# Modifications Copyright")
+    notice = (root / "NOTICE").read_text()
+    for name in ("aws-cli", "botocore", "azure-cli", "Google Cloud SDK", "pkg/strvals",
+                 "spf13/pflag", "time.ParseDuration", "knack", "GitHub CLI", "git"):
+        assert name in notice, name
+    pyproject = (root / "pyproject.toml").read_text()
+    assert 'license-files = ["LICENSE", "NOTICE"]' in pyproject
