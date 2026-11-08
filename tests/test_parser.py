@@ -748,7 +748,10 @@ def test_from_argv_dispatches_aws_by_basename():
 
 def test_from_argv_dispatches_az():
     intents = from_argv(["az", "vm", "start", "-g", "rg1", "-n", "vm1"])
-    assert intents == [from_az(["az", "vm", "start", "-g", "rg1", "-n", "vm1"])]
+    expected = from_az(["az", "vm", "start", "-g", "rg1", "-n", "vm1"])
+    # from_argv also marks what az takes from its configuration (subscription, location)
+    assert [i.resource for i in intents] == [expected.resource]
+    assert intents[0].params["unresolved_scope"] == ["subscription", "region"]
 
 
 def test_from_argv_dispatches_gcloud_and_gsutil():
@@ -3842,21 +3845,18 @@ def test_the_last_dry_run_decides_in_the_other_tools(argv, rehearsal):
     ("helm upgrade api ./c -i", "release/api", {"install": True, "chart": "./c"}, {}),
     ("helm upgrade api ./c -i=false", "release/api", {"install": False, "chart": "./c"}, {}),
     ("helm upgrade -if v.yaml api ./c", "release/api",
-     {"install": True, "values_files": ["v.yaml"], "chart": "./c",
-      "unresolved_scope": ["set.*"]}, {}),
+     {"install": True, "values_files": ["v.yaml"], "chart": "./c"}, {}),
     ("helm upgrade api ./c -f v.yaml", "release/api",
-     {"values_files": ["v.yaml"], "chart": "./c",
-      "unresolved_scope": ["set.*"]}, {}),
+     {"values_files": ["v.yaml"], "chart": "./c"}, {}),
     ("helm upgrade api ./c -fv.yaml", "release/api",
-     {"values_files": ["v.yaml"], "chart": "./c",
-      "unresolved_scope": ["set.*"]}, {}),
+     {"values_files": ["v.yaml"], "chart": "./c"}, {}),
     ("helm upgrade api ./c -nprod", "release/api", {"chart": "./c"}, {"namespace": "prod"}),
     ("helm upgrade api ./c -n=prod", "release/api", {"chart": "./c"}, {"namespace": "prod"}),
     ("helm -nprod upgrade api ./c", "release/api", {"chart": "./c"}, {"namespace": "prod"}),
     ("helm status api -oyaml", "release/api", {"o": "yaml"}, {}),
     ("helm status -oyaml api", "release/api", {"o": "yaml"}, {}),
     ("helm status -o yaml api", "release/api", {"o": "yaml"}, {}),
-    ("helm list -A", "release/*", {"A": True}, {}),
+    ("helm list -A", "release/*", {}, {"all_namespaces": True}),
     ("helm list -aq", "release/*", {"a": True, "q": True}, {}),
     ("helm list -l a=b", "release/*", {"l": "a=b"}, {}),
     # a namespace in a word
@@ -3870,10 +3870,10 @@ def test_the_last_dry_run_decides_in_the_other_tools(argv, rehearsal):
     ("helm upgrade api ./c -n dev -l -nprod", "release/api", {"l": "-nprod", "chart": "./c"},
      {"namespace": "dev"}),
     # flux
-    ("flux get ks -A", "kustomization/*", {"A": True}, {}),
-    ("flux get ks -A a", "kustomization/a", {"A": True}, {}),
+    ("flux get ks -A", "kustomization/*", {}, {"all_namespaces": True}),
+    ("flux get ks -A a", "kustomization/a", {}, {"all_namespaces": True}),
     ("flux get ks a -w", "kustomization/a", {"w": True}, {}),
-    ("flux get ks -Aw", "kustomization/*", {"A": True, "w": True}, {}),
+    ("flux get ks -Aw", "kustomization/*", {"w": True}, {"all_namespaces": True}),
     ("flux get ks -l a=b", "kustomization/*", {"l": "a=b"}, {}),
     ("flux get ks -nprod", "kustomization/*", {}, {"namespace": "prod"}),
     ("flux -nprod get ks", "kustomization/*", {}, {"namespace": "prod"}),
@@ -3886,7 +3886,8 @@ def test_the_last_dry_run_decides_in_the_other_tools(argv, rehearsal):
 def test_helm_and_flux_short_words(argv, resource, params, metadata):
     intent = from_argv(argv.split())[0]
     assert intent.resource == resource
-    assert {k: v for k, v in intent.params.items() if k != "raw_action"} == params
+    assert {k: v for k, v in intent.params.items()
+            if k not in ("raw_action", "unresolved_scope")} == params
     assert intent.metadata == metadata
 
 

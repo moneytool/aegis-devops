@@ -1169,3 +1169,102 @@ def test_storage_rsync_is_refused(command):
 ])
 def test_common_gcloud_creates_with_spaces_are_read(command, resource):
     assert [i.resource for i in from_argv(command.split())] == [resource]
+
+
+# --- review round 2: one value, every spelling; values from outside the argv ----------
+
+
+def test_a_literal_dotted_helm_key_cannot_hide_the_nested_value():
+    # helm keeps both: the nested securityContext.privileged and the literal key
+    command = ["helm", "upgrade", "api", "./c", "-n", "prod", "--set",
+               r"securityContext.privileged=true,securityContext\.privileged=false"]
+    intent = from_argv(command)[0]
+    assert intent.params["set"] == {"securityContext": {"privileged": True},
+                                    "securityContext.privileged": False}
+    rule = _rule("helm", "release/*", ["update"],
+                 {"namespace": "prod", "set.securityContext.privileged": True})
+    assert _verdict([rule], command) == "BLOCK"
+
+
+@pytest.mark.parametrize("scope,params", [
+    # a negated boolean and its positive side are one value
+    ({"no-verify-ssl": True}, {"verify-ssl": False}),
+    ({"verify-ssl": False}, {"no-verify-ssl": True}),
+    ({"deletion_protection": False}, {"deletion-protection": False}),
+    ({"no_deletion_protection": True}, {"deletion_protection": False}),
+    ({"dry-run": True}, {"dry_run": True}),
+])
+def test_scope_keys_match_every_spelling(scope, params):
+    from aegis_core.store import scope_matches
+    assert scope_matches(scope, {}, params)
+    assert not scope_matches({k: (not v) for k, v in scope.items()}, {}, params)
+
+
+@pytest.mark.parametrize("scope,metadata", [
+    ({"repo": "acme/web"}, {"repo": "Acme/Web"}),
+    ({"resource_group": "Prod-RG"}, {"resource_group": "prod-rg"}),
+    ({"subscription": "SUB-1"}, {"subscription": "sub-1"}),
+])
+def test_case_insensitive_scope_keys(scope, metadata):
+    from aegis_core.store import scope_matches
+    assert scope_matches(scope, metadata, {})
+
+
+@pytest.mark.parametrize("command,scope,verdict", [
+    # what the tool takes from its configuration when the argv does not give it
+    ("kubectl delete pod x -n dev", {"context": "prod"}, "ESCALATE"),
+    ("kubectl delete pod x -n dev --context prod", {"context": "prod"}, "BLOCK"),
+    ("kubectl delete pod x -n dev --context dev", {"context": "prod"}, "ALLOW"),
+    ("aws ec2 terminate-instances --instance-ids i-1", {"region": "us-east-1"}, "ESCALATE"),
+    ("aws ec2 terminate-instances --instance-ids i-1 --profile p", {"profile": "prod"},
+     "ALLOW"),
+    ("az vm delete -n v -g rg --yes", {"subscription": "prod"}, "ESCALATE"),
+    ("az vm delete -n v --yes", {"resource_group": "prod"}, "ESCALATE"),
+    ("gcloud compute instances delete web-1", {"project": "prod"}, "ESCALATE"),
+    ("gcloud compute instances delete web-1 --project prod", {"project": "prod"}, "BLOCK"),
+    ("argocd app sync web", {"project": "prod"}, "ESCALATE"),
+    ("git push --force", {"remote": "origin"}, "ESCALATE"),
+])
+def test_scope_the_tool_takes_from_its_configuration_escalates(command, scope, verdict):
+    provider = {"kubectl": "kubernetes", "aws": "aws", "az": "azure", "gcloud": "gcp",
+                "argocd": "argocd", "git": "git"}[command.split()[0]]
+    actions = ["delete", "sync", "push"]
+    rule = _rule(provider, "*", actions, scope)
+    assert _verdict([rule], command) == verdict
+
+
+@pytest.mark.parametrize("command,unresolved", [
+    # helm upgrade reuses the release's values unless --reset-values, or when the
+    # command line sets none (helm 3.21.1 / 4.3.1 Upgrade.reuseValues)
+    ("helm upgrade api ./c -n prod", True),
+    ("helm upgrade api ./c -n prod --reset-values", False),
+    ("helm upgrade api ./c -n prod --set a=1", False),
+    ("helm upgrade api ./c -n prod --set a=1 --reuse-values", True),
+    ("helm upgrade api ./c -n prod --set a=1 --reset-then-reuse-values", True),
+    ("helm upgrade api ./c -n prod --reuse-values --reset-values", False),
+    ("helm rollback api 3 -n prod", True),
+    ("helm install api ./c -n prod", False),
+])
+def test_helm_reused_values_are_unresolved(command, unresolved):
+    intent = from_argv(command.split())[0]
+    assert ("set.*" in intent.params.get("unresolved_scope", [])) is unresolved
+
+
+def test_helm_upgrade_without_values_escalates_a_values_rule():
+    rule = _rule("helm", "release/*", ["update"], {"set.replicaCount": 0})
+    assert _verdict([rule], "helm upgrade api ./c -n prod") == "ESCALATE"
+    assert _verdict([rule], "helm upgrade api ./c -n prod --reset-values") == "ALLOW"
+
+
+@pytest.mark.parametrize("command,every", [
+    ("flux get kustomizations -A -n dev", True),
+    ("flux get kustomizations --all-namespaces -n dev", True),
+    ("flux get kustomizations -A --all-namespaces=false -n dev", False),
+    ("helm list -A", True),
+    ("helm list --all-namespaces=false -A", True),
+])
+def test_all_namespaces_is_one_key(command, every):
+    intent = from_argv(command.split())[0]
+    assert intent.metadata.get("all_namespaces", False) is every
+    rule = _rule(intent.provider, "*", ["read"], {"namespace": "prod"})
+    assert _verdict([rule], command) == ("ESCALATE" if every else "ALLOW")

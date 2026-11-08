@@ -482,23 +482,61 @@ def _constraint_from_dict(data: dict[str, Any]) -> Constraint:
 _GLOB_CHARS = frozenset("*?[")
 
 
-def _dig(mapping: dict[str, Any], key: str) -> tuple[bool, Any]:
-    """``(found, value)`` for ``key`` in ``mapping`` -- a literal key first,
-    then a dotted path (``set.replicaCount`` -> ``mapping["set"]["replicaCount"]``),
-    where each level may also hold a key with dots in it (``labels.app.kubernetes.io/name``
-    -> ``mapping["labels"]["app.kubernetes.io/name"]``, helm's ``--set a\\.b=1``)."""
+def _dig_paths(mapping: dict[str, Any], key: str) -> list[Any]:
+    """Every value ``key`` reaches in ``mapping``: a literal key, and every dotted path
+    (``set.replicaCount`` -> ``mapping["set"]["replicaCount"]``), where each level may
+    also hold a key with dots in it (``labels.app.kubernetes.io/name`` ->
+    ``mapping["labels"]["app.kubernetes.io/name"]``, helm's ``--set a\\.b=1``). All of
+    them count, so a literal dotted key can never hide a nested value of the same path."""
+    values: list[Any] = []
     if key in mapping:
-        return True, mapping[key]
+        values.append(mapping[key])
     start = key.find(".")
     while start != -1:
         head, rest = key[:start], key[start + 1:]
         inner = mapping.get(head)
         if isinstance(inner, dict):
-            found, value = _dig(inner, rest)
-            if found:
-                return True, value
+            values.extend(_dig_paths(inner, rest))
         start = key.find(".", start + 1)
-    return False, None
+    return values
+
+
+def _key_spellings(key: str) -> list[tuple[str, bool]]:
+    """The spellings of one scope key, with whether the value is the negation: the key,
+    its ``-``/``_`` twin (``dry-run`` / ``dry_run``), and a boolean's other side
+    (``no-verify-ssl`` is ``verify-ssl`` negated, ``verify-ssl`` is ``no-verify-ssl``
+    negated), so a rule written either way meets what a parser recorded either way."""
+    head, dot, tail = key.rpartition(".")
+    prefix = head + dot
+    out: list[tuple[str, bool]] = []
+    for leaf in dict.fromkeys((tail, tail.replace("-", "_"), tail.replace("_", "-"))):
+        out.append((prefix + leaf, False))
+        if leaf[:3] in ("no-", "no_") and len(leaf) > 3:
+            out.append((prefix + leaf[3:], True))
+        else:
+            out.extend((prefix + no + leaf, True) for no in ("no-", "no_"))
+    return list(dict.fromkeys(out))
+
+
+def _dig_all(mapping: dict[str, Any], key: str) -> list[Any]:
+    """Every value any spelling of ``key`` (:func:`_key_spellings`) reaches in ``mapping``,
+    a negated spelling only when its value is a boolean."""
+    values: list[Any] = []
+    for spelling, negate in _key_spellings(key):
+        for value in _dig_paths(mapping, spelling):
+            if not negate:
+                values.append(value)
+            else:
+                as_bool = _as_bool(value)
+                if as_bool is not None:
+                    values.append(not as_bool)
+    return values
+
+
+def _dig(mapping: dict[str, Any], key: str) -> tuple[bool, Any]:
+    """``(found, first value)`` of :func:`_dig_all`."""
+    values = _dig_all(mapping, key)
+    return (True, values[0]) if values else (False, None)
 
 
 def _as_bool(value: Any) -> bool | None:
@@ -548,12 +586,28 @@ def scope_matches(
     ``params`` when ``metadata`` lacks it entirely. A key absent from both
     never matches."""
     for key, expected in scope.items():
-        found, actual = _dig(metadata, key)
-        if not found:
-            found, actual = _dig(params, key)
-        if not found or not scope_value_matches(expected, actual):
+        actuals = _dig_all(metadata, key) or _dig_all(params, key)
+        if key.rpartition(".")[2] in _CASE_INSENSITIVE_SCOPE_KEYS:
+            expected = _casefold(expected)
+            actuals = [_casefold(a) for a in actuals]
+        # Every value the key reaches counts: two spellings of one value that disagree
+        # (helm's literal "a.b" beside nested a.b) match if either does.
+        if not any(scope_value_matches(expected, actual) for actual in actuals):
             return False
     return True
+
+
+# Scope keys whose values the service compares without case: GitHub owner/repo, Azure
+# subscription and resource group names.
+_CASE_INSENSITIVE_SCOPE_KEYS = frozenset({"repo", "resource_group", "subscription"})
+
+
+def _casefold(value: Any) -> Any:
+    if isinstance(value, str):
+        return value.casefold()
+    if isinstance(value, list):
+        return [_casefold(v) for v in value]
+    return value
 
 
 def _scope_matches(scope: dict[str, Any], intent: InfrastructureIntent) -> bool:
@@ -623,6 +677,11 @@ def resource_matches(pattern: str, intent: InfrastructureIntent) -> bool:
     """``fnmatch`` of ``pattern`` against every alias of the intent's
     resource (:meth:`InfrastructureIntent.resource_aliases`), so
     ``aws_db_instance.*`` matches ``module.app.aws_db_instance.main``."""
+    if intent.provider == "azure" or (intent.provider == "github"
+                                      and intent.resource.startswith("repo/")):
+        # Azure resource names and GitHub owner/repo are compared without case
+        return any(fnmatch.fnmatchcase(alias.casefold(), pattern.casefold())
+                   for alias in intent.resource_aliases())
     return any(fnmatch.fnmatch(alias, pattern) for alias in intent.resource_aliases())
 
 
@@ -788,13 +847,13 @@ def param_unresolved(key: str, intent: InfrastructureIntent) -> bool:
     ``set.replicaCount`` when helm --set-file sets it from a file nobody read, and
     ``set.*`` for every ``set.`` key the command line leaves to a values file."""
     marks = intent.params.get("unresolved_scope")
-    if not isinstance(marks, list) or _dig(intent.metadata, key)[0]:
+    if not isinstance(marks, list) or _dig_all(intent.metadata, key):
         return False
     for mark in marks:
         if mark == key:
             return True
         if (isinstance(mark, str) and mark.endswith(".*") and key.startswith(mark[:-1])
-                and not _dig(intent.params, key)[0]):
+                and not _dig_all(intent.params, key)):
             return True
     return False
 

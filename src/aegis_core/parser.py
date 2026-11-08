@@ -549,6 +549,15 @@ def _split_flag(token: str) -> tuple[str, str | None]:
     return key, (value if sep else None)
 
 
+def _record_all_namespaces(metadata: dict[str, Any], val: str | None) -> None:
+    """``-A`` / ``--all-namespaces[=bool]`` as ``metadata["all_namespaces"]``, the one key
+    the store reads for every namespace; the last spelling decides."""
+    if _bool_param(val) is True:
+        metadata["all_namespaces"] = True
+    else:
+        metadata.pop("all_namespaces", None)
+
+
 def _record_dry_run(params: dict[str, Any], rehearsal: bool) -> None:
     """The last ``--dry-run`` decides, as it does in pflag and argparse, so a real
     run clears an earlier rehearsal: ``--dry-run=client --dry-run=none`` is real."""
@@ -3018,6 +3027,9 @@ def _parse_helm_tokens(
                 dest = "set_file" if key == "set-file" else "set_json"
                 params.setdefault(dest, []).append(val)
                 sets[key].append(val)
+            elif key in ("A", "all-namespaces"):
+                # every namespace, as kubectl's -A: the last spelling decides
+                _record_all_namespaces(metadata, val)
             elif is_long and key in long_bools:
                 params[key.replace("-", "_")] = _bool_param(val)
             elif not is_long and key in short_bools:
@@ -3038,7 +3050,7 @@ def _parse_helm_tokens(
             positional.append(tok)
         i += 1
 
-    _merge_helm_values(params, sets)
+    _merge_helm_values(params, sets, verb)
     return metadata, params, positional
 
 
@@ -3251,14 +3263,21 @@ def _strip_file_values(value: Any, path: str, out: list[str]) -> Any:
     return value
 
 
-def _merge_helm_values(params: dict[str, Any], sets: dict[str, list[str]]) -> None:
+def _merge_helm_values(params: dict[str, Any], sets: dict[str, list[str]],
+                       verb: str | None = None) -> None:
     """``params["set"]``: the values the command line sets, as one nested map, merged in
     helm's order (pkg/cli/values MergeValues): --set-json, --set, --set-string, --set-file
     and --set-literal, a later one replacing an earlier one at the same key, a map
     replacing a scalar only through --set-json. A --set-file value is the file's content,
     which is not read, and a values file (-f) or --reuse-values can set any key the command
     line does not: those keys are in ``params["unresolved_scope"]`` (``set.<key>``, or
-    ``set.*`` for every key not set), so a rule scoped on them escalates."""
+    ``set.*`` for every key not set), so a rule scoped on them escalates.
+
+    ``upgrade`` also takes the release's previous values (helm 3.21.1 and 4.3.1
+    Upgrade.reuseValues): with --reuse-values or --reset-then-reuse-values for every key
+    the command line does not set, and with neither when the command line sets no value at
+    all; --reset-values, checked first, turns all of it off. ``rollback`` puts back an
+    earlier revision's values. Those values are not on the argv either: ``set.*``."""
     base: dict[str, Any] = {}
     for value in sets["set-json"]:
         stripped = value.strip()
@@ -3280,8 +3299,11 @@ def _merge_helm_values(params: dict[str, Any], sets: dict[str, list[str]]) -> No
     cleaned = _strip_file_values(base, "set", unresolved)
     if cleaned:
         params["set"] = cleaned
-    if params.get("values_files") or params.get("reuse_values") is True or \
-            params.get("reset_then_reuse_values") is True:
+    reuse = verb == "rollback" or (
+        verb == "upgrade" and params.get("reset_values") is not True
+        and (params.get("reuse_values") is True or params.get("reset_then_reuse_values") is True
+             or (not base and not params.get("values_files"))))
+    if params.get("values_files") or reuse:
         unresolved.append("set.*")
     if unresolved:
         params["unresolved_scope"] = unresolved
@@ -3867,6 +3889,9 @@ def _parse_flux_tokens(
                 pass
             elif key == "export":
                 params["export"] = _bool_param(val)
+            elif key in ("A", "all-namespaces"):
+                # every namespace, as kubectl's -A: the last spelling decides
+                _record_all_namespaces(metadata, val)
             elif is_long and key in _FLUX_BOOL_FLAGS:
                 params[key.replace("-", "_")] = _bool_param(val)
             elif not is_long and key in short_bools:
@@ -5243,7 +5268,45 @@ def informational_intent(argv: list[str]) -> InfrastructureIntent | None:
     )
 
 
+# Scope keys each tool takes from its configuration or environment when the argv does
+# not give them: the kubeconfig's context and cluster, aws's region and profile
+# (~/.aws/config, $AWS_REGION, $AWS_PROFILE), gcloud's project and region (the active
+# configuration, $CLOUDSDK_*), az's subscription, resource group and location (az account,
+# az config defaults), argocd's server and project and the Application's namespace
+# (~/.config/argocd, the app itself), and the remote git pushes to (branch.*.pushRemote,
+# remote.pushDefault). gh's repository is marked by from_gh, flux's and kubectl's
+# namespace by the store.
+_CONFIG_SCOPE_KEYS = {
+    "kubernetes": ("context", "cluster"),
+    "helm": ("context", "cluster"),
+    "flux": ("context", "cluster"),
+    "aws": ("region", "profile"),
+    "gcp": ("project", "region"),
+    "azure": ("subscription", "resource_group", "region"),
+    "argocd": ("server", "project", "app_namespace"),
+    "git": ("remote",),
+}
+
+
+def mark_config_scope(intents: list[InfrastructureIntent]) -> list[InfrastructureIntent]:
+    """Adds to ``params["unresolved_scope"]`` each key of :data:`_CONFIG_SCOPE_KEYS` the
+    argv did not give, so a rule scoped on it escalates instead of not applying. A key
+    --resolve-current-context fills later counts as given (the store looks at metadata
+    first)."""
+    for intent in intents:
+        missing = [key for key in _CONFIG_SCOPE_KEYS.get(intent.provider, ())
+                   if key not in intent.metadata and key not in intent.params]
+        if missing:
+            marks = intent.params.setdefault("unresolved_scope", [])
+            marks.extend(key for key in missing if key not in marks)
+    return intents
+
+
 def from_argv(argv: list[str]) -> list[InfrastructureIntent]:
+    return mark_config_scope(_from_argv(argv))
+
+
+def _from_argv(argv: list[str]) -> list[InfrastructureIntent]:
     """Dispatches a raw argv to the right parser based on ``basename(argv[0])``,
     always returning a list of InfrastructureIntents (even for the
     single-intent parsers). Help and version probes become one read-only

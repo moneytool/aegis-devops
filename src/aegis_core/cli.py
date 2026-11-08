@@ -125,6 +125,7 @@ from aegis_core.parser import (
     from_helm_multi,
     from_kubectl_multi,
     from_terraform_plan,
+    mark_config_scope,
 )
 from aegis_core.parsers.pulumi import from_pulumi_argv, from_pulumi_preview
 from aegis_core.parsers.sql import (
@@ -1990,7 +1991,7 @@ def _run(argv: list[str]) -> int:
             # verbatim, not re-quoted.
             return _evaluate(_intents_from_shell_string(" ".join(target_argv)), args)
         _reject_compound_argv(target_argv)
-        intents = _ARGV_TARGET_PARSERS[args.target](target_argv)
+        intents = mark_config_scope(_ARGV_TARGET_PARSERS[args.target](target_argv))
         return _evaluate(intents, args)
 
     if args.target == "sql":
