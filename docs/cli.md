@@ -365,6 +365,33 @@ namespace or the target. A short flag in no table is read the same way. Words af
 operands on helm, flux and argocd. `kubectl get --raw <path>` is still refused: a URI path can
 read any kind, secrets included, which no kind-based rule would match.
 
+**Updating the flag tables.** The tables in `src/aegis_core/parser.py` are pinned to the
+versions named above, and a flag a later release adds is refused until it is listed: that is
+on purpose, since guessing is how a namespace or a target gets misread. To add one, find how
+the tool registers it and put it in the matching set, with a test that reads it:
+
+- kubectl: `kubectl <command> --help` on every command. A flag shown as `--x=false` or
+  `--x=true`, or one with a default for a bare use (`--cascade`, `--validate`), goes in
+  `_KNOWN_BOOL_FLAGS`; any other in `_KUBECTL_VALUE_FLAGS`; one with a number default in
+  `_KUBECTL_INT_FLAGS` too; a short letter in `_KUBECTL_SHORT_BOOL_LETTERS` or
+  `_KUBECTL_SHORT_VALUE_LETTERS`.
+- helm (`pkg/cmd`, `pkg/cli`), flux (`cmd/flux`, and cli-runtime's kubeconfig flags), argo-cd
+  (`cmd/argocd/commands`, `cmd/util`) and gh (`pkg/cmd`, `pkg/cmdutil`): every
+  `Flags().XxxVar[P](…)` call. A `Bool…` flag, or one whose `NoOptDefVal` is set, is a boolean
+  (`_HELM_BOOL_ONLY_FLAGS`, `_FLUX_BOOL_FLAGS`, `_ARGOCD_BOOL_FLAGS`, `_GH_COMMAND_FLAGS`); any
+  other takes a value (`_HELM_VALUE_FLAGS`, `_FLUX_VALUE_FLAGS`, `_ARGOCD_VALUE_FLAGS`). A name
+  that is a boolean on one command and takes a value on another needs a per-verb rule, as
+  `--server-side` has in `_helm_long_flags`.
+- git: `git <verb> -h` and `git <verb> --git-completion-helper-all` (in a repository) for
+  `_GIT_OPTION_SPECS`: `<arg>` is `=`, `[=<arg>]` is `?`, `[no-]` is `!`.
+- aws: the global options in `awscli/data/cli.json` (`_AWS_GLOBAL_OPTIONS`) and the s3
+  options in `awscli/customizations/s3` (`_AWS_S3_BOOL_FLAGS`).
+- az: the short letters in every `command_modules/*/_params.py` of azure-cli: a letter on a
+  `store_true` argument goes in `_AZ_SHORT_BOOL_LETTERS`, and every letter in
+  `_AZ_SHORT_KNOWN_LETTERS`.
+- gcloud: a flag whose reference page shows `--flag=VALUE` may go in `_GCLOUD_VALUE_FLAGS`;
+  never a boolean, which would take the name after it as its value.
+
 Inside a pipeline an unknown binary (`| grep x`) produces nothing; on its own it produces a
 synthetic `shell` / `binary/<name>` / `exec` intent that `--fail-closed` escalates. When that
 binary runs code Aegis cannot read (a script file, `make` or `npm run`, `python3 -c` code, a

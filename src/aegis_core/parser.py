@@ -82,7 +82,8 @@ letter that takes a value ends the word and the rest is its value. So each walke
 splits a short word as it reaches it, from one table of letters per tool, and a
 word with an unknown letter in front of a value letter or ``A`` is refused.
 
-**Flags the parser has no entry for (#80).** kubectl, helm, flux and argocd each have
+**Flags the parser has no entry for (#80).** How to add a flag a later release of a tool
+brings is in docs/cli.md ("Updating the flag tables"). kubectl, helm, flux and argocd each have
 tables of every long flag that takes a value and every one that does not, read from
 the tool's source. A value flag takes the next word whatever it looks like
 (``--description -ndev``). A flag in no table is refused unless ``=value`` or its

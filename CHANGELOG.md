@@ -101,13 +101,21 @@ count (`max_intents`) or change a `ratio`.
 - az: `-nprod-vm`, `-n=prod-vm` and `-ynprod-vm` were read with no name (argparse reads them as
   `-n prod-vm`), so a rule on the VM missed. They are now read as argparse reads them. A prefix of
   `--name`, `--resource-group`, `--location`, `--subscription` or `--ids` (`--resource-gr rg`) is
-  refused, since argparse takes it and what it stands for depends on the command, and so is a
-  bundled word whose first letter depends on the command when an `n`, `g` or `l` follows it
-  (`-snprod`). From azure-cli and knack source; az was not run.
+  refused, since argparse takes it and what it stands for depends on the command. Other short
+  words are read from the letters azure-cli's command modules define (every `_params.py`): a
+  letter that is only ever a value option takes the rest of the word (`-cmycontainer`,
+  `-snprod`), and a word is refused only when a letter that is a plain boolean on some command
+  makes another reading set a different name, resource group or location (`-dnprod`), or when
+  no az command has the first letter (`-Anprod`). From azure-cli and knack source; az was not
+  run.
 - gcloud read only the first name: `gcloud compute instances delete web-1 prod-1` missed
   `prod-1`. Every name is now an intent. A `--no-` flag is a boolean and no longer takes the name
-  after it as its value (`delete --no-graceful-shutdown prod-1`), and a word another unknown flag
-  may have taken, right after the verb, is a name too. Words after `--` (`compute ssh vm -- …`)
+  after it as its value (`delete --no-graceful-shutdown prod-1`). Any other flag the parser has
+  no entry for, followed by a word, is refused: the word is its value if it takes one and a name
+  if it is a boolean, so `delete web-1 --graceful prod-1` could hide `prod-1`. gcloud's source
+  tree (and its per-command flag types) is not on GitHub to read, so the parser keeps a table of
+  flags the gcloud reference shows taking a value (`--machine-type`, `--keep-disks`, the global
+  ones, ...), and any other must be written `--flag=value` or last. Words after `--` (`compute ssh vm -- …`)
   are kept as `passthrough`, not names. `gcloud sql import sql prod-db …` was `sql/sql`, and is
   `sql/instance/prod-db`. `gcloud storage rm --recursive gs://a gs://b` and `gsutil -m rm -r
   gs://b` were refused or read one bucket; both now read their own booleans and every `gs://`
@@ -117,6 +125,32 @@ count (`max_intents`) or change a `ratio`.
   their documentation, not their source, and neither gcloud nor gsutil was run: a letter or
   flag missing from those tables is refused (gsutil) or may still take the next word (gcloud
   storage, though never a `gs://` path).
+- aws: a full target flag and an abbreviation of the same flag were read as the full one only.
+  argparse reads both as that flag and keeps the last, so `aws iam delete-role --role-name a
+  --role b` deletes `b`, read as `a`. Every spelling's value is now a target (`iam/role/a` and
+  `iam/role/b`), on the target and id flags, `--instance-ids`, and s3api's `--bucket` and
+  `--key`. Run with aws-cli 2.37.
+- A flux command with no `-n` was read as having no namespace, and a namespace-scoped rule then
+  did not apply. flux uses `flux-system`, or `$FLUX_SYSTEM_NAMESPACE`, or with
+  `--ns-follows-kube-context` or `$FLUX_NS_FOLLOWS_KUBE_CONTEXT` the kubeconfig context's
+  namespace, and the argv shows none of these variables. The namespace is now unresolved, as for
+  kubectl and helm, so such a rule escalates with `namespace-unresolved`, and
+  `--resolve-current-context` fills the namespace flux would pick (flux2 main.go). An inline
+  `FLUX_NS_FOLLOWS_KUBE_CONTEXT=1` is recorded on the intent.
+- `git branch -m old new`, `-M`, `-c`, `-C` and `git branch -f main HEAD~3` were reads. A rename
+  now creates the new name and deletes the old one (with one name, the current branch,
+  `branch/*` marked), a copy creates the new name, and `-M`, `-C`, `--force` and `-f` also
+  delete the branch they overwrite, so `git branch -M feature main` meets a rule against
+  deleting `branch/main`. Run with git 2.52.
+- helm `--set-json` was recorded raw, so `--set-json replicaCount=0` never met a rule scoped on
+  `set.replicaCount`. It is now read as JSON and merged into `set` in helm's order. A key set by
+  `--set-file`, or left to a values file (`-f`) or `--reuse-values`, comes from a file nobody
+  read, so a rule scoped on it escalates with `set.<key>-unresolved`. The chart's own defaults
+  are still not read: `set.*` is what the command line sets.
+- `kubectl create deployment --port=0x50` was the text `0x50`; kubectl reads that flag with base
+  0, so it is 80, and `--port=080` is refused, as kubectl refuses it (run on kubectl 1.36). On
+  `expose` and `run` `--port` is a string kubectl reads with `Atoi`, which the parser already
+  matched.
 - terraform and tofu `apply -destroy=true` (and `-destroy=T`) were refused as needing a plan, and
   `-destroy -destroy=false` was read as a destroy. Go's flag package reads the last `-destroy`,
   with `strconv.ParseBool`, and so does the parser now; `-auto-approve=true` and
