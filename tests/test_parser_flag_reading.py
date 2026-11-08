@@ -2192,3 +2192,27 @@ def test_git_branch_all_with_a_name_is_refused():
 def test_git_branch_force_rule_holds_with_no_column():
     rule = _rule("git", "branch/prod", ["update"], {"force": True})
     assert _verdict([rule], "git branch --no-column -f prod HEAD~1") == "BLOCK"
+
+
+def test_gh_issue_edit_edits_every_issue_given():
+    # gh issue edit takes several issues (cobra MinimumNArgs(1), cli v2.103)
+    command = "gh issue edit 23 34 --add-label bug -R o/r"
+    assert [i.resource for i in from_argv(command.split())] == ["issue/23", "issue/34"]
+    assert _verdict([_rule("github", "issue/34", ["update"])], command) == "BLOCK"
+
+
+def test_gh_issue_edit_selector_keeps_its_own_repository():
+    a, b = from_argv("gh issue edit https://github.com/o/r/issues/5 6".split())
+    assert a.metadata["repo"] == "o/r"
+    assert "repo" not in b.metadata and "repo" in b.params["unresolved_scope"]
+
+
+@pytest.mark.parametrize("command", [
+    # every other command takes the count its cobra Args allow
+    "gh issue close 1 2", "gh pr edit 1 2", "gh pr merge 1 2", "gh release delete v1 v2",
+    "gh repo delete o/a o/b", "gh run cancel 1 2", "gh secret delete A B",
+    "gh issue delete", "gh release upload v1",
+])
+def test_gh_refuses_argument_counts_gh_refuses(command):
+    with pytest.raises(ValueError):
+        from_argv(command.split())

@@ -5571,6 +5571,46 @@ def _gh_workflow(selector: str, params: dict[str, Any]) -> str:
 def _parse_gh_tokens(
     tokens: list[str], command: tuple[str, str] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+    metadata, params, positional = _parse_gh_tokens_inner(tokens, command)
+    if command in _GH_ARGS:
+        low, high = _GH_ARGS[command]
+        if len(positional) < low or (high is not None and len(positional) > high):
+            count = str(low) if high == low else f"{low} to {'any' if high is None else high}"
+            raise ValueError(f"gh {' '.join(command)}: takes {count} argument(s), got "
+                             f"{positional!r}, and gh refuses it")
+    return metadata, params, positional
+
+
+# How many arguments each gh command takes (cobra Args in cli v2.103 pkg/cmd): (least,
+# most), None for no limit. gh refuses any other count, and so does the parser.
+_GH_ARGS: dict[tuple[str, str], tuple[int, int | None]] = {
+    **{("issue", v): (1, 1) for v in ("close", "comment", "delete", "develop", "lock",
+                                      "unlock", "pin", "unpin", "reopen", "view")},
+    ("issue", "edit"): (1, None), ("issue", "transfer"): (2, 2),
+    ("issue", "create"): (0, 0), ("issue", "list"): (0, 0), ("issue", "status"): (0, 0),
+    **{("pr", v): (0, 1) for v in ("checkout", "checks", "comment", "diff", "edit", "merge",
+                                   "ready", "review", "update-branch", "view")},
+    ("pr", "close"): (1, 1), ("pr", "reopen"): (1, 1), ("pr", "revert"): (1, 1),
+    ("pr", "create"): (0, 0), ("pr", "list"): (0, 0), ("pr", "status"): (0, 0),
+    ("release", "delete"): (1, 1), ("release", "edit"): (1, 1),
+    ("release", "delete-asset"): (2, 2), ("release", "upload"): (2, None),
+    ("release", "list"): (0, 0), ("release", "verify-asset"): (0, 2),
+    **{("release", v): (0, 1) for v in ("download", "verify", "view")},
+    **{("repo", v): (0, 1) for v in ("archive", "create", "delete", "edit", "list",
+                                     "rename", "sync", "unarchive", "view")},
+    **{("run", v): (0, 1) for v in ("cancel", "delete", "download", "rerun", "view")},
+    ("run", "list"): (0, 0),
+    ("secret", "delete"): (1, 1), ("secret", "set"): (0, 1), ("secret", "list"): (0, 0),
+    ("variable", "delete"): (1, 1), ("variable", "get"): (1, 1),
+    ("variable", "set"): (0, 1), ("variable", "list"): (0, 0),
+    ("workflow", "disable"): (0, 1), ("workflow", "enable"): (0, 1),
+    ("workflow", "view"): (0, 1), ("workflow", "list"): (0, 0),
+}
+
+
+def _parse_gh_tokens_inner(
+    tokens: list[str], command: tuple[str, str] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     spec = _GH_COMMAND_FLAGS.get(command) if command else None
     if spec is not None:
         return _parse_gh_command_tokens(tokens, spec, typed_fields=command == ("api", ""))
@@ -5761,7 +5801,43 @@ def _gh_api_normalise_path(path: str) -> str:
     return path.strip("/")
 
 
+def from_gh_multi(argv: list[str]) -> list[InfrastructureIntent]:
+    """Parses a ``gh`` invocation into one intent per object it acts on (see
+    :func:`from_gh`): ``gh issue edit 23 34`` edits both."""
+    intent = from_gh_one(argv)
+    more, base_repo = intent.params.pop("_more_selectors", ([], None))
+    intents = [intent]
+    for selector in more:
+        # each selector on its own: a URL names its repository, a number is in -R's
+        metadata = {k: v for k, v in intent.metadata.items() if k != "repo"}
+        if base_repo is not None:
+            metadata["repo"] = base_repo
+        params = {k: v for k, v in intent.params.items()
+                  if k not in ("resolved_at_runtime", "unresolved_scope")}
+        if "repo" not in metadata:
+            params["unresolved_scope"] = [*intent.params.get("unresolved_scope", [])]
+            if "repo" not in params["unresolved_scope"]:
+                params["unresolved_scope"].append("repo")
+        elif intent.params.get("unresolved_scope"):
+            params["unresolved_scope"] = [m for m in intent.params["unresolved_scope"]
+                                          if m != "repo"]
+        kind = intent.resource.partition("/")[0]
+        resource = _gh_selected(kind, selector, metadata, params)
+        intents.append(InfrastructureIntent(resource=resource, action=intent.action,
+                                            provider="github", params=params,
+                                            metadata=metadata))
+    return intents
+
+
 def from_gh(argv: list[str]) -> InfrastructureIntent:
+    """A ``gh`` invocation that acts on exactly one object (see :func:`from_gh_multi`)."""
+    intents = from_gh_multi(argv)
+    if len(intents) != 1:
+        raise ValueError(f"expected exactly one gh target, found {len(intents)}: {argv!r}")
+    return intents[0]
+
+
+def from_gh_one(argv: list[str]) -> InfrastructureIntent:
     """Parses a ``gh`` (GitHub CLI) invocation, e.g.:
 
     ``gh pr merge 42 --admin --squash``
@@ -5857,6 +5933,9 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
         subverb, *rest = tokens
         metadata, params, positional = _parse_gh_tokens(rest, ("issue", subverb))
         params["raw_action"] = f"issue-{subverb}"
+        if len(positional) > 1 and subverb == "edit":
+            # gh issue edit takes several issues and edits each (cobra MinimumNArgs(1))
+            params["_more_selectors"] = (positional[1:], metadata.get("repo"))
         resource = _gh_selected("issue", positional[0] if positional else None, metadata,
                                 params)
         action = _gh_action("issue", subverb)
@@ -6409,7 +6488,7 @@ def _from_argv(argv: list[str]) -> list[InfrastructureIntent]:
     if name == "git":
         return from_git_multi(argv)
     if name == "gh":
-        return [from_gh(argv)]
+        return from_gh_multi(argv)
     if name in ("psql", "mysql", "sqlite3", "mongosh", "pulumi") or name in _MIGRATION_TOOLS:
         # Imported lazily: parsers/ depends on this module for shared helpers.
         from aegis_core.parsers import pulumi as _pulumi
