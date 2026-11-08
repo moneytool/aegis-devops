@@ -16,10 +16,11 @@ them.
 What a command takes from outside its argv -- a configuration file, the environment, a file a
 value is read from, values reused from an earlier run -- is marked unresolved, so a rule it
 could affect escalates, or the command is refused, and a value recorded for a key that is
-marked unresolved never decides it; so is an ID the tool looks up from a name
+marked unresolved never decides it; an empty value for such a key counts as not given, and so
+does a value the tool fills in when it runs (gh's `{branch}`, git's `@{u}`); so is an ID the tool looks up from a name
 when it runs (an az subscription or location by name, a gcloud project by number). One value
 written several ways (a negated boolean, a URL or a number, a host-qualified name, an ARN, an
-abbreviated option, a short option or its long one, a literal or a nested key, `-` or `_`,
+abbreviated option (aws and az, as argparse resolves it), a short option or its long one, a literal or a nested key, `-` or `_`,
 a qualified or a flagged namespace) meets a rule written any of those ways, on every
 subcommand, and so does a mark that leaves it unresolved. A value decoded from JSON or YAML
 is the value the tool sends (helm's JSON numbers are float64, aws reads YAML 1.2). A target the tool expands when it runs (a list, a selector, `--all`, a
@@ -464,6 +465,30 @@ name). git verbs without an option table leave every param unresolved when given
   (ALLOW against a rule on one bucket), and a list such as `kubectl get pods` is marked now
   too. The other URI spellings were checked: aws `s3://` and s3api `--bucket` already meet,
   az IDs and gh URLs are names already, and helm `oci://` and flux `--url` are not targets.
+- `kubectl delete pod api --namespace=` recorded the namespace `""` as given, but client-go
+  ignores an empty override and uses the context's. An empty value for any scope a tool takes
+  from its configuration (`--namespace=`, `-n ""`, `--context=`, `--cluster=`,
+  `--kube-context=`, argocd `--server=`, aws `--region ""` and `--profile ""`, gcloud
+  `--project=` and `--zone=`, az `--subscription ""` and `-g ""`) is now removed in one place
+  (`mark_config_scope`), so the key is unresolved as if it were not given. gh refuses `-R ""`.
+- `gh api ... -F 'ref={branch}'` recorded the text `{branch}`: gh fills `{owner}`, `{repo}` and
+  `{branch}` (and `:owner`, ...) in `-F` values from the current repository when it runs
+  (fields.go). Such a field is now unresolved, and so is the `ref` taken from it. git's own
+  substitutions were checked too: `git push origin @{u}` (`@{push}`, `@{-1}`, `-`) pushes a
+  ref only git knows, now an unknown target, and `git branch -d -` or `@{-1}` is
+  `branch/*`, marked. helm, kubectl and az substitute nothing in targets.
+- az recorded an abbreviated long option under the abbreviation: `--node-c 1` was `node-c`.
+  knack inherits argparse's allow_abbrev, so every az long option is now resolved by unique
+  prefix against the command's declared long options and az's own, which the generator now
+  also extracts from `_params.py` (`az_short_options.json`), and an ambiguous prefix is
+  refused. aws already did this; gcloud disables abbreviations and gsutil uses getopt.
+- `gcloud storage cp /tmp/secret gs://prod/backup/` recorded the key `backup/`, but the object
+  written is `backup/secret`. A copy or move into a folder (a destination ending in `/`, or a
+  bucket alone) now writes the prefix plus the source's base name, on gcloud storage, gsutil
+  and aws s3 alike. Where the object depends on what the tool finds when it runs, the key is
+  unresolved: several sources, `-r`/`--recursive`, paths from stdin, and on gcloud and gsutil
+  a destination without the slash, which they treat as a folder when objects under it exist
+  (aws never does). `az storage blob upload` is not a modelled command and is refused.
 - Tests that used `flux reconcile ... --dry-run`, `flux get ... --export` and `git push
   --dry-run=false`, which the tools refuse, now use commands the tools accept (`flux create ...
   --export`, `git push --dry-run --no-dry-run`).
