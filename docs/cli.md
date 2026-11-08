@@ -353,9 +353,9 @@ the extension and runs it. Some real probes are therefore still refused, for exa
 do not resolve aliases at all: `git co` is read as a git command, and an unknown aws service
 as that service.
 
-kubectl, helm, flux and argocd flags: each tool has a table of its flags, read from its
-source (kubectl 1.36's `--help` on every command, helm 4.3.1 and 3.21.1, flux 2.10.0,
-argo-cd 3.6.1). Booleans (`--no-headers`, `--no-hooks`, `--prune`, …) take no value; value flags take the next
+kubectl, helm, flux and argocd flags, and those of the gh commands that change something: each
+tool has a table of its flags, read from its source (kubectl 1.36's `--help` on every command,
+helm 4.3.1 and 3.21.1, flux 2.10.0, argo-cd 3.6.1, gh 2.103). Booleans (`--no-headers`, `--no-hooks`, `--prune`, …) take no value; value flags take the next
 token even when it starts with `-`, as pflag does, so `helm upgrade api ./c -n prod
 --description -ndev` runs in `prod`. A flag in no table is a boolean at the end of argv and
 keeps a value written as `--flag=value`. Anywhere else the command is refused (`cannot tell

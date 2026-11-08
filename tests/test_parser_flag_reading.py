@@ -679,3 +679,49 @@ def test_terraform_reads_go_booleans(command, destroy, auto_approve):
     intent = from_argv(command.split())[0]
     assert (intent.resource, intent.action) == ("workspace/current", "delete")
     assert intent.params["auto_approve"] is auto_approve
+
+
+# --- gh ------------------------------------------------------------------------------
+# cli/cli v2.103 source (pkg/cmd), not run.
+
+
+@pytest.mark.parametrize("command,resource,action,params", [
+    # a boolean takes no value, so the word after it is the target
+    ("gh pr merge -s 42", "pr/42", "merge", {"method": "squash"}),
+    ("gh pr merge -r 42", "pr/42", "merge", {"method": "rebase"}),  # -r is --rebase here
+    ("gh pr merge -sd 42", "pr/42", "merge", {"method": "squash", "delete_branch": True}),
+    ("gh repo delete --yes owner/repo", "repo/owner/repo", "delete", {"yes": True}),
+    ("gh release delete -y v1", "release/v1", "delete", {"yes": True}),
+    ("gh pr close -c bye 42", "pr/42", "stop", {"comment": "bye"}),
+    # a short word carries its value
+    ("gh api -XDELETE repos/o/r", "repo/o/r", "delete", {}),
+])
+def test_gh_reads_its_flags_as_pflag_does(command, resource, action, params):
+    intent = from_argv(command.split())[0]
+    assert (intent.resource, intent.action) == (resource, action)
+    assert {k: v for k, v in intent.params.items() if k in params} == params
+
+
+def test_gh_workflow_run_r_is_the_ref():
+    intent = from_argv("gh workflow run deploy.yml -r main -f env=prod".split())[0]
+    assert intent.metadata == {"ref": "main"}
+    assert intent.params["inputs"] == {"env": "prod"}
+
+
+@pytest.mark.parametrize("command,verdict", [
+    ("gh repo delete --yes owner/repo", "BLOCK"),
+    ("gh api -XDELETE repos/owner/repo", "BLOCK"),
+    ("gh repo delete --yes owner/other", "ALLOW"),
+])
+def test_gh_repo_delete_rule_holds(command, verdict):
+    assert _verdict([_rule("github", "repo/owner/repo", ["delete"])], command) == verdict
+
+
+@pytest.mark.parametrize("command", [
+    "gh pr merge 42 --no-such-flag x",
+    "gh repo delete --no-such-flag owner/repo",
+    "gh pr merge -x 42",
+])
+def test_gh_refuses_a_flag_it_cannot_place(command):
+    with pytest.raises(ValueError):
+        from_argv(command.split())

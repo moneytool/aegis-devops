@@ -4101,7 +4101,73 @@ def _gh_fold_globals(group: str, tokens: list[str], leading: list[str]) -> list[
     return [*leading, *tokens]
 
 
-def _parse_gh_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+# The flags of the gh commands that change something, from cli/cli v2.103 (pkg/cmd, and
+# cmdutil's enum and optional-value flags): booleans, flags that take a value, and short
+# letters with the long flag each stands for on that command. -R/--repo and -h/--help are
+# on every one. pflag reads them, so a value flag takes the next word whatever it is, and a
+# boolean takes none: "gh pr merge -s 42" is a squash merge of 42 ("-r" is --rebase there
+# and --ref on "workflow run").
+_GH_COMMAND_FLAGS: dict[tuple[str, str], tuple[frozenset[str], frozenset[str], dict[str, str]]] = {
+    ("pr", "merge"): (
+        frozenset({"admin", "auto", "delete-branch", "disable-auto", "merge", "rebase", "squash"}),
+        frozenset({"author-email", "body", "body-file", "match-head-commit", "subject"}),
+        {"A": "author-email", "F": "body-file", "b": "body", "d": "delete-branch",
+         "m": "merge", "r": "rebase", "s": "squash", "t": "subject"},
+    ),
+    ("pr", "close"): (
+        frozenset({"delete-branch"}), frozenset({"comment"}),
+        {"c": "comment", "d": "delete-branch"},
+    ),
+    ("repo", "delete"): (
+        frozenset({"accept-cascading-deletion-of-private-forks", "confirm", "yes"}),
+        frozenset(), {},
+    ),
+    ("release", "create"): (
+        frozenset({"draft", "fail-on-no-commits", "generate-notes", "latest", "notes-from-tag",
+                   "prerelease", "verify-tag"}),
+        frozenset({"discussion-category", "notes", "notes-file", "notes-start-tag", "target",
+                   "title"}),
+        {"F": "notes-file", "d": "draft", "n": "notes", "p": "prerelease", "t": "title"},
+    ),
+    ("release", "delete"): (frozenset({"cleanup-tag", "yes"}), frozenset(), {"y": "yes"}),
+    ("secret", "set"): (
+        frozenset({"no-repos-selected", "no-store", "user"}),
+        frozenset({"app", "body", "env", "env-file", "org", "repos", "visibility"}),
+        {"a": "app", "b": "body", "e": "env", "f": "env-file", "o": "org", "r": "repos",
+         "u": "user", "v": "visibility"},
+    ),
+    ("secret", "delete"): (
+        frozenset({"user"}), frozenset({"app", "env", "org"}),
+        {"a": "app", "e": "env", "o": "org", "u": "user"},
+    ),
+    ("variable", "set"): (
+        frozenset(), frozenset({"body", "env", "env-file", "org", "repos", "visibility"}),
+        {"b": "body", "e": "env", "f": "env-file", "o": "org", "r": "repos", "v": "visibility"},
+    ),
+    ("workflow", "run"): (
+        frozenset({"json"}), frozenset({"field", "raw-field", "ref"}),
+        {"F": "field", "f": "raw-field", "r": "ref"},
+    ),
+    ("api", ""): (
+        frozenset({"allow-escape-sequences", "include", "paginate", "silent", "slurp",
+                   "verbose"}),
+        frozenset({"cache", "field", "header", "hostname", "input", "jq", "method", "preview",
+                   "raw-field", "template"}),
+        {"F": "field", "H": "header", "X": "method", "f": "raw-field", "i": "include",
+         "p": "preview", "q": "jq", "t": "template"},
+    ),
+}
+_GH_COMMON_BOOLS = frozenset({"help"})
+_GH_COMMON_VALUES = frozenset({"repo"})
+_GH_COMMON_SHORTS = {"R": "repo", "h": "help"}
+
+
+def _parse_gh_tokens(
+    tokens: list[str], command: tuple[str, str] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+    spec = _GH_COMMAND_FLAGS.get(command) if command else None
+    if spec is not None:
+        return _parse_gh_command_tokens(tokens, spec)
     metadata: dict[str, Any] = {}
     params: dict[str, Any] = {}
     positional: list[str] = []
@@ -4148,6 +4214,72 @@ def _parse_gh_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, Any],
                 params[key.replace("-", "_")] = True
         else:
             positional.append(tok)
+        i += 1
+
+    return metadata, params, positional
+
+
+def _parse_gh_command_tokens(
+    tokens: list[str], spec: tuple[frozenset[str], frozenset[str], dict[str, str]],
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+    """A gh command from :data:`_GH_COMMAND_FLAGS`, read as pflag reads it: short words
+    letter by letter, a value flag takes the next word, ``--`` ends the flags, and a flag
+    in no table is refused unless ``=value`` or its place shows its reading."""
+    bools = spec[0] | _GH_COMMON_BOOLS
+    values = spec[1] | _GH_COMMON_VALUES
+    shorts = {**_GH_COMMON_SHORTS, **spec[2]}
+    short_bools = frozenset(letter for letter, name in shorts.items() if name in bools)
+    short_values = frozenset(letter for letter, name in shorts.items() if name in values)
+    metadata: dict[str, Any] = {}
+    params: dict[str, Any] = {}
+    positional: list[str] = []
+
+    tokens = list(tokens)  # short words are split in place as the walk reaches them
+    i = 0
+    n = len(tokens)
+    while i < n:
+        tok = tokens[i]
+        if tok == "--":
+            positional.extend(tokens[i + 1:])
+            break
+        if not tok.startswith("-") or tok == "-":
+            positional.append(tok)
+            i += 1
+            continue
+        is_long = tok.startswith("--")
+        if not is_long and len(tok) > 2:
+            flags = _split_short_word(tok, short_bools, short_values, "gh")
+            if flags != [tok]:
+                tokens[i:i + 1] = flags
+                n = len(tokens)
+                continue
+        key, val = _split_flag(tok)
+        name = key if is_long else shorts.get(key)
+        if name is None or (name not in bools and name not in values):
+            i, params[key.replace("-", "_")] = _other_flag(tokens, i, values=(), bools=(),
+                                                           tool="gh")
+        elif name in bools:
+            on = _bool_param(val)
+            if name in ("squash", "merge", "rebase"):
+                if on is True:
+                    params["method"] = name
+            else:
+                params[name.replace("-", "_")] = on
+        else:
+            if val is None:
+                i += 1
+                val = _value_at(tokens, i, tok)
+            if name == "repo":
+                metadata["repo"] = val
+            elif name == "ref":
+                metadata["ref"] = val
+            elif name in ("field", "raw-field"):
+                k, _sep, v = val.partition("=")
+                params.setdefault("inputs", {})[k] = _coerce(v)
+            elif name == "method":
+                params["_method"] = val.upper()
+            else:
+                params[name.replace("-", "_")] = _coerce(val)
         i += 1
 
     return metadata, params, positional
@@ -4225,7 +4357,7 @@ def from_gh(argv: list[str]) -> InfrastructureIntent:
         if not tokens:
             raise ValueError(f"gh workflow requires a subcommand: {argv!r}")
         subverb, *rest = tokens
-        metadata, params, positional = _parse_gh_tokens(rest)
+        metadata, params, positional = _parse_gh_tokens(rest, ("workflow", subverb))
         if subverb == "run":
             if not positional:
                 raise ValueError(f"could not find a workflow name in: {argv!r}")
@@ -4245,7 +4377,7 @@ def from_gh(argv: list[str]) -> InfrastructureIntent:
         if not tokens:
             raise ValueError(f"gh release requires a subcommand: {argv!r}")
         subverb, *rest = tokens
-        metadata, params, positional = _parse_gh_tokens(rest)
+        metadata, params, positional = _parse_gh_tokens(rest, ("release", subverb))
         params["raw_action"] = f"release-{subverb}"
         tag = positional[0] if positional else "*"
         action = {"create": "create", "delete": "delete"}.get(subverb, "read")
@@ -4258,7 +4390,7 @@ def from_gh(argv: list[str]) -> InfrastructureIntent:
         if not tokens:
             raise ValueError(f"gh pr requires a subcommand: {argv!r}")
         subverb, *rest = tokens
-        metadata, params, positional = _parse_gh_tokens(rest)
+        metadata, params, positional = _parse_gh_tokens(rest, ("pr", subverb))
         params["raw_action"] = f"pr-{subverb}"
         number = positional[0] if positional else "*"
         action = {"merge": "merge", "close": "stop"}.get(subverb, "read")
@@ -4271,7 +4403,7 @@ def from_gh(argv: list[str]) -> InfrastructureIntent:
         if not tokens:
             raise ValueError(f"gh repo requires a subcommand: {argv!r}")
         subverb, *rest = tokens
-        metadata, params, positional = _parse_gh_tokens(rest)
+        metadata, params, positional = _parse_gh_tokens(rest, ("repo", subverb))
         params["raw_action"] = f"repo-{subverb}"
         name = positional[0] if positional else "*"
         action = "delete" if subverb == "delete" else "read"
@@ -4284,7 +4416,7 @@ def from_gh(argv: list[str]) -> InfrastructureIntent:
         if not tokens:
             raise ValueError(f"gh secret requires a subcommand: {argv!r}")
         subverb, *rest = tokens
-        metadata, params, positional = _parse_gh_tokens(rest)
+        metadata, params, positional = _parse_gh_tokens(rest, ("secret", subverb))
         params["raw_action"] = f"secret-{subverb}"
         name = positional[0] if positional else "*"
         action = {"set": "put", "delete": "delete"}.get(subverb, "read")
@@ -4297,7 +4429,7 @@ def from_gh(argv: list[str]) -> InfrastructureIntent:
         if not tokens:
             raise ValueError(f"gh variable requires a subcommand: {argv!r}")
         subverb, *rest = tokens
-        metadata, params, positional = _parse_gh_tokens(rest)
+        metadata, params, positional = _parse_gh_tokens(rest, ("variable", subverb))
         params["raw_action"] = f"variable-{subverb}"
         name = positional[0] if positional else "*"
         action = "put" if subverb == "set" else "read"
@@ -4307,7 +4439,7 @@ def from_gh(argv: list[str]) -> InfrastructureIntent:
         )
 
     if group == "api":
-        metadata, params, positional = _parse_gh_tokens(tokens)
+        metadata, params, positional = _parse_gh_tokens(tokens, ("api", ""))
         method = params.pop("_method", "GET")
         action = _GH_METHOD_ACTION.get(method, "read")
         params["raw_action"] = f"api-{method.lower()}"

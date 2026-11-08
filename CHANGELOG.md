@@ -119,6 +119,14 @@ count (`max_intents`) or change a `ratio`.
   with `strconv.ParseBool`, and so does the parser now; `-auto-approve=true` and
   `--auto-approve` set `auto_approve`. `-destroy=T` and `-destroy=yes` were run with terraform in
   an empty directory.
+- gh read an unlisted boolean as taking the next word, which was often the target: `gh pr
+  merge -s 42` was a merge of `pr/*` (`42` taken as the value of `-s`), `gh repo delete --yes
+  owner/repo` was `repo/*`, and `gh api -XDELETE repos/o/r` was a read of `api/*`. `-r` was read
+  as `--ref` on every command, and on `pr merge` it is `--rebase`. The commands that change
+  something (`pr merge`, `pr close`, `repo delete`, `release create`/`delete`, `secret
+  set`/`delete`, `variable set`, `workflow run`, `api`) now have tables of their flags from
+  cli/cli v2.103 source (not run), read as pflag reads them, and a flag in no table is refused
+  as on the other pflag tools.
 - Tests that used `flux reconcile ... --dry-run`, `flux get ... --export` and `git push
   --dry-run=false`, which the tools refuse, now use commands the tools accept (`flux create ...
   --export`, `git push --dry-run --no-dry-run`).
