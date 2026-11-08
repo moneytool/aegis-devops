@@ -319,6 +319,19 @@ directory or `$GH_REPO`, so a rule scoped on `repo` escalates with `repo-unresol
 (`--resolve-current-context` fills it from `$GH_REPO`). A `gh api` path with `{owner}`, `{repo}`
 or `{branch}` is the same.
 
+Any other scope a tool takes from its configuration when the argv does not give it is the
+same: kubeconfig `context` and `cluster`, aws `region` and `profile`, gcloud `project` and
+`region`, az `subscription`, `resource_group` and `region`, argocd `server`, `project` and
+`app_namespace`, and the `remote` of a git push. The intent lists them in
+`params.unresolved_scope`, and a rule scoped on one of them escalates with
+`<key>-unresolved: <id>` until the argv or `--resolve-current-context` gives it.
+
+**One value, every spelling.** A scope key matches its `-`/`_` twin (`dry-run`, `dry_run`) and a
+boolean's negated spelling (`no-verify-ssl: true` is `verify-ssl: false`). When a key reaches
+more than one value (helm's literal `a.b` beside the nested `a.b`), the rule matches if any of
+them does. `repo`, `resource_group` and `subscription` compare without case, as GitHub and
+Azure do, and so do Azure resource names and GitHub `repo/...` resources.
+
 **Manifests are not read.** `kubectl apply|create|replace|delete -f <file>` (or a directory,
 `-k <kustomization>`, or `-f -` for stdin) is one intent on `manifest/<name>`, with one for each
 file in `-f a -f b` or `-f a,b`; the objects inside are never parsed, since the file can change between the check and the run. A rule for the same
