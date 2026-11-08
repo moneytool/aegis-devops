@@ -359,7 +359,7 @@ def test_argocd_dry_run_is_a_rehearsal_only_on_sync():
     # an unambiguous prefix of a long option is that option
     ("git push --force-w origin main", ["ref/main"], {"force": True}),
     ("git push --del origin old", ["ref/old"], {"delete": True}),
-    ("git push --mirr origin", ["ref/*"], {"force": True, "unknown_target": True}),
+    ("git push --mirr origin", ["ref/*", "ref/*"], {"force": True, "unknown_target": True}),
     # the last spelling decides
     ("git push --no-force -f origin main", ["ref/main"], {"force": True}),
     ("git push -n --no-dry-run origin main", ["ref/main"], {}),
@@ -1080,3 +1080,40 @@ def test_gh_repo_resolves_from_gh_repo():
     resolve_current_context(intent, environ={"GH_REPO": "github.com/acme/web"})
     assert intent.metadata["repo"] == "acme/web"
     assert scope_unresolved({"repo": "acme/web"}, intent) == []
+
+
+# --- git push: refs the argv does not name ----------------------------------------------
+
+
+@pytest.mark.parametrize("command,targets", [
+    ("git push origin main --follow-tags", [("ref/main", "push"), ("ref/*", "push")]),
+    ("git -c push.followTags=true push origin main", [("ref/main", "push"), ("ref/*", "push")]),
+    ("git -c push.followTags push origin main", [("ref/main", "push"), ("ref/*", "push")]),
+    ("git -c push.followTags=true push origin main --no-follow-tags", [("ref/main", "push")]),
+    ("git -c push.followTags=false push origin main", [("ref/main", "push")]),
+    ("git push origin main --tags", [("ref/main", "push"), ("ref/*", "push")]),
+    ("git push origin HEAD", [("ref/*", "push")]),
+    ("git push origin :", [("ref/*", "push")]),  # matching branches, not a delete
+    ("git push origin", [("ref/*", "push")]),
+    ("git push --all origin", [("ref/*", "push")]),
+    ("git push --mirror origin", [("ref/*", "push"), ("ref/*", "delete")]),
+    ("git -c remote.origin.mirror=true push origin", [("ref/*", "push"), ("ref/*", "delete")]),
+    ("git push --prune origin main", [("ref/main", "push"), ("ref/*", "delete")]),
+    ("git push origin :old", [("ref/old", "delete")]),
+    ("git push --delete origin a b", [("ref/a", "delete"), ("ref/b", "delete")]),
+    ("git push origin main --atomic", [("ref/main", "push")]),
+])
+def test_git_push_marks_every_ref_the_argv_does_not_name(command, targets):
+    intents = from_argv(command.split())
+    assert [(i.resource, i.action) for i in intents] == targets
+    for intent in intents:
+        assert (intent.resource == "ref/*") == (intent.params.get("unknown_target") is True)
+
+
+@pytest.mark.parametrize("command", [
+    "git push origin main --follow-tags",
+    "git -c push.followTags=true push origin main",
+    "git push origin HEAD",
+])
+def test_a_tag_rule_escalates_on_tags_the_argv_does_not_name(command):
+    assert _verdict([_rule("git", "ref/v1.0", ["push"])], command) == "ESCALATE"

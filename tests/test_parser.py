@@ -14,6 +14,7 @@ from aegis_core.parser import (
     from_gcloud,
     from_gh,
     from_git,
+    from_git_multi,
     from_helm,
     from_kubectl,
     from_kubectl_multi,
@@ -1778,7 +1779,7 @@ def test_git_push_force_without_refspec_marks_unknown_target():
         ["git", "push", "--force", "origin"],
         ["git", "push", "--mirror", "origin"],
     ):
-        intent = from_git(argv)
+        intent = from_git_multi(argv)[0]  # --mirror also deletes: a second intent
         assert intent.resource == "ref/*", argv
         assert intent.action == "push"
         assert intent.params["force"] is True
@@ -1801,10 +1802,13 @@ def test_git_push_with_refspec_has_no_unknown_target():
 
 
 def test_git_push_mirror_does_not_swallow_the_remote_and_implies_force():
-    intent = from_git(["git", "push", "--mirror", "origin"])
-    assert intent.metadata == {"remote": "origin"}
-    assert intent.params["mirror"] is True
-    assert intent.params["force"] is True
+    push, delete = from_git_multi(["git", "push", "--mirror", "origin"])
+    assert push.metadata == {"remote": "origin"}
+    assert push.params["mirror"] is True
+    assert push.params["force"] is True
+    # --mirror also deletes every remote ref with no local one
+    assert (delete.resource, delete.action) == ("ref/*", "delete")
+    assert delete.params["unknown_target"] is True
 
 
 def test_git_push_all_is_unknown_target():

@@ -4286,7 +4286,11 @@ def _git_push_intent(
         if spec.startswith("+"):
             force = True
             spec = spec[1:]
-        if spec.startswith(":"):
+        if spec == ":":
+            ref = None  # ":" pushes every branch that matches one on the remote
+        elif spec in ("HEAD", "@"):
+            ref = None  # the current branch, to the branch of the same name
+        elif spec.startswith(":"):
             delete = True
             ref = spec[1:]
         elif ":" in spec:
@@ -4294,9 +4298,9 @@ def _git_push_intent(
             ref = dst
         else:
             ref = spec
-        if ref.startswith("refs/heads/"):
+        if ref and ref.startswith("refs/heads/"):
             ref = ref[len("refs/heads/") :]
-        elif ref.startswith("refs/tags/"):
+        elif ref and ref.startswith("refs/tags/"):
             ref = ref[len("refs/tags/") :]
 
     params = dict(params)
@@ -4319,20 +4323,55 @@ def _git_push_intent(
     )
 
 
+def _git_config(leading: list[str]) -> dict[str, str | None]:
+    """The ``-c name=value`` settings in front of the verb, names lower-cased (``-c name``
+    alone is true). ``--config-env name=VAR`` takes its value from the environment, which
+    the argv does not show: None."""
+    config: dict[str, str | None] = {}
+    i = 0
+    while i < len(leading):
+        word = leading[i]
+        if word in ("-c", "--config-env") and i + 1 < len(leading):
+            name, sep, value = leading[i + 1].partition("=")
+            config[name.lower()] = None if word == "--config-env" else (value if sep else "true")
+            i += 2
+            continue
+        if word.startswith("--config-env="):
+            config[word.split("=", 2)[1].lower()] = None
+        i += 1
+    return config
+
+
+def _git_config_true(value: str | None) -> bool:
+    """git's boolean config: true, yes, on, 1 (or unknown, which can only be stricter)."""
+    return value is None or value.strip().lower() in ("true", "yes", "on", "1")
+
+
 def _from_git_push(
-    positional: list[str], params: dict[str, Any], metadata: dict[str, Any]
+    positional: list[str], params: dict[str, Any], metadata: dict[str, Any],
+    options: list[tuple[str, Any]], config: dict[str, str | None],
 ) -> list[InfrastructureIntent]:
     """One intent per refspec: ``git push origin a +b :c`` pushes a, force-pushes b and
-    deletes c. ``--tags`` also pushes every tag, and ``--prune`` deletes every remote ref
-    with no local one, neither of which the argv names."""
+    deletes c. Refs the argv does not name are one more intent on ``ref/*``, marked
+    ``unknown_target``: every tag (``--tags``), the annotated tags reachable from what is
+    pushed (``--follow-tags``, or ``-c push.followTags`` unless ``--no-follow-tags``), the
+    remote refs with no local one (``--prune``, a delete), and with no refspec, ``:`` or
+    ``HEAD``, whatever push.default, ``--all``/``--branches`` or ``--mirror`` pick (as is
+    ``-c remote.<name>.mirror``, a force push that deletes)."""
     remote = positional[0] if positional else None
     refspecs = positional[1:]
     if remote is not None:
         metadata = {**metadata, "remote": remote}
+    mirror_key = f"remote.{(remote or 'origin').lower()}.mirror"
+    if mirror_key in config and _git_config_true(config[mirror_key]):
+        params = {**params, "mirror": True, "force": True}
     intents = [_git_push_intent(refspec, params, metadata) for refspec in refspecs or [None]]
-    if refspecs and params.get("tags") is True:
+    follow = params.get("follow_tags") is True or (
+        "push.followtags" in config and _git_config_true(config["push.followtags"])
+        and ("follow-tags", None) not in options)
+    if refspecs and (params.get("tags") is True or follow):
         intents.append(_git_push_intent(None, params, metadata))
-    if params.get("prune") is True:
+    if params.get("prune") is True or params.get("mirror") is True:
         intents.append(_git_push_intent(None, {**params, "delete": True}, metadata))
     return intents
 
@@ -4355,7 +4394,7 @@ def from_git_multi(argv: list[str]) -> list[InfrastructureIntent]:
     if len(argv) < 2 or _basename(argv[0]) != "git":
         raise ValueError(f"not a recognizable git invocation: {argv!r}")
 
-    _leading, rest = _split_leading_globals(
+    leading, rest = _split_leading_globals(
         argv[1:],
         value_flags=_GIT_GLOBAL_VALUE_FLAGS,
         bool_flags=_GIT_GLOBAL_BOOL_FLAGS,
@@ -4363,6 +4402,7 @@ def from_git_multi(argv: list[str]) -> list[InfrastructureIntent]:
     )
     verb = rest[0]
     tokens = rest[1:]
+    options: list[tuple[str, Any]] = []
     if verb in _GIT_OPTIONS:
         options, positional = _parse_git_options(verb, tokens)
         params = _git_option_params(verb, options)
@@ -4376,7 +4416,7 @@ def from_git_multi(argv: list[str]) -> list[InfrastructureIntent]:
                                     params=dict(params), metadata=dict(metadata))
 
     if verb == "push":
-        return _from_git_push(positional, params, metadata)
+        return _from_git_push(positional, params, metadata, options, _git_config(leading))
 
     if verb in ("branch", "tag"):
         if params.get("delete"):
