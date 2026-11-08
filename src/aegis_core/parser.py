@@ -1340,6 +1340,12 @@ def _parse_flags(
                     i += 1
                     val = _value_at(tokens, i, tok)
                 metadata["user"] = val
+            elif key == "server":
+                # the API server the request goes to, over the context's cluster
+                if val is None:
+                    i += 1
+                    val = _value_at(tokens, i, tok)
+                metadata["server"] = val
             elif key in _DISCARD_VALUE_FLAGS:
                 if val is None:
                     i += 1
@@ -1537,6 +1543,12 @@ def from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
             _mark_unresolved(intent.params, "*")
             kind = intent.resource.partition("/")[0]
             intent.params["resolved_at_runtime"] = {"from": intent.resource, "kinds": [kind]}
+        if (intent.params.get("from-file") is not None
+                or intent.params.get("from-env-file") is not None):
+            # create configmap/secret reads its data keys and values from those files
+            # when it runs: the data is unknown, and so is every key in it
+            _mark_unresolved(intent.params, "data")
+            _mark_unresolved(intent.params, "data.*")
     return intents
 
 
@@ -1664,6 +1676,13 @@ def _from_kubectl_multi(argv: list[str]) -> list[InfrastructureIntent]:
     if verb in _POD_TARGET_VERBS:
         if not positional:
             raise ValueError(f"could not find a target resource in: {argv!r}")
+        if verb == "logs":
+            # logs.go Complete: a second word is the container, over -c; a third is refused
+            if len(positional) > 2:
+                raise ValueError(f"kubectl logs takes a pod and a container: {argv!r}")
+            if len(positional) == 2:
+                params["container"] = positional[1]
+                positional = positional[:1]
         kind, name = _split_resource_token(positional[0])
         if verb == "attach" and len(positional) == 2:
             # attach alone also reads two words as TYPE NAME; exec and
@@ -2503,6 +2522,8 @@ def _parse_aws_tokens(
                     val = _value_at(tokens, i, tok)
                 if key in _AWS_BOOL_FLAGS:
                     _set_bool_param(params, key, _bool_param(val))
+                if key == "endpoint-url":
+                    metadata["endpoint_url"] = val  # see mark_config_scope
                 # the other globals are consumed, intentionally not recorded
             elif key in _AWS_BOOL_FLAGS and arity in (None, ""):
                 _set_bool_param(params, key, _bool_param(val))
@@ -2560,8 +2581,7 @@ def _parse_aws_tokens(
                                             spec.get("t", {}).get(key) if spec else None)
                 if arity == "":
                     _set_bool_param(params, key, True)
-                elif complex_shape and not (isinstance(value, str) and value.startswith(
-                        ("file://", "fileb://"))):
+                elif complex_shape and not _aws_file_ref(value):
                     try:
                         params[key] = _aws_unpack(value, complex_shape, aws_shapes or {}, tok,
                                                   key in aws_old_list)
@@ -2873,14 +2893,23 @@ def _aws_yaml_loader() -> type:
     return Loader
 
 
+def _aws_file_ref(value: Any) -> bool:
+    """Whether aws reads this option value from a file. paramfile runs before argprocess
+    (before JSON or shorthand is decoded) and takes a one-word list as that word, so
+    ``--tags file://t.json`` is a file on a list option too."""
+    if isinstance(value, list) and len(value) == 1:
+        value = value[0]
+    return isinstance(value, str) and value.startswith(("file://", "fileb://"))
+
+
 def _mark_aws_file_values(params: dict[str, Any], spec: dict[str, Any] | None) -> None:
     """aws reads an option's value from a file when it is ``file://`` or ``fileb://``
     (paramfile), which is not read: those options are unresolved. With ``spec``, the whole
     input is in a file: every option of the operation the command line does not give is
     unresolved (one the command line gives is known, since it overrides the input)."""
-    marks = [key for key, value in params.items()
-             if isinstance(value, str) and value.startswith(("file://", "fileb://"))
-             and not key.startswith("cli_input")]
+    marks = [mark for key, value in params.items()
+             if _aws_file_ref(value) and not key.startswith("cli_input")
+             for mark in (key, f"{key}.*")]  # and every key nested in it
     if spec is not None:
         given = {canonical_key(k) for k in params}
         options = spec.get("o", {})
@@ -3274,7 +3303,8 @@ def _az_roles(aliases: dict[str, str]) -> dict[str, str]:
     return roles
 
 
-def _az_convert(params: dict[str, Any], nargs: dict[str, str], tokens: list[str]) -> None:
+def _az_convert(params: dict[str, Any], nargs: dict[str, str], tokens: list[str],
+                skip: set[str] = frozenset()) -> None:
     """What az does to a value after argparse, from the argument's type or validator
     (the table's ``conv:``): ``tags`` (validate_tags: ``key[=value]`` words a map, a bare
     key an empty value), ``bool`` (get_three_state_flag: true/false without case, bare
@@ -3282,7 +3312,7 @@ def _az_convert(params: dict[str, Any], nargs: dict[str, str], tokens: list[str]
     another value az refuses). Another validator is not ported: its value is unresolved."""
     for key in list(params):
         conv = nargs.get(f"conv:{key}")
-        if conv is None:
+        if conv is None or key in skip:  # a value read from a file is not converted
             continue
         value = params[key]
         if conv == "tags":
@@ -3454,14 +3484,19 @@ def _parse_az_tokens(
             positional.append(tok)
         i += 1
 
-    if nargs is not None:
-        _az_convert(params, nargs, tokens)
-    # az reads an argument value "@path" from that file (knack's argument preprocessing),
-    # "@-" from stdin: any other option read that way is unresolved
+    # az reads an argument value "@path" from that file (knack's argument preprocessing,
+    # before argparse and any validator), "@-" from stdin: any other option read that way
+    # is unresolved, and so is every key nested in it (``tags.env`` of ``--tags @t.txt``).
+    # This comes first: only a literal value is converted (tags to a map, a bool, a choice).
+    from_file: set[str] = set()
     for key, value in list(params.items()):
         words = value if isinstance(value, list) else [value]
         if any(isinstance(w, str) and w.startswith("@") for w in words):
+            from_file.add(key)
             _mark_unresolved(params, key)
+            _mark_unresolved(params, f"{key}.*")
+    if nargs is not None:
+        _az_convert(params, nargs, tokens, skip=from_file)
     # the target or its scope would then be a file nobody read
     for value in (name_value, *ids_values, metadata.get("region"),
                   metadata.get("location_display_name"), metadata.get("resource_group"),
@@ -4447,7 +4482,9 @@ def _parse_helm_tokens(
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
-                # consumed, intentionally not recorded
+                if key == "kube-apiserver":
+                    metadata["server"] = val  # see mark_config_scope
+                # the others are consumed, intentionally not recorded
             elif key in _HELM_GLOBAL_BOOL_FLAGS:
                 pass  # consumed, intentionally not recorded
             elif key == "dry-run":
@@ -5424,7 +5461,9 @@ def _parse_flux_tokens(
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
-                # consumed, intentionally not recorded
+                if key == "server":
+                    metadata["server"] = val  # see mark_config_scope
+                # the others are consumed, intentionally not recorded
             elif key in ("verbose", "insecure-skip-tls-verify", "disable-compression"):
                 pass  # consumed, intentionally not recorded
             elif key == "dry-run":
@@ -6401,10 +6440,10 @@ def _gh_fold_globals(group: str, tokens: list[str], leading: list[str]) -> list[
 
 # The flags of the gh commands that change something, from cli/cli v2.103 (pkg/cmd, and
 # cmdutil's enum and optional-value flags): booleans, flags that take a value, and short
-# letters with the long flag each stands for on that command. -R/--repo and -h/--help are
-# on every one. pflag reads them, so a value flag takes the next word whatever it is, and a
-# boolean takes none: "gh pr merge -s 42" is a squash merge of 42 ("-r" is --rebase there
-# and --ref on "workflow run").
+# letters with the long flag each stands for on that command. -h/--help is on every one,
+# and -R/--repo on every one but api. pflag reads them, so a value flag takes the next word
+# whatever it is, and a boolean takes none: "gh pr merge -s 42" is a squash merge of 42
+# ("-r" is --rebase there and --ref on "workflow run").
 _GH_COMMAND_FLAGS: dict[tuple[str, str], tuple[frozenset[str], frozenset[str], dict[str, str]]] = {
     ("pr", "merge"): (
         frozenset({"admin", "auto", "delete-branch", "disable-auto", "merge", "rebase", "squash"}),
@@ -6767,8 +6806,10 @@ def _parse_gh_command_tokens(
     letter by letter, a value flag takes the next word, ``--`` ends the flags, and a flag
     in no table is refused unless ``=value`` or its place shows its reading."""
     bools = spec[0] | _GH_COMMON_BOOLS
-    values = spec[1] | _GH_COMMON_VALUES
-    shorts = {**_GH_COMMON_SHORTS, **spec[2]}
+    # gh api has no -R/--repo (api.go never calls EnableRepoOverride): gh refuses it, and
+    # the repository is the one the path or URL names
+    values = spec[1] | (frozenset() if gh_command == "api" else _GH_COMMON_VALUES)
+    shorts = {**({"h": "help"} if gh_command == "api" else _GH_COMMON_SHORTS), **spec[2]}
     short_bools = frozenset(letter for letter, name in shorts.items() if name in bools)
     short_values = frozenset(letter for letter, name in shorts.items() if name in values)
     metadata: dict[str, Any] = {}
@@ -6796,6 +6837,9 @@ def _parse_gh_command_tokens(
                 n = len(tokens)
                 continue
         key, val = _split_flag(tok)
+        if gh_command == "api" and key in ("R", "repo"):
+            raise ValueError(f"gh api has no {tok.partition('=')[0]} flag; the path or URL "
+                             f"names the repository: {tokens!r}")
         name = key if is_long else shorts.get(key)
         if name is None and not is_long:
             raise ValueError(f"gh: -{key} is not a short flag the parser knows on this "
@@ -7093,15 +7137,31 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
             params.setdefault("unresolved_scope", []).extend(["inputs.*", "ref"])
         action = _GH_METHOD_ACTION.get(method, "read")
         params["raw_action"] = f"api-{method.lower()}"
-        path = _gh_api_normalise_path(positional[0]) if positional else "*"
+        raw = positional[0] if positional else ""
+        # an absolute URL is sent as it is (api.go): its host is the host, whatever
+        # --hostname says; api.github.com is github.com, any other host is a GHES one,
+        # whose REST paths start with api/v3
+        url_host = None
+        if raw.startswith(("http://", "https://")):
+            netloc = raw.split("://", 1)[1].split("/", 1)[0].lower()
+            url_host = "github.com" if netloc == "api.github.com" else netloc
+        path = _gh_api_normalise_path(raw) if positional else "*"
+        if url_host and url_host != "github.com" and path.startswith("api/v3/"):
+            path = path[len("api/v3/"):]
         params["api_path"] = path
         # {owner}, {repo} and {branch} (or :owner, ...) are filled from the current
         # repository when gh runs, which the argv does not show
         unknown = bool(_GH_API_PLACEHOLDER_RE.search(path))
         path = _GH_API_PLACEHOLDER_RE.sub("*", path)
         repo_match = _GH_API_REPO_RE.match(path)
-        if repo_match and "repo" not in metadata and not unknown:
-            host = params.get("hostname") or "github.com"
+        if url_host:
+            metadata.pop("repo", None)
+            metadata["github_host"] = url_host
+        if repo_match and not unknown:
+            # the path names the repository the request acts on: -R only fills
+            # placeholders, so it does not override the path's
+            host = url_host or params.get("hostname") or "github.com"
+            metadata.pop("repo", None)
             _gh_set_repo(metadata, f"{host}/{repo_match.group(1)}/{repo_match.group(2)}")
         resource = f"api/{path}"
         for pattern, by_method in _GH_API_ROUTES:
@@ -7525,7 +7585,7 @@ _EMPTY_IS_ABSENT = frozenset({
     "namespace", "context", "cluster", "kubeconfig", "region", "zone", "profile", "project",
     "project_number", "subscription", "subscription_name", "resource_group",
     "location_display_name", "server", "app_namespace", "repo", "remote", "remote_url",
-    "account",
+    "account", "endpoint_url",
 })
 
 
@@ -7561,6 +7621,16 @@ def mark_config_scope(intents: list[InfrastructureIntent]) -> list[Infrastructur
             for key in [k for k, v in store.items()
                         if k in _EMPTY_IS_ABSENT and isinstance(v, str) and not v.strip()]:
                 del store[key]
+        if intent.provider in ("kubernetes", "helm", "flux") and intent.metadata.get("server"):
+            # --server (helm --kube-apiserver) sends the request to that URL, whatever
+            # cluster the context or --cluster names: the cluster is not theirs
+            intent.metadata.pop("cluster", None)
+        if intent.provider == "aws" and intent.metadata.get("endpoint_url"):
+            # --endpoint-url sends the request to another endpoint (a partition, a proxy, a
+            # look-alike): its account and region are not the configuration's
+            for key in ("account", "region"):
+                intent.metadata.pop(key, None)
+                _mark_unresolved(intent.params, key)
         keys = _CONFIG_SCOPE_KEYS.get(intent.provider, ())
         if intent.provider == "git" and intent.params.get("raw_action") != "push":
             keys = ()  # only a push has a remote

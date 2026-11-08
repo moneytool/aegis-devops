@@ -191,7 +191,9 @@ ones it filled in `metadata["resolved_from_environment"]`. This table is generat
 | --- | --- | --- |
 | `namespace` | kubectl (`-n`/`--namespace`), helm (`-n`/`--namespace`), flux (`-n`/`--namespace`) | `prod` |
 | `context` | kubectl (`--context`), helm (`--kube-context`), argocd (`--server`/context resolution), flux (`--context`) | `gke_acme_prod` |
-| `cluster` | kubectl (`--cluster`) | `prod-us-east` |
+| `cluster` | kubectl (`--cluster`); dropped and left unresolved when `server` is given, since the request goes to that URL | `prod-us-east` |
+| `server` | kubectl (`--server`/`-s`), helm (`--kube-apiserver`), flux (`--server`): the API server URL that overrides the context's cluster; argocd (`--server`) | `https://prod:6443` |
+| `endpoint_url` | aws (`--endpoint-url`): leaves `account` and `region` unresolved | `https://localhost:4566` |
 | `kubeconfig` | accepted as a global flag by kubectl/helm/flux/argocd so it never leaks into `resource`/`action`, but its value is **discarded** — not recorded in `metadata` or `params` by any parser | *(not recorded)* |
 | `region` | terraform (from `values`/`planned_values`/`provider_config`), aws (`--region`), az (`-l`/`--location`; a display name with a space is `location_display_name`, leaving `region` unresolved), gcloud (`--region`, or derived from `--zone` — see below) | `us-east-1` |
 | `zone` | gcloud (`--zone`) | `us-east1-b` |
@@ -200,7 +202,7 @@ ones it filled in `metadata["resolved_from_environment"]`. This table is generat
 | `profile` | aws (`--profile`) | `prod-admin` |
 | `subscription` | az (`--subscription` given as a GUID, or an `--ids` path; a name is `subscription_name`, leaving `subscription` unresolved) | `00000000-0000-0000-0000-000000000000` |
 | `resource_group` | az (`--resource-group`/`-g`, and parsed out of an ARM `--ids` path) | `rg-prod` |
-| `repo` | gh (`--repo`/`-R`, or parsed from a `.../repos/<owner>/<name>/...` API path) | `acme/infra` |
+| `repo` | gh (`--repo`/`-R`, or parsed from a `.../repos/<owner>/<name>/...` API path or absolute URL; `gh api` has no `-R`; a GitHub Enterprise Server URL gives `host/owner/repo`) | `acme/infra` |
 | `ref` | gh (`--ref`, or parsed from a workflow-dispatch API path) | `main` |
 | `env` | never emitted by a parser; set by `EnvironmentMap.apply()` from `environments.yaml` when a resolvable key (`context`/`cluster`/`project`/`account`/`subscription`/`resource_group`/`workspace`) is present and mapped | `prod` |
 | `workspace` | never emitted by a parser; only resolved through `environments.yaml`'s `terraform_workspaces` table | `prod` |

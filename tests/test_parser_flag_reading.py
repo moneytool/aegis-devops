@@ -3039,3 +3039,167 @@ def test_gcloud_typed_rules_meet_every_spelling(rule_value, command):
     key = "num-nodes" if "num-nodes" in command else "boot-disk-size"
     rule = _rule("gcp", "*", ["scale", "create"], {key: rule_value})
     assert _verdict([rule], command) == "BLOCK"
+
+
+# --- review round 13 ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("command,container", [
+    # logs.go Complete: a second word is the container, and it wins over -c
+    ("kubectl logs web secret -c public -n prod", "secret"),
+    ("kubectl logs -c public web secret -n prod", "secret"),
+    ("kubectl logs deploy/web secret -n prod", "secret"),
+    ("kubectl logs web -c public -n prod", "public"),
+])
+def test_kubectl_logs_second_word_is_the_container_over_c(command, container):
+    assert all(i.params["container"] == container for i in from_argv(command.split()))
+
+
+def test_kubectl_logs_rule_on_the_container_meets_the_second_word():
+    rule = _rule("kubernetes", "pod/*", ["logs"], {"container": "secret"})
+    assert _verdict([rule], "kubectl logs web secret -c public -n prod") == "BLOCK"
+    with pytest.raises(ValueError):  # logs takes a pod and a container, no more
+        from_argv("kubectl logs web a b -n prod".split())
+
+
+@pytest.mark.parametrize("command,host,repo", [
+    # the absolute URL names the host and the repository, whatever --hostname says
+    ("gh api --hostname staging.example https://api.github.com/repos/acme/prod/actions/"
+     "secrets/X -X DELETE", "github.com", "acme/prod"),
+    # another host is a GitHub Enterprise Server: its repository is host/owner/repo
+    ("gh api https://ghe.corp/api/v3/repos/acme/prod/actions/secrets/X -X DELETE",
+     "ghe.corp", "ghe.corp/acme/prod"),
+])
+def test_gh_api_absolute_url_decides_host_and_repo(command, host, repo):
+    intent = from_argv(command.split())[0]
+    assert intent.metadata["github_host"] == host
+    assert intent.metadata["repo"] == repo
+
+
+@pytest.mark.parametrize("scope,verdict", [
+    ({"github_host": "github.com"}, "BLOCK"),
+    ({"repo": "acme/prod"}, "BLOCK"),
+    ({"github_host": "staging.example"}, "ALLOW"),
+])
+def test_gh_api_rules_meet_the_url_host_not_hostname(scope, verdict):
+    rule = _rule("github", "secret/*", ["delete"], scope)
+    command = ("gh api --hostname staging.example https://api.github.com/repos/acme/prod/"
+               "actions/secrets/X -X DELETE")
+    assert _verdict([rule], command) == verdict
+
+
+def test_gh_api_ghes_repo_is_not_the_github_com_repo():
+    command = "gh api https://ghe.corp/api/v3/repos/acme/prod/actions/secrets/X -X DELETE"
+    assert _verdict([_rule("github", "secret/*", ["delete"], {"repo": "acme/prod"})],
+                    command) == "ALLOW"
+    assert _verdict([_rule("github", "secret/*", ["delete"], {"repo": "ghe.corp/acme/prod"})],
+                    command) == "BLOCK"
+
+
+@pytest.mark.parametrize("command", [
+    "kubectl delete pod x --server https://prod:6443 --cluster dev -n a",
+    "kubectl delete pod x -s https://prod:6443 --cluster dev -n a",
+    "helm uninstall web --kube-apiserver https://prod:6443 -n a",
+    "flux suspend kustomization app --server https://prod:6443 -n a",
+])
+def test_kube_server_override_leaves_the_cluster_unresolved(command):
+    intent = from_argv(command.split())[0]
+    assert intent.metadata["server"] == "https://prod:6443"
+    assert "cluster" not in intent.metadata
+    assert "cluster" in intent.params["unresolved_scope"]
+
+
+def test_kube_server_override_is_not_filled_with_the_kubeconfig_cluster(tmp_path):
+    from aegis_core.environments import resolve_current_context
+
+    path = tmp_path / "kubeconfig"
+    path.write_text("apiVersion: v1\nkind: Config\ncurrent-context: dev\ncontexts:\n"
+                    "- name: dev\n  context: {cluster: dev-cluster, user: me}\n")
+    intent = from_argv("kubectl delete pod x --server https://prod:6443 -n a".split())[0]
+    resolve_current_context(intent, environ={"KUBECONFIG": str(path)})
+    assert intent.metadata["context"] == "dev"
+    assert "cluster" not in intent.metadata
+    rule = _rule("kubernetes", "pod/*", ["delete"], {"cluster": "dev-cluster"})
+    store = ConstraintStore(authority_map={"admin": {"deletion"}})
+    store.add_constraint(rule)
+    assert AegisInterceptor(store).intercept(intent, now=NOW).verdict == "ESCALATE"
+
+
+def test_aws_endpoint_url_leaves_account_and_region_unresolved():
+    command = ("aws ec2 terminate-instances --instance-ids i-1 --region us-east-1 "
+               "--endpoint-url https://x")
+    intent = from_argv(command.split())[0]
+    assert intent.metadata["endpoint_url"] == "https://x"
+    assert "region" not in intent.metadata
+    assert {"region", "account"} <= set(intent.params["unresolved_scope"])
+    rule = _rule("aws", "ec2/instance/*", ["delete"], {"region": "us-east-1"})
+    assert _verdict([rule], command) == "ESCALATE"
+
+
+@pytest.mark.parametrize("environ", [
+    {"AWS_REGION": "us-east-1", "AWS_ENDPOINT_URL": "https://x"},
+    {"AWS_REGION": "us-east-1", "AWS_ENDPOINT_URL_EC2": "https://x"},
+])
+def test_aws_endpoint_override_in_the_environment_is_not_filled_with_a_region(environ):
+    from aegis_core.environments import resolve_current_context
+
+    intent = from_argv("aws ec2 terminate-instances --instance-ids i-1".split())[0]
+    resolve_current_context(intent, environ=environ)
+    assert "region" not in intent.metadata
+    assert "region" in intent.params["unresolved_scope"]
+
+
+@pytest.mark.parametrize("command", [
+    "az group update -n rg --tags @tags.txt",
+    "az group update -n rg --tags @-",
+    "az group update -n rg --tags env=prod @more.txt",
+])
+def test_az_value_from_a_file_is_not_converted_and_nested_keys_are_unresolved(command):
+    intent = from_argv(command.split())[0]
+    assert not isinstance(intent.params["tags"], dict)  # not converted as a literal
+    assert {"tags", "tags.*"} <= set(intent.params["unresolved_scope"])
+    rule = _rule("azure", "resource/group/*", ["update"], {"tags.env": "prod"})
+    assert _verdict([rule], command) == "ESCALATE"
+
+
+def test_az_literal_tags_still_convert():
+    rule = _rule("azure", "resource/group/*", ["update"], {"tags.env": "prod"})
+    assert _verdict([rule], "az group update -n rg --tags env=prod") == "BLOCK"
+    assert _verdict([rule], "az group update -n rg --tags env=dev") == "ALLOW"
+
+
+@pytest.mark.parametrize("command,key", [
+    # paramfile runs before JSON or shorthand, and takes a one-word list as that word
+    ("aws ec2 create-tags --resources i-1 --tags file://t.json", "tags"),
+    ("aws ec2 run-instances --image-id ami-1 --tag-specifications file://t.json",
+     "tag-specifications"),
+    ("aws lambda update-function-code --function-name f --zip-file fileb://f.zip",
+     "zip-file"),
+])
+def test_aws_file_value_is_read_before_shorthand(command, key):
+    intent = from_argv(command.split())[0]
+    assert {key, f"{key}.*"} <= set(intent.params["unresolved_scope"])
+
+
+def test_aws_file_tags_escalate_a_nested_rule():
+    rule = _rule("aws", "ec2/tag/*", ["create"], {"tags.Key": "env"})
+    assert _verdict([rule], "aws ec2 create-tags --resources i-1 --tags file://t.json") == \
+        "ESCALATE"
+
+
+@pytest.mark.parametrize("command", [
+    "kubectl create configmap cm --from-file=config.yaml -n prod",
+    "kubectl create configmap cm --from-file=key=path -n prod",
+    "kubectl create secret generic s --from-env-file=.env --from-literal=a=b -n prod",
+])
+def test_kubectl_data_from_files_is_unresolved(command):
+    intent = from_argv(command.split())[0]
+    assert {"data", "data.*"} <= set(intent.params["unresolved_scope"])
+
+
+def test_gh_field_from_a_file_is_unresolved_and_raw_field_is_text():
+    typed = from_argv("gh api repos/a/b -F name=@n.txt -X PATCH".split())[0]
+    assert "inputs.name" in typed.params["unresolved_scope"]
+    raw = from_argv("gh api repos/a/b -f name=@n.txt -X PATCH".split())[0]
+    assert raw.params["inputs"] == {"name": "@n.txt"}
+    assert "inputs.name" not in raw.params.get("unresolved_scope", [])

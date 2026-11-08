@@ -120,9 +120,10 @@ def test_from_kubectl_context_and_cluster():
     assert intent.metadata == {"context": "staging", "cluster": "eu"}
 
 
-def test_from_kubectl_discards_output_and_server_and_records_kubeconfig():
+def test_from_kubectl_discards_output_and_records_server_and_kubeconfig():
     """--kubeconfig is recorded: it decides which file the context and
-    namespace come from under --resolve-current-context (review of #38)."""
+    namespace come from under --resolve-current-context (review of #38). --server
+    is recorded too: it overrides the context's cluster (review round 13)."""
     intent = from_kubectl(
         [
             "kubectl",
@@ -137,7 +138,7 @@ def test_from_kubectl_discards_output_and_server_and_records_kubeconfig():
         ]
     )
     assert intent.params == {}
-    assert intent.metadata == {"kubeconfig": "/tmp/kc"}
+    assert intent.metadata == {"kubeconfig": "/tmp/kc", "server": "https://x"}
 
 
 # --- kubectl: resource form normalisation -----------------------------------
@@ -2181,10 +2182,12 @@ def test_gh_api_unrouted_paths_and_methods_keep_the_generic_api_resource():
     assert user.resource == "api/user" and "repo" not in user.metadata
 
 
-def test_gh_api_explicit_repo_flag_wins_over_the_path():
-    intent = from_gh(["gh", "api", "-R", "a/b", "-X", "DELETE", "repos/o/r"])
-    assert intent.metadata["repo"] == "a/b"
-    assert intent.resource == "repo/o/r"
+@pytest.mark.parametrize("flag", [["-R", "a/b"], ["--repo", "a/b"], ["--repo=a/b"]])
+def test_gh_api_has_no_repo_flag(flag):
+    # gh api never calls EnableRepoOverride, so gh refuses -R/--repo (review round 13; this
+    # test used to say -R won over the path)
+    with pytest.raises(ValueError):
+        from_gh(["gh", "api", *flag, "-X", "DELETE", "repos/o/r"])
 
 
 # --- REVIEW-4 T1.6: terraform address aliases, region resolution, plan digest -----

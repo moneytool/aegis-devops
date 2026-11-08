@@ -376,7 +376,8 @@ def resolve_current_context(
         if "context" not in md:
             path, current, cluster = kubeconfig_current_context(environ, home, explicit)
             fill("context", current)
-            fill("cluster", cluster)
+            if "server" not in md:  # --server sends the request elsewhere
+                fill("cluster", cluster)
             if current and not explicit and environ.get("KUBECONFIG", "").strip():
                 fill("kubeconfig", path)
         if provider == "helm":
@@ -397,7 +398,11 @@ def resolve_current_context(
                                                                explicit))
     elif provider == "aws":
         fill("profile", environ.get("AWS_PROFILE"))
-        fill("region", environ.get("AWS_DEFAULT_REGION") or environ.get("AWS_REGION"))
+        # an endpoint override (--endpoint-url, $AWS_ENDPOINT_URL, $AWS_ENDPOINT_URL_<SVC>)
+        # sends the request elsewhere: the region stays unresolved, as the parser left it
+        if "endpoint_url" not in md and not any(
+                k.startswith("AWS_ENDPOINT_URL") and v for k, v in environ.items()):
+            fill("region", environ.get("AWS_DEFAULT_REGION") or environ.get("AWS_REGION"))
     elif provider == "gcp":
         if "project_number" not in md:  # the argv named a project, by number
             fill("project", environ.get("CLOUDSDK_CORE_PROJECT"))
