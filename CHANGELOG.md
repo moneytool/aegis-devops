@@ -8,6 +8,12 @@ behaviour.
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-11-08
+
+Every parser reads a command as its tool does, or refuses it; scope a command leaves to
+configuration, files or the environment now escalates. Expect more escalations and refusals
+than 1.3.x (see "Behaviour changes" in #82).
+
 Every parser reads flags the way its tool does: a flag that takes a value takes the next word
 whatever it looks like, and a flag the parser cannot place, or a short letter whose meaning on
 the command it does not know, is refused instead of guessed or recorded as written (#80).
@@ -2072,6 +2078,7 @@ See "Project status" in the README and [`docs/dev/PLAN.md`](docs/dev/PLAN.md) §
 rather than real connectors, signing uses a shared secret, and a principal is a signed name
 rather than a bound identity.
 
+[1.4.0]: https://github.com/moneytool/aegis-devops/releases/tag/v1.4.0
 [1.3.4]: https://github.com/moneytool/aegis-devops/releases/tag/v1.3.4
 [1.3.3]: https://github.com/moneytool/aegis-devops/releases/tag/v1.3.3
 [1.3.2]: https://github.com/moneytool/aegis-devops/releases/tag/v1.3.2
