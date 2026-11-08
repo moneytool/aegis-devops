@@ -5314,35 +5314,46 @@ def _git_reads_only(verb: str, positional: list[str], tokens: list[str]) -> bool
     return False
 
 
-# Options that make git branch / git tag list rather than create (their documentation):
-# with one of them, the names given are patterns to list.
-_GIT_BRANCH_LIST_OPTIONS = frozenset({
-    "list", "all", "remotes", "verbose", "contains", "no-contains", "with", "without",
-    "merged", "no-merged", "points-at", "show-current", "format", "sort", "column",
-    "omit-empty", "ignore-case",
-})
-_GIT_TAG_LIST_OPTIONS = frozenset({
-    "list", "n", "contains", "no-contains", "with", "without", "merged", "no-merged",
-    "points-at", "format", "sort", "column", "omit-empty", "ignore-case",
-})
+# The filters that put git branch and git tag in list mode whatever else is given
+# (builtin/branch.c and builtin/tag.c, git 2.52): --contains/--with, --no-contains/--without,
+# --merged, --no-merged and --points-at, each a value, never a boolean's negation.
+_GIT_LIST_FILTERS = ("contains", "with", "no_contains", "without", "merged", "no_merged",
+                     "points_at")
+
+
+def _git_lists(verb: str, positional: list[str], params: dict[str, Any]) -> bool:
+    """Whether git branch / git tag list, as git decides it: ``--list`` (branch: its last
+    value, ``--no-list`` is off) or ``-l`` (tag), no name and no other action, one of the
+    list filters, and on tag ``-n`` with any count. ``--column``, ``--sort``,
+    ``--format``, ``-v`` and the others only shape a list, and do not make one."""
+    if params.get("list") is True:
+        return True
+    if any(params.get(k) not in (None, False) for k in _GIT_LIST_FILTERS):
+        return True
+    if verb == "tag" and "n" in params and params["n"] is not False:
+        return True
+    return not positional
 
 
 def _git_branch_or_tag(verb: str, positional: list[str], params: dict[str, Any],
                        one) -> list[InfrastructureIntent]:
-    """``git branch`` / ``git tag`` with no delete, rename or copy: a list when no name is
-    given or a list option is (``-l``, ``--contains``, ...), ``git tag -v`` verifies, and
-    otherwise the name is created, at the commit given or HEAD; ``-f`` replaces one that
+    """``git branch`` / ``git tag`` with no delete, rename or copy: a list when git lists
+    (:func:`_git_lists`), ``git tag -v`` verifies, ``git branch --show-current`` prints,
+    and otherwise the name is created, at the commit given or HEAD; ``-f`` replaces one that
     exists (an update, forced). ``git branch -u`` / ``--unset-upstream`` /
     ``--edit-description`` change the branch's configuration (an update)."""
-    keys = {canonical_key(k) for k in params}
-    lists = _GIT_BRANCH_LIST_OPTIONS if verb == "branch" else _GIT_TAG_LIST_OPTIONS
+    keys = {canonical_key(k) for k, v in params.items() if v not in (None, False)}
     if verb == "branch" and keys & {"set-upstream-to", "unset-upstream", "edit-description",
                                     "set-upstream"}:
         return [one(f"branch/{positional[0] if positional else '*'}", "update")]
     if verb == "tag" and "verify" in keys:
         return [one(f"tag/{name}", "read") for name in positional or ["*"]]
-    if not positional or keys & {canonical_key(k) for k in lists}:
+    if verb == "branch" and "show-current" in keys:
+        return [one("branch/*", "read")]
+    if _git_lists(verb, positional, params):
         return [one(f"{verb}/{name}", "read") for name in positional or ["*"]]
+    if verb == "branch" and keys & {"all", "remotes"}:
+        raise ValueError("git branch: -a and -r do not take a branch name (git refuses it)")
     name = positional[0]
     intents = [one(f"{verb}/{name}", "create")]
     if params.get("force") is True:

@@ -2163,3 +2163,32 @@ def test_aws_json_input_numbers_stay_exact():
 ])
 def test_gh_fields_are_the_values_gh_sends(command, inputs):
     assert from_argv(command.split())[0].params["inputs"] == inputs
+
+
+@pytest.mark.parametrize("command,targets", [
+    # list mode as builtin/branch.c and builtin/tag.c decide it (run on git 2.52)
+    ("git branch --no-column -f prod HEAD~1",
+     [("branch/prod", "create"), ("branch/prod", "update"), ("branch/prod", "delete")]),
+    ("git branch -v x", [("branch/x", "create")]),
+    ("git branch --sort=refname y", [("branch/y", "create")]),
+    ("git branch --no-list a", [("branch/a", "create")]),
+    ("git branch --no-contains x", [("branch/*", "read")]),
+    ("git branch --list --column a*", [("branch/a*", "read")]),
+    ("git branch --show-current", [("branch/*", "read")]),
+    ("git tag --no-column v1", [("tag/v1", "create")]),
+    ("git tag -n0", [("tag/*", "read")]),
+    ("git tag --points-at HEAD", [("tag/*", "read")]),
+    ("git tag -l v*", [("tag/v*", "read")]),
+])
+def test_git_list_mode_follows_git(command, targets):
+    assert [(i.resource, i.action) for i in from_argv(command.split())] == targets
+
+
+def test_git_branch_all_with_a_name_is_refused():
+    with pytest.raises(ValueError):  # git: -a and -r do not take a branch name
+        from_argv("git branch -a x".split())
+
+
+def test_git_branch_force_rule_holds_with_no_column():
+    rule = _rule("git", "branch/prod", ["update"], {"force": True})
+    assert _verdict([rule], "git branch --no-column -f prod HEAD~1") == "BLOCK"
