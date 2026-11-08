@@ -479,9 +479,17 @@ name). git verbs without an option table leave every param unresolved when given
   `branch/*`, marked. helm, kubectl and az substitute nothing in targets.
 - az recorded an abbreviated long option under the abbreviation: `--node-c 1` was `node-c`.
   knack inherits argparse's allow_abbrev, so every az long option is now resolved by unique
-  prefix against the command's declared long options and az's own, which the generator now
-  also extracts from `_params.py` (`az_short_options.json`), and an ambiguous prefix is
-  refused. aws already did this; gcloud disables abbreviations and gsutil uses getopt.
+  prefix against the command's full option list, and one that is neither an exact option
+  nor a unique prefix of one is refused. The generator (`az_short_options.json`) reads each
+  command's options from `_params.py` (its helper functions too), from the function the
+  command runs (a custom function without `**kwargs` gives exactly its options, spelled as
+  `_params.py` spells them), from AAZ command classes and from generic update commands;
+  storage's data-plane account options are added. A command whose options are all known uses
+  only its own, so an option declared for a parent group does not apply to it; for any
+  other the group's options are included, and a prefix ambiguous among them is refused. A
+  test parses 35 everyday commands from the az reference written with full option names.
+  aws already resolved prefixes; gcloud disables them and gsutil uses getopt. `az aks
+  upgrade` is now read (an update) instead of refused.
 - `gcloud storage cp /tmp/secret gs://prod/backup/` recorded the key `backup/`, but the object
   written is `backup/secret`. A copy or move into a folder (a destination ending in `/`, or a
   bucket alone) now writes the prefix plus the source's base name, on gcloud storage, gsutil
