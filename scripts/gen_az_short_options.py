@@ -220,6 +220,11 @@ def module_arguments(source: str) -> dict[str, dict[str, Any]]:
             found = _nargs(sub, type_nargs)
             if found:
                 nargs[dest] = found
+            for keyword in sub.keywords:
+                # argparse type=int / type=float: the only az values that are not text
+                if (keyword.arg == "type" and isinstance(keyword.value, ast.Name)
+                        and keyword.value.id in ("int", "float")):
+                    nargs.setdefault(f"type:{dest}", keyword.value.id)
             if sub.func.attr == "extra":
                 extras.add(dest)
         for name in names:
@@ -376,8 +381,10 @@ def main(checkout: str, out: str) -> None:
         groups: list[list[str]] = []
         for dest, options in entry["dest"].items():
             nargs = entry["nargs"].get(dest)
+            vtype = entry["nargs"].get(f"type:{dest}")
             groups.append([*(options or ["--" + dest.replace("_", "-")]),
-                           *([f"nargs:{nargs}"] if nargs else [])])
+                           *([f"nargs:{nargs}"] if nargs else []),
+                           *([f"type:{vtype}"] if vtype else [])])
         table[scope] = {"s": {}, "l": set(), "c": False, "n": {}}
         _set_leaf(table, scope, groups, False)
     # each registered command: its function's parameters as knack spells them (exactly its
@@ -389,9 +396,11 @@ def main(checkout: str, out: str) -> None:
             dests |= arguments.get(scope, {}).get("extra", set())
         for dest in dests:
             nargs = dest_nargs(command, dest)
+            vtype = dest_nargs(command, f"type:{dest}")
             groups.append([*(dest_options(command, dest) or _CORE_DESTS.get(dest)
                              or ["--" + dest.replace("_", "-")]),
-                           *([f"nargs:{nargs}"] if nargs else [])])
+                           *([f"nargs:{nargs}"] if nargs else []),
+                           *([f"type:{vtype}"] if vtype else [])])
         if command in aaz and not complete:
             groups, complete = aaz[command], True
         # an argument declared on this very command in _params.py is its own, though the
@@ -462,10 +471,12 @@ def _set_leaf(table: dict[str, dict[str, Any]], command: str, groups: list[list[
     shorts: dict[str, str] = {}
     nargs: dict[str, str] = {}
     for group in groups:
-        options = [o for o in group if not o.startswith("nargs:")]
+        options = [o for o in group if not o.startswith(("nargs:", "type:"))]
         shorts.update(_aliases(options))
-        for marker in (o for o in group if o.startswith("nargs:")):
-            nargs.update({o[2:]: marker[len("nargs:"):] for o in options if o.startswith("--")})
+        for marker in (o for o in group if o.startswith(("nargs:", "type:"))):
+            prefix = "" if marker.startswith("nargs:") else "type:"
+            value = marker.partition(":")[2]
+            nargs.update({prefix + o[2:]: value for o in options if o.startswith("--")})
     if complete:
         entry["l"], entry["s"], entry["n"] = longs, {**entry["s"], **shorts}, nargs
     else:

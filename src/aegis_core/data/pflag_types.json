@@ -456,6 +456,7 @@
    "group": "StringArray"
   }
  },
+ "argocd:custom": [],
  "flux": {
   "access-key": "String",
   "add-ignore-paths": "StringSlice",
@@ -508,11 +509,11 @@
   "components": "StringSlice",
   "components-extra": "StringSlice",
   "context": "String",
-  "crds": "value",
+  "crds": "String",
   "create-target-namespace": "Bool",
   "creds": "String",
   "debug": "Bool",
-  "decryption-provider": "value",
+  "decryption-provider": "String",
   "decryption-secret": "String",
   "depends-on": "StringSlice",
   "deploy-token-auth": "Bool",
@@ -567,10 +568,10 @@
   "label": "StringSlice",
   "label-selector": "String",
   "layer-selector": "String",
-  "level": "value",
+  "level": "String",
   "local": "Bool",
   "local-sources": "StringToString",
-  "log-level": "value",
+  "log-level": "String",
   "manifests": "String",
   "name": "String",
   "namespace": "String",
@@ -585,7 +586,7 @@
   "owner": "String",
   "pass-credentials": "Bool",
   "password": "String",
-  "path": "mixed:String,value",
+  "path": "String",
   "payload": "String",
   "personal": "Bool",
   "policy-change-delay": "Duration",
@@ -594,7 +595,7 @@
   "private": "Bool",
   "private-key-file": "String",
   "progress-bar": "Bool",
-  "provider": "value",
+  "provider": "String",
   "provider-ref": "String",
   "proxy-secret-ref": "String",
   "prune": "Bool",
@@ -643,14 +644,14 @@
   "since": "Duration",
   "since-time": "String",
   "skip-namespace": "Bool",
-  "source": "mixed:String,value",
+  "source": "String",
   "sparse-checkout": "StringSlice",
   "sparse-checkout-paths": "StringSlice",
-  "ssh-ecdsa-curve": "value",
+  "ssh-ecdsa-curve": "String",
   "ssh-hostkey-algos": "StringSlice",
   "ssh-hostname": "String",
-  "ssh-key-algorithm": "value",
-  "ssh-rsa-bits": "value",
+  "ssh-key-algorithm": "String",
+  "ssh-rsa-bits": "Int",
   "ssh-signing-key-file": "String",
   "ssh-signing-passphrase": "String",
   "ssh-signing-password": "String",
@@ -673,7 +674,7 @@
   "token-auth": "Bool",
   "toleration-keys": "StringSlice",
   "trust-policy-file": "String",
-  "type": "mixed:String,value",
+  "type": "String",
   "types": "StringSlice",
   "url": "String",
   "user": "String",
@@ -683,11 +684,11 @@
   "values-from": "StringSlice",
   "verbose": "Bool",
   "verify-issuer": "String",
-  "verify-provider": "value",
+  "verify-provider": "String",
   "verify-secret-ref": "String",
   "verify-subject": "String",
   "version": "String",
-  "visibility": "value",
+  "visibility": "String",
   "wait": "Bool",
   "watch": "Bool",
   "watch-all-namespaces": "Bool",
@@ -699,20 +700,26 @@
   "yes": "Bool"
  },
  "flux:commands": {
+  "bootstrap": {
+   "log-level": "String",
+   "ssh-ecdsa-curve": "String",
+   "ssh-key-algorithm": "String",
+   "ssh-rsa-bits": "Int"
+  },
   "bootstrap b server": {
-   "path": "value"
+   "path": "String"
   },
   "bootstrap git": {
-   "path": "value"
+   "path": "String"
   },
   "bootstrap git hub": {
-   "path": "value"
+   "path": "String"
   },
   "bootstrap git lab": {
-   "path": "value"
+   "path": "String"
   },
   "bootstrap gitea": {
-   "path": "value"
+   "path": "String"
   },
   "build artifact": {
    "path": "String"
@@ -724,29 +731,45 @@
    "type": "String"
   },
   "create helm release": {
-   "source": "value"
+   "source": "String"
   },
   "create ks": {
-   "path": "value",
-   "source": "value"
+   "path": "String",
+   "source": "String"
   },
   "create receiver": {
-   "type": "value"
+   "type": "String"
+  },
+  "create secret git": {
+   "ssh-ecdsa-curve": "String",
+   "ssh-key-algorithm": "String",
+   "ssh-rsa-bits": "Int"
   },
   "create secret receiver": {
-   "type": "value"
+   "type": "String"
+  },
+  "create source bucket": {
+   "provider": "String"
   },
   "create source chart": {
-   "source": "value"
+   "source": "String",
+   "verify-provider": "String"
   },
   "create source git": {
+   "provider": "String",
+   "ssh-ecdsa-curve": "String",
+   "ssh-key-algorithm": "String",
+   "ssh-rsa-bits": "Int",
    "tag": "String"
   },
   "create source o c i repository": {
-   "tag": "String"
+   "provider": "String",
+   "tag": "String",
+   "verify-provider": "String"
   },
   "diff artifact": {
-   "path": "String"
+   "path": "String",
+   "provider": "String"
   },
   "diff ks": {
    "path": "String"
@@ -754,20 +777,46 @@
   "docgen": {
    "path": "String"
   },
+  "install": {
+   "log-level": "String"
+  },
+  "list artifacts": {
+   "provider": "String"
+  },
   "migrate": {
    "path": "String"
   },
+  "pull artifact": {
+   "provider": "String"
+  },
   "push artifact": {
    "path": "String",
+   "provider": "String",
    "source": "String"
   },
   "tag artifact": {
+   "provider": "String",
    "tag": "StringSlice"
   },
   "trigger receiver": {
    "type": "String"
   }
  },
+ "flux:custom": [
+  "crds",
+  "decryption-provider",
+  "level",
+  "log-level",
+  "path",
+  "provider",
+  "source",
+  "ssh-ecdsa-curve",
+  "ssh-key-algorithm",
+  "ssh-rsa-bits",
+  "type",
+  "verify-provider",
+  "visibility"
+ ],
  "gh": {
   "accept-cascading-deletion-of-private-forks": "Bool",
   "accept-visibility-change-consequences": "Bool",
@@ -1029,6 +1078,7 @@
    "json": "Bool"
   }
  },
+ "gh:custom": [],
  "helm": {
   "all": "Bool",
   "all-namespaces": "Bool",
@@ -1110,6 +1160,7 @@
   "no-headers": "Bool",
   "no-hooks": "Bool",
   "offset": "Int",
+  "output": "String",
   "output-dir": "String",
   "pass-credentials": "Bool",
   "passphrase-file": "String",
@@ -1117,6 +1168,8 @@
   "password-stdin": "Bool",
   "pending": "Bool",
   "plain-http": "Bool",
+  "post-renderer": "String",
+  "post-renderer-args": "StringArray",
   "prov": "Bool",
   "qps": "Float32",
   "quiet": "Bool",
@@ -1171,6 +1224,7 @@
   "verify": "Bool",
   "version": "String",
   "versions": "Bool",
+  "wait": "HelmWait",
   "wait-for-jobs": "Bool",
   "with-subcharts": "Bool"
  },
@@ -1200,10 +1254,17 @@
    "server-side": "String"
   }
  },
+ "helm:custom": [
+  "output",
+  "post-renderer",
+  "post-renderer-args",
+  "wait"
+ ],
  "kubectl": {
   "accept-hosts": "String",
   "accept-paths": "String",
   "address": "mixed:String,StringSlice",
+  "aggregation-rule": "StringToString",
   "all": "Bool",
   "all-containers": "Bool",
   "all-namespaces": "Bool",
@@ -1226,7 +1287,7 @@
   "as-user-extra": "StringArray",
   "attach": "Bool",
   "audience": "StringArray",
-  "auth-provider": "value",
+  "auth-provider": "String",
   "bound-object-kind": "String",
   "bound-object-name": "String",
   "bound-object-uid": "String",
@@ -1272,9 +1333,9 @@
   "duration": "Duration",
   "edit": "Bool",
   "env": "mixed:StringArray,StringToString",
-  "exec-api-version": "value",
-  "exec-command": "value",
-  "exec-interactive-mode": "value",
+  "exec-api-version": "String",
+  "exec-command": "String",
+  "exec-interactive-mode": "String",
   "expose": "Bool",
   "external-ip": "String",
   "external-name": "String",
@@ -1514,5 +1575,12 @@
   "top pod": {
    "containers": "Bool"
   }
- }
+ },
+ "kubectl:custom": [
+  "aggregation-rule",
+  "auth-provider",
+  "exec-api-version",
+  "exec-command",
+  "exec-interactive-mode"
+ ]
 }

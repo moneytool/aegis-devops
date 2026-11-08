@@ -65,7 +65,7 @@ def test_a_helm_value_flag_takes_the_next_word(command, namespace, params):
     ("helm upgrade --wait-for-jobs api ./c", "api", {"wait_for_jobs": True, "chart": "./c"}),
     ("helm upgrade --take-ownership api ./c", "api", {"take_ownership": True, "chart": "./c"}),
     ("helm install --server-side api ./c", "api", {"server_side": True, "chart": "./c"}),
-    ("helm upgrade --wait api ./c", "api", {"wait": True, "chart": "./c"}),
+    ("helm upgrade --wait api ./c", "api", {"wait": "watcher", "chart": "./c"}),
     ("helm uninstall --keep-history api", "api", {"keep_history": True}),
 ])
 def test_a_helm_boolean_leaves_the_release_alone(command, release, params):
@@ -1699,7 +1699,7 @@ def test_aws_desired_capacity_rule_holds_in_every_spelling(command, verdict):
     ("gcloud compute instances stop web --discard-local-ssd", ["compute/instance/web"],
      {"discard-local-ssd": True}),
     ("gcloud container clusters resize c --num-nodes 0 --region r",
-     ["container/cluster/c"], {"num-nodes": 0}),
+     ["container/cluster/c"], {"num-nodes": "0"}),
     ("gcloud storage rm -r gs://b/x", ["storage/bucket/b"], {"recursive": True}),
     ("gcloud compute instances list --filter name=x", ["compute/instance/*"],
      {"filter": "name=x"}),
@@ -2851,3 +2851,86 @@ def test_a_rule_value_its_type_cannot_hold_escalates():
     # neither a match nor a miss: the rule escalates, as an unknown value does
     rule = _rule("helm", "release/*", ["update"], {"timeout": "soon"})
     assert _verdict([rule], "helm upgrade r ./c --timeout 300s") == "ESCALATE"
+
+
+# --- review round 11 -----------------------------------------------------------------
+
+
+@pytest.mark.parametrize("command,resource,key,value", [
+    # a value is typed only by the type the tool declares for it
+    ("aws s3api delete-object --bucket production --key 001", "s3/object/production/001",
+     "key", "001"),
+    ("gcloud compute instances create web --zone z --description 001",
+     "compute/instance/web", "description", "001"),
+    ("aws autoscaling set-desired-capacity --auto-scaling-group-name g --desired-capacity 010",
+     "autoscaling/auto-scaling-group/g", "desired_capacity", 10),  # botocore integer
+    ("az aks scale -g rg -n c --node-count 03", "aks/cluster/c", "node-count", 3),  # type=int
+    ("az group update -n rg --set tags.x=001", "resource/group/rg", "set", ["tags.x=001"]),
+    ("kubectl run web --image 001", "pod/web", "image", "001"),
+    ("helm upgrade r ./c --version 1.10", "release/r", "version", "1.10"),
+    ("git push --push-option 007 origin main", "ref/main", "push_option", "007"),
+])
+def test_values_are_typed_only_by_the_declared_type(command, resource, key, value):
+    intent = from_argv(command.split())[0]
+    assert intent.resource == resource
+    assert intent.params[key] == value
+
+
+def test_a_rule_on_the_exact_key_text_holds():
+    rule = _rule("aws", "s3/object/production/001", ["delete"])
+    assert _verdict([rule], "aws s3api delete-object --bucket production --key 001") == "BLOCK"
+    rule = _rule("aws", "s3/object/production/1", ["delete"])
+    assert _verdict([rule], "aws s3api delete-object --bucket production --key 001") == "ALLOW"
+
+
+@pytest.mark.parametrize("flags,value", [
+    # helm 4's waitValue.Set
+    ("--wait", "watcher"), ("--wait=true", "watcher"), ("--wait=false", "hookOnly"),
+    ("--wait=legacy", "legacy"), ("--wait=hookOnly", "hookOnly"),
+])
+def test_helm_wait_is_read_as_helm_4_reads_it(flags, value):
+    intent = from_argv(["helm", "upgrade", "r", "./c", flags])[0]
+    assert intent.params["wait"] == value
+    assert "wait" in intent.params["unresolved_scope"]  # helm 3 reads a boolean
+
+
+def test_helm_wait_refuses_what_helm_refuses():
+    with pytest.raises(ValueError):
+        from_argv(["helm", "upgrade", "r", "./c", "--wait=soon"])
+
+
+def test_an_int_slice_rule_is_normalized():
+    rule = _rule("argocd", "app/*", ["sync"], {"source-positions": "0x1"})
+    assert _verdict([rule], "argocd app sync a --source-positions 1") == "BLOCK"
+
+
+def test_every_pflag_type_has_a_normalization():
+    # class-level: every type the generator found (custom Values resolved) is known
+    from aegis_core.parser import PFLAG_NORMAL_KIND, _pflag_tables
+
+    tables = _pflag_tables()
+    for tool in ("kubectl", "helm", "flux", "argocd", "gh"):
+        for kind in tables[tool].values():
+            for part in (kind[len("mixed:"):].split(",") if kind.startswith("mixed:")
+                         else [kind]):
+                assert part in PFLAG_NORMAL_KIND, (tool, part)
+
+
+def test_every_custom_pflag_value_is_handled():
+    from aegis_core.parser import _pflag_tables
+
+    tables = _pflag_tables()
+    for tool in ("kubectl", "helm", "flux", "argocd", "gh"):
+        for flag in tables.get(f"{tool}:custom", []):
+            assert not tables[tool][flag].startswith("value"), (tool, flag)
+
+
+@pytest.mark.parametrize("value,expected", [
+    ("^--^env=prod--team=x", {"env": "prod", "team": "x"}),
+    ("^:^env=prod:team=x", {"env": "prod", "team": "x"}),
+    ("^;;^a=1,2;;b=3", {"a": "1,2", "b": "3"}),
+])
+def test_gcloud_delimiters_of_any_length(value, expected):
+    intent = from_argv(["gcloud", "compute", "instances", "update", "web", "--update-labels",
+                        value])[0]
+    assert intent.params["update-labels"] == expected

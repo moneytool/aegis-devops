@@ -12,7 +12,9 @@ command is ``{"o": {option: arity}, "m": {Member: option}, "p": [[name, arity]],
 "s": {subcommand: ...}}``: ``o`` every ``--option`` with how many words argparse gives it
 (``""`` none, ``"1"`` one, ``"?"`` an optional one, ``"*"``/``"+"`` a list, ``"2"`` two),
 ``m`` the input shape's member names (what ``--cli-input-json`` keys are) with the option
-each one is, ``p`` positional arguments, ``s`` subcommands (``ec2 wait``)."""
+each one is, ``t`` the type of each value that is not a string (``integer``, ``long``,
+``float``, ``double``, ``timestamp``, ``blob``, ``structure``, ``map``, ``list:<member>``),
+``p`` positional arguments, ``s`` subcommands (``ec2 wait``)."""
 
 import argparse
 import json
@@ -48,6 +50,19 @@ def _command(cmd, depth: int) -> dict:
                 if spelling.startswith("--"):
                     options[spelling[2:]] = _arity(action)
         entry["o"] = options
+        # each value's type, as aws-cli unpacks it (cli_type_name; a list's member type):
+        # only the ones that are not strings
+        types: dict[str, str] = {}
+        for name, arg in arg_table.items():
+            kind = getattr(arg, "cli_type_name", "string") or "string"
+            if kind == "list":
+                model = getattr(arg, "argument_model", None)
+                member = getattr(getattr(model, "member", None), "type_name", "string")
+                kind = f"list:{member}"
+            if kind not in ("string", "boolean", "list:string"):
+                types[name] = kind
+        if types:
+            entry["t"] = types
         members: dict[str, str] = {}
         for name, arg in arg_table.items():
             member = getattr(arg, "_serialized_name", None)

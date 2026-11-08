@@ -545,6 +545,25 @@ name). git verbs without an option table leave every param unresolved when given
   parameters already took every word. gcloud ArgList and ArgDict values (`--tags a,b`,
   `--labels k=v,k2=v2`, and the `^X^` delimiter) are now a list or a map, so a rule on
   `labels.env` meets them. From source and the gcloud reference.
+- Values were typed by how they look: `aws s3api delete-object --key 001` was the key `1`
+  and the target `s3/object/production/1`, and gcloud `--description 001` the number 1. A
+  value is now typed only by the type the tool declares for it, and otherwise kept exactly as
+  written: aws by its botocore shape (integer and long with int(), float and double with
+  float(), list members by their type; the option table now records each shape), az by a
+  declared `type=int`/`float`, gcloud as text (its reference pages declare no number types)
+  with ArgList and ArgDict split, the pflag tools by their registered types, git as text,
+  helm and argocd rollback revisions as Go's Atoi. helm `--set` (strvals typedVal) and gh
+  `-F` keep their own typing, which the tools declare. Every site is listed in
+  `docs/dev/parser-audit.md` (C27). A target built from a value uses its exact text.
+- helm 4's `--wait` is a custom pflag value: bare `--wait` is `watcher`, `--wait=false` is
+  `hookOnly` (flags.go waitValue.Set), and it was read as a boolean. It is now read as helm
+  4 reads it, and because helm 3 reads it as a boolean and which helm runs is not on the
+  line, `wait` is also unresolved, so a rule on it escalates. The pflag generator now lists
+  every custom value of kubectl, helm, flux, argocd and gh, resolves each by what its Set()
+  does, and fails on one it does not know. Slice and map types register their element type
+  (an argocd `--source-positions` Int64Slice), and the store normalizes each element of a
+  rule's value; a test checks every type in the table has a normalization. gcloud's
+  `^DELIM^` escaping takes a delimiter of any length (`^--^env=prod--team=x`). From source.
 - Tests that used `flux reconcile ... --dry-run`, `flux get ... --export` and `git push
   --dry-run=false`, which the tools refuse, now use commands the tools accept (`flux create ...
   --export`, `git push --dry-run --no-dry-run`).

@@ -496,16 +496,13 @@ _KUBECTL_CATEGORIES = {
 _NODE_TARGET_VERBS = {"cordon", "uncordon", "drain"}
 
 
-def _coerce(value: str) -> Any:
-    """Best-effort numeric coercion for CLI flag values."""
-    try:
-        return int(value)
-    except ValueError:
-        pass
-    try:
-        return float(value)
-    except ValueError:
-        return value
+def _go_atoi(text: str, what: str) -> int:
+    """``text`` as Go's strconv.Atoi reads it (an optional sign and decimal digits, as helm
+    and argocd read a revision); anything else the tool refuses, and so does the parser.
+    No value is ever typed by how it looks: only by the type the tool declares for it."""
+    if not re.fullmatch(r"[+-]?[0-9]+", text):
+        raise ValueError(f"{what} {text!r} is not a number the tool reads")
+    return int(text)
 
 
 _TRUE_WORDS = frozenset({"true", "t", "yes", "y", "1", "on"})
@@ -537,7 +534,7 @@ def _bool_param(value: str | None) -> Any:
     ``--flag=false`` -> False. A non-boolean spelling (kubectl's
     ``--cascade=orphan``) is recorded as given, never mistaken for True."""
     coerced = _coerce_bool(value)
-    return coerced if coerced is not None else _coerce(value)
+    return coerced if coerced is not None else value
 
 
 def _is_dry_run(value: str | None, *, truthy: frozenset[str] = frozenset()) -> bool:
@@ -637,6 +634,22 @@ _PFLAG_CSV = _PFLAG_LISTS - {"StringArray"}
 _PFLAG_INTS = {"Int": 64, "Int8": 8, "Int16": 16, "Int32": 32, "Int64": 64, "Uint": 64,
                "Uint8": 8, "Uint16": 16, "Uint32": 32, "Uint64": 64}
 _PFLAG_FLOATS = frozenset({"Float32", "Float64"})
+# The element type of each slice type (normalize_typed's kinds); a string slice has none.
+_PFLAG_ELEMENT = {"IntSlice": "int", "Int32Slice": "int", "Int64Slice": "int",
+                  "UintSlice": "int", "Float64Slice": "float", "Float32Slice": "float",
+                  "BoolSlice": "bool", "DurationSlice": "duration"}
+# What each pflag type is normalized as, for the parser's side and a rule's (None: text).
+# Every type in pflag_types.json must be here (a test checks it).
+PFLAG_NORMAL_KIND: dict[str, str | None] = {
+    "String": None, "StringArray": None, "StringSlice": None, "IP": None, "IPSlice": None,
+    "IPMask": None, "IPNet": None, "BytesHex": None, "BytesBase64": None,
+    "Bool": "bool", "Count": "int", "Duration": "duration", "Float32": "float",
+    "Float64": "float", "StringToString": "map", "StringToInt": "map-int",
+    "StringToInt64": "map-int", "HelmWait": None,
+    **{k: "int" for k in ("Int", "Int8", "Int16", "Int32", "Int64", "Uint", "Uint8",
+                          "Uint16", "Uint32", "Uint64")},
+    **_PFLAG_ELEMENT,
+}
 
 
 @lru_cache(maxsize=1)
@@ -738,6 +751,9 @@ def normalize_typed(kind: str, value: Any) -> Any:
         if text in _GO_FALSE:
             return False
         raise ValueError(f"{value!r} is not a boolean Go reads")
+    if kind == "map-int":
+        pairs = normalize_typed("map", value)
+        return {k: normalize_typed("int", v) for k, v in pairs.items()}
     if kind == "map":
         if isinstance(value, dict):
             return {str(k): str(v) for k, v in value.items()}
@@ -763,14 +779,14 @@ def _pflag_store(params: dict[str, Any], tool: str, flag: str, key: str, value: 
     a StringArray accumulates every value, a StringSlice (and the other slices) every
     value split as CSV, an Int is read with base 0 (Go's strconv.ParseInt), a Duration with
     time.ParseDuration, in seconds, a Float with ParseFloat, a StringToString as a map, a
-    Count counts; a String is kept as before. A flag registered with several types (in
+    Count counts; a String is kept as written. A flag registered with several types (in
     different commands) keeps every reading a rule could match: a list when any is one."""
     if not isinstance(value, str):
         params[key] = value
         return
     kinds = _pflag_kinds(tool, flag, command)
     if not kinds:
-        params[key] = _coerce(value)
+        params[key] = value  # no declared type: the text, as written
         return
     if kinds & _PFLAG_LISTS:
         values: list[Any] = []
@@ -778,12 +794,23 @@ def _pflag_store(params: dict[str, Any], tool: str, flag: str, key: str, value: 
             values.extend(_read_string_slice(value))
         if kinds - _PFLAG_CSV:
             values.append(value)
-        if kinds <= {"IntSlice", "Int32Slice", "Int64Slice", "UintSlice"}:
-            values = [_go_int(v, f"{tool} --{flag}", 64) for v in values]
+        element = {_PFLAG_ELEMENT.get(k) for k in kinds}
+        if len(element) == 1 and None not in element:
+            # an IntSlice, BoolSlice, DurationSlice ... : each element read by its type, and
+            # the type registered so a rule's value is read the same way
+            kind = element.pop()
+            values = [normalize_typed(kind, v) for v in values]
+            _mark_type(params, key, kind)
         existing = params.get(key)
         before = existing if isinstance(existing, list) else (
             [] if existing is None else [existing])
         params[key] = before + [v for v in dict.fromkeys(values) if v not in before]
+        return
+    if kinds <= {"StringToInt", "StringToInt64"}:
+        pairs = params.get(key) if isinstance(params.get(key), dict) else {}
+        pairs.update(normalize_typed("map-int", value))
+        params[key] = pairs
+        _mark_type(params, key, "map-int")
         return
     if kinds == {"StringToString"}:
         pairs = params.get(key) if isinstance(params.get(key), dict) else {}
@@ -815,7 +842,7 @@ def _pflag_store(params: dict[str, Any], tool: str, flag: str, key: str, value: 
         params[key] = _go_float(value, f"{tool} --{flag}")
         _mark_type(params, key, "float")
         return
-    params[key] = _coerce(value)  # a String, as before: a number-looking value compares
+    params[key] = value  # a String (or a custom Value): the text, as written
 
 
 def _other_flag(
@@ -907,6 +934,24 @@ def _helm_short_letters(verb: str | None) -> tuple[frozenset[str], frozenset[str
     if verb == "template":
         return _HELM_SHORT_BOOL_LETTERS, _HELM_SHORT_VALUE_LETTERS | {"a"}
     return _HELM_SHORT_BOOL_LETTERS | {"a"}, _HELM_SHORT_VALUE_LETTERS
+
+
+_HELM_WAIT_STRATEGIES = frozenset({"watcher", "hookOnly", "legacy"})
+
+
+def _helm_wait(val: str | None) -> str:
+    """helm 4's ``--wait`` as its waitValue.Set reads it (pkg/cmd/flags.go): bare or
+    ``true`` is ``watcher``, ``false`` is ``hookOnly``, ``watcher``, ``hookOnly`` and
+    ``legacy`` are themselves; anything else helm refuses. helm 3's ``--wait`` is a
+    boolean, and which helm runs is not on the line: the caller also leaves ``wait``
+    unresolved, so a rule on it escalates rather than trust either reading."""
+    if val is None or val == "true":
+        return "watcher"
+    if val == "false":
+        return "hookOnly"
+    if val in _HELM_WAIT_STRATEGIES:
+        return val
+    raise ValueError(f"helm: --wait={val!r} is not a wait strategy helm reads")
 
 
 def _helm_short_name(letter: str, verb: str | None) -> str | None:
@@ -1223,7 +1268,7 @@ def _parse_flags(
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
-                params[key] = _coerce(val)
+                params[key] = val
             elif is_long or i + 1 < len(tokens) or val is not None:
                 # Unknown to the parser. Refused unless "=value" or its place at the
                 # end shows how kubectl would read it (see _other_flag).
@@ -2092,8 +2137,27 @@ def _aws_option_like(word: str) -> bool:
             and not _AWS_NEGATIVE_NUMBER_RE.match(word))
 
 
+def _aws_typed(text: str, vtype: str | None, flag: str) -> Any:
+    """A value as aws-cli unpacks it by its botocore shape (``vtype``, the option table's
+    ``t``): an integer or long with Python's int(), a float or double with float(), a
+    list's members by their type; any other value (a string, timestamp, blob, structure,
+    map) is kept exactly as written, ``001`` included. What aws refuses, so does the
+    parser."""
+    kind = (vtype or "string").removeprefix("list:")
+    if text.startswith(("file://", "fileb://")):
+        return text  # read from a file when aws runs: unresolved (_mark_aws_file_values)
+    try:
+        if kind in ("integer", "long"):
+            return int(text)
+        if kind in ("float", "double"):
+            return float(text)
+    except ValueError as exc:
+        raise ValueError(f"aws: {flag} {text!r} is not a {kind}, and aws refuses it") from exc
+    return text
+
+
 def _aws_take_values(tokens: list[str], i: int, tok: str, val: str | None,
-                     arity: str) -> tuple[Any, int]:
+                     arity: str, vtype: str | None = None) -> tuple[Any, int]:
     """The value(s) argparse gives an option of ``arity`` (see _AWS_OPTIONS_ARCHIVE) at
     ``tokens[i]``, and the index of the last word taken."""
     n = len(tokens)
@@ -2102,7 +2166,8 @@ def _aws_take_values(tokens: list[str], i: int, tok: str, val: str | None,
             raise ValueError(f"aws: {tok} takes no value, and aws refuses it")
         return True, i
     if val is not None:
-        return (_coerce(val) if arity in ("1", "?") else [val]), i
+        return (_aws_typed(val, vtype, tok) if arity in ("1", "?")
+                else [_aws_typed(val, vtype, tok)]), i
     taken: list[str] = []
     limit = {"1": 1, "?": 1, "*": n, "+": n}.get(arity) or int(arity)
     while len(taken) < limit and i + 1 < n and not _aws_option_like(tokens[i + 1]):
@@ -2114,8 +2179,8 @@ def _aws_take_values(tokens: list[str], i: int, tok: str, val: str | None,
                                               and len(taken) != int(arity)):
         raise ValueError(f"aws: {tok} is missing its value: {tokens!r}")
     if arity in ("1", "?"):
-        return _coerce(taken[0]), i
-    return taken, i
+        return _aws_typed(taken[0], vtype, tok), i
+    return [_aws_typed(t, vtype, tok) for t in taken], i
 
 
 def _parse_aws_tokens(
@@ -2250,19 +2315,20 @@ def _parse_aws_tokens(
                 # botocore's "--no-<flag>" is a boolean's off switch: x: False
                 _set_bool_param(params, key, True)
             elif arity is not None:
-                value, i = _aws_take_values(tokens, i, tok, val, arity)
+                value, i = _aws_take_values(tokens, i, tok, val, arity,
+                                            spec.get("t", {}).get(key) if spec else None)
                 if arity == "":
                     _set_bool_param(params, key, True)
                 else:
                     params[key] = value
             else:
                 if val is not None:
-                    params[key] = _coerce(val)
+                    params[key] = val
                 elif i + 1 < n and not tokens[i + 1].startswith("-"):
                     # argparse never takes a word starting with "-" as a value
                     i += 1
                     val = tokens[i]
-                    params[key] = _coerce(val)
+                    params[key] = val
                 else:
                     params[key] = True
                 if val is not None and "instance-ids".startswith(key):
@@ -2951,6 +3017,20 @@ def _az_roles(aliases: dict[str, str]) -> dict[str, str]:
     return roles
 
 
+def _az_typed(text: str, nargs: dict[str, str] | None, key: str, tok: str) -> Any:
+    """An az value: the text, unless the argument declares ``type=int`` or ``type=float``
+    (argparse's int() and float()); what argparse refuses, so does the parser."""
+    vtype = (nargs or {}).get(f"type:{key}")
+    try:
+        if vtype == "int":
+            return int(text)
+        if vtype == "float":
+            return float(text)
+    except ValueError as exc:
+        raise ValueError(f"az: {tok} {text!r} is not a {vtype}, and az refuses it") from exc
+    return text
+
+
 def _parse_az_tokens(
     tokens: list[str], aliases: dict[str, str] | None = None,
     longs: frozenset[str] | None = None, nargs: dict[str, str] | None = None,
@@ -3065,11 +3145,11 @@ def _parse_az_tokens(
                         i += 1
                         ids_values.append(tokens[i])
             elif val is not None:
-                params[key] = _coerce(val)
+                params[key] = _az_typed(val, nargs, key, tok)
             elif i + 1 < n and not tokens[i + 1].startswith("-"):
                 # argparse never takes a word starting with "-" as a value
                 i += 1
-                params[key] = _coerce(tokens[i])
+                params[key] = _az_typed(tokens[i], nargs, key, tok)
             else:
                 params[key] = True
         else:
@@ -3428,11 +3508,16 @@ def _gcloud_flag_table(command: str) -> dict[str, Any] | None:
 
 def _gcloud_arg(text: str, is_dict: bool, existing: Any) -> Any:
     """A gcloud ArgList (``a,b``) as a list, or an ArgDict (``k=v,k2=v2``) as a map, split on
-    commas or on the delimiter gcloud's ``^X^`` prefix names (``^:^a:b``). A map flag given
-    again (``--create-disk`` twice) keeps each map."""
+    commas or on the delimiter gcloud's ``^DELIM^`` prefix names, of any length
+    (``^:^a:b``, ``^--^env=prod--team=x``; gcloud topic escaping). A map flag given again
+    (``--create-disk`` twice) keeps each map."""
     delimiter = ","
-    if len(text) >= 3 and text[0] == "^" and "^" in text[2:3]:
-        delimiter, text = text[1], text[3:]
+    if text.startswith("^") and "^" in text[1:]:
+        # gcloud topic escaping: ^DELIM^ names the delimiter, any non-empty string
+        end = text.index("^", 1)
+        if end == 1:
+            raise ValueError(f"gcloud: {text!r} names an empty delimiter")
+        delimiter, text = text[1:end], text[end + 1:]
     items = [item for item in text.split(delimiter) if item != ""]
     if not is_dict:
         return items
@@ -3531,12 +3616,12 @@ def _parse_gcloud_tokens(
                 if key in table["list"] or key in table["dict"]:
                     params[key] = _gcloud_arg(val, key in table["dict"], params.get(key))
                 else:
-                    params[key] = _coerce(val)
+                    params[key] = val
             elif table is not None and key in table["optional"]:
                 if val is None and i + 1 < n and not tokens[i + 1].startswith("-"):
                     i += 1  # argparse takes the next word as the optional value
                     val = tokens[i]
-                params[key] = True if val is None else _coerce(val)
+                params[key] = True if val is None else val
             elif table is not None and strict:
                 raise ValueError(f"gcloud: {tok} is not a flag of this command, and gcloud "
                                  f"refuses it: {tokens!r}")
@@ -3546,9 +3631,9 @@ def _parse_gcloud_tokens(
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
-                params[key] = _coerce(val)
+                params[key] = val
             elif val is not None:
-                params[key] = _coerce(val)
+                params[key] = val
             elif key.startswith("no-") and tok.startswith("--"):
                 _set_bool_param(params, key, True)
             elif lenient:
@@ -3563,7 +3648,7 @@ def _parse_gcloud_tokens(
                     params[key] = True  # a path stays a path
                 else:
                     i += 1
-                    params[key] = _coerce(tokens[i])
+                    params[key] = tokens[i]
             else:
                 params[key] = True
         else:
@@ -4049,7 +4134,7 @@ def _parse_helm_tokens(
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
-                params["version"] = _coerce(val)
+                params["version"] = val
             elif key == "values" or (key == "f" and not is_long and verb != "list"):
                 # A StringSlice: "-f a.yaml,b.yaml" is two files.
                 if val is None:
@@ -4075,6 +4160,9 @@ def _parse_helm_tokens(
             elif key in ("A", "all-namespaces"):
                 # every namespace, as kubectl's -A: the last spelling decides
                 _record_all_namespaces(metadata, val)
+            elif key == "wait":
+                params["wait"] = _helm_wait(val)
+                _mark_unresolved(params, "wait")  # helm 3 reads it as a boolean
             elif is_long and key in long_bools:
                 params[key.replace("-", "_")] = _bool_param(val)
             elif not is_long and short_key in short_bools:
@@ -4369,8 +4457,8 @@ def _merge_helm_values(params: dict[str, Any], sets: dict[str, list[str]],
              or (not base and not params.get("values_files"))))
     if params.get("values_files") or reuse:
         unresolved.append("set.*")
-    if unresolved:
-        params["unresolved_scope"] = unresolved
+    for mark in unresolved:
+        _mark_unresolved(params, mark)
 
 
 def from_helm_multi(argv: list[str]) -> list[InfrastructureIntent]:
@@ -4442,7 +4530,7 @@ def from_helm_multi(argv: list[str]) -> list[InfrastructureIntent]:
         if not positional:
             raise ValueError(f"could not find a helm release name in: {argv!r}")
         if len(positional) > 1:
-            params["revision"] = _coerce(positional[1])
+            params["revision"] = _go_atoi(positional[1], "revision")
         return [one(positional[0], "rollback")]
 
     if verb in _HELM_READ_VERBS:
@@ -4748,7 +4836,7 @@ def _from_argocd_multi(argv: list[str]) -> list[InfrastructureIntent]:
             raise ValueError(f"could not find an argocd app name in: {argv!r}")
         apps = [positional[0]]
         if len(positional) > 1:
-            params["revision"] = _coerce(positional[1])
+            params["revision"] = _go_atoi(positional[1], "revision")
     elif subverb in _ARGOCD_MULTI_APP_VERBS:
         if not positional and not picked:
             raise ValueError(f"could not find an argocd app name in: {argv!r}")
@@ -5425,7 +5513,7 @@ def _git_option_params(verb: str, options: list[tuple[str, Any]]) -> dict[str, A
         if val is None:
             params[key] = False
         else:
-            params[key] = _coerce(val) if isinstance(val, str) else val
+            params[key] = val  # git's option values are text
     for name in ("force", "delete", "dry_run", "amend", "hard"):
         params.pop(name, None)
     if verb == "push":

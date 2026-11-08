@@ -268,6 +268,21 @@ AUDIT = [
      param("tags", ["a", "b"])),
     ("C26", "gcloud", "gcloud compute instances create w --zone z --labels k=v",
      param("labels", {"k": "v"})),
+    # C27 a value is typed only by the type the tool declares
+    ("C27", "aws", "aws s3api delete-object --bucket production --key 001",
+     res("s3/object/production/001")),
+    ("C27", "gcloud", "gcloud compute instances create w --zone z --description 001",
+     param("description", "001")),
+    ("C27", "az", "az group update -n rg --set tags.x=001", param("set", ["tags.x=001"])),
+    ("C27", "kubectl", "kubectl run web --image 001", param("image", "001")),
+    ("C27", "helm", "helm upgrade r ./c --version 1.10", param("version", "1.10")),
+    ("C27", "flux", "flux create source git a --url u --branch 001", param("branch", "001")),
+    ("C27", "argocd", "argocd app set a --revision 001", param("revision", "001")),
+    ("C27", "gh", "gh release create 001 -R o/r --title 007", param("title", "007")),
+    ("C27", "git", "git push --push-option 007 origin main", param("push_option", "007")),
+    # C28 custom pflag Values, and slice element types
+    ("C28", "helm", "helm upgrade r ./c --wait=false", param("wait", "hookOnly")),
+    ("C28", "argocd", "argocd app sync a --source-positions 0x2", param("source_positions", [2])),
     # C25 a flag read by its value, not its presence
     ("C25", "git", "git branch --no-column -f prod HEAD~1", res("branch/prod", "branch/prod",
                                                                "branch/prod")),

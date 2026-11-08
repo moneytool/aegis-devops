@@ -66,7 +66,7 @@ import re
 from typing import Any
 
 from aegis_core.intent import InfrastructureIntent
-from aegis_core.parser import _basename, _coerce  # noqa: F401  (re-exported convention)
+from aegis_core.parser import _basename  # noqa: F401  (re-exported convention)
 
 # --- statement splitting -----------------------------------------------------
 

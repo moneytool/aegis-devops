@@ -811,8 +811,8 @@ def test_review_of_the_object_a_command_reaches(pattern, action, command, verdic
 
 
 @pytest.mark.parametrize("pattern,scope,verdict", [
-    ("web/*", {"copy-to": 1}, "BLOCK"),
-    ("web/*", {"copy-to": 2}, "ALLOW"),
+    ("web/*", {"copy-to": "001"}, "BLOCK"),
+    ("web/*", {"copy-to": 1}, "ALLOW"),  # a String flag: "001" is not 1
     ("pod/001", {}, "BLOCK"),
 ])
 def test_copy_to_stays_a_number_in_a_scope_and_text_in_a_target(pattern, scope, verdict):
@@ -1288,7 +1288,7 @@ def test_an_unknown_flag_that_shows_its_reading_is_kept(command, resource, param
     ("kubectl create role r --verb get --resource pods -n prod", "role/r",
      {"verb": ["get"], "resource": ["pods"]}, {"namespace": "prod"}),
     ("kubectl create pdb p --min-available 1 --selector app=x -n prod",
-     "poddisruptionbudget/p", {"min-available": 1, "selector": "app=x"}, {"namespace": "prod"}),
+     "poddisruptionbudget/p", {"min-available": "1", "selector": "app=x"}, {"namespace": "prod"}),
     # --current is a flag of its own: this was refused before
     ("kubectl config set-context --current --namespace=prod", "set-context/*",
      {"current": True}, {"namespace": "prod"}),

@@ -658,7 +658,7 @@ def test_from_gcloud_container_clusters_resize_maps_to_scale():
     )
     assert intent.action == "scale"
     assert intent.resource == "container/cluster/prod"
-    assert intent.params["num-nodes"] == 5
+    assert intent.params["num-nodes"] == "5"  # gcloud values are text unless declared
 
 
 def test_from_gcloud_sql_instances_delete():
@@ -939,7 +939,7 @@ def test_from_helm_bool_flags_and_set_and_values():
     assert intent.params["values_files"] == ["values.yaml"]
     assert intent.params["set"] == {"image": {"tag": "v2"}}
     assert intent.params["atomic"] is True
-    assert intent.params["wait"] is True
+    assert intent.params["wait"] == "watcher"  # helm 4 waitValue; unresolved for helm 3
     assert intent.params["create_namespace"] is True
 
 
@@ -1775,7 +1775,7 @@ def test_bool_flag_helper_semantics():
         and _coerce_bool("0") is False
     )
     assert _coerce_bool("orphan") is None
-    assert _bool_param(None) is True and _bool_param("false") is False and _bool_param("7") == 7
+    assert _bool_param(None) is True and _bool_param("false") is False and _bool_param("7") == "7"
     assert (
         _is_dry_run(None)
         and _is_dry_run("true")
@@ -3443,7 +3443,7 @@ def test_run_keeps_its_params_on_every_intent():
     intents = from_kubectl_multi(command.split())
     assert [i.resource for i in intents] == ["pod/001", "001/*"]
     for intent in intents:
-        assert intent.params == {"image": 1, "dry_run": True, "command": ["sleep", "1"]}
+        assert intent.params == {"image": "001", "dry_run": True, "command": ["sleep", "1"]}
 
 
 @pytest.mark.parametrize("command", [
@@ -3526,7 +3526,7 @@ def test_run_expose_keeps_the_namespace_on_every_intent(command):
 def test_run_expose_keeps_its_params_on_every_intent():
     command = "kubectl run web --image=x --expose --port=80 --dry-run=client -- sleep 1"
     for intent in from_kubectl_multi(command.split()):
-        assert intent.params == {"image": "x", "expose": True, "port": 80, "dry_run": True,
+        assert intent.params == {"image": "x", "expose": True, "port": "80", "dry_run": True,
                                  "command": ["sleep", "1"]}
         assert "resolved_at_runtime" not in intent.params
 
@@ -3600,7 +3600,7 @@ def test_debug_names_pods(command, targets):
 def test_debug_copy_to_is_raw_in_the_target_and_as_before_in_params():
     intents = from_kubectl_multi("kubectl debug web --copy-to=001 --image=x".split())
     assert "pod/001" in [i.resource for i in intents]
-    assert all(i.params["copy-to"] == 1 for i in intents)
+    assert all(i.params["copy-to"] == "001" for i in intents)  # a String flag: its text
 
 
 def test_the_last_copy_to_wins_as_in_params():
