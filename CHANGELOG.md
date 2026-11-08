@@ -45,6 +45,13 @@ unknown long flag before a word is refused (an unknown long flag at the end is k
 name). git verbs without an option table leave every param unresolved when given an option.
 
 ### Fixed
+- A scope key marked unresolved could still match a rule definitively when its recorded value
+  happened to equal the rule's, so the rule BLOCKed instead of escalating: `kubectl run web
+  --image=blocked --overrides '{...}'` against a rule on `image: blocked` was BLOCK, though the
+  override can replace the image. An unresolved key (exact, prefix, descendant or alias mark)
+  now never matches definitively; the rule escalates whether the recorded value equals the
+  rule's or not. A recursive storage key still decides for the literal key the command names
+  (`gsutil mv gs://b/logs` moves `logs` itself). Found in review of #82.
 - helm and flux read a long flag with no entry in the parser as a flag with no value, so the
   word after it was read as flags: `helm upgrade api ./c -n prod --description -ndev` was read
   as namespace `dev`, and helm runs it in `prod` with the description `-ndev` (#80). `flux create

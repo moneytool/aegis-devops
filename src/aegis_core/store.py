@@ -659,8 +659,14 @@ def _casefold(value: Any) -> Any:
 
 
 def _scope_matches(scope: dict[str, Any], intent: InfrastructureIntent) -> bool:
+    """Whether ``scope`` matches definitively. A scope key the intent leaves unresolved
+    (:func:`_unresolved_scope_keys`) never matches definitively, whatever value is recorded
+    for it: the rule takes the unresolved path (:func:`scope_unresolved`) and escalates,
+    so a value an override or a file can replace never decides a BLOCK."""
     if not scope:
         return True
+    if _unresolved_scope_keys(scope, intent):
+        return False
     return scope_matches(scope, intent.metadata, intent.params)
 
 
@@ -961,7 +967,9 @@ def _prefix_unresolved(key: str, expected: Any, intent: InfrastructureIntent) ->
     """Whether a rule's value for ``key`` may be one of the values the command reaches
     when it runs, all starting with a known prefix (``params["unresolved_prefix"]``: a
     recursive copy, move or delete of ``logs`` reaches ``logs/a``, ``logs/b``...). A value
-    that cannot start with the prefix is not reached, and the key decides as recorded."""
+    that cannot start with the prefix is not reached, and the key decides as recorded. Nor
+    is a value equal to the literal recorded value (``gsutil mv gs://b/logs`` moves the
+    object ``logs`` itself for certain): that one decides as recorded too."""
     prefixes = intent.params.get("unresolved_prefix")
     if not isinstance(prefixes, dict):
         return False
@@ -970,6 +978,10 @@ def _prefix_unresolved(key: str, expected: Any, intent: InfrastructureIntent) ->
         if canonical_key(name) == want and isinstance(prefix, str):
             if not isinstance(expected, str):
                 return True  # a value that is not text: not known not to be reached
+            recorded = intent.params.get(name)
+            if (isinstance(recorded, str) and expected == recorded
+                    and not _GLOB_CHARS & set(recorded) and not _GLOB_CHARS & set(expected)):
+                return False
             return _pattern_may_start_with(expected, prefix)
     return False
 
@@ -981,7 +993,22 @@ def scope_unresolved(scope: dict[str, Any], intent: InfrastructureIntent) -> lis
     Such a rule can neither be honoured nor dismissed, so the interceptor
     escalates with ``"<key>-unresolved: <id>"`` -- "unknown namespace" is
     never "not prod", exactly as for ``env`` (REVIEW-4 T1.3)."""
-    unknown = set()
+    unknown = _unresolved_scope_keys(scope, intent)
+    if not unknown:
+        return []
+    gone = {canonical_key(k) for k in unknown}
+    rest = {k: v for k, v in scope.items() if k not in unknown}
+    metadata = {k: v for k, v in intent.metadata.items() if canonical_key(k) not in gone}
+    params = {k: v for k, v in intent.params.items() if canonical_key(k) not in gone}
+    return sorted(unknown) if scope_matches(rest, metadata, params) else []
+
+
+def _unresolved_scope_keys(scope: dict[str, Any], intent: InfrastructureIntent) -> set[str]:
+    """The keys of ``scope`` this intent leaves unresolved: ``env`` and ``namespace`` when
+    not known, a key a parser marked (exactly, by a prefix mark, under it, or through a
+    scope-key alias), a key whose value the command reaches only at run time
+    (``unresolved_prefix``), and a rule value the key's type cannot hold."""
+    unknown: set[str] = set()
     if "env" in scope and "env" not in intent.metadata:
         unknown.add("env")
     if "namespace" in scope and namespace_unresolved(intent):
@@ -995,13 +1022,7 @@ def scope_unresolved(scope: dict[str, Any], intent: InfrastructureIntent) -> lis
     # matches nor fails to: it escalates, as an unknown value does
     unknown.update(key for key, expected in scope.items()
                    if not _typed_expected(key, expected, intent.params)[0])
-    if not unknown:
-        return []
-    gone = {canonical_key(k) for k in unknown}
-    rest = {k: v for k, v in scope.items() if k not in unknown}
-    metadata = {k: v for k, v in intent.metadata.items() if canonical_key(k) not in gone}
-    params = {k: v for k, v in intent.params.items() if canonical_key(k) not in gone}
-    return sorted(unknown) if scope_matches(rest, metadata, params) else []
+    return unknown
 
 
 def time_window_unresolved(

@@ -2303,6 +2303,30 @@ def test_kubectl_run_overrides_leave_the_object_unknown():
     assert _verdict([rule], command.split()) == "ESCALATE"
 
 
+def test_an_unresolved_key_never_blocks_on_its_recorded_value():
+    # PR #82 review: the recorded image equals the rule, but --overrides can replace it,
+    # so the rule escalates as it does when the recorded value differs; it never BLOCKs.
+    command = ["kubectl", "run", "web", "--image=blocked", "-n", "prod", "--overrides",
+               '{"spec":{"containers":[{"name":"web","image":"allowed"}]}}']
+    for image in ("blocked", "allowed"):
+        rule = _rule("kubernetes", "pod/web", ["run"], {"image": image})
+        assert _verdict([rule], command) == "ESCALATE", image
+    # a prefix mark (gcloud --metadata-from-file) and a descendant mark (helm --set-file
+    # under a recorded map) take the same path
+    gcloud = ("gcloud compute instances create vm --zone us-east1-b --project p "
+              "--metadata k=v --metadata-from-file k=f").split()
+    assert _verdict([_rule("gcp", "compute/instance/*", ["create"], {"metadata.k": "v"})],
+                    gcloud) == "ESCALATE"
+    helm = ("helm upgrade api ./c -n prod --reset-values --set config.public=safe "
+            "--set-file config.secret=f").split()
+    assert _verdict([_rule("helm", "release/api", ["update"],
+                           {"set.config.public": "safe", "set.config": {"public": "safe"}})],
+                    helm) == "ESCALATE"
+    # a resolved key still blocks
+    assert _verdict([_rule("kubernetes", "pod/web", ["run"], {"image": "blocked"})],
+                    ["kubectl", "run", "web", "--image=blocked", "-n", "prod"]) == "BLOCK"
+
+
 def test_gh_api_dispatch_inputs_meet_the_porcelain_rule():
     rule = _rule("github", "workflow/*", ["run"], {"inputs.env": "prod"})
     command = ["gh", "api", "-X", "POST", "repos/o/r/actions/workflows/d.yml/dispatches",
