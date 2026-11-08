@@ -3408,14 +3408,203 @@ def _parse_git_tokens(tokens: list[str]) -> tuple[dict[str, Any], list[str]]:
     return params, positional
 
 
-def _from_git_push(
-    positional: list[str], params: dict[str, Any], metadata: dict[str, Any]
-) -> InfrastructureIntent:
-    remote = positional[0] if positional else None
-    refspec = positional[1] if len(positional) > 1 else None
-    if remote is not None:
-        metadata = {**metadata, "remote": remote}
+# Every option of the git verbs the parser reads closely, from `git <verb> -h` and the
+# hidden ones in `--git-completion-helper-all` (git 2.52). One word per option:
+# "<short>/<long>", then "=" when it takes a value (the rest of a short word, after a
+# "=", or the next word whatever it looks like), "?" when it takes one only after "="
+# (or in the rest of a short word), and "!" when "--no-<long>" turns it off.
+_GIT_OPTION_SPECS = {
+    "push": (
+        "v/verbose! q/quiet! /repo=! /all! /branches! /mirror! d/delete! /tags! n/dry-run! "
+        "/porcelain! f/force! /force-with-lease?! /force-if-includes! /recurse-submodules=! "
+        "/thin! /receive-pack=! /exec=! u/set-upstream! /progress! /prune! /no-verify /verify "
+        "/follow-tags! /signed?! /atomic! o/push-option=! 4/ipv4 6/ipv6"
+    ),
+    "branch": (
+        "v/verbose! q/quiet! t/track?! u/set-upstream-to=! /unset-upstream! /color?! "
+        "r/remotes /contains= /no-contains= /with= /without= /abbrev?! a/all d/delete! D/ "
+        "m/move! M/ /omit-empty! c/copy! C/ l/list! /show-current! /create-reflog! "
+        "/edit-description! f/force! /merged= /no-merged= /column?! /sort=! /points-at=! "
+        "i/ignore-case! /recurse-submodules! /format=! /set-upstream!"
+    ),
+    "tag": (
+        "l/list n/? d/delete v/verify a/annotate! m/message= F/file=! /trailer= e/edit! "
+        "s/sign! /cleanup=! u/local-user=! f/force! /create-reflog! /column?! /contains= "
+        "/no-contains= /with= /without= /merged= /no-merged= /omit-empty! /sort=! "
+        "/points-at=! /format=! /color?! i/ignore-case!"
+    ),
+    "rebase": (
+        "/onto=! /keep-base! /no-verify /verify q/quiet! v/verbose! n/no-stat /stat "
+        "/signoff! /committer-date-is-author-date! /reset-author-date! /ignore-date! C/= "
+        "/ignore-whitespace! /whitespace=! f/force-rebase! /no-ff /ff /continue /skip /abort "
+        "/quit /edit-todo /show-current-patch /apply m/merge i/interactive /preserve-merges! "
+        "/rerere-autoupdate! /empty= /keep-empty! /autosquash! /update-refs! S/gpg-sign?! "
+        "/autostash! x/exec=! /allow-empty-message! r/rebase-merges?! /fork-point! "
+        "s/strategy=! X/strategy-option=! /root! /reschedule-failed-exec! "
+        "/reapply-cherry-picks!"
+    ),
+    "reset": (
+        "q/quiet! /no-refresh /refresh /mixed /soft /hard /merge /keep "
+        "/recurse-submodules?! p/patch! U/unified= /inter-hunk-context= N/intent-to-add! "
+        "/pathspec-from-file=! /pathspec-file-nul!"
+    ),
+    "commit": (
+        "q/quiet! v/verbose! F/file=! /author=! /date=! m/message=! c/reedit-message=! "
+        "C/reuse-message=! /fixup=! /squash=! /reset-author! /trailer= s/signoff! "
+        "t/template=! e/edit! /cleanup=! /status! S/gpg-sign?! a/all! i/include! "
+        "/interactive! p/patch! U/unified= /inter-hunk-context= o/only! n/no-verify /verify "
+        "/dry-run! /short! /branch! /ahead-behind! /porcelain! /long! z/null! /amend! "
+        "/no-post-rewrite /post-rewrite u/untracked-files?! /pathspec-from-file=! "
+        "/pathspec-file-nul! /allow-empty! /allow-empty-message!"
+    ),
+}
 
+
+def _git_option_table(spec: str) -> tuple[dict[str, tuple[str, str]], dict[str, str], set[str]]:
+    """``(shorts, longs, negatable)`` from one entry of :data:`_GIT_OPTION_SPECS`: a short
+    letter maps to ``(name, arity)``, a long name to its arity ("", "=" or "?")."""
+    shorts: dict[str, tuple[str, str]] = {}
+    longs: dict[str, str] = {}
+    negatable: set[str] = set()
+    for word in spec.split():
+        short, _slash, rest = word.partition("/")
+        neg = rest.endswith("!")
+        rest = rest.rstrip("!")
+        arity = rest[-1] if rest and rest[-1] in "=?" else ""
+        name = rest.rstrip("=?")
+        if name:
+            longs[name] = arity
+            if neg:
+                negatable.add(name)
+        if short:
+            shorts[short] = (name or short, arity)
+    return shorts, longs, negatable
+
+
+_GIT_OPTIONS = {verb: _git_option_table(spec) for verb, spec in _GIT_OPTION_SPECS.items()}
+
+
+def _git_long_option(verb: str, key: str) -> tuple[str, bool]:
+    """The long option ``--key`` names on ``verb`` and whether it is the ``--no-`` form, as
+    git's parse-options finds it: the exact name, ``no-<name>`` of a negatable one, or a
+    prefix of exactly one of those (``--forc`` is ambiguous, ``--amen`` is ``--amend``)."""
+    _shorts, longs, negatable = _GIT_OPTIONS[verb]
+    if key in longs:
+        return key, False
+    if key.startswith("no-") and key[3:] in negatable:
+        return key[3:], True
+    spellings = [(name, False) for name in longs] + [(f"no-{name}", True) for name in negatable]
+    found = [(name, neg) for name, neg in spellings if name.startswith(key)]
+    if len(found) == 1:
+        name, neg = found[0]
+        return (name[3:] if neg else name), neg
+    reason = "is ambiguous" if found else "is not an option of"
+    raise ValueError(f"git {verb}: --{key} {reason} git {verb}")
+
+
+def _parse_git_options(verb: str, tokens: list[str]) -> tuple[list[tuple[str, Any]], list[str]]:
+    """``tokens`` as git's parse-options reads them on ``verb``: the options in order, as
+    ``(long name, value)`` with value None for the ``--no-`` form and True for a bare
+    option, and the operands. Short words bundle (``-fu``), a value option takes the rest
+    of its word or the next word, ``--`` and ``--end-of-options`` end the options, and
+    anything git refuses is a ValueError."""
+    shorts, longs, _negatable = _GIT_OPTIONS[verb]
+    options: list[tuple[str, Any]] = []
+    operands: list[str] = []
+    i = 0
+    n = len(tokens)
+    while i < n:
+        tok = tokens[i]
+        if tok in ("--", "--end-of-options"):
+            operands.extend(tokens[i + 1:])
+            break
+        if tok.startswith("--"):
+            key, val = _split_flag(tok)
+            name, negated = _git_long_option(verb, key)
+            arity = longs[name]
+            if negated or not arity:
+                if val is not None:
+                    raise ValueError(f"git {verb}: {tok} takes no value")
+                options.append((name, None if negated else True))
+            elif val is None and arity == "=":
+                i += 1
+                if i < n:
+                    val = tokens[i]
+                options.append((name, val if val is not None else True))
+            else:
+                options.append((name, val if val is not None else True))
+        elif tok.startswith("-") and tok != "-":
+            rest = tok[1:]
+            while rest:
+                letter, rest = rest[0], rest[1:]
+                if letter not in shorts:
+                    raise ValueError(f"git {verb}: -{letter} is not an option of git {verb}")
+                name, arity = shorts[letter]
+                if not arity:
+                    options.append((name, True))
+                    continue
+                if not rest and arity == "=":
+                    i += 1
+                    rest = tokens[i] if i < n else ""
+                options.append((name, rest if rest else True))
+                break
+        else:
+            operands.append(tok)
+        i += 1
+    return options, operands
+
+
+def _git_last(options: list[tuple[str, Any]], *names: str) -> Any:
+    """The value the last of ``names`` was given (None for a ``--no-`` form), or None."""
+    value = None
+    for name, val in options:
+        if name in names:
+            value = val
+    return value
+
+
+def _git_option_params(verb: str, options: list[tuple[str, Any]]) -> dict[str, Any]:
+    """The params a git verb's options set, each by its last spelling."""
+    params: dict[str, Any] = {}
+    for name, val in options:
+        key = name.replace("-", "_")
+        if val is None:
+            params.pop(key, None)
+        else:
+            params[key] = _coerce(val) if isinstance(val, str) else val
+    for name in ("force", "delete", "dry_run", "amend", "hard"):
+        params.pop(name, None)
+    if verb == "push":
+        if _git_last(options, "force") or _git_last(options, "force-with-lease"):
+            params["force"] = True
+        if _git_last(options, "force-with-lease"):
+            params["force_with_lease"] = True
+        if _git_last(options, "delete"):
+            params["delete"] = True
+        if _git_last(options, "dry-run"):
+            params["dry_run"] = True
+    elif verb in ("branch", "tag"):
+        if _git_last(options, "delete", "D"):
+            params["delete"] = True
+        if _git_last(options, "force", "D"):
+            params["force"] = True
+    elif verb == "commit":
+        if _git_last(options, "amend"):
+            params["amend"] = True
+        if _git_last(options, "dry-run"):
+            params["dry_run"] = True
+    elif verb == "reset":
+        # git keeps the last mode; a --hard anywhere counts, which can only be stricter
+        if any(name == "hard" for name, _val in options):
+            params["hard"] = True
+    elif verb == "rebase" and _git_last(options, "force-rebase"):
+        params["force"] = True
+    return params
+
+
+def _git_push_intent(
+    refspec: str | None, params: dict[str, Any], metadata: dict[str, Any]
+) -> InfrastructureIntent:
     delete = bool(params.get("delete"))
     # --mirror force-updates every ref on the remote (and deletes the ones
     # that don't exist locally): a force push by any other name.
@@ -3445,11 +3634,12 @@ def _from_git_push(
         params["force"] = True
     if delete:
         params["delete"] = True
-    if not ref:
+    if not ref or "*" in ref:
         # No refspec: the target is whatever the local branch / push.default
         # / --all / --mirror resolve to — unknowable from the argv. Marked
         # so the caller can escalate ("git push -f" must not sail past a
-        # "ref/main" rule as "ref/*").
+        # "ref/main" rule as "ref/*"). A pattern refspec ("refs/heads/*")
+        # reaches every ref it matches, which is just as unknown.
         params["unknown_target"] = True
 
     resource = f"ref/{ref}" if ref else "ref/*"
@@ -3459,7 +3649,25 @@ def _from_git_push(
     )
 
 
-def from_git(argv: list[str]) -> InfrastructureIntent:
+def _from_git_push(
+    positional: list[str], params: dict[str, Any], metadata: dict[str, Any]
+) -> list[InfrastructureIntent]:
+    """One intent per refspec: ``git push origin a +b :c`` pushes a, force-pushes b and
+    deletes c. ``--tags`` also pushes every tag, and ``--prune`` deletes every remote ref
+    with no local one, neither of which the argv names."""
+    remote = positional[0] if positional else None
+    refspecs = positional[1:]
+    if remote is not None:
+        metadata = {**metadata, "remote": remote}
+    intents = [_git_push_intent(refspec, params, metadata) for refspec in refspecs or [None]]
+    if refspecs and params.get("tags") is True:
+        intents.append(_git_push_intent(None, params, metadata))
+    if params.get("prune") is True:
+        intents.append(_git_push_intent(None, {**params, "delete": True}, metadata))
+    return intents
+
+
+def from_git_multi(argv: list[str]) -> list[InfrastructureIntent]:
     """Parses a ``git`` invocation. Only remote-affecting or history-rewriting
     commands produce non-read intents; local reads are ``read``, e.g.:
 
@@ -3467,6 +3675,12 @@ def from_git(argv: list[str]) -> InfrastructureIntent:
       -> resource "ref/main", action "push", params {"force": True}, metadata {"remote": "origin"}
     ``git rebase main``
       -> resource "history/main", action "rewrite"
+
+    ``push``, ``branch``, ``tag``, ``rebase``, ``reset`` and ``commit`` are read as git's
+    parse-options reads them (:func:`_parse_git_options`), so ``-fu`` is ``-f -u``,
+    ``--amen`` is ``--amend``, ``-n`` is ``--dry-run`` only on push, and an option git
+    refuses is refused. ``git push origin a b`` and ``git branch -d a b`` are one intent
+    per ref or branch.
     """
     if len(argv) < 2 or _basename(argv[0]) != "git":
         raise ValueError(f"not a recognizable git invocation: {argv!r}")
@@ -3479,71 +3693,61 @@ def from_git(argv: list[str]) -> InfrastructureIntent:
     )
     verb = rest[0]
     tokens = rest[1:]
-    params, positional = _parse_git_tokens(tokens)
+    if verb in _GIT_OPTIONS:
+        options, positional = _parse_git_options(verb, tokens)
+        params = _git_option_params(verb, options)
+    else:
+        params, positional = _parse_git_tokens(tokens)
     metadata: dict[str, Any] = {}
     params["raw_action"] = verb
+
+    def one(resource: str, action: str) -> InfrastructureIntent:
+        return InfrastructureIntent(resource=resource, action=action, provider="git",
+                                    params=dict(params), metadata=dict(metadata))
 
     if verb == "push":
         return _from_git_push(positional, params, metadata)
 
-    if verb == "branch":
+    if verb in ("branch", "tag"):
         if params.get("delete"):
             if not positional:
-                raise ValueError(f"could not find a branch name in: {argv!r}")
-            return InfrastructureIntent(
-                resource=f"branch/{positional[0]}", action="delete", provider="git",
-                params=params, metadata=metadata,
-            )
-        return InfrastructureIntent(
-            resource=f"branch/{positional[0] if positional else '*'}", action="read",
-            provider="git", params=params, metadata=metadata,
-        )
-
-    if verb == "tag":
-        if params.get("delete"):
-            if not positional:
-                raise ValueError(f"could not find a tag name in: {argv!r}")
-            return InfrastructureIntent(
-                resource=f"tag/{positional[0]}", action="delete", provider="git",
-                params=params, metadata=metadata,
-            )
-        return InfrastructureIntent(
-            resource=f"tag/{positional[0] if positional else '*'}", action="read",
-            provider="git", params=params, metadata=metadata,
-        )
+                raise ValueError(f"could not find a {verb} name in: {argv!r}")
+            # git deletes every one it is given
+            return [one(f"{verb}/{name}", "delete") for name in dict.fromkeys(positional)]
+        return [one(f"{verb}/{positional[0] if positional else '*'}", "read")]
 
     if verb == "rebase":
-        target = positional[0] if positional else "HEAD"
-        return InfrastructureIntent(
-            resource=f"history/{target}", action="rewrite", provider="git",
-            params=params, metadata=metadata,
-        )
+        # "git rebase <upstream> <branch>" rewrites <branch>: both are targets
+        targets = positional[:2] or ["HEAD"]
+        return [one(f"history/{target}", "rewrite") for target in targets]
 
     if verb == "reset" and params.get("hard"):
         target = positional[0] if positional else "HEAD"
-        return InfrastructureIntent(
-            resource=f"history/{target}", action="rewrite", provider="git",
-            params=params, metadata=metadata,
-        )
+        return [one(f"history/{target}", "rewrite")]
 
     if verb == "commit" and params.get("amend"):
-        return InfrastructureIntent(
-            resource="history/HEAD", action="rewrite", provider="git",
-            params=params, metadata=metadata,
-        )
+        return [one("history/HEAD", "rewrite")]
 
-    if verb in ("filter-branch", "filter-repo"):
+    if verb == "filter-branch":
         target = positional[0] if positional else "HEAD"
-        return InfrastructureIntent(
-            resource=f"history/{target}", action="rewrite", provider="git",
-            params=params, metadata=metadata,
-        )
+        return [one(f"history/{target}", "rewrite")]
+
+    if verb == "filter-repo":
+        # git filter-repo rewrites every ref of the repository, whatever it is given
+        return _mark_open_targets([one("history/*", "rewrite")])
 
     # checkout, switch, log, status, diff, fetch, pull, commit (no --amend),
     # add, show, reset (no --hard), ... -- local/read-ish, nothing to gate.
-    return InfrastructureIntent(
-        resource="history/*", action="read", provider="git", params=params, metadata=metadata
-    )
+    return [one("history/*", "read")]
+
+
+def from_git(argv: list[str]) -> InfrastructureIntent:
+    """Parses a ``git`` invocation that has exactly one target (see
+    :func:`from_git_multi`). Raises ValueError for ``git push origin a b``."""
+    intents = from_git_multi(argv)
+    if len(intents) != 1:
+        raise ValueError(f"expected exactly one git target, found {len(intents)}: {argv!r}")
+    return intents[0]
 
 
 # --- GitHub CLI (gh) -------------------------------------------------------
@@ -4124,7 +4328,7 @@ def from_argv(argv: list[str]) -> list[InfrastructureIntent]:
     if name == "flux":
         return from_flux_multi(argv)
     if name == "git":
-        return [from_git(argv)]
+        return from_git_multi(argv)
     if name == "gh":
         return [from_gh(argv)]
     if name in ("psql", "mysql", "sqlite3", "mongosh", "pulumi") or name in _MIGRATION_TOOLS:

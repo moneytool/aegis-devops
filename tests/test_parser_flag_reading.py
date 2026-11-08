@@ -346,3 +346,105 @@ def test_argocd_dry_run_is_a_rehearsal_only_on_sync():
     assert _verdict([rule], "argocd app sync a --dry-run") == "ALLOW"
     assert _verdict([rule], "argocd app sync a --dry-run --dry-run=false") == "BLOCK"
 
+
+# --- git -----------------------------------------------------------------------------
+# git's parse-options, from `git <verb> -h` on git 2.52; the push, commit and reset cases
+# that change a verdict were also run with git 2.52 against a local bare repository.
+
+
+@pytest.mark.parametrize("command,resources,params", [
+    # bundled short options
+    ("git push -fu origin main", ["ref/main"], {"force": True, "set_upstream": True}),
+    ("git push -nf origin main", ["ref/main"], {"force": True, "dry_run": True}),
+    # an unambiguous prefix of a long option is that option
+    ("git push --force-w origin main", ["ref/main"], {"force": True}),
+    ("git push --del origin old", ["ref/old"], {"delete": True}),
+    ("git push --mirr origin", ["ref/*"], {"force": True, "unknown_target": True}),
+    # the last spelling decides
+    ("git push --no-force -f origin main", ["ref/main"], {"force": True}),
+    ("git push -n --no-dry-run origin main", ["ref/main"], {}),
+    ("git push --dry-run --no-dry origin main", ["ref/main"], {}),
+    # a value option takes the next word whatever it is
+    ("git push --repo -f origin main", ["ref/main"], {"repo": "-f"}),
+    ("git push -o ci.skip origin main", ["ref/main"], {"push_option": "ci.skip"}),
+    # an option that takes a value only after "=" leaves the next word alone
+    ("git push --force-with-lease origin main", ["ref/main"], {"force": True}),
+    ("git push --signed=yes origin main", ["ref/main"], {"signed": "yes"}),
+    # every refspec is pushed
+    ("git push origin safe +main", ["ref/safe", "ref/main"], {}),
+    ("git push origin a :b", ["ref/a", "ref/b"], {}),
+    ("git push origin -- main", ["ref/main"], {}),
+    # a pattern refspec reaches every ref it matches
+    ("git push origin +refs/heads/*:refs/heads/*", ["ref/*"],
+     {"force": True, "unknown_target": True}),
+])
+def test_git_push_is_read_as_git_reads_it(command, resources, params):
+    intents = from_argv(command.split())
+    assert [i.resource for i in intents] == resources
+    last = intents[-1].params
+    assert {k: last.get(k) for k in params} == params
+    for absent in ("force", "dry_run", "delete"):
+        if absent not in params and resources == ["ref/main"]:
+            assert absent not in last
+
+
+@pytest.mark.parametrize("command,verdict", [
+    ("git push -fu origin main", "BLOCK"),
+    ("git push --force-w origin main", "BLOCK"),
+    ("git push origin safe +main", "BLOCK"),
+    ("git push --dry-run --no-dry -f origin main", "BLOCK"),
+    ("git push -f -n origin main", "ALLOW"),
+    ("git push origin +refs/heads/*:refs/heads/*", "ESCALATE"),
+    ("git push origin main", "ALLOW"),
+])
+def test_git_force_push_rule_holds(command, verdict):
+    store_rule = _rule("git", "ref/main", ["push"], {"force": True})
+    assert _verdict([store_rule], command) == verdict
+
+
+@pytest.mark.parametrize("command,resource,action", [
+    ("git commit --amen -m x", "history/HEAD", "rewrite"),
+    ("git commit -n --amend -m x", "history/HEAD", "rewrite"),  # -n is --no-verify here
+    ("git commit --amend --no-amend -m x", "history/*", "read"),
+    ("git commit -am x", "history/*", "read"),
+    ("git reset --har HEAD~3", "history/HEAD~3", "rewrite"),
+    ("git reset --ha HEAD", "history/HEAD", "rewrite"),
+    ("git rebase -x make main", "history/main", "rewrite"),
+])
+def test_git_history_rewrites_are_read_as_git_reads_them(command, resource, action):
+    intent = from_argv(command.split())[0]
+    assert (intent.resource, intent.action) == (resource, action)
+    assert "dry_run" not in intent.params
+
+
+def test_git_commit_n_is_not_a_rehearsal():
+    rule = _rule("git", "history/*", ["rewrite"])
+    assert _verdict([rule], "git commit -n --amend -m x") == "BLOCK"
+    assert _verdict([rule], "git commit --amen -m x") == "BLOCK"
+
+
+@pytest.mark.parametrize("command,resources", [
+    ("git branch -D a b", ["branch/a", "branch/b"]),
+    ("git branch -d a -- b", ["branch/a", "branch/b"]),
+    ("git tag -d v1 v2", ["tag/v1", "tag/v2"]),
+    ("git rebase main feature", ["history/main", "history/feature"]),
+    ("git filter-repo --path src", ["history/*"]),
+])
+def test_git_reads_every_target(command, resources):
+    assert [i.resource for i in from_argv(command.split())] == resources
+
+
+def test_git_branch_delete_of_two_meets_a_rule_on_the_second():
+    assert _verdict([_rule("git", "branch/main", ["delete"])], "git branch -D old main") == \
+        "BLOCK"
+
+
+@pytest.mark.parametrize("command", [
+    "git push --forc origin main",  # force, force-with-lease and force-if-includes
+    "git push --no-such-option origin main",
+    "git push -x origin main",
+    "git commit --amend=yes -m x",  # --amend takes no value
+])
+def test_git_refuses_what_git_refuses(command):
+    with pytest.raises(ValueError):
+        from_argv(command.split())

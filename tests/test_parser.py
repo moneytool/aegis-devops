@@ -1662,7 +1662,8 @@ FALSE_FLAG_CASES = [
     ([*FLUX_CREATE, "--export", "--export=false"], "dry_run"),
     (["gh", "pr", "merge", "1", "--admin=false"], "admin"),
     (["gh", "pr", "merge", "1", "--delete-branch=false"], "delete_branch"),
-    (["git", "push", "origin", "main", "--dry-run=false"], "dry_run"),
+    # git's --dry-run takes no value (git refuses --dry-run=false); --no-dry-run is the off
+    (["git", "push", "origin", "main", "--dry-run", "--no-dry-run"], "dry_run"),
 ]
 
 
