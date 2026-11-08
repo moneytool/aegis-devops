@@ -2103,17 +2103,22 @@ def _from_aws_s3(
     # --include/--exclude filters when aws runs: the key is then only a prefix
     many = operation == "sync" or params.get("recursive") is True
 
-    def add(uri: str, action: str) -> None:
+    def add(uri: str, action: str, destination: bool = False) -> None:
         bucket, _, key = uri[len("s3://") :].partition("/")
         intent_params = {**params, "key": key} if key else dict(params)
         if many:
             _mark_unresolved(intent_params, "key")
+        elif destination:
+            # cp/mv to s3://b/dir/ writes dir/<source's base name> (aws s3 never treats a
+            # key without the slash as a folder)
+            _copy_destination_key(intent_params, rest[:-1], False, folders=False)
         intents.append(InfrastructureIntent(resource=f"s3/bucket/{bucket}", action=action,
                                             provider="aws", params=intent_params,
                                             metadata=dict(metadata)))
 
     for uri in uris:
-        add(uri, action)
+        add(uri, action, destination=operation in ("cp", "mv") and rest[-1:] == [uri]
+            and uri == uris[-1])
     if operation == "mv" and rest and rest[0].startswith("s3://"):
         add(rest[0], "delete")
     if operation == "sync" and params.get("delete") is True and rest[-1:] == uris[-1:]:
@@ -2650,8 +2655,38 @@ def _az_aliases(words: list[str]) -> dict[str, str]:
     tables = _az_short_tables()
     aliases: dict[str, str] = {}
     for size in range(1, len(words) + 1):
-        aliases.update(tables.get(" ".join(words[:size]), {}))
+        aliases.update(tables.get(" ".join(words[:size]), {}).get("s", {}))
     return aliases
+
+
+# The long options az's core and knack give every command.
+_AZ_GLOBAL_LONGS = frozenset({
+    "resource-group", "name", "location", "subscription", "ids", "output", "query", "help",
+    "debug", "verbose", "only-show-errors", "yes", "no-wait",
+})
+
+
+def _az_longs(words: list[str]) -> frozenset[str]:
+    """The long options declared for ``az <words>`` and the scopes above it, and az's own:
+    what argparse resolves an abbreviated long option against."""
+    tables = _az_short_tables()
+    longs: set[str] = set(_AZ_GLOBAL_LONGS)
+    for size in range(1, len(words) + 1):
+        longs.update(tables.get(" ".join(words[:size]), {}).get("l", ()))
+    return frozenset(longs)
+
+
+def _az_long_option(key: str, longs: frozenset[str]) -> str:
+    """The long option ``--key`` names, as argparse's allow_abbrev finds it: the exact name,
+    or the one declared option it is a prefix of; a prefix of several is refused, as az
+    refuses it. A name that is neither is kept: it may be an option the command's function
+    signature gives, which _params.py does not list."""
+    if key in longs:
+        return key
+    found = sorted(o for o in longs if o.startswith(key))
+    if len(found) > 1:
+        raise ValueError(f"az: --{key} is ambiguous ({', '.join(found)}), and az refuses it")
+    return found[0] if found else key
 
 
 # az's own short options (knack and azure-cli core): -o output, -h help, -y the --yes that
@@ -2679,6 +2714,7 @@ def _az_roles(aliases: dict[str, str]) -> dict[str, str]:
 
 def _parse_az_tokens(
     tokens: list[str], aliases: dict[str, str] | None = None,
+    longs: frozenset[str] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], list[str], str | None, list[str]]:
     """``aliases`` (:func:`_az_aliases`) records each short option as the long option it is
     on the command, so ``-c 1`` and ``--node-count 1`` record the same; the long option
@@ -2710,6 +2746,8 @@ def _parse_az_tokens(
                     and any(o != key and o.startswith(key) for o in _AZ_SCOPE_OPTIONS)):
                 raise ValueError(f"az: {tok} may be an abbreviation of an option that names "
                                  f"the target or its scope; write the option in full")
+            if longs is not None and tok.startswith("--"):
+                key = _az_long_option(key, longs)  # --node-c is --node-count
             if aliases is not None and roles is not None:
                 if not tok.startswith("--"):
                     if key not in aliases and key not in _AZ_GLOBAL_SHORTS:
@@ -2884,7 +2922,7 @@ def _from_az_multi(argv: list[str]) -> list[InfrastructureIntent]:
     metadata, params, positional, name_value, ids_values = _parse_az_tokens(tokens)
     # read again with the command's own short options, each recorded as its long option
     metadata, params, positional, name_value, ids_values = _parse_az_tokens(
-        tokens, _az_aliases(positional))
+        tokens, _az_aliases(positional), _az_longs(positional))
 
     if not positional:
         raise ValueError(f"could not find an az verb in: {argv!r}")
@@ -3307,6 +3345,33 @@ def _gcs_target(uri: str, params: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     return f"storage/bucket/{bucket}", intent_params
 
 
+def _copy_destination_key(params: dict[str, Any], sources: list[str], many: bool,
+                          folders: bool) -> None:
+    """The object a copy writes, as gcloud storage, gsutil and aws s3 name it: a destination
+    ending in ``/`` (or a bucket alone) is a folder, and the object is that prefix plus the
+    source's base name. With several sources, ``-r``/``--recursive`` or paths from stdin,
+    which objects, only the tool knows: ``key`` is unresolved. ``folders``: gcloud and
+    gsutil also treat a destination without the slash as a folder when objects under it
+    exist, which only they can see, so that key is unresolved too (aws never does)."""
+    key = params.get("key", "")
+    if many or len(sources) != 1:
+        _mark_unresolved(params, "key")
+        return
+    base = sources[0].rstrip("/").rsplit("/", 1)[-1]
+    if key == "" or key.endswith("/"):
+        if not base or _GLOB_CHARS_RE.search(base):
+            _mark_unresolved(params, "key")
+            return
+        params["key"] = key + base
+    elif folders:
+        _mark_unresolved(params, "key")
+
+
+def _gcs_destination_key(params: dict[str, Any], sources: list[str], from_stdin: bool) -> None:
+    recursive = any(params.get(k) is True for k in ("r", "R", "recursive"))
+    _copy_destination_key(params, sources, recursive or from_stdin, folders=True)
+
+
 def _gcs_uri_intents(
     verb: str,
     operands: list[str],
@@ -3332,8 +3397,11 @@ def _gcs_uri_intents(
     if move:
         sources = operands[:-1] if len(operands) > 1 else []
         targets.extend((src, "delete") for src in sources if src.startswith("gs://"))
+    destination = operands[-1] if verb in ("cp", "mv") and operands else None
     for uri, act in targets:
         resource, intent_params = _gcs_target(uri, params)
+        if uri == destination and act == action:
+            _gcs_destination_key(intent_params, operands[:-1], from_stdin)
         intents.append(InfrastructureIntent(
             resource=resource, action=act, provider="gcp",
             params=intent_params, metadata=dict(metadata)))
@@ -5100,8 +5168,10 @@ def _git_push_intent(
             spec = spec[1:]
         if spec == ":":
             ref = None  # ":" pushes every branch that matches one on the remote
-        elif spec in ("HEAD", "@"):
-            ref = None  # the current branch, to the branch of the same name
+        elif spec in ("HEAD", "@") or _git_resolved_name(spec.rpartition(":")[2]):
+            # the current branch, its upstream (@{u}, @{push}), the one before (@{-1}, -):
+            # which ref, only git knows
+            ref = None
         elif spec.startswith(":"):
             delete = True
             ref = spec[1:]
@@ -5133,6 +5203,12 @@ def _git_push_intent(
     return InfrastructureIntent(
         resource=resource, action=action, provider="git", params=params, metadata=metadata
     )
+
+
+def _git_resolved_name(name: str) -> bool:
+    """Whether git resolves ``name`` to a ref when it runs: ``@{upstream}``, ``@{push}``,
+    ``@{-1}`` and the like, ``-`` (the previous branch), ``HEAD`` and ``@``."""
+    return "@{" in name or name in ("-", "HEAD", "@")
 
 
 def _git_config(leading: list[str]) -> dict[str, str | None]:
@@ -5326,8 +5402,10 @@ def from_git_multi(argv: list[str]) -> list[InfrastructureIntent]:
         if params.get("delete"):
             if not positional:
                 raise ValueError(f"could not find a {verb} name in: {argv!r}")
-            # git deletes every one it is given
-            return [one(f"{verb}/{name}", "delete") for name in dict.fromkeys(positional)]
+            # git deletes every one it is given; a name git resolves (-, @{-1}) is marked
+            return _mark_open_targets([one(f"{verb}/*" if _git_resolved_name(name)
+                                           else f"{verb}/{name}", "delete")
+                                       for name in dict.fromkeys(positional)])
         if params.get("rename") or params.get("copy"):
             return _git_branch_move(positional, one, params, argv)
         return _git_branch_or_tag(verb, positional, params, one)
@@ -5824,6 +5902,10 @@ def _gh_build_fields(params: dict[str, Any], fields: list[tuple[bool, str]], *,
         if not sep and keys[-1] != "":
             raise ValueError(f"gh api: field {text!r} requires a value separated by '='")
         typed: Any = None if not sep else _gh_field_value(value, typed=magic)
+        if magic and sep and _GH_API_PLACEHOLDER_RE.search(value):
+            # gh fills {owner}, {repo} and {branch} in -F values from the current
+            # repository when it runs (fields.go magicFieldValue -> fillPlaceholders)
+            from_file = True
         dest, is_array, subkey = inputs, False, ""
         for k in keys:
             if k == "":
@@ -6624,6 +6706,16 @@ _CONFIG_SCOPE_KEYS = {
 }
 
 
+# The scope keys a tool takes from its configuration when they are not given, for which an
+# empty value on the line is no value at all (see mark_config_scope).
+_EMPTY_IS_ABSENT = frozenset({
+    "namespace", "context", "cluster", "kubeconfig", "region", "zone", "profile", "project",
+    "project_number", "subscription", "subscription_name", "resource_group",
+    "location_display_name", "server", "app_namespace", "repo", "remote", "remote_url",
+    "account",
+})
+
+
 def mark_unknown_names(intents: list[InfrastructureIntent]) -> list[InfrastructureIntent]:
     """Marks every ``kind/*`` target ``resolved_at_runtime``: ``*`` stands for objects the
     tool picks when it runs (a list, ``--all``, stdin, a file), so a rule on one of them
@@ -6648,6 +6740,14 @@ def mark_config_scope(intents: list[InfrastructureIntent]) -> list[Infrastructur
     fill). Every unknown name is marked too (:func:`mark_unknown_names`)."""
     mark_unknown_names(intents)
     for intent in intents:
+        # An empty value is no value: client-go ignores --namespace= and uses the context's,
+        # and every other tool falls back to its configuration the same way (or fails). So
+        # it is removed here, once, for every parser, and the key is unresolved as if it
+        # were not given.
+        for store in (intent.metadata, intent.params):
+            for key in [k for k, v in store.items()
+                        if k in _EMPTY_IS_ABSENT and isinstance(v, str) and not v.strip()]:
+                del store[key]
         keys = _CONFIG_SCOPE_KEYS.get(intent.provider, ())
         if intent.provider == "git" and intent.params.get("raw_action") != "push":
             keys = ()  # only a push has a remote

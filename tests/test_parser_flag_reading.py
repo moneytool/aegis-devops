@@ -2433,3 +2433,93 @@ def test_every_star_target_is_marked_in_one_place():
         for intent in from_argv(command.split()):
             if intent.resource.endswith("/*"):
                 assert "resolved_at_runtime" in intent.params, command
+
+
+# --- review round 8 ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("argv,key", [
+    # an empty value is no value: the tool falls back to its configuration
+    (["kubectl", "delete", "pod", "api", "--namespace="], "namespace"),
+    (["kubectl", "delete", "pod", "api", "-n", ""], "namespace"),
+    (["kubectl", "delete", "pod", "api", "--context="], "context"),
+    (["helm", "uninstall", "r", "--namespace", ""], "namespace"),
+    (["helm", "uninstall", "r", "--kube-context="], "context"),
+    (["flux", "suspend", "ks", "a", "--namespace="], "namespace"),
+    (["argocd", "app", "delete", "a", "--server=", "-y"], "server"),
+    (["aws", "ec2", "terminate-instances", "--instance-ids", "i-1", "--region", ""], "region"),
+    (["gcloud", "compute", "instances", "delete", "a", "--project="], "project"),
+    (["az", "vm", "delete", "-n", "v", "-g", "", "--yes"], "resource_group"),
+])
+def test_an_empty_scope_value_is_unresolved(argv, key):
+    intent = from_argv(argv)[0]
+    assert key not in intent.metadata
+
+
+def test_an_empty_namespace_escalates_a_namespace_rule():
+    rule = _rule("kubernetes", "pod/*", ["delete"], {"namespace": "prod"})
+    assert _verdict([rule], ["kubectl", "delete", "pod", "api", "--namespace="]) == "ESCALATE"
+
+
+def test_gh_placeholders_in_magic_fields_are_unresolved():
+    command = ["gh", "api", "-X", "POST", "repos/o/r/actions/workflows/d.yml/dispatches",
+               "-F", "ref={branch}"]
+    intent = from_argv(command)[0]
+    assert "ref" not in intent.metadata and "ref" in intent.params["unresolved_scope"]
+    rule = _rule("github", "workflow/*", ["run"], {"ref": "main"})
+    assert _verdict([rule], command) == "ESCALATE"
+
+
+@pytest.mark.parametrize("command,resource", [
+    ("git push origin @{u}", "ref/*"),
+    ("git push origin HEAD:@{push}", "ref/*"),
+    ("git branch -d -", "branch/*"),
+    ("git branch -d @{-1}", "branch/*"),
+])
+def test_git_names_git_resolves_are_unknown(command, resource):
+    intent = from_argv(command.split())[0]
+    assert intent.resource == resource
+
+
+@pytest.mark.parametrize("command,key", [
+    # argparse's allow_abbrev, against the command's declared long options
+    ("az aks scale -g rg -n c --node-c 1", "node-count"),
+    ("az aks scale -g rg -n c --node-count 1", "node-count"),
+])
+def test_az_long_option_prefix_is_the_full_option(command, key):
+    assert from_argv(command.split())[0].params[key] == 1
+
+
+def test_az_ambiguous_long_prefix_is_refused():
+    with pytest.raises(ValueError):
+        from_argv("az aks scale -g rg -n c --no 1".split())
+
+
+def test_az_long_prefix_rule_holds():
+    rule = _rule("azure", "aks/cluster/*", ["scale"], {"node-count": 1})
+    assert _verdict([rule], "az aks scale -g rg -n c --node-c 1".split()) == "BLOCK"
+
+
+@pytest.mark.parametrize("command,key,unresolved", [
+    # a folder destination writes prefix + the source's base name
+    ("gcloud storage cp /tmp/secret gs://prod/backup/", "backup/secret", False),
+    ("gsutil cp /tmp/secret gs://prod/backup/", "backup/secret", False),
+    ("gcloud storage cp /tmp/secret gs://prod/", "secret", False),
+    ("aws s3 cp /tmp/secret s3://prod/backup/", "backup/secret", False),
+    ("aws s3 mv s3://a/secret s3://prod/dir/", "dir/secret", False),
+    # aws never treats a key without the slash as a folder
+    ("aws s3 cp /tmp/secret s3://prod/backup", "backup", False),
+    # gcloud and gsutil do when objects under it exist; several sources or -r: unknown
+    ("gcloud storage cp /tmp/secret gs://prod/backup", "backup", True),
+    ("gcloud storage cp /tmp/a /tmp/b gs://prod/backup/", "backup/", True),
+    ("gsutil cp -r /tmp/d gs://prod/backup/", "backup/", True),
+])
+def test_copy_destination_key_is_the_object_written(command, key, unresolved):
+    intent = [i for i in from_argv(command.split()) if i.resource.endswith("/prod")][-1]
+    assert intent.params["key"] == key
+    assert ("key" in intent.params.get("unresolved_scope", [])) is unresolved
+
+
+def test_copy_into_a_folder_meets_a_rule_on_the_object():
+    rule = _rule("gcp", "storage/bucket/prod", ["put"], {"key": "backup/secret"})
+    assert _verdict([rule], "gcloud storage cp /tmp/secret gs://prod/backup/") == "BLOCK"

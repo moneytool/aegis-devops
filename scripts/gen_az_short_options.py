@@ -1,5 +1,7 @@
-"""Writes src/aegis_core/data/az_short_options.json: every short option of az's commands
-and the long option it is, read from azure-cli's ``command_modules/*/_params.py``:
+"""Writes src/aegis_core/data/az_short_options.json: the short options of az's commands
+and the long option each is (``s``), and the long options declared for each command scope
+(``l``, for argparse's prefix matching), read from azure-cli's
+``command_modules/*/_params.py``:
 
     python scripts/gen_az_short_options.py <azure-cli checkout> \\
         src/aegis_core/data/az_short_options.json
@@ -17,6 +19,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 
 def _strings(node: ast.AST) -> list[str] | None:
@@ -99,7 +102,7 @@ def _eval(node: ast.AST, env: dict[str, list[str]]) -> list[str] | None:
     return None
 
 
-def module_scopes(source: str) -> dict[str, dict[str, str]]:
+def module_scopes(source: str) -> dict[str, dict[str, Any]]:
     tree = ast.parse(source)
     types: dict[str, list[str]] = {}
     for node in ast.walk(tree):
@@ -108,7 +111,7 @@ def module_scopes(source: str) -> dict[str, dict[str, str]]:
             options = _options_list(node.value, {})
             if options:
                 types[node.targets[0].id] = options
-    scopes: dict[str, dict[str, str]] = {}
+    scopes: dict[str, dict[str, Any]] = {}
 
     def block(statements: list[ast.stmt], env: dict[str, list[str]]) -> None:
         env = dict(env)
@@ -136,6 +139,7 @@ def module_scopes(source: str) -> dict[str, dict[str, str]]:
                     names = _eval(call.args[0], env) or []
                     var = item.optional_vars.id
                     found: dict[str, str] = {}
+                    longs: set[str] = set()
                     for sub in ast.walk(node):
                         if (isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute)
                                 and isinstance(sub.func.value, ast.Name)
@@ -144,8 +148,15 @@ def module_scopes(source: str) -> dict[str, dict[str, str]]:
                             options = _options_list(sub, types)
                             if options:
                                 found.update(_aliases(options))
+                                longs.update(o[2:] for o in options if o.startswith("--"))
+                            elif (sub.args and isinstance(sub.args[0], ast.Constant)
+                                  and isinstance(sub.args[0].value, str)):
+                                # knack's default spelling of an argument: --dest-name
+                                longs.add(sub.args[0].value.replace("_", "-"))
                     for name in names:
-                        scopes.setdefault(name, {}).update(found)
+                        entry = scopes.setdefault(name, {"s": {}, "l": set()})
+                        entry["s"].update(found)
+                        entry["l"].update(longs)
             block(node.body, env)
             return
         if isinstance(node, (ast.FunctionDef, ast.If, ast.Try)):
@@ -158,15 +169,18 @@ def module_scopes(source: str) -> dict[str, dict[str, str]]:
             visit(child, env)
 
     block(tree.body, {})
-    return {k: v for k, v in scopes.items() if v}
+    return {k: v for k, v in scopes.items() if v["s"] or v["l"]}
 
 
 def main(checkout: str, out: str) -> None:
     root = Path(checkout)
-    table: dict[str, dict[str, str]] = {}
+    table: dict[str, dict[str, Any]] = {}
     for path in sorted(root.glob("src/azure-cli/azure/cli/command_modules/*/_params.py")):
-        for scope, aliases in module_scopes(path.read_text()).items():
-            table.setdefault(scope, {}).update(aliases)
+        for scope, found in module_scopes(path.read_text()).items():
+            entry = table.setdefault(scope, {"s": {}, "l": set()})
+            entry["s"].update(found["s"])
+            entry["l"].update(found["l"])
+    table = {k: {"s": v["s"], "l": sorted(v["l"])} for k, v in table.items()}
     commit = subprocess.run(["git", "-C", checkout, "rev-parse", "HEAD"], capture_output=True,
                             text=True, check=False).stdout.strip()
     with open(out, "w") as f:
