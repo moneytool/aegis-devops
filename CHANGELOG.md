@@ -497,6 +497,22 @@ name). git verbs without an option table leave every param unresolved when given
   unresolved: several sources, `-r`/`--recursive`, paths from stdin, and on gcloud and gsutil
   a destination without the slash, which they treat as a folder when objects under it exist
   (aws never does). `az storage blob upload` is not a modelled command and is refused.
+- Siblings of earlier fixes. `argocd app delete -l team=payments -N dev` gave the selection
+  namespace `dev`, but delete lists the selector's apps in every namespace
+  (getAppNamesBySelector) and deletes each by its qualified name: the selection's
+  `app_namespace` is unresolved now (sync's list does take `-N`). `git branch -f '@{-1}'`
+  and `git branch -m '@{-1}' new` recorded `branch/@{-1}`: every git name operand now goes
+  through one helper, so a name git resolves (`@{-1}`, `-`, `HEAD`) is `kind/*`, marked, on
+  branch create, reset, rename, copy and upstream, tag and push; `rebase`, `reset --hard`
+  and `commit --amend` also reach the current branch (`history/*`, marked).
+  `gcloud storage rm gs://prod/secret#123456789` (and gsutil, and a copy's source) kept
+  `#123456789` in the key: it is the object's generation, now a `generation` param, with
+  the key `secret`. `gcloud compute instances delete web --project acme-prod` left the zone
+  unmarked: gcloud zone and account, aws account, the kubeconfig user (now recorded from
+  `--user`) and gh's host joined the table of scopes taken from the configuration, so every
+  one of them is unresolved when absent. `docs/dev/parser-audit.md` lists every class of
+  finding from the review rounds against every tool, and `tests/test_parser_audit.py` checks
+  each cell that applies. From source; not run.
 - Tests that used `flux reconcile ... --dry-run`, `flux get ... --export` and `git push
   --dry-run=false`, which the tools refuse, now use commands the tools accept (`flux create ...
   --export`, `git push --dry-run --no-dry-run`).
