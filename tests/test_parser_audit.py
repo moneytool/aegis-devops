@@ -1,4 +1,4 @@
-"""The sibling audit of review rounds 1-17 (docs/dev/parser-audit.md): one check per class
+"""The sibling audit of review rounds 1-18 (docs/dev/parser-audit.md): one check per class
 of finding and per tool where the class applies, so a fix that covers one tool and misses
 its siblings fails here. Each row is ``(class, tool, argv, check)``."""
 
@@ -383,6 +383,14 @@ AUDIT = [
      param("args", ["a", "b"])),
     ("C27", "gcloud", "gcloud compute instances create vm --zone z "
      "--accelerator type=t4,count=01", param("accelerator", {"type": "t4", "count": 1})),
+    # round 18
+    ("C13", "gh", "gh api -X PATCH repos/acme/prod --input body.json -F a=1",
+     param("api_query", {"a": 1})),
+    ("C37", "kubectl", "kubectl expose deploy web -n prod --port=80 --overrides={}",
+     marked("service/*")),
+    ("C39", "gcloud", "gcloud storage buckets update gs://b --update-labels env=prod",
+     param("update-labels", {"env": "prod"})),
+    ("C39", "gcloud", "gcloud compute firewall-rules create fw --rules tcp:22", unres("rules")),
 ]
 
 

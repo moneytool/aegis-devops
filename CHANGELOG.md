@@ -703,6 +703,19 @@ name). git verbs without an option table leave every param unresolved when given
   declare, or a missing required one, is refused. Where the spec is not read statically
   (`container clusters create --addons`, `update --update-addons`), the flag and every member
   are unresolved.
+- A prefix mark (`inputs.*`, `tags.*`, `data.*`) spared every key the command recorded under
+  it, an exception meant only for helm's `set.*`. `gh api -X PATCH repos/acme/prod --input
+  body.json -F delete_branch_on_merge=false` was read as setting it to `false`, but gh sends the
+  file as the body and moves the fields into the URL query, so the file's value applies. A
+  prefix mark now covers recorded keys too, except helm's `set.*` for keys `--set` replaced
+  outright, and gh api's fields with `--input` are recorded as `api_query`.
+- `kubectl expose --overrides='{"metadata":{"name":"protected"}}'` can rename the new Service:
+  with `--overrides` the Service is now `service/*`, marked. expose's default name is the
+  source's cut to 63 characters, as kubectl cuts it.
+- gcloud storage `--update-labels env=prod` was read as a list, because the reference page and
+  the SDK disagreed on its shape. The SDK's map or list type now wins, a shape still in doubt
+  is unresolved (compute firewall-rules `--rules`), and the generator fails on a disagreement
+  left without a resolution (32 flags disagreed; 30 follow the SDK now).
 
 ### Added
 - A `NOTICE` file at the repository root lists the third-party code and data in the package
