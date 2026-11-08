@@ -2150,6 +2150,7 @@ def from_aws_multi(argv: list[str]) -> list[InfrastructureIntent]:
             # read again with the s3 commands' own options (--recursive takes no value)
             metadata, params, positional, *_ = _parse_aws_tokens(tokens, s3=operation)
             service, operation, *rest = positional
+        _mark_aws_file_values(params, False)
         return _from_aws_s3(operation, rest, metadata, params, argv)
 
     # read again with the operation's own options: each is resolved to its full name
@@ -2674,6 +2675,24 @@ def _parse_arm_id(arm_id: str) -> tuple[str, dict[str, Any]]:
 
 
 def from_az_multi(argv: list[str]) -> list[InfrastructureIntent]:
+    """Parses an ``az`` CLI invocation (see :func:`_from_az_multi`). Every intent, from the
+    named form or an ``--ids`` path, then has its scope normalized once: a subscription
+    that is not a GUID is ``subscription_name`` and a location with a space is
+    ``location_display_name``, since az looks up the ID or name they stand for when it
+    runs; ``subscription`` and ``region`` are then unresolved."""
+    intents = _from_az_multi(argv)
+    for intent in intents:
+        md = intent.metadata
+        sub = md.get("subscription")
+        if isinstance(sub, str) and not _GUID_RE.fullmatch(sub):
+            md["subscription_name"] = md.pop("subscription")
+        region = md.get("region")
+        if isinstance(region, str) and " " in region:
+            md["location_display_name"] = md.pop("region")
+    return intents
+
+
+def _from_az_multi(argv: list[str]) -> list[InfrastructureIntent]:
     """Parses an ``az`` CLI invocation into one InfrastructureIntent per
     target: one for the ``-n/--name`` form, or one per ``--ids`` ARM path
     (``az vm deallocate --ids /subscriptions/.../virtualMachines/a
@@ -3966,6 +3985,21 @@ def _parse_argocd_tokens(
 
 
 def from_argocd_multi(argv: list[str]) -> list[InfrastructureIntent]:
+    """Parses an ``argocd`` invocation (see :func:`_from_argocd_multi`). Every intent, from
+    every subcommand, then has its app name normalized once: ``NAMESPACE/NAME`` is
+    ``app/NAME`` with ``app_namespace``, as argocd's ParseFromQualifiedName reads it, the
+    same app as ``NAME -N NAMESPACE`` (the qualified namespace wins over ``-N``)."""
+    intents = _from_argocd_multi(argv)
+    for intent in intents:
+        name = intent.resource.partition("/")[2]
+        if "/" in name and name != "*":
+            namespace, name = name.split("/", 1)
+            intent.metadata["app_namespace"] = namespace
+            intent.resource = f"app/{name}"
+    return intents
+
+
+def _from_argocd_multi(argv: list[str]) -> list[InfrastructureIntent]:
     """Parses an ``argocd`` invocation into one InfrastructureIntent per
     target app (``argocd app sync`` / ``delete`` may name more than one).
 
@@ -4050,17 +4084,9 @@ def from_argocd_multi(argv: list[str]) -> list[InfrastructureIntent]:
             raise ValueError(f"could not find an argocd app name in: {argv!r}")
         apps = [positional[0]]
 
-    intents = []
-    for app in apps:
-        app_metadata = dict(metadata)
-        if "/" in app and app != "*":
-            # NAMESPACE/NAME, as argocd's ParseFromQualifiedName reads it: the same app as
-            # NAME with -N NAMESPACE
-            app_metadata["app_namespace"], app = app.split("/", 1)
-        intents.append(InfrastructureIntent(
-            resource=f"app/{app}", action=action, provider="argocd",
-            params=dict(params), metadata=app_metadata,
-        ))
+    intents = [InfrastructureIntent(resource=f"app/{app}", action=action, provider="argocd",
+                                    params=dict(params), metadata=dict(metadata))
+               for app in apps]
     intents.extend(
         InfrastructureIntent(resource="app/*", action=action, provider="argocd",
                              params=p, metadata=dict(m))

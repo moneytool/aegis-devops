@@ -1950,7 +1950,8 @@ def test_aws_iam_reads_and_plain_creates_are_not_privilege_grants():
     assert "privilege" not in create.params
 
 
-ARM = "/subscriptions/sub-1/resourceGroups/rg-1/providers"
+SUB = "0b1f6471-1bf0-4dda-aec3-000000000001"
+ARM = f"/subscriptions/{SUB}/resourceGroups/rg-1/providers"
 
 
 @pytest.mark.parametrize(
@@ -1979,7 +1980,7 @@ def test_az_ids_arm_path_maps_to_named_form_resource(arm_type, expected):
     assert intent.provider == "azure"
     assert intent.action == "delete"
     assert intent.resource == expected
-    assert intent.metadata["subscription"] == "sub-1"
+    assert intent.metadata["subscription"] == SUB
     assert intent.metadata["resource_group"] == "rg-1"
     assert intent.metadata["arm_id"] == f"{ARM}/{arm_type}"
 
@@ -1996,11 +1997,8 @@ def test_az_ids_matches_the_named_flag_form():
         ]
     )
     by_name = from_az(
-        ["az", "aks", "delete", "-n", "c1", "-g", "rg-1", "--subscription", "sub-1", "--yes"]
+        ["az", "aks", "delete", "-n", "c1", "-g", "rg-1", "--subscription", SUB, "--yes"]
     )
-    # a subscription by name is subscription_name: which ID it is, only az knows
-    assert by_name.metadata["subscription_name"] == "sub-1"
-    by_name.metadata["subscription"] = by_name.metadata.pop("subscription_name")
     assert by_ids.resource == by_name.resource == "aks/cluster/c1"
     assert by_ids.action == by_name.action == "delete"
     assert by_ids.params == by_name.params
@@ -2031,7 +2029,7 @@ def test_az_multiple_ids_yield_one_intent_each_and_single_form_rejects():
         "deallocate",
         "--ids",
         f"{ARM}/Microsoft.Compute/virtualMachines/a",
-        "/subscriptions/sub-1/resourceGroups/rg-2/providers/Microsoft.Compute/virtualMachines/b",
+        f"/subscriptions/{SUB}/resourceGroups/rg-2/providers/Microsoft.Compute/virtualMachines/b",
         "--no-wait",
     ]
     intents = from_az_multi(argv)
@@ -2057,7 +2055,7 @@ def test_az_ids_equals_form_and_the_id_wins_over_explicit_flags():
     assert intent.resource == "compute/vm/a"
     # az ignores --subscription with --ids: the ID's subscription is used (azure-cli
     # core commands/arm.py parse_ids_arguments)
-    assert intent.metadata["subscription"] == "sub-1"
+    assert intent.metadata["subscription"] == SUB
     assert "subscription_name" not in intent.metadata
 
 

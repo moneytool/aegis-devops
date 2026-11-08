@@ -1777,3 +1777,29 @@ def test_az_ids_override_the_subscription_flag():
                "--ids", f"{arm}/virtualMachines/a"]
     rule = _rule("azure", "compute/vm/*", ["delete"], {"resource_group": "prod"})
     assert _verdict([rule], command) == "BLOCK"
+
+
+# --- review round 4 ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("command", [
+    # 1: every path is normalized once at the end, the early-returning ones too
+    "argocd app actions run prod/payments restart --kind Deployment",
+    "argocd app actions run payments restart --kind Deployment -N prod",
+    "argocd app delete prod/payments -y",
+])
+def test_argocd_qualified_name_on_every_subcommand(command):
+    intent = from_argv(command.split())[0]
+    assert (intent.resource, intent.metadata["app_namespace"]) == ("app/payments", "prod")
+    rule = _rule("argocd", "app/payments", ["update", "delete"], {"app_namespace": "prod"})
+    assert _verdict([rule], command) == "BLOCK"
+
+
+def test_az_ids_subscription_name_is_normalized_too():
+    command = ["az", "vm", "delete", "--yes", "--ids",
+               "/subscriptions/Production/resourceGroups/rg/providers/Microsoft.Compute/"
+               "virtualMachines/a"]
+    intent = from_argv(command)[0]
+    assert intent.metadata["subscription_name"] == "Production"
+    rule = _rule("azure", "compute/vm/*", ["delete"], {"subscription": GUID})
+    assert _verdict([rule], command) == "ESCALATE"
