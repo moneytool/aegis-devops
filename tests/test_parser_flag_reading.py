@@ -1694,7 +1694,7 @@ def test_aws_desired_capacity_rule_holds_in_every_spelling(command, verdict):
     ("gcloud compute instances update --no-deletion-protection web",
      ["compute/instance/web"], {"deletion_protection": False}),
     ("gcloud compute instances update --update-labels a=b web",
-     ["compute/instance/web"], {"update-labels": "a=b"}),
+     ["compute/instance/web"], {"update-labels": {"a": "b"}}),  # an ArgDict
     # an optional value takes the next word, as argparse does
     ("gcloud compute instances stop web --discard-local-ssd", ["compute/instance/web"],
      {"discard-local-ssd": True}),
@@ -2574,6 +2574,19 @@ AZ_EVERYDAY = [
     "az role assignment delete --assignee user@example.com --role Reader --resource-group rg",
     "az functionapp delete --resource-group rg --name fn1",
     "az cosmosdb delete --resource-group rg --name db1 --yes",
+    # multi-value options (round 10)
+    ("az group create --name rg --locati"
+     "on eastus --tags owner=ops env=prod"),
+    ("az vm update --resource-group rg --name"
+     " vm1 --set tags.env=prod tags.owner=ops"),
+    ("az aks create --resource-group rg --n"
+     "ame aks2 --zones 1 2 3 --node-count 3"),
+    ("az vm create --resource-group rg --name vm2"
+     " --image Ubuntu2204 --zone 1 --tags a=b c=d"),
+    ("az network nsg rule create --resource-group rg --nsg-name nsg1 --name r2 --priority 20"
+     "0 --destination-port-ranges 80 443 --source-address-prefixes 10.0.0.0/8 192.168.0.0/16"),
+    ("az storage account update --resource-group r"
+     "g --name sa1 --set tags.x=y --remove tags.old"),
 ]
 
 
@@ -2768,4 +2781,34 @@ def test_every_typed_flag_in_the_tables_is_read_by_its_type():
 def test_a_rule_meets_any_value_of_a_repeated_flag():
     rule = _rule("argocd", "app/*", ["sync"], {"resource": "apps:Deployment:x"})
     command = "argocd app sync a --resource apps:Deployment:x --resource apps:Deployment:y"
+    assert _verdict([rule], command) == "BLOCK"
+
+
+@pytest.mark.parametrize("command,key,value", [
+    # az: every word up to the next option, as argparse gives nargs + / * and append
+    ("az group create --name rg --location eastus --tags owner=ops env=prod", "tags",
+     ["owner=ops", "env=prod"]),
+    ("az vm update -g rg -n v --set a=1 b=2 --set c=3", "set", ["a=1", "b=2", "c=3"]),
+    ("az aks create -g rg -n c --zones 1 2 3", "zones", ["1", "2", "3"]),
+    # aws: a list parameter takes every word up to the next option
+    ("aws ec2 create-tags --resources i-1 i-2 --tags Key=a,Value=b Key=c,Value=d",
+     "resources", ["i-1", "i-2"]),
+    # gcloud: an ArgList or ArgDict is split on commas (or the ^X^ delimiter)
+    ("gcloud compute instances create web --zone z --tags a,b", "tags", ["a", "b"]),
+    ("gcloud compute instances create web --zone z --labels k=v,k2=v2", "labels",
+     {"k": "v", "k2": "v2"}),
+    ("gcloud compute instances update web --update-labels ^:^env=prod:team=x",
+     "update-labels", {"env": "prod", "team": "x"}),
+])
+def test_multi_value_options_take_every_value(command, key, value):
+    assert from_argv(command.split())[0].params[key] == value
+
+
+@pytest.mark.parametrize("rule,command", [
+    (_rule("azure", "resource/group/*", ["create"], {"tags": "env=prod"}),
+     "az group create --name rg --location eastus --tags owner=ops env=prod"),
+    (_rule("gcp", "compute/instance/*", ["create"], {"labels.env": "prod"}),
+     "gcloud compute instances create web --zone z --labels team=x,env=prod"),
+])
+def test_a_rule_meets_one_value_of_a_multi_value_option(rule, command):
     assert _verdict([rule], command) == "BLOCK"

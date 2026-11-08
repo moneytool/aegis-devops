@@ -513,6 +513,30 @@ name). git verbs without an option table leave every param unresolved when given
   one of them is unresolved when absent. `docs/dev/parser-audit.md` lists every class of
   finding from the review rounds against every tool, and `tests/test_parser_audit.py` checks
   each cell that applies. From source; not run.
+- `argocd app sync a --resource x --resource y` kept only `y`, and helm `--history-max 0x0`
+  was recorded as text. Every flag of kubectl, helm, flux, argocd and gh is now read by the
+  pflag type its registration gives it (`src/aegis_core/data/pflag_types.json`, written by
+  `scripts/gen_pflag_types.py` from each tool's source, with the type each command gives a
+  flag whose type differs between commands): a StringArray accumulates every value, a
+  StringSlice every value split as CSV, an Int is read with base 0, a Duration with
+  time.ParseDuration and recorded in seconds (`--timeout 5m` and `300s` are both 300), a
+  Float with ParseFloat, a StringToString as a map, a Count counts; what pflag refuses is
+  refused. The store meets a rule against each value of a repeated flag. From source.
+- `git -c remote.origin.push=+refs/heads/safe:refs/heads/prod push origin safe` was a push to
+  `ref/safe`: git maps a refspec with no destination through `remote.<name>.push` (with its
+  `+`) or push.default's upstream, from any config file (push.c refspec_append_mapped). A
+  source-only refspec's destination is now unknown (the source stays `ref/<source>`), and a
+  `-c remote.<name>.push` on the line is applied as git applies it, force included. This
+  means a rule on any other ref now escalates for `git push origin <branch>`: only
+  `src:dst` names the destination. From source.
+- az refused `--tags owner=ops env=prod`, `--set a=1 b=2` and `--zones 1 2 3`. Each az option's
+  `nargs` (`+`, `*`, `?`) or `action='append'` is now read from `_params.py`, the argument
+  types (`tags_type`, `zones_type`) and AAZ list and dict arguments, with the generic update's
+  `--set/--add/--remove`, and the option takes every word up to the next option, as argparse
+  does; the everyday az sample gained six multi-value commands, all parsed. aws list
+  parameters already took every word. gcloud ArgList and ArgDict values (`--tags a,b`,
+  `--labels k=v,k2=v2`, and the `^X^` delimiter) are now a list or a map, so a rule on
+  `labels.env` meets them. From source and the gcloud reference.
 - Tests that used `flux reconcile ... --dry-run`, `flux get ... --export` and `git push
   --dry-run=false`, which the tools refuse, now use commands the tools accept (`flux create ...
   --export`, `git push --dry-run --no-dry-run`).

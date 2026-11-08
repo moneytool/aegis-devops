@@ -1,8 +1,12 @@
 {
- "_source": "https://cloud.google.com/sdk/gcloud/reference (fetched 2026-11-07)",
+ "_source": "https://cloud.google.com/sdk/gcloud/reference (fetched 2026-11-08)",
  "compute disks add-iam-policy-binding": {
   "alias": {},
   "bool": [],
+  "dict": [
+   "condition"
+  ],
+  "list": [],
   "optional": [],
   "value": [
    "condition",
@@ -17,6 +21,15 @@
   "bool": [
    "confidential-compute",
    "require-csek-key-create"
+  ],
+  "dict": [
+   "labels",
+   "resource-manager-tags"
+  ],
+  "list": [
+   "guest-os-features",
+   "licenses",
+   "resource-policies"
   ],
   "optional": [],
   "value": [
@@ -59,6 +72,8 @@
  "compute disks delete": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "region",
@@ -68,6 +83,8 @@
  "compute disks describe": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "region",
@@ -80,6 +97,12 @@
   },
   "bool": [
    "uri"
+  ],
+  "dict": [],
+  "list": [
+   "regions",
+   "sort-by",
+   "zones"
   ],
   "optional": [],
   "value": [
@@ -98,6 +121,10 @@
   "bool": [
    "all"
   ],
+  "dict": [
+   "condition"
+  ],
+  "list": [],
   "optional": [],
   "value": [
    "condition",
@@ -110,6 +137,8 @@
  "compute disks resize": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "region",
@@ -120,6 +149,8 @@
  "compute disks set-iam-policy": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "zone"
@@ -130,6 +161,14 @@
   "bool": [
    "clear-architecture",
    "clear-labels"
+  ],
+  "dict": [
+   "update-labels"
+  ],
+  "list": [
+   "append-licenses",
+   "remove-labels",
+   "remove-licenses"
   ],
   "optional": [],
   "value": [
@@ -154,6 +193,19 @@
    "enable-logging",
    "no-enable-logging"
   ],
+  "dict": [
+   "resource-manager-tags"
+  ],
+  "list": [
+   "allow",
+   "destination-ranges",
+   "rules",
+   "source-ranges",
+   "source-service-accounts",
+   "source-tags",
+   "target-service-accounts",
+   "target-tags"
+  ],
   "optional": [],
   "value": [
    "action",
@@ -176,12 +228,16 @@
  "compute firewall-rules delete": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": []
  },
  "compute firewall-rules describe": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": []
  },
@@ -191,6 +247,10 @@
   },
   "bool": [
    "uri"
+  ],
+  "dict": [],
+  "list": [
+   "sort-by"
   ],
   "optional": [],
   "value": [
@@ -208,6 +268,17 @@
    "disabled",
    "enable-logging",
    "no-enable-logging"
+  ],
+  "dict": [],
+  "list": [
+   "allow",
+   "destination-ranges",
+   "rules",
+   "source-ranges",
+   "source-service-accounts",
+   "source-tags",
+   "target-service-accounts",
+   "target-tags"
   ],
   "optional": [],
   "value": [
@@ -227,6 +298,10 @@
  "compute instances add-iam-policy-binding": {
   "alias": {},
   "bool": [],
+  "dict": [
+   "condition"
+  ],
+  "list": [],
   "optional": [],
   "value": [
    "condition",
@@ -270,6 +345,23 @@
    "shielded-secure-boot",
    "shielded-vtpm",
    "skip-guest-os-shutdown"
+  ],
+  "dict": [
+   "accelerator",
+   "create-disk",
+   "disk",
+   "labels",
+   "local-ssd",
+   "metadata",
+   "metadata-from-file",
+   "network-interface",
+   "network-performance-configs",
+   "resource-manager-tags"
+  ],
+  "list": [
+   "resource-policies",
+   "scopes",
+   "tags"
   ],
   "optional": [],
   "value": [
@@ -367,6 +459,8 @@
   "bool": [
    "no-graceful-shutdown"
   ],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "delete-disks",
@@ -377,6 +471,8 @@
  "compute instances describe": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "zone"
@@ -385,6 +481,8 @@
  "compute instances export": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "destination",
@@ -404,6 +502,14 @@
    "no-scopes",
    "no-service-account",
    "restart-on-failure"
+  ],
+  "dict": [
+   "labels"
+  ],
+  "list": [
+   "guest-os-features",
+   "scopes",
+   "tags"
   ],
   "optional": [],
   "value": [
@@ -441,6 +547,11 @@
   "bool": [
    "uri"
   ],
+  "dict": [],
+  "list": [
+   "sort-by",
+   "zones"
+  ],
   "optional": [],
   "value": [
    "filter",
@@ -457,6 +568,10 @@
   "bool": [
    "all"
   ],
+  "dict": [
+   "condition"
+  ],
+  "list": [],
   "optional": [],
   "value": [
    "condition",
@@ -469,6 +584,8 @@
  "compute instances reset": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "zone"
@@ -477,6 +594,8 @@
  "compute instances set-iam-policy": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "zone"
@@ -487,6 +606,8 @@
   "bool": [
    "async"
   ],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "csek-key-file",
@@ -499,6 +620,8 @@
    "async",
    "no-graceful-shutdown"
   ],
+  "dict": [],
+  "list": [],
   "optional": [
    "discard-local-ssd"
   ],
@@ -529,6 +652,12 @@
    "shielded-secure-boot",
    "shielded-vtpm"
   ],
+  "dict": [
+   "update-labels"
+  ],
+  "list": [
+   "remove-labels"
+  ],
   "optional": [],
   "value": [
    "graceful-shutdown-max-duration",
@@ -554,6 +683,8 @@
    "troubleshoot",
    "tunnel-through-iap"
   ],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "command",
@@ -657,6 +788,42 @@
    "shielded-integrity-monitoring",
    "shielded-secure-boot",
    "spot"
+  ],
+  "dict": [
+   "accelerator",
+   "addons",
+   "alpha-cluster-feature-gates",
+   "autoprovisioning-resource-manager-tags",
+   "autoprovisioning-standard-rollout-policy",
+   "cloud-run-config",
+   "create-subnetwork",
+   "labels",
+   "max-accelerator",
+   "metadata",
+   "metadata-from-file",
+   "min-accelerator",
+   "network-performance-configs",
+   "notification-config",
+   "resource-manager-tags"
+  ],
+  "list": [
+   "additional-zones",
+   "autopilot-privileged-admission",
+   "autoprovisioning-locations",
+   "autoprovisioning-network-tags",
+   "autoprovisioning-scopes",
+   "enable-kubernetes-unstable-apis",
+   "logging",
+   "master-authorized-networks",
+   "monitoring",
+   "node-labels",
+   "node-locations",
+   "node-taints",
+   "scopes",
+   "service-account-signing-keys",
+   "service-account-verification-keys",
+   "storage-pools",
+   "tags"
   ],
   "optional": [
    "ephemeral-storage-local-ssd",
@@ -819,6 +986,8 @@
   "bool": [
    "async"
   ],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "location",
@@ -832,6 +1001,8 @@
    "z": "zone"
   },
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "location",
@@ -848,6 +1019,8 @@
    "dns-endpoint",
    "internal-ip"
   ],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "location",
@@ -862,6 +1035,10 @@
   },
   "bool": [
    "uri"
+  ],
+  "dict": [],
+  "list": [
+   "sort-by"
   ],
   "optional": [],
   "value": [
@@ -882,6 +1059,8 @@
   "bool": [
    "async"
   ],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "location",
@@ -993,6 +1172,33 @@
    "start-credential-rotation",
    "start-ip-rotation",
    "unset-membership-type"
+  ],
+  "dict": [
+   "additional-ip-ranges",
+   "autoprovisioning-resource-manager-tags",
+   "autoprovisioning-standard-rollout-policy",
+   "cloud-run-config",
+   "max-accelerator",
+   "min-accelerator",
+   "network-performance-configs",
+   "notification-config",
+   "remove-additional-ip-ranges",
+   "update-addons",
+   "update-labels"
+  ],
+  "list": [
+   "additional-pod-ipv4-ranges",
+   "autopilot-privileged-admission",
+   "autoprovisioning-locations",
+   "autoprovisioning-network-tags",
+   "autoprovisioning-scopes",
+   "enable-kubernetes-unstable-apis",
+   "logging",
+   "master-authorized-networks",
+   "monitoring",
+   "node-locations",
+   "remove-additional-pod-ipv4-ranges",
+   "remove-labels"
   ],
   "optional": [],
   "value": [
@@ -1108,6 +1314,8 @@
    "async",
    "master"
   ],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "cluster-version",
@@ -1152,6 +1360,28 @@
    "shielded-integrity-monitoring",
    "shielded-secure-boot",
    "spot"
+  ],
+  "dict": [
+   "accelerator",
+   "additional-node-network",
+   "additional-pod-network",
+   "create-pod-ipv4-range",
+   "labels",
+   "metadata",
+   "metadata-from-file",
+   "network-performance-configs",
+   "opportunistic-maintenance",
+   "resource-manager-tags",
+   "secondary-boot-disk",
+   "standard-rollout-policy"
+  ],
+  "list": [
+   "node-labels",
+   "node-locations",
+   "node-taints",
+   "scopes",
+   "storage-pools",
+   "tags"
   ],
   "optional": [
    "ephemeral-storage-local-ssd",
@@ -1242,6 +1472,8 @@
   "bool": [
    "async"
   ],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "cluster",
@@ -1256,6 +1488,8 @@
    "z": "zone"
   },
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "cluster",
@@ -1271,6 +1505,10 @@
   },
   "bool": [
    "uri"
+  ],
+  "dict": [],
+  "list": [
+   "sort-by"
   ],
   "optional": [],
   "value": [
@@ -1292,6 +1530,8 @@
   "bool": [
    "async"
   ],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "cluster",
@@ -1325,6 +1565,20 @@
    "flex-start",
    "remove-maintenance-exclusion-until-end-of-support",
    "respect-pdb-during-node-pool-deletion"
+  ],
+  "dict": [
+   "accelerator",
+   "labels",
+   "network-performance-configs",
+   "resource-manager-tags",
+   "standard-rollout-policy"
+  ],
+  "list": [
+   "node-labels",
+   "node-locations",
+   "node-taints",
+   "storage-pools",
+   "tags"
   ],
   "optional": [],
   "value": [
@@ -1375,6 +1629,8 @@
  "functions add-iam-policy-binding": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "member",
@@ -1385,6 +1641,8 @@
  "functions delete": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "region"
@@ -1413,6 +1671,24 @@
    "retry",
    "serve-all-traffic-latest-revision",
    "trigger-http"
+  ],
+  "dict": [
+   "set-build-env-vars",
+   "set-env-vars",
+   "set-secrets",
+   "trigger-event-filters",
+   "trigger-event-filters-path-pattern",
+   "update-build-env-vars",
+   "update-env-vars",
+   "update-labels",
+   "update-secrets"
+  ],
+  "list": [
+   "network-tags",
+   "remove-build-env-vars",
+   "remove-env-vars",
+   "remove-labels",
+   "remove-secrets"
   ],
   "optional": [],
   "value": [
@@ -1473,6 +1749,8 @@
   "bool": [
    "v2"
   ],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "region"
@@ -1482,6 +1760,11 @@
   "alias": {},
   "bool": [
    "v2"
+  ],
+  "dict": [],
+  "list": [
+   "regions",
+   "sort-by"
   ],
   "optional": [],
   "value": [
@@ -1495,6 +1778,8 @@
  "functions remove-iam-policy-binding": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "member",
@@ -1505,6 +1790,8 @@
  "functions set-iam-policy": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "region"
@@ -1513,6 +1800,10 @@
  "iam service-accounts add-iam-policy-binding": {
   "alias": {},
   "bool": [],
+  "dict": [
+   "condition"
+  ],
+  "list": [],
   "optional": [],
   "value": [
    "condition",
@@ -1524,6 +1815,8 @@
  "iam service-accounts create": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "description",
@@ -1533,12 +1826,16 @@
  "iam service-accounts delete": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": []
  },
  "iam service-accounts describe": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": []
  },
@@ -1546,6 +1843,10 @@
   "alias": {},
   "bool": [
    "uri"
+  ],
+  "dict": [],
+  "list": [
+   "sort-by"
   ],
   "optional": [],
   "value": [
@@ -1559,6 +1860,10 @@
   "bool": [
    "all"
   ],
+  "dict": [
+   "condition"
+  ],
+  "list": [],
   "optional": [],
   "value": [
    "condition",
@@ -1570,12 +1875,16 @@
  "iam service-accounts set-iam-policy": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": []
  },
  "iam service-accounts update": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "description",
@@ -1585,6 +1894,10 @@
  "projects add-iam-policy-binding": {
   "alias": {},
   "bool": [],
+  "dict": [
+   "condition"
+  ],
+  "list": [],
   "optional": [],
   "value": [
    "condition",
@@ -1599,6 +1912,11 @@
    "enable-cloud-apis",
    "set-as-default"
   ],
+  "dict": [
+   "labels",
+   "tags"
+  ],
+  "list": [],
   "optional": [],
   "value": [
    "folder",
@@ -1611,12 +1929,16 @@
  "projects delete": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": []
  },
  "projects describe": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": []
  },
@@ -1624,6 +1946,10 @@
   "alias": {},
   "bool": [
    "uri"
+  ],
+  "dict": [],
+  "list": [
+   "sort-by"
   ],
   "optional": [],
   "value": [
@@ -1638,6 +1964,10 @@
   "bool": [
    "all"
   ],
+  "dict": [
+   "condition"
+  ],
+  "list": [],
   "optional": [],
   "value": [
    "condition",
@@ -1649,12 +1979,16 @@
  "projects set-iam-policy": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": []
  },
  "projects update": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "name"
@@ -1663,6 +1997,8 @@
  "pubsub topics add-iam-policy-binding": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "member",
@@ -1673,6 +2009,13 @@
   "alias": {},
   "bool": [
    "message-storage-policy-enforce-in-transit"
+  ],
+  "dict": [
+   "labels",
+   "tags"
+  ],
+  "list": [
+   "message-storage-policy-allowed-regions"
   ],
   "optional": [],
   "value": [
@@ -1721,12 +2064,16 @@
  "pubsub topics delete": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": []
  },
  "pubsub topics describe": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": []
  },
@@ -1734,6 +2081,10 @@
   "alias": {},
   "bool": [
    "uri"
+  ],
+  "dict": [],
+  "list": [
+   "sort-by"
   ],
   "optional": [],
   "value": [
@@ -1746,6 +2097,8 @@
  "pubsub topics remove-iam-policy-binding": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "member",
@@ -1755,6 +2108,8 @@
  "pubsub topics set-iam-policy": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": []
  },
@@ -1768,6 +2123,13 @@
    "clear-schema-settings",
    "message-storage-policy-enforce-in-transit",
    "recompute-message-storage-policy"
+  ],
+  "dict": [
+   "update-labels"
+  ],
+  "list": [
+   "message-storage-policy-allowed-regions",
+   "remove-labels"
   ],
   "optional": [],
   "value": [
@@ -1827,6 +2189,10 @@
    "user-output-enabled",
    "v",
    "version"
+  ],
+  "dict": [],
+  "list": [
+   "flatten"
   ],
   "optional": [],
   "value": [
@@ -1888,6 +2254,40 @@
    "no-use-http2",
    "session-affinity",
    "use-http2"
+  ],
+  "dict": [
+   "add-volume",
+   "add-volume-mount",
+   "labels",
+   "liveness-probe",
+   "readiness-probe",
+   "set-build-env-vars",
+   "set-env-vars",
+   "set-secrets",
+   "startup-probe",
+   "update-build-env-vars",
+   "update-env-vars",
+   "update-labels",
+   "update-secrets"
+  ],
+  "list": [
+   "add-cloudsql-instances",
+   "add-custom-audiences",
+   "args",
+   "command",
+   "depends-on",
+   "network-tags",
+   "remove-build-env-vars",
+   "remove-cloudsql-instances",
+   "remove-containers",
+   "remove-custom-audiences",
+   "remove-env-vars",
+   "remove-labels",
+   "remove-secrets",
+   "remove-volume",
+   "remove-volume-mount",
+   "set-cloudsql-instances",
+   "set-custom-audiences"
   ],
   "optional": [],
   "value": [
@@ -1968,6 +2368,10 @@
  "run services add-iam-policy-binding": {
   "alias": {},
   "bool": [],
+  "dict": [
+   "condition"
+  ],
+  "list": [],
   "optional": [],
   "value": [
    "condition",
@@ -1983,6 +2387,8 @@
    "async",
    "no-async"
   ],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "namespace",
@@ -1992,6 +2398,8 @@
  "run services describe": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "namespace",
@@ -2002,6 +2410,10 @@
   "alias": {},
   "bool": [
    "uri"
+  ],
+  "dict": [],
+  "list": [
+   "sort-by"
   ],
   "optional": [],
   "value": [
@@ -2017,6 +2429,10 @@
   "bool": [
    "all"
   ],
+  "dict": [
+   "condition"
+  ],
+  "list": [],
   "optional": [],
   "value": [
    "condition",
@@ -2029,6 +2445,8 @@
  "run services set-iam-policy": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "region"
@@ -2071,6 +2489,37 @@
    "no-use-http2",
    "session-affinity",
    "use-http2"
+  ],
+  "dict": [
+   "add-volume",
+   "add-volume-mount",
+   "labels",
+   "liveness-probe",
+   "readiness-probe",
+   "set-env-vars",
+   "set-secrets",
+   "startup-probe",
+   "update-env-vars",
+   "update-labels",
+   "update-secrets"
+  ],
+  "list": [
+   "add-cloudsql-instances",
+   "add-custom-audiences",
+   "args",
+   "command",
+   "depends-on",
+   "network-tags",
+   "remove-cloudsql-instances",
+   "remove-containers",
+   "remove-custom-audiences",
+   "remove-env-vars",
+   "remove-labels",
+   "remove-secrets",
+   "remove-volume",
+   "remove-volume-mount",
+   "set-cloudsql-instances",
+   "set-custom-audiences"
   ],
   "optional": [],
   "value": [
@@ -2147,6 +2596,11 @@
    "no-striped",
    "striped"
   ],
+  "dict": [],
+  "list": [
+   "d",
+   "database"
+  ],
   "optional": [],
   "value": [
    "bak-type",
@@ -2164,6 +2618,11 @@
   "bool": [
    "async",
    "offload"
+  ],
+  "dict": [],
+  "list": [
+   "d",
+   "database"
   ],
   "optional": [],
   "value": [
@@ -2188,6 +2647,13 @@
    "offload",
    "parallel"
   ],
+  "dict": [],
+  "list": [
+   "d",
+   "database",
+   "t",
+   "table"
+  ],
   "optional": [],
   "value": [
    "d",
@@ -2203,6 +2669,8 @@
    "async",
    "prompt-for-pvk-password"
   ],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "cert-path",
@@ -2224,6 +2692,8 @@
    "recovery-only",
    "striped"
   ],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "bak-type",
@@ -2242,6 +2712,10 @@
   },
   "bool": [
    "async"
+  ],
+  "dict": [],
+  "list": [
+   "columns"
   ],
   "optional": [],
   "value": [
@@ -2266,6 +2740,8 @@
    "if-exists",
    "parallel"
   ],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "d",
@@ -2280,6 +2756,8 @@
    "async",
    "prompt-for-pvk-password"
   ],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "cert-path",
@@ -2345,6 +2823,20 @@
    "require-ssl",
    "retain-backups-on-delete",
    "storage-auto-increase"
+  ],
+  "dict": [
+   "auto-scale-target-metrics",
+   "connection-pool-flags",
+   "database-flags",
+   "performance-capture-config",
+   "psc-auto-connections",
+   "tags"
+  ],
+  "list": [
+   "active-directory-dns-servers",
+   "allowed-psc-projects",
+   "authorized-networks",
+   "custom-subject-alternative-names"
   ],
   "optional": [],
   "value": [
@@ -2435,6 +2927,8 @@
    "async",
    "enable-final-backup"
   ],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "final-backup-description",
@@ -2445,6 +2939,8 @@
  "sql instances describe": {
   "alias": {},
   "bool": [],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": []
  },
@@ -2455,6 +2951,10 @@
    "show-sql-network-architecture",
    "show-transactional-log-storage-state",
    "uri"
+  ],
+  "dict": [],
+  "list": [
+   "sort-by"
   ],
   "optional": [],
   "value": [
@@ -2467,6 +2967,10 @@
  "storage buckets add-iam-policy-binding": {
   "alias": {},
   "bool": [],
+  "dict": [
+   "condition"
+  ],
+  "list": [],
   "optional": [],
   "value": [
    "condition",
@@ -2497,6 +3001,11 @@
    "pap",
    "public-access-prevention",
    "uniform-bucket-level-access"
+  ],
+  "dict": [],
+  "list": [
+   "labels",
+   "placement"
   ],
   "optional": [],
   "value": [
@@ -2529,6 +3038,8 @@
    "c",
    "continue-on-error"
   ],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "additional-headers"
@@ -2539,6 +3050,8 @@
   "bool": [
    "raw"
   ],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "additional-headers"
@@ -2549,6 +3062,10 @@
   "bool": [
    "raw",
    "uri"
+  ],
+  "dict": [],
+  "list": [
+   "sort-by"
   ],
   "optional": [],
   "value": [
@@ -2564,6 +3081,10 @@
   "bool": [
    "all"
   ],
+  "dict": [
+   "condition"
+  ],
+  "list": [],
   "optional": [],
   "value": [
    "condition",
@@ -2581,6 +3102,8 @@
    "c",
    "continue-on-error"
   ],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "e",
@@ -2630,6 +3153,13 @@
    "requester-pays",
    "uniform-bucket-level-access",
    "versioning"
+  ],
+  "dict": [],
+  "list": [
+   "add-acl-grant",
+   "add-default-object-acl-grant",
+   "remove-labels",
+   "update-labels"
   ],
   "optional": [],
   "value": [
@@ -2720,6 +3250,20 @@
    "skip-unsupported",
    "v"
   ],
+  "dict": [],
+  "list": [
+   "custom-contexts",
+   "custom-metadata",
+   "decryption-keys",
+   "gzip-in-flight",
+   "gzip-local",
+   "j",
+   "remove-custom-contexts",
+   "remove-custom-metadata",
+   "update-custom-contexts",
+   "update-custom-metadata",
+   "z"
+  ],
   "optional": [],
   "value": [
    "L",
@@ -2807,6 +3351,20 @@
    "skip-unsupported",
    "v"
   ],
+  "dict": [],
+  "list": [
+   "custom-contexts",
+   "custom-metadata",
+   "decryption-keys",
+   "gzip-in-flight",
+   "gzip-local",
+   "j",
+   "remove-custom-contexts",
+   "remove-custom-metadata",
+   "update-custom-contexts",
+   "update-custom-metadata",
+   "z"
+  ],
   "optional": [],
   "value": [
    "L",
@@ -2863,6 +3421,8 @@
    "read-paths-from-stdin",
    "recursive"
   ],
+  "dict": [],
+  "list": [],
   "optional": [],
   "value": [
    "additional-headers",

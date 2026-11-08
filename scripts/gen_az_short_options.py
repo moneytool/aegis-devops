@@ -43,6 +43,26 @@ def _options_list(call: ast.Call, types: dict[str, list[str]]) -> list[str] | No
     return None
 
 
+# How many words the core argument types take (azure-cli-core commands/parameters.py).
+_CORE_TYPE_NARGS = {"tags_type": "*", "zones_type": "+", "tag_type": "?"}
+
+
+def _nargs(call: ast.Call, type_nargs: dict[str, str]) -> str | None:
+    """How many words an argument takes, as argparse reads its ``nargs`` (``+``, ``*``,
+    ``?``) or ``action='append'`` (``append``: one word each time, all kept), from the call
+    or the argument type it is given."""
+    for keyword in call.keywords:
+        if keyword.arg == "nargs" and isinstance(keyword.value, ast.Constant):
+            return str(keyword.value.value)
+        if (keyword.arg == "action" and isinstance(keyword.value, ast.Constant)
+                and keyword.value.value == "append"):
+            return "append"
+    for arg in [*call.args[1:], *(k.value for k in call.keywords if k.arg == "arg_type")]:
+        if isinstance(arg, ast.Name) and arg.id in type_nargs:
+            return type_nargs[arg.id]
+    return None
+
+
 def _aliases(options: list[str]) -> dict[str, str]:
     long_names = [o[2:] for o in options if o.startswith("--")]
     if not long_names:
@@ -160,12 +180,16 @@ def module_arguments(source: str) -> dict[str, dict[str, Any]]:
     ``--dest-name``), and the dests added with ``c.extra`` (not in any signature)."""
     tree = ast.parse(source)
     types: dict[str, list[str]] = {}
+    type_nargs: dict[str, str] = dict(_CORE_TYPE_NARGS)
     for node in ast.walk(tree):
         if (isinstance(node, ast.Assign) and len(node.targets) == 1
                 and isinstance(node.targets[0], ast.Name) and isinstance(node.value, ast.Call)):
             options = _options_list(node.value, {})
             if options:
                 types[node.targets[0].id] = options
+            nargs = _nargs(node.value, {})
+            if nargs:
+                type_nargs[node.targets[0].id] = nargs
     helpers = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
 
     def argument_calls(node: ast.AST, var: str, depth: int = 0):
@@ -186,18 +210,23 @@ def module_arguments(source: str) -> dict[str, dict[str, Any]]:
     for names, var, node, _call in _contexts(tree, "argument_context"):
         dests: dict[str, list[str] | None] = {}
         extras: set[str] = set()
+        nargs: dict[str, str] = {}
         for sub in argument_calls(node, var):
             if not (sub.args and isinstance(sub.args[0], ast.Constant)
                     and isinstance(sub.args[0].value, str)):
                 continue
             dest = sub.args[0].value
             dests[dest] = _options_list(sub, types)
+            found = _nargs(sub, type_nargs)
+            if found:
+                nargs[dest] = found
             if sub.func.attr == "extra":
                 extras.add(dest)
         for name in names:
-            entry = scopes.setdefault(name, {"dest": {}, "extra": set()})
+            entry = scopes.setdefault(name, {"dest": {}, "extra": set(), "nargs": {}})
             entry["dest"].update(dests)
             entry["extra"].update(extras)
+            entry["nargs"].update(nargs)
     return scopes
 
 
@@ -259,6 +288,7 @@ def module_commands(source: str, functions: dict[str, tuple[list[str], bool]]
     return commands
 
 
+_AAZ_MULTI = frozenset({"AAZListArg", "AAZDictArg", "AAZTagsArg", "AAZZonesArg"})
 _AAZ_DEFAULTS = {"AAZResourceGroupNameArg": ["--resource-group", "-g"],
                  "AAZResourceLocationArg": ["--location", "-l"]}
 
@@ -289,8 +319,10 @@ def aaz_commands(path: Path) -> dict[str, list[list[str]]]:
                 listed = next((_strings(k.value) for k in sub.value.keywords
                                if k.arg == "options"), None)
                 kind = getattr(sub.value.func, "id", getattr(sub.value.func, "attr", ""))
-                options.append(listed or _AAZ_DEFAULTS.get(kind)
-                               or ["--" + sub.targets[0].attr.replace("_", "-")])
+                spelled = listed or _AAZ_DEFAULTS.get(kind) or [
+                    "--" + sub.targets[0].attr.replace("_", "-")]
+                # an AAZ list or dict argument takes every word up to the next option
+                options.append([*spelled, "nargs:+"] if kind in _AAZ_MULTI else spelled)
         for name in names:
             out[name] = options
     return out
@@ -311,9 +343,10 @@ def main(checkout: str, out: str) -> None:
         params = module / "_params.py"
         if params.exists():
             for scope, found in module_arguments(params.read_text(encoding="utf-8-sig")).items():
-                entry = arguments.setdefault(scope, {"dest": {}, "extra": set()})
+                entry = arguments.setdefault(scope, {"dest": {}, "extra": set(), "nargs": {}})
                 entry["dest"].update(found["dest"])
                 entry["extra"].update(found["extra"])
+                entry["nargs"].update(found["nargs"])
         functions = module_functions([p for p in files if "aaz" not in p.parts])
         for path in files:
             if path.name == "commands.py":
@@ -329,15 +362,24 @@ def main(checkout: str, out: str) -> None:
                 found = entry["dest"][dest]
         return found
 
+    def dest_nargs(command: str, dest: str) -> str | None:
+        found: str | None = _CORE_DEST_NARGS.get(dest)
+        for scope in _scope_chain(command):
+            entry = arguments.get(scope)
+            if entry and dest in entry["nargs"]:
+                found = entry["nargs"][dest]
+        return found
+
     table: dict[str, dict[str, Any]] = {}
     # scopes: every option any argument scope declares (a group's may not all apply)
     for scope, entry in arguments.items():
-        spellings: list[str] = []
+        groups: list[list[str]] = []
         for dest, options in entry["dest"].items():
-            spellings.extend(options or ["--" + dest.replace("_", "-")])
-        table[scope] = {"s": {}, "l": set(), "c": False}
-        table[scope]["l"].update(o[2:] for o in spellings if o.startswith("--"))
-        table[scope]["s"].update(_aliases_all(entry["dest"]))
+            nargs = entry["nargs"].get(dest)
+            groups.append([*(options or ["--" + dest.replace("_", "-")]),
+                           *([f"nargs:{nargs}"] if nargs else [])])
+        table[scope] = {"s": {}, "l": set(), "c": False, "n": {}}
+        _set_leaf(table, scope, groups, False)
     # each registered command: its function's parameters as knack spells them (exactly its
     # options when complete), or an AAZ class's
     for command, (params, complete) in commands.items():
@@ -346,14 +388,18 @@ def main(checkout: str, out: str) -> None:
         for scope in _scope_chain(command):
             dests |= arguments.get(scope, {}).get("extra", set())
         for dest in dests:
-            groups.append(dest_options(command, dest) or _CORE_DESTS.get(dest)
-                          or ["--" + dest.replace("_", "-")])
+            nargs = dest_nargs(command, dest)
+            groups.append([*(dest_options(command, dest) or _CORE_DESTS.get(dest)
+                             or ["--" + dest.replace("_", "-")]),
+                           *([f"nargs:{nargs}"] if nargs else [])])
         if command in aaz and not complete:
             groups, complete = aaz[command], True
         # an argument declared on this very command in _params.py is its own, though the
         # function's signature may not show it under that name
-        groups.extend(options for options in arguments.get(command, {}).get(
-            "dest", {}).values() if options)
+        own = arguments.get(command, {})
+        groups.extend([*options, *([f"nargs:{own['nargs'][dest]}"]
+                                   if dest in own.get("nargs", {}) else [])]
+                      for dest, options in own.get("dest", {}).items() if options)
         if command.startswith("storage "):
             # storage's data-plane commands get their account and auth options when az
             # loads them, not from a signature or _params.py: never all known here
@@ -362,11 +408,12 @@ def main(checkout: str, out: str) -> None:
     for command, groups in aaz.items():
         if command not in commands:
             _set_leaf(table, command, groups, True)
-    storage = table.setdefault("storage", {"s": {}, "l": set(), "c": False})
+    storage = table.setdefault("storage", {"s": {}, "l": set(), "c": False, "n": {}})
     storage["l"] |= _STORAGE_DATA_PLANE
     commit = subprocess.run(["git", "-C", checkout, "rev-parse", "HEAD"], capture_output=True,
                             text=True, check=False).stdout.strip()
-    data = {k: {"s": v["s"], "l": sorted(v["l"]), **({"c": True} if v["c"] else {})}
+    data = {k: {"s": v["s"], "l": sorted(v["l"]), **({"c": True} if v["c"] else {}),
+                **({"n": v["n"]} if v.get("n") else {})}
             for k, v in sorted(table.items())}
     with open(out, "w") as f:
         json.dump({"_source": f"azure-cli {commit} command_modules (_params.py, "
@@ -394,6 +441,9 @@ _STORAGE_DATA_PLANE = {
 
 # Arguments azure-cli's core registers for every command by their name (core
 # commands/parameters.py and the global registrations): their spelling is not --dest-name.
+# How many words the arguments core registers by name take.
+_CORE_DEST_NARGS = {"tags": "*", "zones": "+"}
+
 _CORE_DESTS = {
     "resource_group_name": ["--resource-group", "-g"],
     "location": ["--location", "-l"],
@@ -407,16 +457,21 @@ def _set_leaf(table: dict[str, dict[str, Any]], command: str, groups: list[list[
     """A command's own options: ``l`` its long ones and ``s`` its short ones (each the long
     option listed with it). ``c`` when they are all of them: then they replace what the
     scopes above declare, which may not apply to it; otherwise they add to them."""
-    entry = table.setdefault(command, {"s": {}, "l": set(), "c": False})
+    entry = table.setdefault(command, {"s": {}, "l": set(), "c": False, "n": {}})
     longs = {o[2:] for group in groups for o in group if o.startswith("--")}
     shorts: dict[str, str] = {}
+    nargs: dict[str, str] = {}
     for group in groups:
-        shorts.update(_aliases(group))
+        options = [o for o in group if not o.startswith("nargs:")]
+        shorts.update(_aliases(options))
+        for marker in (o for o in group if o.startswith("nargs:")):
+            nargs.update({o[2:]: marker[len("nargs:"):] for o in options if o.startswith("--")})
     if complete:
-        entry["l"], entry["s"] = longs, {**entry["s"], **shorts}
+        entry["l"], entry["s"], entry["n"] = longs, {**entry["s"], **shorts}, nargs
     else:
         entry["l"] |= longs
         entry["s"] = {**entry["s"], **shorts}
+        entry["n"] = {**entry.get("n", {}), **nargs}
     entry["c"] = complete
 
 

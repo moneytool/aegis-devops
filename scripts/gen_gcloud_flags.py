@@ -3,7 +3,8 @@ models, with whether it takes a value, read from the gcloud reference pages
 (https://cloud.google.com/sdk/gcloud/reference/...), which list each flag as
 ``--flag=VALUE`` (a value), ``--flag[=VALUE]`` (an optional value, which argparse takes
 from the next word unless it starts with "-"), ``--flag`` or ``--[no-]flag`` (a boolean),
-with its short spellings (``alias``: each short spelling and the flag it is). gcloud itself is not
+with its short spellings (``alias``: each short spelling and the flag it is), and which
+values are lists (``TAG,[TAG,…]``) or maps (``[KEY=VALUE,…]``). gcloud itself is not
 needed.
 
     python scripts/gen_gcloud_flags.py src/aegis_core/data/gcloud_flags.json
@@ -61,6 +62,8 @@ def flags(page: str) -> dict[str, list[str]]:
     values: set[str] = set()
     optional: set[str] = set()
     alias: dict[str, str] = {}
+    lists: set[str] = set()
+    dicts: set[str] = set()
     for match in _DT.finditer(page):
         inner = match.group(2)
         codes = [_text(c) for c in _CODE.findall(inner)]
@@ -68,6 +71,9 @@ def flags(page: str) -> dict[str, list[str]]:
             continue
         rest = _text(inner)[len(codes[0]):]
         kind = values if rest.startswith("=") else optional if rest.startswith("[=") else bools
+        spec = rest.partition(" ")[0]
+        # an ArgList (TAG,[TAG,…]) or ArgDict ([KEY=VALUE,…]): its value is split on commas
+        shape = (dicts if "=" in spec[1:] else lists) if "…" in spec or ",[" in spec else None
         long_name = None
         for spelling in [codes[0], *codes[1:]]:
             found = _NAME.fullmatch(spelling)
@@ -76,12 +82,14 @@ def flags(page: str) -> dict[str, list[str]]:
             kind.add(found.group(2))
             if found.group(1):
                 bools.add("no-" + found.group(2))
+            if shape is not None and kind is values:
+                shape.add(found.group(2))
             if long_name is None:
                 long_name = found.group(2)
             elif found.group(2) != long_name:
                 alias[found.group(2)] = long_name  # -z is --zone
     return {"bool": sorted(bools), "value": sorted(values), "optional": sorted(optional),
-            "alias": dict(sorted(alias.items()))}
+            "alias": dict(sorted(alias.items())), "list": sorted(lists), "dict": sorted(dicts)}
 
 
 def fetch(path: str) -> str:

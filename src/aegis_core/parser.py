@@ -2807,6 +2807,27 @@ def _az_entry(words: list[str]) -> tuple[dict[str, str], frozenset[str]]:
     return shorts, frozenset(longs)
 
 
+# How many words az's own multi-value options take: the generic update's --set, --add and
+# --remove (every word up to the next option, each time), --ids.
+_AZ_GLOBAL_NARGS = {"set": "append+", "add": "append+", "remove": "append+", "ids": "+"}
+
+
+def _az_nargs(words: list[str]) -> dict[str, str]:
+    """How many words each long option of ``az <words>`` takes, where it is not one: ``+``
+    and ``*`` every word up to the next option, ``?`` one if there is one, ``append`` one
+    each time, all kept (from ``_params.py`` nargs and argument types, and AAZ list and
+    dict arguments)."""
+    tables = _az_short_tables()
+    leaf = tables.get(" ".join(words), {})
+    nargs = dict(_AZ_GLOBAL_NARGS)
+    if leaf.get("c"):
+        nargs.update(leaf.get("n", {}))
+        return nargs
+    for size in range(1, len(words) + 1):
+        nargs.update(tables.get(" ".join(words[:size]), {}).get("n", {}))
+    return nargs
+
+
 def _az_aliases(words: list[str]) -> dict[str, str]:
     """The short options of ``az <words>`` and the long option each is."""
     return _az_entry(words)[0]
@@ -2864,7 +2885,7 @@ def _az_roles(aliases: dict[str, str]) -> dict[str, str]:
 
 def _parse_az_tokens(
     tokens: list[str], aliases: dict[str, str] | None = None,
-    longs: frozenset[str] | None = None,
+    longs: frozenset[str] | None = None, nargs: dict[str, str] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], list[str], str | None, list[str]]:
     """``aliases`` (:func:`_az_aliases`) records each short option as the long option it is
     on the command, so ``-c 1`` and ``--node-count 1`` record the same; the long option
@@ -2939,6 +2960,29 @@ def _parse_az_tokens(
                     i += 1
                     val = _value_at(tokens, i, tok)
                 name_value = val
+            elif nargs is not None and key in nargs and key not in ("ids",):
+                # several words, as argparse gives an option with nargs + / * / ? or
+                # action append: every word up to the next option-looking one
+                kind = nargs[key]
+                values = [val] if val is not None else []
+                if val is None and kind != "append":
+                    while i + 1 < n and not _aws_option_like(tokens[i + 1]):
+                        i += 1
+                        values.append(tokens[i])
+                        if kind == "?":
+                            break
+                elif val is None:
+                    i += 1
+                    values.append(_value_at(tokens, i, tok))
+                if kind == "+" and not values:
+                    raise ValueError(f"az: {tok} needs at least one value: {tokens!r}")
+                if kind == "?" and not values:
+                    params[key] = True
+                elif kind in ("append", "append+"):
+                    params[key] = [*params.get(key, []), *values] \
+                        if isinstance(params.get(key), list) else values
+                else:
+                    params[key] = values
             elif key in ("what-if", "dry-run"):
                 _record_dry_run(params, _is_dry_run(val))
             elif key in _AZ_BOOL_FLAGS:
@@ -2967,7 +3011,8 @@ def _parse_az_tokens(
     # az reads an argument value "@path" from that file (knack's argument preprocessing),
     # "@-" from stdin: any other option read that way is unresolved
     for key, value in list(params.items()):
-        if isinstance(value, str) and value.startswith("@"):
+        words = value if isinstance(value, list) else [value]
+        if any(isinstance(w, str) and w.startswith("@") for w in words):
             _mark_unresolved(params, key)
     # the target or its scope would then be a file nobody read
     for value in (name_value, *ids_values, metadata.get("region"),
@@ -3071,8 +3116,11 @@ def _from_az_multi(argv: list[str]) -> list[InfrastructureIntent]:
     tokens = argv[1:]
     metadata, params, positional, name_value, ids_values = _parse_az_tokens(tokens)
     # read again with the command's own short options, each recorded as its long option
+    # the command's words: up to its verb (a multi-value option's words may follow)
+    words = positional[:next((i + 1 for i, w in enumerate(positional) if w in _AZ_VERBS),
+                             len(positional))]
     metadata, params, positional, name_value, ids_values = _parse_az_tokens(
-        tokens, _az_aliases(positional), _az_longs(positional))
+        tokens, _az_aliases(words), _az_longs(words), _az_nargs(words))
 
     if not positional:
         raise ValueError(f"could not find an az verb in: {argv!r}")
@@ -3305,9 +3353,30 @@ def _gcloud_flag_table(command: str) -> dict[str, Any] | None:
         return None
     root = tables["root"]
     table: dict[str, Any] = {kind: frozenset(entry.get(kind, ())) | frozenset(root.get(kind, ()))
-                             for kind in ("bool", "value", "optional")}
+                             for kind in ("bool", "value", "optional", "list", "dict")}
     table["alias"] = {**root.get("alias", {}), **entry.get("alias", {})}
     return table
+
+
+def _gcloud_arg(text: str, is_dict: bool, existing: Any) -> Any:
+    """A gcloud ArgList (``a,b``) as a list, or an ArgDict (``k=v,k2=v2``) as a map, split on
+    commas or on the delimiter gcloud's ``^X^`` prefix names (``^:^a:b``). A map flag given
+    again (``--create-disk`` twice) keeps each map."""
+    delimiter = ","
+    if len(text) >= 3 and text[0] == "^" and "^" in text[2:3]:
+        delimiter, text = text[1], text[3:]
+    items = [item for item in text.split(delimiter) if item != ""]
+    if not is_dict:
+        return items
+    pairs: dict[str, Any] = {}
+    for item in items:
+        k, sep, v = item.partition("=")
+        pairs[k] = v if sep else None
+    if isinstance(existing, dict):
+        return [existing, pairs]
+    if isinstance(existing, list) and existing and isinstance(existing[0], dict):
+        return [*existing, pairs]
+    return pairs
 
 
 def _parse_gcloud_tokens(
@@ -3391,7 +3460,10 @@ def _parse_gcloud_tokens(
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
-                params[key] = _coerce(val)
+                if key in table["list"] or key in table["dict"]:
+                    params[key] = _gcloud_arg(val, key in table["dict"], params.get(key))
+                else:
+                    params[key] = _coerce(val)
             elif table is not None and key in table["optional"]:
                 if val is None and i + 1 < n and not tokens[i + 1].startswith("-"):
                     i += 1  # argparse takes the next word as the optional value

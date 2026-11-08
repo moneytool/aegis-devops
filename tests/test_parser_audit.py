@@ -107,6 +107,22 @@ AUDIT = [
     ("C5", "helm", "helm upgrade r ./c --set q=007", ("set", "q", "007")),
     ("C5", "aws", "aws autoscaling set-desired-capacity --auto-scaling-group-name g "
      "--desired-capacity -1", param("desired_capacity", -1)),
+    ("C5", "helm", "helm upgrade r ./c --history-max 0x0", param("history_max", 0)),
+    ("C5", "helm", "helm upgrade r ./c --timeout 5m", param("timeout", 300)),
+    ("C5", "flux", "flux reconcile ks a --timeout 1m30s", param("timeout", 90)),
+    ("C5", "kubectl", "kubectl logs web --since 2m", param("since", 120)),
+    ("C5", "argocd", "argocd app sync a --timeout 0x10", param("timeout", 16)),
+    ("C5", "gh", "gh run list -R o/r --limit 0x10", param("limit", 16)),
+    # C6 repeated flags accumulate exactly where pflag's type does
+    ("C6", "argocd", "argocd app sync a --resource g:K:x --resource g:K:y",
+     param("resource", ["g:K:x", "g:K:y"])),
+    ("C6", "kubectl", "kubectl get pods -L a,b -L c", param("label-columns", ["a", "b", "c"])),
+    ("C6", "helm", "helm template a ./c --api-versions v1 --api-versions v2",
+     param("api_versions", ["v1", "v2"])),
+    ("C6", "flux", "flux create source git a --url u --ignore-paths x,y",
+     param("ignore_paths", ["x", "y"])),
+    ("C6", "gh", "gh pr create -R o/r --label a,b --label c --title t --body b",
+     param("label", ["a", "b", "c"])),
     # C6 a boolean's negation and last spelling
     ("C6", "kubectl", "kubectl run web --image x --expose=false", param("expose", False)),
     ("C6", "helm", "helm upgrade api ./c --install=false", param("install", False)),
@@ -231,6 +247,18 @@ AUDIT = [
     ("C24", "helm", "helm list", marked("release/*")),
     ("C24", "gcloud", "gcloud storage buckets update --read-paths-from-stdin --no-versioning",
      marked("storage/bucket/*")),
+    # C10 (r10): a source-only push's destination is mapped by config when git runs
+    ("C10", "git", "git push origin safe", ("first_marked_destination",)),
+    # C26 a multi-value option takes every value, as the tool's parser gives it
+    ("C26", "az", "az group create --name rg --location eastus --tags a=b c=d",
+     param("tags", ["a=b", "c=d"])),
+    ("C26", "az", "az vm update -g rg -n v --set a=1 b=2", param("set", ["a=1", "b=2"])),
+    ("C26", "aws", "aws ec2 create-tags --resources i-1 i-2 --tags Key=a,Value=b",
+     param("resources", ["i-1", "i-2"])),
+    ("C26", "gcloud", "gcloud compute instances create w --zone z --tags a,b",
+     param("tags", ["a", "b"])),
+    ("C26", "gcloud", "gcloud compute instances create w --zone z --labels k=v",
+     param("labels", {"k": "v"})),
     # C25 a flag read by its value, not its presence
     ("C25", "git", "git branch --no-column -f prod HEAD~1", res("branch/prod", "branch/prod",
                                                                "branch/prod")),
@@ -274,6 +302,8 @@ def _check(intents, check):
         return all(i.metadata.get("all_namespaces") for i in intents[1:])
     if kind == "has":
         return any(i.resource == check[1] and i.action == check[2] for i in intents)
+    if kind == "first_marked_destination":
+        return first.params.get("resolved_at_runtime", {}).get("destination") is True
     if kind == "last_param":
         return intents[-1].params.get(check[1]) == check[2]
     raise AssertionError(kind)
