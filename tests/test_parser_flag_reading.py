@@ -656,3 +656,26 @@ def test_gsutil_refuses_an_option_it_does_not_know():
     with pytest.raises(ValueError):
         from_argv("gsutil rm -x gs://b".split())
 
+
+# --- terraform and tofu --------------------------------------------------------------
+# Go's flag package; -destroy=T and -destroy=yes were run with terraform 1.x in an empty
+# directory (destroy mode, and refused).
+
+
+@pytest.mark.parametrize("command,destroy,auto_approve", [
+    ("terraform apply -destroy", True, False),
+    ("terraform apply --destroy -auto-approve", True, True),
+    ("terraform apply -destroy=true", True, False),
+    ("terraform apply -destroy=T --auto-approve=true", True, True),
+    ("terraform apply -destroy -destroy=false", False, False),
+    ("tofu destroy -auto-approve=false", True, False),
+    ("terraform destroy --auto-approve", True, True),
+])
+def test_terraform_reads_go_booleans(command, destroy, auto_approve):
+    if not destroy:
+        with pytest.raises(ValueError, match="plan"):
+            from_argv(command.split())
+        return
+    intent = from_argv(command.split())[0]
+    assert (intent.resource, intent.action) == ("workspace/current", "delete")
+    assert intent.params["auto_approve"] is auto_approve

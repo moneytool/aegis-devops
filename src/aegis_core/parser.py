@@ -4365,9 +4365,7 @@ def from_terraform_argv(argv: list[str]) -> list[InfrastructureIntent] | None:
     if not rest:
         return None
     sub, args = rest[0], rest[1:]
-    destroy = sub == "destroy" or (
-        sub == "apply" and any(a in ("-destroy", "--destroy") for a in args)
-    )
+    destroy = sub == "destroy" or (sub == "apply" and _go_bool_flag(args, "destroy"))
     if not destroy:
         return None
     return [
@@ -4375,10 +4373,25 @@ def from_terraform_argv(argv: list[str]) -> list[InfrastructureIntent] | None:
             resource=f"workspace/{chdir or 'current'}",
             action="delete",
             provider="terraform",
-            params={"argv": list(argv), "auto_approve": "-auto-approve" in args},
+            params={"argv": list(argv), "auto_approve": _go_bool_flag(args, "auto-approve")},
             metadata={"tool": tool},
         )
     ]
+
+
+def _go_bool_flag(args: list[str], name: str) -> bool:
+    """Whether Go's flag package, which terraform and tofu use, ends with the boolean
+    ``-name`` on: ``-name``, ``--name`` and ``-name=true`` turn it on, ``-name=false``
+    off, and the last one counts. A value strconv.ParseBool refuses (``-destroy=yes``)
+    makes the tool refuse the command, so it counts as on, which can only be stricter."""
+    on = False
+    for arg in args:
+        if arg == "--":
+            break
+        key, sep, value = arg.lstrip("-").partition("=")
+        if arg.startswith("-") and key == name:
+            on = not sep or value not in _GO_FALSE_WORDS
+    return on
 
 
 # --- help / version probes ------------------------------------------------------
