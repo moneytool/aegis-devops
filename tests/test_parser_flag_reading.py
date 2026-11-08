@@ -5,6 +5,7 @@ table of its flags, read from its source, and a flag in no table is refused unle
 ``=value`` or its place at the end shows how the tool would read it. Words after ``--``
 are operands. Behaviour comes from each tool's source unless a test says it was run."""
 
+import shlex
 from datetime import UTC, datetime
 
 import pytest
@@ -365,7 +366,7 @@ def test_argocd_dry_run_is_a_rehearsal_only_on_sync():
     ("git push --dry-run --no-dry origin main", ["ref/main"], {}),
     # a value option takes the next word whatever it is
     ("git push --repo -f origin main", ["ref/main"], {"repo": "-f"}),
-    ("git push -o ci.skip origin main", ["ref/main"], {"push_option": "ci.skip"}),
+    ("git push -o ci.skip origin main", ["ref/main"], {"push_option": ["ci.skip"]}),
     # an option that takes a value only after "=" leaves the next word alone
     ("git push --force-with-lease origin main", ["ref/main"], {"force": True}),
     ("git push --signed=yes origin main", ["ref/main"], {"signed": "yes"}),
@@ -2068,12 +2069,18 @@ def test_every_az_short_option_reads_as_its_long_option():
 
 
 def test_every_gh_short_flag_reads_as_its_long_flag():
-    from aegis_core.parser import _GH_COMMAND_FLAGS
+    from aegis_core.parser import _gh_command_spec
 
-    for (group, sub), (bools, _values, shorts) in _GH_COMMAND_FLAGS.items():
-        if group == "api":
-            continue
+    for group, sub in (("pr", "merge"), ("pr", "close"), ("repo", "delete"),
+                       ("release", "create"), ("release", "delete"), ("secret", "set"),
+                       ("secret", "delete"), ("variable", "set"), ("workflow", "run"),
+                       ("issue", "delete"), ("issue", "close"), ("run", "delete"),
+                       ("run", "cancel"), ("run", "rerun"), ("workflow", "enable"),
+                       ("workflow", "disable")):
+        bools, _values, shorts = _gh_command_spec((group, sub))
         for letter, flag in shorts.items():
+            if flag == "repo":
+                continue
             base = ["gh", group, sub, "1", "-R", "o/r"]
             if flag in bools:
                 _same(base + [f"-{letter}"], base + [f"--{flag}"])
@@ -2520,7 +2527,9 @@ def test_az_long_prefix_rule_holds():
 def test_copy_destination_key_is_the_object_written(command, key, unresolved):
     intent = [i for i in from_argv(command.split()) if i.resource.endswith("/prod")][-1]
     assert intent.params["key"] == key
-    assert ("key" in intent.params.get("unresolved_scope", [])) is unresolved
+    unknown = ("key" in intent.params.get("unresolved_scope", [])
+               or "key" in intent.params.get("unresolved_prefix", {}))
+    assert unknown is unresolved
 
 
 def test_copy_into_a_folder_meets_a_rule_on_the_object():
@@ -2868,7 +2877,7 @@ def test_a_rule_value_its_type_cannot_hold_escalates():
     ("az group update -n rg --set tags.x=001", "resource/group/rg", "set", ["tags.x=001"]),
     ("kubectl run web --image 001", "pod/web", "image", "001"),
     ("helm upgrade r ./c --version 1.10", "release/r", "version", "1.10"),
-    ("git push --push-option 007 origin main", "ref/main", "push_option", "007"),
+    ("git push --push-option 007 origin main", "ref/main", "push_option", ["007"]),
 ])
 def test_values_are_typed_only_by_the_declared_type(command, resource, key, value):
     intent = from_argv(command.split())[0]
@@ -3466,3 +3475,220 @@ def test_rules_reach_into_every_repeated_group(scope, command):
     resource = "compute/instance/*" if "compute" in command else "run/service/*"
     action = "create" if "compute" in command else "update"
     assert _verdict([_rule("gcp", resource, [action], scope)], command) == "BLOCK"
+
+
+# --- review round 16 ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("command,marked,known", [
+    # with a values file, --set writes into what the file holds: an index keeps the list's
+    # other items, a nested key the map's other keys; only a value set whole is known
+    ("helm upgrade web ./c -f values.yaml --set hosts[0]=safe", {"set.hosts"}, set()),
+    ("helm upgrade web ./c -f values.yaml --set image.tag=v1", {"set.image"},
+     {"set.image.tag"}),
+    ("helm upgrade web ./c -f values.yaml --set replicas=3", set(), {"set.replicas"}),
+    ("helm upgrade web ./c -f values.yaml --set hosts={a,b}", set(), {"set.hosts"}),
+    ("helm upgrade web ./c --reuse-values --set a.b[1].c=x", {"set.a", "set.a.b"}, set()),
+    ("helm upgrade web ./c -f v.yaml --set a.b=1 --set a=2", set(), {"set.a"}),
+    ("helm upgrade web ./c -f v.yaml --set-json {\"a\":{\"b\":1}}", {"set.a"}, set()),
+])
+def test_helm_set_into_file_values_leaves_the_container_unresolved(command, marked, known):
+    marks = set(from_argv(command.split())[0].params["unresolved_scope"])
+    assert marked <= marks
+    assert not known & marks
+
+
+def test_helm_set_without_files_is_known():
+    marks = from_argv("helm upgrade web ./c --set hosts[0]=safe".split())[0].params.get(
+        "unresolved_scope", [])
+    assert "set.hosts" not in marks and "set.*" not in marks
+
+
+@pytest.mark.parametrize("scope,verdict", [
+    ({"set.hosts": "forbidden"}, "ESCALATE"),  # the file's other hosts stay
+    ({"set.image": {"tag": "v2", "repository": "x"}}, "ESCALATE"),
+    ({"set.image.tag": "v1"}, "BLOCK"),
+    ({"set.image.repository": "x"}, "ESCALATE"),
+])
+def test_helm_rules_on_merged_values(scope, verdict):
+    command = "helm upgrade web ./c -f values.yaml --set hosts[0]=safe --set image.tag=v1"
+    assert _verdict([_rule("helm", "release/*", ["update"], scope)], command) == verdict
+
+
+@pytest.mark.parametrize("command,key,value", [
+    # git options given several times keep every value (git's documentation)
+    ("git push -o a -o b origin main", "push_option", ["a", "b"]),
+    ("git push --push-option=a --no-push-option -o c origin main", "push_option", ["c"]),
+    ("git commit -m one -m two", "message", ["one", "two"]),
+    ("git commit -m t --trailer a=1 --trailer b=2", "trailer", ["a=1", "b=2"]),
+    ("git tag -a v1 -m x -m y", "message", ["x", "y"]),
+    ("git rebase -x make -x test main", "exec", ["make", "test"]),
+    ("git rebase -X ours -X patience main", "strategy_option", ["ours", "patience"]),
+    ("git branch --sort=-date --sort=refname", "sort", ["-date", "refname"]),
+])
+def test_git_options_that_accumulate(command, key, value):
+    assert from_argv(command.split())[0].params[key] == value
+
+
+def test_git_push_option_rule_meets_every_value():
+    rule = _rule("git", "ref/*", ["push"], {"push_option": "ci.skip"})
+    assert _verdict([rule], "git push -o ci.skip -o other origin main") == "BLOCK"
+
+
+@pytest.mark.parametrize("command,scope,verdict", [
+    # a move is recursive without -r: the source key is a prefix of what moves
+    ("gsutil mv gs://prod/oldprefix gs://archive/newprefix", {"key": "oldprefix/secret"},
+     "ESCALATE"),
+    ("gsutil mv gs://prod/oldprefix gs://archive/newprefix", {"key": "other/x"}, "ALLOW"),
+    ("gsutil mv gs://prod/oldprefix gs://archive/newprefix", {"key": "oldprefix"}, "BLOCK"),
+    ("gsutil cp -M gs://prod/oldprefix gs://archive/newprefix", {"key": "oldprefix/s"},
+     "ESCALATE"),
+    ("gcloud storage mv gs://prod/oldprefix gs://archive/newprefix", {"key": "oldprefix/s"},
+     "ESCALATE"),
+    ("gsutil rm -r gs://prod/logs", {"key": "logs/a"}, "ESCALATE"),
+    ("gsutil rm -r gs://prod/logs", {"key": "other"}, "ALLOW"),
+    ("gsutil rm gs://prod/logs", {"key": "logs/a"}, "ALLOW"),  # one object
+    ("gcloud storage rm --recursive gs://prod/logs", {"key": "logs/a"}, "ESCALATE"),
+    ("aws s3 rm s3://prod/logs --recursive", {"key": "logs/a"}, "ESCALATE"),
+    ("aws s3 rm s3://prod/logs --recursive", {"key": "other"}, "ALLOW"),
+    ("aws s3 mv s3://prod/logs s3://b/x", {"key": "logs/a"}, "ALLOW"),  # one object
+])
+def test_recursive_storage_keys_are_prefixes(command, scope, verdict):
+    provider = "aws" if command.startswith("aws") else "gcp"
+    pattern = "s3/bucket/prod" if provider == "aws" else "storage/bucket/prod"
+    assert _verdict([_rule(provider, pattern, ["delete"], scope)], command) == verdict
+
+
+def test_recursive_move_destination_is_a_prefix():
+    rule = _rule("gcp", "storage/bucket/archive", ["put"], {"key": "newprefix/a"})
+    assert _verdict([rule], "gsutil mv gs://prod/oldprefix gs://archive/newprefix") == \
+        "ESCALATE"
+    rule = _rule("gcp", "storage/bucket/archive", ["put"], {"key": "elsewhere"})
+    assert _verdict([rule], "gsutil mv gs://prod/oldprefix gs://archive/newprefix") == "ALLOW"
+
+
+EVERYDAY_GH = [
+    "gh pr create -t Fix -b Desc -B main -H feature -d -r alice -a @me -l bug",
+    "gh pr edit 42 -t Fix -b Desc -B main -m v1",
+    "gh pr merge 42 -s -d",
+    "gh pr merge 42 -r -t Subject -b Body",
+    "gh pr checkout 42 -b local -f",
+    "gh pr review 42 -a -b LGTM",
+    "gh pr review 42 -r -b Changes",
+    "gh pr close 42 -c Done -d",
+    "gh pr comment 42 -b Thanks",
+    "gh pr list -s open -L 10 -a @me",
+    "gh pr view 42 -c -w",
+    "gh issue create -t Bug -b Desc -l bug -a @me -m v1",
+    "gh issue edit 7 -t New -b Desc -m v2",
+    "gh issue close 7 -c Fixed -r completed",
+    "gh issue comment 7 -b Ack",
+    "gh issue list -s closed -L 5 -l bug",
+    "gh repo clone acme/prod -u upstream",
+    "gh repo create acme/new --public -d Desc -c",
+    "gh repo fork acme/prod --clone",
+    "gh repo delete acme/old --yes",
+    "gh repo view acme/prod -w",
+    "gh release create v1.0.0 -t Release -n Notes -d -p",
+    "gh release upload v1.0.0 dist/app.tar.gz --clobber",
+    "gh release delete v1.0.0 -y --cleanup-tag",
+    "gh workflow run deploy.yml -r main -f env=prod",
+    "gh run rerun 123 --failed -d",
+    "gh run cancel 123",
+    "gh run list -L 5 -w ci.yml",
+    "gh secret set TOKEN -b value -e prod",
+    "gh variable set NAME -b value -e staging",
+    "gh api repos/acme/prod/issues -X POST -f title=Bug -F draft=true",
+    "gh label create bug -c FF0000 -d Bugs",
+    "gh gist create notes.txt -d Notes -p",
+    "gh auth status -a",
+    "gh search repos aegis -L 5",
+    "gh repo edit acme/prod -d New",
+    "gh cache delete --all -R acme/prod",
+]
+EVERYDAY_OTHERS = [
+    "helm install web ./chart -n prod -f values.yaml --set image.tag=v1",
+    "helm upgrade web ./chart -n prod -i -f values.yaml",
+    "helm upgrade web ./chart -n prod --reuse-values --atomic",
+    "helm uninstall web -n prod",
+    "helm rollback web 3 -n prod",
+    "helm list -n prod -a",
+    "helm status web -n prod -o json",
+    "helm template web ./chart -f values.yaml",
+    "helm get values web -n prod -a",
+    "helm history web -n prod",
+    "helm repo add bitnami https://charts.bitnami.com/bitnami",
+    "helm repo update",
+    "helm pull bitnami/nginx -d /tmp",
+    "flux reconcile kustomization app -n flux-system --with-source",
+    "flux suspend kustomization app -n flux-system",
+    "flux resume helmrelease web -n prod",
+    "flux get kustomizations -A",
+    "flux create source git app -n flux-system --url=https://github.com/acme/app --branch=main",
+    "flux delete kustomization app -n flux-system -s",
+    "flux logs -n flux-system",
+    "argocd app sync web -p prod",
+    "argocd app get web -o yaml",
+    "argocd app delete web -y",
+    "argocd app list -p prod",
+    "argocd app set web -p env=prod",
+    "argocd app rollback web 3",
+    "argocd app create web --repo https://github.com/acme/app --path k8s "
+    "--dest-server https://kubernetes.default.svc --dest-namespace prod",
+    "argocd app diff web",
+    "argocd app history web",
+    "kubectl get pods -n prod -o wide -l app=web",
+    "kubectl apply -f deploy.yaml -n prod",
+    "kubectl delete pod web -n prod",
+    "kubectl logs web -n prod -c app -f",
+    "kubectl exec web -n prod -c app -it -- sh",
+    "kubectl scale deploy web -n prod --replicas=3",
+    "kubectl rollout restart deploy/web -n prod",
+    "kubectl describe pod web -n prod",
+    "kubectl create secret generic s -n prod --from-literal=a=b",
+    "kubectl set image deploy/web app=nginx:1.27 -n prod",
+    "kubectl port-forward svc/web 8080:80 -n prod",
+    "kubectl edit deploy web -n prod",
+    "kubectl label pod web -n prod env=prod",
+    "kubectl get all -A",
+]
+
+
+@pytest.mark.parametrize("command", EVERYDAY_GH + EVERYDAY_OTHERS)
+def test_everyday_commands_with_short_flags_parse(command):
+    assert from_argv(shlex.split(command))
+
+
+def test_gh_flags_come_from_gh_registrations():
+    # pr create's letters are gh's own (gh_flags.json, generated from cli/cli)
+    intent = from_argv("gh pr create -t Fix -b Desc -B main -d".split())[0]
+    assert intent.params["title"] == "Fix" and intent.params["body"] == "Desc"
+    assert intent.params["base"] == "main" and intent.params["draft"] is True
+    with pytest.raises(ValueError):  # repo clone has no -R
+        from_argv("gh repo clone acme/prod -R x/y".split())
+
+
+# commands whose letters the parser does not take from the registrations, because it
+# refuses the command (documented overrides of the generated letters)
+_REFUSED_FOR_LETTERS = {("flux", "migrate"), ("argocd", "app logs"), ("kubectl", "proxy")}
+
+
+def test_short_letters_agree_with_the_registrations():
+    from aegis_core import parser as p
+
+    tables = p._pflag_tables()
+    checks = {
+        "helm": (p._helm_short_name, lambda k: k in ("list", "template", "pull", "package",
+                                                      "upgrade", "create", "install")),
+        "flux": (p._flux_short_name, lambda k: len(k.split()) == 1 and k != "add"),
+        "argocd": (lambda letter, k: p._argocd_short_name(letter, k.split()[1]),
+                   lambda k: k.startswith("app ") and len(k.split()) == 2),
+        "kubectl": (lambda letter, k: p._kubectl_short_name(letter, k, False),
+                    lambda k: len(k.split()) == 1 and k not in ("add", "env", "resources")),
+    }
+    for tool, (name_of, applies) in checks.items():
+        for key, letters in tables[f"{tool}:shorts"].items():
+            if not applies(key) or (tool, key) in _REFUSED_FOR_LETTERS:
+                continue
+            for letter, flag in letters.items():
+                assert name_of(letter, key) == flag, (tool, key, letter, flag)

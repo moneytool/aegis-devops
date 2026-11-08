@@ -1072,12 +1072,28 @@ def _unbundle_short_word(word: str, verb: str | None, *, replicas: bool = False)
     return _split_short_word(word, bools, values, "kubectl")
 
 
+def _generated_shorts(tool: str, verb: str | None) -> dict[str, str]:
+    """The short letters ``tool``'s registrations give the command ``verb`` itself
+    (``<tool>:shorts`` in pflag_types.json): ``helm pull -d`` is --destination, where
+    ``helm list -d`` is --date."""
+    if verb is None:
+        return {}
+    found = _pflag_tables().get(f"{tool}:shorts", {}).get(verb)
+    return dict(found) if isinstance(found, dict) else {}
+
+
 def _helm_short_letters(verb: str | None) -> tuple[frozenset[str], frozenset[str]]:
-    """Helm's short letters: ``-a`` is a value on ``template`` and a boolean on ``list``
-    (helm 3) and ``get values``."""
-    if verb == "template":
-        return _HELM_SHORT_BOOL_LETTERS, _HELM_SHORT_VALUE_LETTERS | {"a"}
-    return _HELM_SHORT_BOOL_LETTERS | {"a"}, _HELM_SHORT_VALUE_LETTERS
+    """Helm's short letters: the global ones (``-n``) and those every release command
+    shares, with the letters the command's own registrations give winning (``-a`` is a
+    value on ``template`` and a boolean on ``list`` and ``get values``; ``-d`` is a value
+    on ``pull`` and ``package``), each a boolean or a value by its registered type."""
+    bools = set(_HELM_SHORT_BOOL_LETTERS | {"a"})
+    values = set(_HELM_SHORT_VALUE_LETTERS)
+    for letter, flag in _generated_shorts("helm", verb).items():
+        bools.discard(letter)
+        values.discard(letter)
+        (bools if _pflag_kinds("helm", flag) == {"Bool"} else values).add(letter)
+    return frozenset(bools), frozenset(values)
 
 
 _HELM_WAIT_STRATEGIES = frozenset({"watcher", "hookOnly", "legacy"})
@@ -1101,6 +1117,9 @@ def _helm_wait(val: str | None) -> str:
 def _helm_short_name(letter: str, verb: str | None) -> str | None:
     """The long flag helm's ``-<letter>`` is on ``verb`` (helm 4.3.1 and 3.21.1 flag
     registrations), or None when it has none here."""
+    own = _generated_shorts("helm", verb)
+    if letter in own:
+        return own[letter]
     names = {"n": "namespace", "o": "output", "m": "max", "s": "show-only",
              "A": "all-namespaces", "d": "date", "g": "generate-name", "i": "install",
              "q": "short", "r": "reverse"}
@@ -2854,7 +2873,8 @@ def _from_aws_s3(
         bucket, _, key = uri[len("s3://") :].partition("/")
         intent_params = {**params, "key": key} if key else dict(params)
         if many:
-            _mark_unresolved(intent_params, "key")
+            # every key under the path (a prefix, as aws lists it)
+            _mark_key_prefix(intent_params, key)
         elif destination:
             # cp/mv to s3://b/dir/ writes dir/<source's base name> (aws s3 never treats a
             # key without the slash as a folder)
@@ -4279,7 +4299,16 @@ def _mark_unresolved(params: dict[str, Any], key: str) -> None:
         marks.append(key)
 
 
-def _gcs_target(uri: str, params: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+def _mark_key_prefix(params: dict[str, Any], prefix: str) -> None:
+    """The command reaches every object whose key starts with ``prefix`` (a recursive copy,
+    move or delete, a wildcard's literal start): a rule on a key that may start with it
+    escalates, and a rule on any other key is not about this command
+    (``params["unresolved_prefix"]``, read by the store)."""
+    params.setdefault("unresolved_prefix", {})["key"] = prefix
+
+
+def _gcs_target(uri: str, params: dict[str, Any],
+                recursive: bool = False) -> tuple[str, dict[str, Any]]:
     """A ``gs://bucket[/object]`` operand as ``storage/bucket/<bucket>`` with the object in
     ``params["key"]``, on every gcloud storage and gsutil command alike. A wildcard
     (``*``, ``**``, ``?``, ``[...]``) or ``-r`` in the object reaches every key it matches:
@@ -4295,9 +4324,12 @@ def _gcs_target(uri: str, params: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         intent_params["generation"] = int(generation)
     if key:
         intent_params["key"] = key
-    recursive = any(params.get(k) is True for k in ("r", "R", "recursive"))
-    if recursive or _GLOB_CHARS_RE.search(key):
-        _mark_unresolved(intent_params, "key")
+    recursive = recursive or any(params.get(k) is True for k in ("r", "R", "recursive"))
+    glob = _glob_literal_prefix(key)
+    if glob is not None:
+        _mark_key_prefix(intent_params, glob)
+    elif recursive:
+        _mark_key_prefix(intent_params, key)
     prefix = _glob_literal_prefix(bucket)
     if prefix is not None:
         intent_params["resolved_at_runtime"] = {"from": f"storage/bucket/{bucket}",
@@ -4331,8 +4363,15 @@ def _copy_destination_key(params: dict[str, Any], sources: list[str], many: bool
         _mark_unresolved(params, "key")
 
 
-def _gcs_destination_key(params: dict[str, Any], sources: list[str], from_stdin: bool) -> None:
-    recursive = any(params.get(k) is True for k in ("r", "R", "recursive"))
+def _gcs_destination_key(params: dict[str, Any], sources: list[str], from_stdin: bool,
+                         recursive: bool = False) -> None:
+    recursive = recursive or any(params.get(k) is True for k in ("r", "R", "recursive"))
+    key = params.get("key", "")
+    if recursive and not from_stdin and not _GLOB_CHARS_RE.search(key):
+        # everything lands under the destination: <key>/... or <key>/<source base>/...
+        params.get("unresolved_prefix", {}).pop("key", None)
+        _mark_key_prefix(params, key)
+        return
     _copy_destination_key(params, sources, recursive or from_stdin, folders=True)
 
 
@@ -4351,6 +4390,9 @@ def _gcs_uri_intents(
     reach ``storage/bucket/*``, marked."""
     action = _GCS_LEGACY_VERB_MAP[verb]
     move = verb == "mv" or (raw_prefix == "gsutil" and verb == "cp" and params.get("M") is True)
+    # a move is recursive without -r: gcloud storage mv sets recursive itself
+    # (surface/storage/mv.py), and gsutil's cp turns recursion on for a move
+    implicit = move
     from_stdin = params.get("I") is True or params.get("read_paths_from_stdin") is True
     uris = [t for t in operands if t.startswith("gs://")]
     if not uris and not (from_stdin and verb in ("rm", "cp", "mv")):
@@ -4363,9 +4405,9 @@ def _gcs_uri_intents(
         targets.extend((src, "delete") for src in sources if src.startswith("gs://"))
     destination = operands[-1] if verb in ("cp", "mv") and operands else None
     for uri, act in targets:
-        resource, intent_params = _gcs_target(uri, params)
+        resource, intent_params = _gcs_target(uri, params, recursive=implicit)
         if uri == destination and act == action:
-            _gcs_destination_key(intent_params, operands[:-1], from_stdin)
+            _gcs_destination_key(intent_params, operands[:-1], from_stdin, recursive=implicit)
         intents.append(InfrastructureIntent(
             resource=resource, action=act, provider="gcp",
             params=intent_params, metadata=dict(metadata)))
@@ -4888,6 +4930,11 @@ class _StrvalsParser:
         self.s = text
         self.i = 0
         self.mode = mode  # "typed", "string", "json", "file" or "literal"
+        # the dotted paths written into rather than replaced: a map a nested key is set in,
+        # a list an index is set in (strvals ParseInto keeps what is already there)
+        self.merged: set[str] = set()
+        self._prefix: list[str] = []
+        self._in_list = 0
 
     def error(self, message: str) -> ValueError:
         return ValueError(f"helm cannot parse {self.s!r}: {message}")
@@ -4989,7 +5036,13 @@ class _StrvalsParser:
             existing = data.get(name, [])
             if not isinstance(existing, list):
                 raise self.error(f"{name!r} is not a list")
-            items = self.list_item(list(existing), self.index(), level)
+            if not self._in_list:
+                self.merged.add(".".join([*self._prefix, name]))
+            self._in_list += 1
+            try:
+                items = self.list_item(list(existing), self.index(), level)
+            finally:
+                self._in_list -= 1
             if name:
                 data[name] = items
             return
@@ -5001,7 +5054,13 @@ class _StrvalsParser:
         if not isinstance(existing, dict):
             raise self.error(f"{name!r} is not a map")  # helm panics, and refuses
         inner = dict(existing)
-        self.key(inner, level)
+        if not self._in_list:
+            self.merged.add(".".join([*self._prefix, name]))
+        self._prefix.append(name)
+        try:
+            self.key(inner, level)
+        finally:
+            self._prefix.pop()
         if not inner:
             raise self.error(f"key map {name!r} has no value")
         if name:
@@ -5080,6 +5139,15 @@ def _strip_file_values(value: Any, path: str, out: list[str]) -> Any:
     return value
 
 
+def _helm_dig(values: dict[str, Any], path: str) -> Any:
+    node: Any = values
+    for part in path.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return None
+        node = node[part]
+    return node
+
+
 def _merge_helm_values(params: dict[str, Any], sets: dict[str, list[str]],
                        verb: str | None = None) -> None:
     """``params["set"]``: the values the command line sets, as one nested map, merged in
@@ -5096,6 +5164,16 @@ def _merge_helm_values(params: dict[str, Any], sets: dict[str, list[str]],
     all; --reset-values, checked first, turns all of it off. ``rollback`` puts back an
     earlier revision's values. Those values are not on the argv either: ``set.*``."""
     base: dict[str, Any] = {}
+    merged: set[str] = set()
+
+    def map_paths(value: Any, path: str) -> None:
+        # MergeMaps merges each map of a JSON object into the one already there
+        if isinstance(value, dict):
+            for k, v in value.items():
+                if isinstance(v, dict):
+                    merged.add(f"{path}{k}")
+                    map_paths(v, f"{path}{k}.")
+
     for value in sets["set-json"]:
         stripped = value.strip()
         if stripped.startswith("{"):
@@ -5106,12 +5184,17 @@ def _merge_helm_values(params: dict[str, Any], sets: dict[str, list[str]],
             if not isinstance(loaded, dict):
                 raise ValueError(f"helm: --set-json {value!r} is not a JSON object")
             base = _helm_merge_maps(base, loaded)
+            map_paths(loaded, "")
         else:
-            _StrvalsParser(value, "json").parse(base)
+            parser = _StrvalsParser(value, "json")
+            parser.parse(base)
+            merged |= parser.merged
     for kind, mode in (("set", "typed"), ("set-string", "string"), ("set-file", "file"),
                        ("set-literal", "literal")):
         for value in sets[kind]:
-            _StrvalsParser(value, mode).parse(base)
+            parser = _StrvalsParser(value, mode)
+            parser.parse(base)
+            merged |= parser.merged
     unresolved: list[str] = []
     cleaned = _strip_file_values(base, "set", unresolved)
     if cleaned:
@@ -5122,6 +5205,13 @@ def _merge_helm_values(params: dict[str, Any], sets: dict[str, list[str]],
              or (not base and not params.get("values_files"))))
     if params.get("values_files") or reuse:
         unresolved.append("set.*")
+        # A --set writes into what the files or the reused values hold: a list index
+        # keeps the list's other items, a nested key the map's other keys. Those maps and
+        # lists, compared whole, are unknown; only a value set whole (a scalar, a {a,b}
+        # list) is known. A container a later --set replaced whole is known again.
+        for path in sorted(merged):
+            if isinstance(_helm_dig(base, path), (dict, list)):
+                unresolved.append(f"set.{path}")
     for mark in unresolved:
         _mark_unresolved(params, mark)
 
@@ -5197,6 +5287,37 @@ def from_helm_multi(argv: list[str]) -> list[InfrastructureIntent]:
         if len(positional) > 1:
             params["revision"] = _go_atoi(positional[1], "revision")
         return [one(positional[0], "rollback")]
+
+    if verb == "repo":
+        # helm repo add|update|remove|list: the local repository list, not a release
+        sub = positional[0] if positional else None
+        names = positional[1:]
+        params["raw_action"] = f"repo-{sub}"
+
+        def repo(name: str, action: str) -> InfrastructureIntent:
+            return InfrastructureIntent(resource=f"repo/{name}", action=action,
+                                        provider="helm", params=dict(params),
+                                        metadata=dict(metadata))
+
+        if sub == "add" and len(names) == 2:
+            params["url"] = names[1]
+            return [repo(names[0], "create")]
+        if sub in ("update", "up"):
+            return [repo(name, "update") for name in names] or _mark_open_targets(
+                [repo("*", "update")])
+        if sub in ("remove", "rm") and names:
+            return [repo(name, "delete") for name in names]
+        if sub in ("list", "ls") and not names:
+            return [repo("*", "read")]
+        raise ValueError(f"unsupported helm repo invocation: {argv!r}")
+
+    if verb in ("pull", "fetch"):
+        # downloads a chart to the local disk
+        if len(positional) != 1:
+            raise ValueError(f"helm pull takes one chart: {argv!r}")
+        return [InfrastructureIntent(resource=f"chart/{positional[0]}", action="read",
+                                     provider="helm", params=dict(params),
+                                     metadata=dict(metadata))]
 
     if verb in _HELM_READ_VERBS:
         sub_positional = positional
@@ -6064,6 +6185,23 @@ _GIT_OPTION_SPECS = {
 }
 
 
+# The options that take a value each time they are given, per verb (git 2.52's
+# documentation, checked by running git): push -o/--push-option ("can be given multiple
+# times") and --force-with-lease (one per ref); commit and tag -m ("concatenated as
+# separate paragraphs") and --trailer; branch and tag --contains, --no-contains, --merged,
+# --no-merged, --points-at and --sort (each adds a filter or a sort key); rebase -x/--exec
+# and -X/--strategy-option. Every other value option keeps its last value.
+_GIT_ACCUMULATING = {
+    "push": frozenset({"push-option", "force-with-lease"}),
+    "commit": frozenset({"message", "trailer"}),
+    "tag": frozenset({"message", "trailer", "contains", "no-contains", "with", "without",
+                      "merged", "no-merged", "points-at", "sort"}),
+    "branch": frozenset({"contains", "no-contains", "with", "without", "merged",
+                         "no-merged", "points-at", "sort"}),
+    "rebase": frozenset({"exec", "strategy-option"}),
+}
+
+
 def _git_option_table(spec: str) -> tuple[dict[str, tuple[str, str]], dict[str, str], set[str]]:
     """``(shorts, longs, negatable)`` from one entry of :data:`_GIT_OPTION_SPECS`: a short
     letter maps to ``(name, arity)``, a long name to its arity ("", "=" or "?")."""
@@ -6172,12 +6310,19 @@ def _git_option_params(verb: str, options: list[tuple[str, Any]]) -> dict[str, A
     ``x: False``, and an option that is the negative of another (``--no-verify`` beside
     ``--verify``, ``-n`` on commit) is that one with ``False``, so one value has one key."""
     longs = _GIT_OPTIONS[verb][1]
+    accumulating = _GIT_ACCUMULATING.get(verb, frozenset())
     params: dict[str, Any] = {}
     for name, val in options:
         if val is True and name.startswith("no-") and name[3:] in longs:
             name, val = name[3:], None
         key = name.replace("-", "_")
-        if val is None:
+        if name in accumulating:
+            # each one adds a value; the --no- form empties the list (OPT_STRING_LIST)
+            if val is None:
+                params.pop(key, None)
+            else:
+                params.setdefault(key, []).append(val)
+        elif val is None:
             params[key] = False
         else:
             params[key] = val  # git's option values are text
@@ -6742,74 +6887,9 @@ def _gh_fold_globals(group: str, tokens: list[str], leading: list[str]) -> list[
     return [*leading, *tokens]
 
 
-# The flags of the gh commands that change something, from cli/cli v2.103 (pkg/cmd, and
-# cmdutil's enum and optional-value flags): booleans, flags that take a value, and short
-# letters with the long flag each stands for on that command. -h/--help is on every one,
-# and -R/--repo on every one but api. pflag reads them, so a value flag takes the next word
-# whatever it is, and a boolean takes none: "gh pr merge -s 42" is a squash merge of 42
-# ("-r" is --rebase there and --ref on "workflow run").
-_GH_COMMAND_FLAGS: dict[tuple[str, str], tuple[frozenset[str], frozenset[str], dict[str, str]]] = {
-    ("pr", "merge"): (
-        frozenset({"admin", "auto", "delete-branch", "disable-auto", "merge", "rebase", "squash"}),
-        frozenset({"author-email", "body", "body-file", "match-head-commit", "subject"}),
-        {"A": "author-email", "F": "body-file", "b": "body", "d": "delete-branch",
-         "m": "merge", "r": "rebase", "s": "squash", "t": "subject"},
-    ),
-    ("pr", "close"): (
-        frozenset({"delete-branch"}), frozenset({"comment"}),
-        {"c": "comment", "d": "delete-branch"},
-    ),
-    ("repo", "delete"): (
-        frozenset({"accept-cascading-deletion-of-private-forks", "confirm", "yes"}),
-        frozenset(), {},
-    ),
-    ("release", "create"): (
-        frozenset({"draft", "fail-on-no-commits", "generate-notes", "latest", "notes-from-tag",
-                   "prerelease", "verify-tag"}),
-        frozenset({"discussion-category", "notes", "notes-file", "notes-start-tag", "target",
-                   "title"}),
-        {"F": "notes-file", "d": "draft", "n": "notes", "p": "prerelease", "t": "title"},
-    ),
-    ("release", "delete"): (frozenset({"cleanup-tag", "yes"}), frozenset(), {"y": "yes"}),
-    ("secret", "set"): (
-        frozenset({"no-repos-selected", "no-store", "user"}),
-        frozenset({"app", "body", "env", "env-file", "org", "repos", "visibility"}),
-        {"a": "app", "b": "body", "e": "env", "f": "env-file", "o": "org", "r": "repos",
-         "u": "user", "v": "visibility"},
-    ),
-    ("secret", "delete"): (
-        frozenset({"user"}), frozenset({"app", "env", "org"}),
-        {"a": "app", "e": "env", "o": "org", "u": "user"},
-    ),
-    ("variable", "set"): (
-        frozenset(), frozenset({"body", "env", "env-file", "org", "repos", "visibility"}),
-        {"b": "body", "e": "env", "f": "env-file", "o": "org", "r": "repos", "v": "visibility"},
-    ),
-    ("workflow", "run"): (
-        frozenset({"json"}), frozenset({"field", "raw-field", "ref"}),
-        {"F": "field", "f": "raw-field", "r": "ref"},
-    ),
-    ("issue", "delete"): (frozenset({"confirm", "yes"}), frozenset(), {}),
-    ("issue", "close"): (frozenset(), frozenset({"comment", "duplicate-of", "reason"}),
-                         {"c": "comment", "r": "reason"}),
-    ("run", "delete"): (frozenset(), frozenset(), {}),
-    ("run", "cancel"): (frozenset({"force"}), frozenset(), {}),
-    ("run", "rerun"): (frozenset({"failed", "debug"}), frozenset({"job"}),
-                       {"d": "debug", "j": "job"}),
-    ("workflow", "enable"): (frozenset(), frozenset(), {}),
-    ("workflow", "disable"): (frozenset(), frozenset(), {}),
-    ("api", ""): (
-        frozenset({"allow-escape-sequences", "include", "paginate", "silent", "slurp",
-                   "verbose"}),
-        frozenset({"cache", "field", "header", "hostname", "input", "jq", "method", "preview",
-                   "raw-field", "template"}),
-        {"F": "field", "H": "header", "X": "method", "f": "raw-field", "i": "include",
-         "p": "preview", "q": "jq", "t": "template"},
-    ),
-}
-_GH_COMMON_BOOLS = frozenset({"help"})
-_GH_COMMON_VALUES = frozenset({"repo"})
-_GH_COMMON_SHORTS = {"R": "repo", "h": "help"}
+# The flags of every gh command are read from gh's own registrations (gh_flags.json, see
+# _gh_command_spec): each command's booleans, value flags and short letters, and -R/--repo
+# only where gh registers it (not on api, repo clone or gist).
 
 
 _GH_REPO_SPEC_RE = re.compile(
@@ -6960,7 +7040,7 @@ _GH_ARGS: dict[tuple[str, str], tuple[int, int | None]] = {
 def _parse_gh_tokens_inner(
     tokens: list[str], command: tuple[str, str] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
-    spec = _GH_COMMAND_FLAGS.get(command) if command else None
+    spec = _gh_command_spec(command) if command else None
     if spec is not None:
         return _parse_gh_command_tokens(tokens, spec, typed_fields=command == ("api", ""),
                                         gh_command=" ".join(command).strip())
@@ -7115,18 +7195,41 @@ def _gh_api_field_keys(key: str) -> list[str]:
     return [match.group(1), *re.findall(r"\[([^\[\]]*)\]", match.group(2))]
 
 
+_GH_FLAGS_FILE = Path(__file__).parent / "data" / "gh_flags.json"
+
+
+@lru_cache(maxsize=1)
+def _gh_flag_table() -> dict[str, Any]:
+    with open(_GH_FLAGS_FILE) as f:
+        return json.load(f)
+
+
+@lru_cache(maxsize=512)
+def _gh_command_spec(
+    command: tuple[str, ...],
+) -> tuple[frozenset[str], frozenset[str], dict[str, str]] | None:
+    """``(booleans, value flags, {letter: flag})`` of a gh command, from its flag
+    registrations in cli/cli (``gh_flags.json``, scripts/gen_gh_flags.py): its own flags
+    and the persistent ones of the commands above it (``-R`` from EnableRepoOverride).
+    None for a command gh does not register (an extension, an alias)."""
+    entry = _gh_flag_table().get(" ".join(command).strip())
+    if not isinstance(entry, dict):
+        return None
+    bools = frozenset(name for name, (kind, _short) in entry.items() if kind == "bool")
+    values = frozenset(name for name, (kind, _short) in entry.items() if kind != "bool")
+    shorts = {short: name for name, (_kind, short) in entry.items() if short}
+    return bools, values, shorts
+
+
 def _parse_gh_command_tokens(
     tokens: list[str], spec: tuple[frozenset[str], frozenset[str], dict[str, str]],
     *, typed_fields: bool = False, gh_command: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
-    """A gh command from :data:`_GH_COMMAND_FLAGS`, read as pflag reads it: short words
-    letter by letter, a value flag takes the next word, ``--`` ends the flags, and a flag
-    in no table is refused unless ``=value`` or its place shows its reading."""
-    bools = spec[0] | _GH_COMMON_BOOLS
-    # gh api has no -R/--repo (api.go never calls EnableRepoOverride): gh refuses it, and
-    # the repository is the one the path or URL names
-    values = spec[1] | (frozenset() if gh_command == "api" else _GH_COMMON_VALUES)
-    shorts = {**({"h": "help"} if gh_command == "api" else _GH_COMMON_SHORTS), **spec[2]}
+    """A gh command read as pflag reads it, with the flags gh registers for it
+    (:func:`_gh_command_spec`): short words letter by letter, a value flag takes the next
+    word, ``--`` ends the flags, and a flag gh does not register is refused (gh refuses
+    it). gh api has no -R/--repo (api.go never calls EnableRepoOverride)."""
+    bools, values, shorts = spec
     short_bools = frozenset(letter for letter, name in shorts.items() if name in bools)
     short_values = frozenset(letter for letter, name in shorts.items() if name in values)
     metadata: dict[str, Any] = {}
@@ -7563,7 +7666,13 @@ def _from_gh(argv: list[str]) -> InfrastructureIntent:
         # extension exec disables flag parsing: every word goes to the extension
         metadata, params, positional = {}, {}, list(tokens)
     else:
-        metadata, params, positional = _parse_gh_tokens(tokens)
+        # the command is the first word gh registers under the group (flags may come
+        # before it: cobra reads them with the command's own flag set)
+        sub = next((t for t in tokens if not t.startswith("-")
+                    and _gh_command_spec((group, t)) is not None), None)
+        command = (group, sub) if sub is not None else (
+            (group,) if _gh_command_spec((group,)) is not None else None)
+        metadata, params, positional = _parse_gh_tokens(tokens, command)
     params["raw_action"] = group
     # gh <group> <command> ...: the resource keeps the command word, as before
     subverb = positional[0] if (group, None) not in _GH_ACTIONS and positional else None

@@ -26,7 +26,8 @@ TYPES = ("StringArray", "StringSlice", "StringToString", "IntSlice", "Int32Slice
          "IP", "IPSlice", "IPMask", "IPNet", "BytesHex", "BytesBase64")
 _CALL = re.compile(
     r"\.(?P<type>" + "|".join(TYPES) + r"|)(?P<var>Var)?(?P<p>P)?\(\s*"
-    r"(?:(?P<ptr>&?[\w.\[\]()]+)\s*,\s*)?(?P<name>\"[^\"]*\"|[A-Za-z_][\w.]*)\s*,", re.S)
+    r"(?:(?P<ptr>&?[\w.\[\]()]+)\s*,\s*)?(?P<name>\"[^\"]*\"|[A-Za-z_][\w.]*)\s*,"
+    r"(?:\s*\"(?P<short>[A-Za-z0-9]?)\"\s*,)?", re.S)
 _CONST = re.compile(r"\b([A-Za-z_]\w*)\s*(?:string\s*)?=\s*\"([a-z0-9][a-z0-9.-]*)\"")
 
 
@@ -87,7 +88,9 @@ def _balanced_arg(text: str, start: int) -> tuple[str | None, int]:
     return None, i
 
 
-def scan(dirs: list[str], tool: str = "") -> tuple[dict[str, str], dict[str, dict[str, str]]]:
+def scan(dirs: list[str], tool: str = "",
+         shorts: dict[str, dict[str, str]] | None = None,
+         ) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
     files = [p for d in dirs for p in Path(d).rglob("*.go") if not p.name.endswith("_test.go")]
     consts: dict[str, str] = {}
     for path in files:
@@ -103,7 +106,8 @@ def scan(dirs: list[str], tool: str = "") -> tuple[dict[str, str], dict[str, dic
             value_expr, after = _balanced_arg(text, m.end())
             if value_expr is None:
                 continue
-            nm = re.match(r"\s*(\"[^\"]*\"|[A-Za-z_][\w.]*)\s*,", text[after:])
+            nm = re.match(r"\s*(\"[^\"]*\"|[A-Za-z_][\w.]*)\s*,"
+                          r"(?:\s*\"([A-Za-z0-9]?)\"\s*,)?", text[after:])
             if not nm:
                 continue
             raw = nm.group(1)
@@ -116,6 +120,8 @@ def scan(dirs: list[str], tool: str = "") -> tuple[dict[str, str], dict[str, dic
             command = _command_key(tool, path, text, m.start())
             if command:
                 by_command.setdefault(command, {}).setdefault(name, set()).add(kind)
+                if shorts is not None and "VarP" in text[m.start():m.end()] and nm.group(2):
+                    shorts.setdefault(command, {})[nm.group(2)] = name
         for m in _CALL.finditer(text):
             kind, var, ptr = m.group("type"), m.group("var"), m.group("ptr")
             if not kind and not var:
@@ -134,6 +140,8 @@ def scan(dirs: list[str], tool: str = "") -> tuple[dict[str, str], dict[str, dic
             command = _command_key(tool, path, text, m.start())
             if command:
                 by_command.setdefault(command, {}).setdefault(name, set()).add(kind or "value")
+                if shorts is not None and m.group("p") and m.group("short"):
+                    shorts.setdefault(command, {})[m.group("short")] = name
 
     def one(kinds: set[str]) -> str:
         return next(iter(kinds)) if len(kinds) == 1 else "mixed:" + ",".join(sorted(kinds))
@@ -168,6 +176,7 @@ CUSTOM_VALUES = {
     ("flux", "ssh-rsa-bits"): "Int",  # flags.RSAKeyBits: strconv.Atoi
     ("flux", "type"): "String", ("flux", "verify-provider"): "String",
     ("flux", "visibility"): "String",
+    ("gh", "retention-period"): "Duration",  # codespace NullableDuration: time.ParseDuration
 }
 
 
@@ -221,7 +230,11 @@ def main(out: str, specs: list[str]) -> None:
     data = {"_source": "pflag registrations in each tool's source: " + "; ".join(named)}
     for spec in specs:
         tool, _, dirs = spec.partition("=")
-        flags, commands = scan(dirs.split(","), tool)
+        letters: dict[str, dict[str, str]] = {}
+        flags, commands = scan(dirs.split(","), tool, letters)
+        # each command's short letters, as the registrations give them (``-n`` is
+        # --namespace), by the command the registration belongs to
+        data[f"{tool}:shorts"] = {c: dict(sorted(v.items())) for c, v in sorted(letters.items())}
         data[tool] = _resolve_custom(tool, flags)
         data[f"{tool}:commands"] = {c: _resolve_custom(tool, f) for c, f in commands.items()}
         data[f"{tool}:custom"] = sorted(name for name, kind in flags.items() if "value" in kind)

@@ -922,6 +922,23 @@ def param_unresolved(key: str, intent: InfrastructureIntent) -> bool:
     return False
 
 
+def _prefix_unresolved(key: str, expected: Any, intent: InfrastructureIntent) -> bool:
+    """Whether a rule's value for ``key`` may be one of the values the command reaches
+    when it runs, all starting with a known prefix (``params["unresolved_prefix"]``: a
+    recursive copy, move or delete of ``logs`` reaches ``logs/a``, ``logs/b``...). A value
+    that cannot start with the prefix is not reached, and the key decides as recorded."""
+    prefixes = intent.params.get("unresolved_prefix")
+    if not isinstance(prefixes, dict):
+        return False
+    want = canonical_key(key)
+    for name, prefix in prefixes.items():
+        if canonical_key(name) == want and isinstance(prefix, str):
+            if not isinstance(expected, str):
+                return True  # a value that is not text: not known not to be reached
+            return _pattern_may_start_with(expected, prefix)
+    return False
+
+
 def scope_unresolved(scope: dict[str, Any], intent: InfrastructureIntent) -> list[str]:
     """The scope keys of ``scope`` that this intent leaves unresolved
     (``env`` without a resolved environment; ``namespace`` per
@@ -935,6 +952,8 @@ def scope_unresolved(scope: dict[str, Any], intent: InfrastructureIntent) -> lis
     if "namespace" in scope and namespace_unresolved(intent):
         unknown.add("namespace")
     unknown.update(key for key in scope if param_unresolved(key, intent))
+    unknown.update(key for key, expected in scope.items()
+                   if _prefix_unresolved(key, expected, intent))
     # a rule's value its key's type cannot hold (a duration key given "soon") neither
     # matches nor fails to: it escalates, as an unknown value does
     unknown.update(key for key, expected in scope.items()
