@@ -2,6 +2,15 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+def canonical_key(key: str) -> str:
+    """The one form two scope keys are compared in: ``-`` and ``_`` are the same
+    character in every segment (``dry-run`` / ``dry_run``, ``set.replica_count`` /
+    ``set.replica-count``). The store's matching and its unresolved marks, and the
+    parser's configuration marks, all go through this function, so they can never
+    disagree about whether two spellings name the same key."""
+    return key.replace("_", "-")
+
+
 @dataclass
 class InfrastructureIntent:
     """

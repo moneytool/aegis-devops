@@ -1505,3 +1505,29 @@ def test_kuberc_off_is_fine():
 def test_terraform_chdir_has_one_spelling(chdir):
     assert from_argv(["terraform", f"-chdir={chdir}", "destroy"])[0].resource == \
         "workspace/infra"
+
+
+# --- review round 3 ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("flags,rule_key,verdict", [
+    # A2: an unresolved mark meets every spelling matching meets
+    ("--set-file replica-count=r.txt", "set.replica_count", "ESCALATE"),
+    ("--set-file replica_count=r.txt", "set.replica-count", "ESCALATE"),
+    ("--set replica-count=0", "set.replica_count", "BLOCK"),
+    ("--set a.b_c.d=0", "set.a.b-c.d", "BLOCK"),  # every level, not only the last
+    ("--set-file a.b_c.d=r.txt", "set.a.b-c.d", "ESCALATE"),
+    ("--set-file replica-count=r.txt --set replica_count=3", "set.replica_count",
+     "ESCALATE"),
+])
+def test_unresolved_marks_meet_every_spelling(flags, rule_key, verdict):
+    rule = _rule("helm", "release/*", ["update"], {rule_key: 0})
+    assert _verdict([rule], ["helm", "upgrade", "api", "./c", *flags.split()]) == verdict
+
+
+@pytest.mark.parametrize("rule_key", ["app_namespace", "app-namespace"])
+def test_argocd_app_namespace_mark_meets_both_spellings(rule_key):
+    rule = _rule("argocd", "app/*", ["delete"], {rule_key: "prod"})
+    assert _verdict([rule], "argocd app delete web -y") == "ESCALATE"
+    assert _verdict([rule], "argocd app delete web -y --app-namespace prod") == "BLOCK"
+    assert _verdict([rule], "argocd app delete web -y --app-namespace dev") == "ALLOW"

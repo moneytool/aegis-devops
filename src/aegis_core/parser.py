@@ -123,7 +123,7 @@ from collections.abc import Collection
 from pathlib import Path
 from typing import Any
 
-from aegis_core.intent import InfrastructureIntent
+from aegis_core.intent import InfrastructureIntent, canonical_key
 
 # Shared one-word verb normalisation used by the AWS/Azure/GCP parsers. Each
 # cloud parser is also responsible for a handful of compound verbs (e.g.
@@ -5590,8 +5590,8 @@ def mark_config_scope(intents: list[InfrastructureIntent]) -> list[Infrastructur
         keys = _CONFIG_SCOPE_KEYS.get(intent.provider, ())
         if intent.provider == "git" and intent.params.get("raw_action") != "push":
             keys = ()  # only a push has a remote
-        missing = [key for key in keys
-                   if key not in intent.metadata and key not in intent.params]
+        given = {canonical_key(k) for k in (*intent.metadata, *intent.params)}
+        missing = [key for key in keys if canonical_key(key) not in given]
         if missing:
             marks = intent.params.setdefault("unresolved_scope", [])
             marks.extend(key for key in missing if key not in marks)

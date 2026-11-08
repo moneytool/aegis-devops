@@ -106,7 +106,7 @@ import yaml
 
 from aegis_core.gitsource import GIT_PREFIX, SourceNotChecked, SourceRejected
 from aegis_core.gitsource import REASON_MESSAGES as GIT_REASON_MESSAGES
-from aegis_core.intent import InfrastructureIntent
+from aegis_core.intent import InfrastructureIntent, canonical_key
 from aegis_core.parser import _KUBECTL_BUILTIN_NAMES
 from aegis_core.provenance import (
     CachingSourceFetcher,
@@ -487,35 +487,37 @@ def _dig_paths(mapping: dict[str, Any], key: str) -> list[Any]:
     (``set.replicaCount`` -> ``mapping["set"]["replicaCount"]``), where each level may
     also hold a key with dots in it (``labels.app.kubernetes.io/name`` ->
     ``mapping["labels"]["app.kubernetes.io/name"]``, helm's ``--set a\\.b=1``). All of
-    them count, so a literal dotted key can never hide a nested value of the same path."""
+    them count, so a literal dotted key can never hide a nested value of the same path.
+    Keys are compared by :func:`canonical_key` at every level."""
     values: list[Any] = []
-    if key in mapping:
-        values.append(mapping[key])
-    start = key.find(".")
-    while start != -1:
-        head, rest = key[:start], key[start + 1:]
-        inner = mapping.get(head)
-        if isinstance(inner, dict):
-            values.extend(_dig_paths(inner, rest))
-        start = key.find(".", start + 1)
+    want = canonical_key(key)
+    for name, inner in mapping.items():
+        if not isinstance(name, str):
+            continue
+        have = canonical_key(name)
+        if have == want:
+            values.append(inner)
+        elif (isinstance(inner, dict) and want.startswith(have)
+                and want[len(have):len(have) + 1] == "."):
+            values.extend(_dig_paths(inner, key[len(name) + 1:]))
     return values
 
 
 def _key_spellings(key: str) -> list[tuple[str, bool]]:
-    """The spellings of one scope key, with whether the value is the negation: the key,
-    its ``-``/``_`` twin (``dry-run`` / ``dry_run``), and a boolean's other side
-    (``no-verify-ssl`` is ``verify-ssl`` negated, ``verify-ssl`` is ``no-verify-ssl``
-    negated), so a rule written either way meets what a parser recorded either way."""
+    """The spellings of one scope key, with whether the value is the negation: the key
+    and a boolean's other side (``no-verify-ssl`` is ``verify-ssl`` negated,
+    ``verify-ssl`` is ``no-verify-ssl`` negated), so a rule written either way meets
+    what a parser recorded either way. ``-`` and ``_`` need no spelling of their own:
+    :func:`canonical_key` makes them one."""
     head, dot, tail = key.rpartition(".")
     prefix = head + dot
-    out: list[tuple[str, bool]] = []
-    for leaf in dict.fromkeys((tail, tail.replace("-", "_"), tail.replace("_", "-"))):
-        out.append((prefix + leaf, False))
-        if leaf[:3] in ("no-", "no_") and len(leaf) > 3:
-            out.append((prefix + leaf[3:], True))
-        else:
-            out.extend((prefix + no + leaf, True) for no in ("no-", "no_"))
-    return list(dict.fromkeys(out))
+    leaf = canonical_key(tail)
+    out: list[tuple[str, bool]] = [(key, False)]
+    if leaf.startswith("no-") and len(leaf) > 3:
+        out.append((prefix + tail[3:], True))
+    else:
+        out.append((prefix + "no-" + tail, True))
+    return out
 
 
 def _dig_all(mapping: dict[str, Any], key: str) -> list[Any]:
@@ -845,14 +847,20 @@ def namespace_unresolved(intent: InfrastructureIntent) -> bool:
 def param_unresolved(key: str, intent: InfrastructureIntent) -> bool:
     """Whether a parser marked scope ``key`` as unknown (``params["unresolved_scope"]``):
     ``set.replicaCount`` when helm --set-file sets it from a file nobody read, and
-    ``set.*`` for every ``set.`` key the command line leaves to a values file."""
+    ``set.*`` for every ``set.`` key the command line leaves to a values file. A mark
+    meets every spelling of the key that matching would meet (:func:`canonical_key`,
+    and a boolean's negated side)."""
     marks = intent.params.get("unresolved_scope")
     if not isinstance(marks, list) or _dig_all(intent.metadata, key):
         return False
+    spellings = {canonical_key(spelling) for spelling, _ in _key_spellings(key)}
     for mark in marks:
-        if mark == key:
+        if not isinstance(mark, str):
+            continue
+        canon = canonical_key(mark)
+        if canon in spellings:
             return True
-        if (isinstance(mark, str) and mark.endswith(".*") and key.startswith(mark[:-1])
+        if (canon.endswith(".*") and any(s.startswith(canon[:-1]) for s in spellings)
                 and not _dig_all(intent.params, key)):
             return True
     return False
@@ -873,9 +881,10 @@ def scope_unresolved(scope: dict[str, Any], intent: InfrastructureIntent) -> lis
     unknown.update(key for key in scope if param_unresolved(key, intent))
     if not unknown:
         return []
+    gone = {canonical_key(k) for k in unknown}
     rest = {k: v for k, v in scope.items() if k not in unknown}
-    metadata = {k: v for k, v in intent.metadata.items() if k not in unknown}
-    params = {k: v for k, v in intent.params.items() if k not in unknown}
+    metadata = {k: v for k, v in intent.metadata.items() if canonical_key(k) not in gone}
+    params = {k: v for k, v in intent.params.items() if canonical_key(k) not in gone}
     return sorted(unknown) if scope_matches(rest, metadata, params) else []
 
 
