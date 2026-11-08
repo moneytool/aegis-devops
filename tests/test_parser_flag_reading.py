@@ -853,3 +853,41 @@ def test_aws_full_flag_and_abbreviation_are_both_read(command, resources):
 def test_aws_rule_on_the_abbreviated_name_holds():
     assert _verdict([_rule("aws", "iam/role/b", ["delete"])],
                     "aws iam delete-role --role-name a --role b") == "BLOCK"
+
+
+# --- git branch rename, copy and force (run with git 2.52 in a scratch repository) ----
+
+
+@pytest.mark.parametrize("command,targets", [
+    ("git branch -m old new", [("branch/new", "create"), ("branch/old", "delete")]),
+    ("git branch -M feature main",
+     [("branch/main", "create"), ("branch/main", "delete"), ("branch/feature", "delete")]),
+    ("git branch --move --force a b",
+     [("branch/b", "create"), ("branch/b", "delete"), ("branch/a", "delete")]),
+    # one name renames the current branch, which the argv does not show
+    ("git branch -m new", [("branch/new", "create"), ("branch/*", "delete")]),
+    ("git branch -c a b", [("branch/b", "create")]),
+    ("git branch -C a main", [("branch/main", "create"), ("branch/main", "delete")]),
+    # -f resets an existing branch
+    ("git branch -f main HEAD~3", [("branch/main", "create"), ("branch/main", "delete")]),
+    ("git branch side", [("branch/side", "read")]),
+])
+def test_git_branch_rename_copy_and_force(command, targets):
+    assert [(i.resource, i.action) for i in from_argv(command.split())] == targets
+
+
+@pytest.mark.parametrize("command,verdict", [
+    ("git branch -m main old-main", "BLOCK"),
+    ("git branch -M feature main", "BLOCK"),
+    ("git branch -C feature main", "BLOCK"),
+    ("git branch -f main HEAD~3", "BLOCK"),
+    ("git branch -m new-name", "ESCALATE"),  # the current branch may be main
+    ("git branch -c main copy", "ALLOW"),
+])
+def test_a_rule_against_deleting_main_holds_on_renames(command, verdict):
+    assert _verdict([_rule("git", "branch/main", ["delete"])], command) == verdict
+
+
+def test_git_branch_rename_takes_at_most_two_names():
+    with pytest.raises(ValueError):
+        from_argv("git branch -m a b c".split())

@@ -3994,8 +3994,15 @@ def _git_option_params(verb: str, options: list[tuple[str, Any]]) -> dict[str, A
     elif verb in ("branch", "tag"):
         if _git_last(options, "delete", "D"):
             params["delete"] = True
-        if _git_last(options, "force", "D"):
+        if _git_last(options, "force", "D", "M", "C"):
             params["force"] = True
+        if verb == "branch":
+            # -m/-M rename a branch and -c/-C copy one; the capital letters overwrite an
+            # existing branch of the new name, as --force does
+            if _git_last(options, "move", "M"):
+                params["rename"] = True
+            elif _git_last(options, "copy", "C"):
+                params["copy"] = True
     elif verb == "commit":
         if _git_last(options, "amend"):
             params["amend"] = True
@@ -4122,6 +4129,12 @@ def from_git_multi(argv: list[str]) -> list[InfrastructureIntent]:
                 raise ValueError(f"could not find a {verb} name in: {argv!r}")
             # git deletes every one it is given
             return [one(f"{verb}/{name}", "delete") for name in dict.fromkeys(positional)]
+        if params.get("rename") or params.get("copy"):
+            return _git_branch_move(positional, one, params, argv)
+        if verb == "branch" and params.get("force") and positional:
+            # git branch -f <name> [<start>] resets an existing branch to <start>
+            return [one(f"branch/{positional[0]}", "create"),
+                    one(f"branch/{positional[0]}", "delete")]
         return [one(f"{verb}/{positional[0] if positional else '*'}", "read")]
 
     if verb == "rebase":
@@ -4147,6 +4160,26 @@ def from_git_multi(argv: list[str]) -> list[InfrastructureIntent]:
     # checkout, switch, log, status, diff, fetch, pull, commit (no --amend),
     # add, show, reset (no --hard), ... -- local/read-ish, nothing to gate.
     return [one("history/*", "read")]
+
+
+def _git_branch_move(positional, one, params, argv) -> list[InfrastructureIntent]:
+    """``git branch -m|-c [<old>] <new>``: the new branch is created (``create``), and with
+    -M, -C or --force an existing branch of that name is overwritten, so it is also a
+    ``delete``. A rename also removes the old name (``delete``). With one name the old
+    branch is the current one, which the argv does not show: ``branch/*``, marked, so a
+    rule on one branch escalates."""
+    if not positional or len(positional) > 2:
+        raise ValueError(f"could not find the branch names in: {argv!r}")
+    new = positional[-1]
+    intents = [one(f"branch/{new}", "create")]
+    if params.get("force"):
+        intents.append(one(f"branch/{new}", "delete"))
+    if params.get("rename"):
+        if len(positional) == 2:
+            intents.append(one(f"branch/{positional[0]}", "delete"))
+        else:
+            intents.extend(_mark_open_targets([one("branch/*", "delete")]))
+    return intents
 
 
 def from_git(argv: list[str]) -> InfrastructureIntent:
