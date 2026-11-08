@@ -986,3 +986,43 @@ def test_a_scope_key_with_dots_in_one_level_is_found():
     from aegis_core.store import scope_matches
     assert scope_matches({"labels.app.kubernetes.io/name": "x"}, {},
                          {"labels": {"app.kubernetes.io/name": "x"}})
+
+
+# --- aws: a prefix of any s3 option and of --dry-run (run with aws-cli 2.37) -----------
+
+
+@pytest.mark.parametrize("command,targets,dry_run", [
+    ("aws s3 sync ./empty s3://prod --del",
+     [("s3/bucket/prod", "put"), ("s3/bucket/prod", "delete")], False),
+    ("aws s3 rm s3://b/x --dryr", [("s3/bucket/b", "delete")], True),
+    ("aws s3 rm --rec s3://b", [("s3/bucket/b", "delete")], False),
+    ("aws s3 cp --rec s3://a s3://b", [("s3/bucket/a", "put"), ("s3/bucket/b", "put")], False),
+    ("aws ec2 terminate-instances --instance-ids i-1 --dry", [("ec2/instance/i-1", "delete")],
+     True),
+    ("aws ec2 terminate-instances --instance-ids i-1 --dry --no-dry",
+     [("ec2/instance/i-1", "delete")], False),
+])
+def test_aws_reads_every_option_prefix(command, targets, dry_run):
+    intents = from_argv(command.split())
+    assert [(i.resource, i.action) for i in intents] == targets
+    assert all(i.params.get("dry_run", False) is dry_run for i in intents)
+
+
+@pytest.mark.parametrize("command", [
+    "aws s3 cp ./x s3://b/x --del",  # cp has no --delete
+    "aws s3 cp ./x s3://b/ --ex x",  # exclude, expires, expected-size
+])
+def test_aws_s3_refuses_what_aws_refuses(command):
+    with pytest.raises(ValueError):
+        from_argv(command.split())
+
+
+def test_aws_dry_prefix_is_not_a_rehearsal_where_another_option_starts_with_dry():
+    # synthetics update-canary has --dry-run-id and no --dry-run
+    intent = from_argv("aws synthetics update-canary --name c --dry x".split())[0]
+    assert "dry_run" not in intent.params
+
+
+def test_aws_sync_del_meets_a_delete_rule():
+    assert _verdict([_rule("aws", "s3/bucket/prod", ["delete"])],
+                    "aws s3 sync ./empty s3://prod --del") == "BLOCK"

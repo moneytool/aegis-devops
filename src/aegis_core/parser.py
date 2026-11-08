@@ -1676,14 +1676,57 @@ _AWS_GLOBAL_OPTIONS = {
     "cli-auto-prompt": False, "no-cli-auto-prompt": False, "cli-error-format": True,
 }
 
-# The options of "aws s3 cp/mv/rm/sync/..." that take no value (awscli/customizations/s3
-# subcommands.py and syncstrategy). --grants takes one or more words, --tags two, and the
-# rest one each. --dryrun is that command's rehearsal.
-_AWS_S3_BOOL_FLAGS = frozenset({
-    "recursive", "human-readable", "summarize", "dryrun", "quiet", "force", "follow-symlinks",
-    "no-follow-symlinks", "no-guess-mime-type", "only-show-errors", "no-progress",
-    "progress-multiline", "ignore-glacier-warnings", "force-glacier-transfer", "no-overwrite",
-    "delete", "exact-timestamps", "size-only", "validate-same-s3-paths",
+# Every option of each "aws s3" command, from aws-cli 2.37 (the ARG_TABLE of each class in
+# awscli/customizations/s3/subcommands.py, and the syncstrategy options of sync), with how
+# many words it takes: "" none, "1" one, "?" the next one unless it is an option, "+" every
+# word up to the next option, "2" two. argparse takes an unambiguous prefix of any of them
+# (--del is --delete on sync, --dryr is --dryrun), after the global options have had theirs.
+_AWS_S3_TRANSFER = (
+    "dryrun: quiet: include:1 exclude:1 acl:1 follow-symlinks: no-follow-symlinks: "
+    "no-guess-mime-type: sse:? sse-c:? sse-c-key:1 sse-kms-key-id:1 sse-c-copy-source:? "
+    "sse-c-copy-source-key:1 storage-class:1 grants:+ website-redirect:1 content-type:1 "
+    "cache-control:1 content-disposition:1 content-encoding:1 content-language:1 expires:1 "
+    "source-region:1 only-show-errors: no-progress: progress-frequency:1 progress-multiline: "
+    "page-size:1 ignore-glacier-warnings: force-glacier-transfer: request-payer:? "
+    "checksum-mode:1 checksum-algorithm:1 metadata:1 copy-props:1 metadata-directive:1 "
+    "case-conflict:1 no-overwrite:"
+)
+_AWS_S3_OPTIONS = {
+    command: dict(word.split(":") for word in spec.split())
+    for command, spec in {
+        "cp": _AWS_S3_TRANSFER + " expected-size:1 recursive:",
+        "mv": _AWS_S3_TRANSFER + " recursive: validate-same-s3-paths:",
+        "sync": _AWS_S3_TRANSFER + " size-only: exact-timestamps: delete:",
+        "rm": "dryrun: quiet: recursive: request-payer:? include:1 exclude:1 "
+              "only-show-errors: page-size:1",
+        "ls": "recursive: page-size:1 human-readable: summarize: request-payer:? "
+              "bucket-name-prefix:1 bucket-region:1",
+        "mb": "tags:2",
+        "rb": "force:",
+    }.items()
+}
+
+
+def _aws_s3_option(command: str, key: str) -> str:
+    """The option of ``aws s3 <command>`` that ``--key`` names: the exact name or the one
+    option it is a prefix of. Anything else aws refuses, and so does the parser."""
+    options = _AWS_S3_OPTIONS[command]
+    if key in options:
+        return key
+    found = [name for name in options if name.startswith(key)]
+    if len(found) != 1:
+        reason = f"is ambiguous ({', '.join(found)})" if found else "is not an option"
+        raise ValueError(f"aws s3 {command}: --{key} {reason}, and aws refuses it")
+    return found[0]
+
+
+# Operations with another option whose name starts with "dry" (botocore data in aws-cli
+# 2.37). Anywhere else a prefix of --dry-run of three letters or more ("--dry") is that
+# option to argparse; here it may be the other one, so it is not read as a rehearsal.
+_AWS_OTHER_DRY_OPTIONS = frozenset({
+    ("kms", "decrypt"), ("kms", "re-encrypt"), ("opensearch", "describe-dry-run-progress"),
+    ("opensearch", "update-domain-config"), ("synthetics", "get-canary"),
+    ("synthetics", "get-canary-runs"), ("synthetics", "update-canary"),
 })
 
 
@@ -1699,12 +1742,14 @@ def _aws_global_name(key: str) -> str | None:
 
 
 def _parse_aws_tokens(
-    tokens: list[str], *, s3: bool = False,
+    tokens: list[str], *, s3: str | None = None, dry_prefix: bool = True,
 ) -> tuple[dict[str, Any], dict[str, Any], list[str], str | None, list[str] | None,
            list[tuple[str, list[str]]], str | None]:
-    """``(metadata, params, positional, id, ids, abbreviations, id_flag)``. ``s3`` reads the options
-    of the high-level ``aws s3`` commands. ``abbreviations`` are the ``(key, value)`` of
-    options the parser does not know whose name starts a target flag's: argparse takes an
+    """``(metadata, params, positional, id, ids, abbreviations, id_flag)``. ``s3`` names the
+    high-level ``aws s3`` command whose options to read (:data:`_AWS_S3_OPTIONS`).
+    ``dry_prefix`` reads a prefix of ``--dry-run`` (``--dry``) as that option.
+    ``abbreviations`` are the ``(key, value)`` of options the parser does not know whose
+    name starts a target flag's: argparse takes an
     unambiguous prefix of an operation's option too (``--role`` is ``--role-name`` on
     ``iam delete-role``), so a missing target may be in one of them."""
     metadata: dict[str, Any] = {}
@@ -1735,7 +1780,32 @@ def _parse_aws_tokens(
                     i += 1
                     val = _value_at(tokens, i, tok)
                 metadata["profile"] = val
-            elif key == "dry-run" or (s3 and key == "dryrun"):
+            elif s3 and tok.startswith("--") and key not in _AWS_GLOBAL_OPTIONS:
+                name = _aws_s3_option(s3, key)
+                arity = _AWS_S3_OPTIONS[s3][name]
+                if name == "dryrun":
+                    _record_dry_run(params, _is_dry_run(val))
+                elif not arity:
+                    params[name] = _bool_param(val)
+                elif val is not None:
+                    params[name] = val
+                elif arity in ("+", "2"):
+                    count = n if arity == "+" else 2
+                    values: list[str] = []
+                    while len(values) < count and i + 1 < n and not tokens[i + 1].startswith("-"):
+                        i += 1
+                        values.append(tokens[i])
+                    params[name] = values
+                elif i + 1 < n and not tokens[i + 1].startswith("-"):
+                    i += 1
+                    params[name] = tokens[i]
+                elif arity == "?":
+                    params[name] = True
+                else:
+                    raise ValueError(f"aws s3 {s3}: {tok} is missing its value: {tokens!r}")
+            elif key == "dry-run" or (dry_prefix and len(key) >= 3 and tok.startswith("--")
+                                      and "dry-run".startswith(key)):
+                # a prefix of --dry-run is that option to argparse (see _AWS_OTHER_DRY_OPTIONS)
                 _record_dry_run(params, _is_dry_run(val))
             elif key == "no-dry-run" or (len(key) >= 4 and "no-dry-run".startswith(key)):
                 # an unambiguous prefix of --no-dry-run is that option to argparse
@@ -1747,23 +1817,6 @@ def _parse_aws_tokens(
                 if key in _AWS_BOOL_FLAGS:
                     params[key] = _bool_param(val)
                 # the other globals are consumed, intentionally not recorded
-            elif s3 and key in _AWS_S3_BOOL_FLAGS:
-                params[key] = _bool_param(val)
-            elif s3 and val is None and key in ("grants", "tags"):
-                count = n if key == "grants" else 2
-                values: list[str] = []
-                while len(values) < count and i + 1 < n and not tokens[i + 1].startswith("-"):
-                    i += 1
-                    values.append(tokens[i])
-                params[key] = values
-            elif s3 and val is None:
-                # every other s3 option takes one word (--sse and --request-payer take the
-                # next one too, when it is not an option)
-                if i + 1 < n and not tokens[i + 1].startswith("-"):
-                    i += 1
-                    params[key] = tokens[i]
-                else:
-                    params[key] = True
             elif key in _AWS_BOOL_FLAGS:
                 params[key] = _bool_param(val)
             elif key in ("cli-input-json", "cli-input-yaml"):
@@ -1961,11 +2014,14 @@ def from_aws_multi(argv: list[str]) -> list[InfrastructureIntent]:
         raise ValueError(f"could not determine an aws service/operation in: {argv!r}")
 
     service, operation, *rest = positional
+    if (service, operation) in _AWS_OTHER_DRY_OPTIONS:
+        (metadata, params, positional, id_value, multi_ids, abbreviations,
+         id_flag) = _parse_aws_tokens(tokens, dry_prefix=False)
 
     if service == "s3":
         if operation in _AWS_S3_VERB_MAP:
             # read again with the s3 commands' own options (--recursive takes no value)
-            metadata, params, positional, *_ = _parse_aws_tokens(tokens, s3=True)
+            metadata, params, positional, *_ = _parse_aws_tokens(tokens, s3=operation)
             service, operation, *rest = positional
         return _from_aws_s3(operation, rest, metadata, params, argv)
 
