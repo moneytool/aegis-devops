@@ -274,3 +274,75 @@ def test_flux_create_export_is_the_rehearsal():
     base = "flux create kustomization a --source=GitRepository/a --path=./k"
     assert from_argv(f"{base} --export".split())[0].params["dry_run"] is True
     assert "dry_run" not in from_argv(f"{base} --export --export=false".split())[0].params
+
+
+# --- argocd --------------------------------------------------------------------------
+# argo-cd v3.6 source (cmd/argocd/commands), not run.
+
+
+@pytest.mark.parametrize("command,params", [
+    # short words read letter by letter, as pflag does
+    ("argocd app sync a -lteam=x", {"selector": "team=x"}),
+    ("argocd app delete a -yl team=x", {"yes": True, "selector": "team=x"}),
+    ("argocd app delete a -yp foreground", {"yes": True, "propagation_policy": "foreground"}),
+    ("argocd app sync a -Nargocd", {"app_namespace": "argocd"}),
+    ("argocd app create a --repo r --path p -lteam=x -pk=v", {"label": "team=x",
+                                                             "parameter": "k=v"}),
+    # a value flag takes the next word whatever it is
+    ("argocd app sync a --revision -l", {"revision": "-l"}),
+    ("argocd app set a --nameprefix -y", {"nameprefix": "-y"}),
+])
+def test_argocd_flags_are_read_as_pflag_reads_them(command, params):
+    intent = from_argv(command.split())[0]
+    assert intent.resource == "app/a"
+    assert {k: v for k, v in intent.params.items() if k in params} == params
+
+
+@pytest.mark.parametrize("command", [
+    "argocd app sync a -qnprod",  # argocd has no -q
+    "argocd app sync a --no-such-flag x",
+    "argocd app delete --no-such-flag a",
+    "argocd app sync a -x b",
+])
+def test_argocd_refuses_what_it_cannot_read(command):
+    with pytest.raises(ValueError):
+        from_argv(command.split())
+
+
+@pytest.mark.parametrize("command,resources", [
+    # sync and delete -l act on every app the selector picks; sync --project on every app
+    # in the project, beside the apps named
+    ("argocd app sync -l team=x", ["app/*"]),
+    ("argocd app sync a -l team=x", ["app/a", "app/*"]),
+    ("argocd app delete a -l team=x", ["app/a", "app/*"]),
+    ("argocd app sync --project prod --project stage", ["app/*", "app/*"]),
+    ("argocd app sync a b", ["app/a", "app/b"]),
+    ("argocd app sync -- a b", ["app/a", "app/b"]),
+])
+def test_argocd_reads_the_apps_a_selector_or_project_picks(command, resources):
+    assert [i.resource for i in from_argv(command.split())] == resources
+
+
+@pytest.mark.parametrize("command,verdict", [
+    ("argocd app delete web -l team=x", "ESCALATE"),
+    ("argocd app delete payments", "BLOCK"),
+    ("argocd app delete web", "ALLOW"),
+    ("argocd app sync -l team=x", "ALLOW"),  # the rule is on delete
+])
+def test_argocd_delete_by_selector_meets_a_rule_on_one_app(command, verdict):
+    assert _verdict([_rule("argocd", "app/payments", ["delete"])], command) == verdict
+
+
+def test_argocd_sync_by_project_meets_a_project_rule():
+    rule = _rule("argocd", "app/*", ["sync"], {"project": "prod"})
+    assert _verdict([rule], "argocd app sync web --project prod") == "BLOCK"
+    assert _verdict([rule], "argocd app sync --project stage --project prod") == "BLOCK"
+    assert _verdict([rule], "argocd app sync --project stage") == "ALLOW"
+
+
+def test_argocd_dry_run_is_a_rehearsal_only_on_sync():
+    assert from_argv("argocd app sync a --dry-run".split())[0].params["dry_run"] is True
+    rule = _rule("argocd", "app/*", ["sync"])
+    assert _verdict([rule], "argocd app sync a --dry-run") == "ALLOW"
+    assert _verdict([rule], "argocd app sync a --dry-run --dry-run=false") == "BLOCK"
+

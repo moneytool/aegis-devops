@@ -2689,79 +2689,148 @@ _ARGOCD_ACTION_MAP = {
 
 _ARGOCD_MULTI_APP_VERBS = {"sync", "delete"}
 
-# ArgoCD global options (persistent flags, accepted anywhere on the line).
+# ArgoCD global options (persistent flags of the root command, accepted anywhere on the
+# line; argo-cd v3.6 cmd/argocd/commands/root.go).
 _ARGOCD_GLOBAL_VALUE_FLAGS = {
-    "server",
-    "auth-token",
-    "config",
-    "header",
-    "client-crt",
-    "client-crt-key",
-    "server-crt",
-    "kube-context",
-    "port-forward-namespace",
-    "logformat",
-    "loglevel",
-    "http-retry-max",
-    "server-name",
-    "grpc-web-root-path",
-    "redis-haproxy-name",
-    "redis-name",
-    "repo-server-name",
-    "controller-name",
+    "server", "auth-token", "config", "header", "H", "client-crt", "client-crt-key",
+    "server-crt", "kube-context", "port-forward-namespace", "logformat", "loglevel",
+    "http-retry-max", "server-name", "grpc-web-root-path", "redis-haproxy-name", "redis-name",
+    "repo-server-name", "controller-name", "argocd-context", "redis-compress",
 }
 _ARGOCD_GLOBAL_BOOL_FLAGS = {
-    "grpc-web",
-    "insecure",
-    "plaintext",
-    "core",
-    "port-forward",
+    "grpc-web", "insecure", "plaintext", "core", "port-forward", "prompts-enabled",
     "skip-test-tls",
 }
-# Known boolean sync/delete options (``--prune=true`` must be True, not "true").
-_ARGOCD_BOOL_FLAGS = {"prune", "force", "cascade", "async", "apply-out-of-sync-only",
-                      "server-side", "replace", "yes", "y"}
+
+# Every long flag of the "argocd app" commands, from argo-cd v3.6 (cmd/argocd/commands
+# app*.go and cmd/util/app.go), and the globals above. A flag that takes a value takes the
+# next word whatever it looks like (#80). "app unset" has booleans of the same names as
+# some value flags of create and set (--nameprefix, --ref, ...), and is not parsed.
+_ARGOCD_VALUE_FLAGS = frozenset(_ARGOCD_GLOBAL_VALUE_FLAGS) | frozenset({
+    "annotations", "app-namespace", "cluster", "config-management-plugin", "container",
+    "dest-name", "dest-namespace", "dest-server", "diff-exit-code", "directory-exclude",
+    "directory-include", "dry-source-path", "dry-source-repo", "dry-source-revision", "env",
+    "file", "filter", "filter-fields", "group", "helm-api-versions", "helm-chart",
+    "helm-kube-version", "helm-namespace", "helm-set", "helm-set-file", "helm-set-string",
+    "helm-version", "hydrate-to-branch", "ignore-normalizer-jq-execution-timeout", "info",
+    "jsonnet-ext-var-code", "jsonnet-ext-var-str", "jsonnet-libs", "jsonnet-tla-code",
+    "jsonnet-tla-str", "kind", "kustomize-api-versions", "kustomize-common-annotation",
+    "kustomize-common-label", "kustomize-image", "kustomize-kube-version",
+    "kustomize-namespace", "kustomize-replica", "kustomize-version", "label", "local",
+    "local-include", "local-repo-root", "name", "nameprefix", "namesuffix", "namespace",
+    "out", "output", "parameter", "patch", "patch-type", "path", "plugin-env", "project",
+    "propagation-policy", "ref", "release-name", "repo", "resource", "resource-name",
+    "retry-backoff-duration", "retry-backoff-factor", "retry-backoff-max-duration",
+    "retry-limit", "revision", "revision-history-limit", "revisions", "selector",
+    "server-side-diff-concurrency", "server-side-diff-max-batch-kb", "since-seconds",
+    "source", "source-name", "source-names", "source-position", "source-positions",
+    "strategy", "sync-option", "sync-policy", "sync-retry-backoff-duration",
+    "sync-retry-backoff-factor", "sync-retry-backoff-max-duration", "sync-retry-limit",
+    "sync-source-branch", "sync-source-path", "tag-prefix", "tail", "timeout", "type",
+    "until-time", "values", "values-literal-file",
+})
+_ARGOCD_BOOL_FLAGS = frozenset(_ARGOCD_GLOBAL_BOOL_FLAGS) | frozenset({
+    "all", "allow-empty", "apply-out-of-sync-only", "assumeYes", "async", "auto-prune",
+    "cascade", "degraded", "delete", "directory-disable-extension-filter",
+    "directory-recurse", "dry-run", "exit-code", "follow", "force", "hard-refresh", "health",
+    "help", "helm-pass-credentials", "helm-skip-crds", "helm-skip-schema-validation",
+    "helm-skip-tests", "hydrated", "ignore-missing-components",
+    "ignore-missing-value-files", "kustomize-force-common-annotation",
+    "kustomize-force-common-label", "kustomize-label-include-templates",
+    "kustomize-label-without-selector", "match-case", "operation", "orphan", "orphaned",
+    "pass-credentials", "preview-changes", "previous", "prune", "refresh", "replace",
+    "retry-refresh", "self-heal", "server-side", "server-side-diff", "server-side-generate",
+    "set-finalizer", "show-managed-fields", "show-operation", "show-params", "suspended",
+    "sync", "sync-apply-only", "sync-dry-run", "sync-force", "sync-prune",
+    "sync-retry-refresh", "upsert", "validate", "values-literal", "wait", "yes",
+})
+
+# The short letters of the "argocd app" commands parsed here, with the long flag each one
+# is on each verb: all take a value but -y (delete's --yes) and -h. -f and -p are booleans
+# only on "app logs", which is not parsed.
+_ARGOCD_SHORT_VALUE_LETTERS = frozenset("HNPcflopr")
+_ARGOCD_SHORT_BOOL_LETTERS = frozenset("hy")
+_ARGOCD_SHORT_NAMES = {
+    "H": "header", "N": "app-namespace", "P": "path", "c": "cluster", "f": "file",
+    "o": "output", "r": "repo", "y": "yes", "h": "help",
+}
 
 
-def _parse_argocd_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+def _argocd_short_name(letter: str, verb: str | None) -> str:
+    """The long flag a short letter is on ``verb``."""
+    if letter == "l":
+        return "label" if verb == "create" else "selector"
+    if letter == "p":
+        return {"delete": "propagation-policy", "list": "project"}.get(verb or "", "parameter")
+    return _ARGOCD_SHORT_NAMES.get(letter, letter)
+
+
+def _parse_argocd_tokens(
+    tokens: list[str], verb: str | None = None
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     metadata: dict[str, Any] = {}
     params: dict[str, Any] = {}
     positional: list[str] = []
 
+    tokens = list(tokens)  # short words are split in place as the walk reaches them
     i = 0
     n = len(tokens)
     while i < n:
         tok = tokens[i]
+        if tok == "--":
+            # pflag: every word after it is an operand
+            positional.extend(tokens[i + 1:])
+            break
         if tok.startswith("-") and tok != "-":
+            is_long = tok.startswith("--")
+            if not is_long and len(tok) > 2:
+                flags = _split_short_word(tok, _ARGOCD_SHORT_BOOL_LETTERS,
+                                          _ARGOCD_SHORT_VALUE_LETTERS, "argocd")
+                if flags != [tok]:
+                    tokens[i:i + 1] = flags
+                    n = len(tokens)
+                    continue
             key, val = _split_flag(tok)
-            if key == "project":
+            name = key if is_long else _argocd_short_name(key, verb)
+            known = is_long or key in _ARGOCD_SHORT_VALUE_LETTERS | _ARGOCD_SHORT_BOOL_LETTERS
+            if name == "project" and known:
+                # A StringArray on sync and list: every one counts.
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
                 metadata["project"] = val
-            elif key == "kube-context":
+                params.setdefault("projects", []).append(val)
+            elif name == "kube-context":
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
                 metadata["context"] = val
-            elif key in _ARGOCD_GLOBAL_VALUE_FLAGS:
+            elif name in _ARGOCD_GLOBAL_VALUE_FLAGS and known:
                 if val is None:
                     i += 1
                     val = _value_at(tokens, i, tok)
                 # consumed, intentionally not recorded
-            elif key in _ARGOCD_GLOBAL_BOOL_FLAGS:
+            elif name in _ARGOCD_GLOBAL_BOOL_FLAGS:
                 pass  # consumed, intentionally not recorded
-            elif key == "dry-run":
-                _record_dry_run(params, _is_dry_run(val))
-            elif key in _ARGOCD_BOOL_FLAGS:
-                params[key.replace("-", "_")] = _bool_param(val)
-            elif val is not None:
-                params[key.replace("-", "_")] = _coerce(val)
-            elif i + 1 < n and not tokens[i + 1].startswith("-"):
-                i += 1
-                params[key.replace("-", "_")] = _coerce(tokens[i])
+            elif name == "dry-run":
+                # Only "app sync" has --dry-run. argocd refuses it on the other verbs and
+                # runs nothing, so it is a rehearsal only there.
+                if verb == "sync":
+                    _record_dry_run(params, _is_dry_run(val))
+            elif known and (name in _ARGOCD_BOOL_FLAGS or key in _ARGOCD_SHORT_BOOL_LETTERS):
+                params[name.replace("-", "_")] = _bool_param(val)
+            elif not is_long and key in _ARGOCD_SHORT_VALUE_LETTERS:
+                # Always the next token, whatever it looks like, as pflag reads it.
+                if val is None:
+                    i += 1
+                    val = _value_at(tokens, i, tok)
+                params[name.replace("-", "_")] = _coerce(val)
             else:
-                params[key.replace("-", "_")] = True
+                # A value flag takes the next word whatever it is (#80); a flag in no
+                # table is refused unless "=value" or its place shows its reading.
+                i, params[key.replace("-", "_")] = _other_flag(
+                    tokens, i, values=_ARGOCD_VALUE_FLAGS if is_long else (), bools=(),
+                    tool="argocd")
         else:
             positional.append(tok)
         i += 1
@@ -2771,7 +2840,11 @@ def _parse_argocd_tokens(tokens: list[str]) -> tuple[dict[str, Any], dict[str, A
 
 def from_argocd_multi(argv: list[str]) -> list[InfrastructureIntent]:
     """Parses an ``argocd`` invocation into one InfrastructureIntent per
-    target app (``argocd app sync`` / ``delete`` may name more than one)."""
+    target app (``argocd app sync`` / ``delete`` may name more than one).
+
+    ``app sync`` also syncs every app ``-l/--selector`` or ``--project`` picks, and
+    ``app delete -l`` deletes every app the selector picks (argo-cd app.go): each is an
+    ``app/*`` intent, marked, beside the apps named."""
     if len(argv) < 2 or _basename(argv[0]) != "argocd":
         raise ValueError(f"not a recognizable argocd invocation: {argv!r}")
 
@@ -2782,6 +2855,7 @@ def from_argocd_multi(argv: list[str]) -> list[InfrastructureIntent]:
         value_flags=_ARGOCD_GLOBAL_VALUE_FLAGS,
         bool_flags=_ARGOCD_GLOBAL_BOOL_FLAGS,
         tool="argocd",
+        glued_values=True,
     )
     if rest[0] != "app":
         raise ValueError(f"unsupported argocd invocation: {argv!r}")
@@ -2792,6 +2866,7 @@ def from_argocd_multi(argv: list[str]) -> list[InfrastructureIntent]:
         value_flags=_ARGOCD_GLOBAL_VALUE_FLAGS,
         bool_flags=_ARGOCD_GLOBAL_BOOL_FLAGS,
         tool="argocd",
+        glued_values=True,
     )
     leading = leading + leading_2
 
@@ -2801,7 +2876,7 @@ def from_argocd_multi(argv: list[str]) -> list[InfrastructureIntent]:
     if subverb == "actions":
         if len(rest) < 2 or rest[1] != "run":
             raise ValueError(f"unsupported 'argocd app actions' invocation: {argv!r}")
-        metadata, params, positional = _parse_argocd_tokens(leading + rest[2:])
+        metadata, params, positional = _parse_argocd_tokens(leading + rest[2:], "actions-run")
         if len(positional) < 2:
             raise ValueError(f"could not find an app and action name in: {argv!r}")
         app, action_name = positional[0], positional[1]
@@ -2817,9 +2892,19 @@ def from_argocd_multi(argv: list[str]) -> list[InfrastructureIntent]:
     if subverb not in _ARGOCD_ACTION_MAP:
         raise ValueError(f"unsupported argocd app subcommand: {argv!r}")
 
-    metadata, params, positional = _parse_argocd_tokens(tokens)
+    metadata, params, positional = _parse_argocd_tokens(tokens, subverb)
     params["raw_action"] = subverb
     action = _ARGOCD_ACTION_MAP[subverb]
+
+    # The apps a selector or a project picks, which argocd lists when it runs.
+    picked: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    if subverb in _ARGOCD_MULTI_APP_VERBS:
+        selector = params.get("selector")
+        projects = params.get("projects", []) if subverb == "sync" else []
+        for project in projects or ([None] if selector is not None else []):
+            where = {**metadata, "project": project} if project is not None else metadata
+            picked.append(({**params, "resolved_at_runtime": {"from": "app/*",
+                                                               "kinds": ["app"]}}, where))
 
     if subverb == "list":
         apps = positional if positional else ["*"]
@@ -2830,7 +2915,7 @@ def from_argocd_multi(argv: list[str]) -> list[InfrastructureIntent]:
         if len(positional) > 1:
             params["revision"] = _coerce(positional[1])
     elif subverb in _ARGOCD_MULTI_APP_VERBS:
-        if not positional:
+        if not positional and not picked:
             raise ValueError(f"could not find an argocd app name in: {argv!r}")
         apps = positional
     else:
@@ -2838,13 +2923,19 @@ def from_argocd_multi(argv: list[str]) -> list[InfrastructureIntent]:
             raise ValueError(f"could not find an argocd app name in: {argv!r}")
         apps = [positional[0]]
 
-    return [
+    intents = [
         InfrastructureIntent(
             resource=f"app/{app}", action=action, provider="argocd",
             params=dict(params), metadata=dict(metadata),
         )
         for app in apps
     ]
+    intents.extend(
+        InfrastructureIntent(resource="app/*", action=action, provider="argocd",
+                             params=p, metadata=dict(m))
+        for p, m in picked
+    )
+    return intents
 
 
 def from_argocd(argv: list[str]) -> InfrastructureIntent:

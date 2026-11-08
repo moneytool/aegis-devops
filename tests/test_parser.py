@@ -992,13 +992,22 @@ def test_from_argocd_dry_run_flag():
 
 def test_from_argocd_project_metadata_and_discarded_flags():
     intent = from_argocd(
-        ["argocd", "app", "sync", "prod-web", "--project", "platform",
+        ["argocd", "app", "create", "prod-web", "--project", "platform",
          "--server", "argocd.internal", "--grpc-web", "--auth-token", "secret"]
     )
     assert intent.metadata == {"project": "platform"}
     assert "server" not in intent.params
     assert "auth_token" not in intent.params
     assert "grpc_web" not in intent.params
+
+
+def test_argocd_sync_with_a_project_also_syncs_every_app_in_it():
+    # argo-cd app.go: sync lists the project's apps and syncs them with the ones named
+    intents = from_argocd_multi(
+        ["argocd", "app", "sync", "prod-web", "--project", "platform", "--grpc-web"])
+    assert [i.resource for i in intents] == ["app/prod-web", "app/*"]
+    assert all(i.metadata == {"project": "platform"} for i in intents)
+    assert intents[1].params["resolved_at_runtime"] == {"from": "app/*", "kinds": ["app"]}
 
 
 def test_from_argocd_actions_run():
