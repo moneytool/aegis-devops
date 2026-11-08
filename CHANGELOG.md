@@ -8,6 +8,18 @@ behaviour.
 
 ## [Unreleased]
 
+## [1.3.4] — 2026-11-07
+
+kubectl, helm and flux flag spellings are read as the tools read them: a repeated `--dry-run`,
+bundled short flags and repeated `-f`.
+
+### Known limits
+- A long flag that takes a value is still read as a flag of its own when helm or flux has no entry
+  for it in the parser, so `helm upgrade api ./c -n prod --description -ndev` is read as namespace
+  `dev`, and helm runs it in `prod` with the description `-ndev`. `flux create source git a -n prod
+  --url -ndev` is read as `dev` the same way (flux behaviour from source, not run). Every earlier
+  release reads these the same way (#80).
+
 ### Fixed
 - Two kubectl flag spellings were read differently from kubectl, on every verb, so a BLOCK could
   pass (#75). Checked on kubectl 1.36 against a local stub API server.
@@ -1264,6 +1276,7 @@ See "Project status" in the README and [`docs/dev/PLAN.md`](docs/dev/PLAN.md) §
 rather than real connectors, signing uses a shared secret, and a principal is a signed name
 rather than a bound identity.
 
+[1.3.4]: https://github.com/moneytool/aegis-devops/releases/tag/v1.3.4
 [1.3.3]: https://github.com/moneytool/aegis-devops/releases/tag/v1.3.3
 [1.3.2]: https://github.com/moneytool/aegis-devops/releases/tag/v1.3.2
 [1.3.1]: https://github.com/moneytool/aegis-devops/releases/tag/v1.3.1
