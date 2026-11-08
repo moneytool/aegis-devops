@@ -2245,7 +2245,7 @@ def _aws_input_tokens(
     import yaml  # local: only an aws input needs it
 
     try:
-        data = yaml.safe_load(text) if yaml_input else json.loads(text)
+        data = yaml.load(text, Loader=_aws_yaml_loader()) if yaml_input else json.loads(text)
     except (ValueError, yaml.YAMLError) as exc:
         raise ValueError(f"aws: --cli-input- is not valid input: {exc}") from exc
     if not isinstance(data, dict):
@@ -2273,6 +2273,49 @@ def _aws_input_tokens(
         else:
             structured[option] = value
     return words, structured, False
+
+
+@lru_cache(maxsize=1)
+def _aws_yaml_loader() -> type:
+    """A YAML loader that types scalars as aws-cli v2 does (ruamel.yaml, YAML 1.2): only
+    true/false are booleans (``yes`` is a string), ``010`` is ten, ``0o10`` eight and
+    ``0x10`` sixteen, ``_`` may separate digits, and ``1:30`` is a string. Checked with aws
+    2.37 against a closed local port. JSON numbers (``--cli-input-json``) stay exact, as
+    in aws."""
+    import yaml
+
+    class Loader(yaml.SafeLoader):
+        pass
+
+    Loader.yaml_implicit_resolvers = {
+        first: [(tag, regexp) for tag, regexp in resolvers
+                if tag not in ("tag:yaml.org,2002:bool", "tag:yaml.org,2002:int",
+                               "tag:yaml.org,2002:float")]
+        for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+    }
+    Loader.add_implicit_resolver("tag:yaml.org,2002:bool",
+                                 re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"),
+                                 list("tTfF"))
+    Loader.add_implicit_resolver(
+        "tag:yaml.org,2002:int",
+        re.compile(r"^(?:[-+]?[0-9][0-9_]*|0o[0-7_]+|0x[0-9a-fA-F_]+)$"),
+        list("-+0123456789"))
+    Loader.add_implicit_resolver(
+        "tag:yaml.org,2002:float",
+        re.compile(r"^(?:[-+]?(?:\.[0-9]+|[0-9][0-9_]*(?:\.[0-9_]*)?)(?:[eE][-+]?[0-9]+)?"
+                   r"|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$"),
+        list("-+0123456789."))
+
+    def construct_int(loader, node):
+        text = loader.construct_scalar(node).replace("_", "")
+        if text.startswith("0o"):
+            return int(text[2:], 8)
+        if text.startswith("0x"):
+            return int(text[2:], 16)
+        return int(text, 10)
+
+    Loader.add_constructor("tag:yaml.org,2002:int", construct_int)
+    return Loader
 
 
 def _mark_aws_file_values(params: dict[str, Any], every: bool) -> None:
@@ -3612,6 +3655,24 @@ def _parse_helm_tokens(
 # shape helm gives the chart and a rule's dotted scope key (set.securityContext.privileged)
 # walks it. What helm refuses is a ValueError.
 
+def _go_json_number(text: str) -> int | float:
+    """A JSON number as Go's encoding/json decodes it into an interface{} (helm's strvals
+    does not use UseNumber): a float64, so 9007199254740993 is 9007199254740992. An
+    integral value is returned as an int, which the store compares equal to the float. A
+    number out of float64's range Go refuses, and so does the parser."""
+    value = float(text)
+    if value in (float("inf"), float("-inf")):
+        raise ValueError(f"JSON number {text} is out of range of a float64")
+    return int(value) if value.is_integer() else value
+
+
+def _go_json_constant(text: str) -> Any:
+    raise ValueError(f"{text} is not JSON")  # Python accepts NaN and Infinity; Go does not
+
+
+_GO_JSON = json.JSONDecoder(parse_int=_go_json_number, parse_float=_go_json_number,
+                            parse_constant=_go_json_constant)
+
 _HELM_MAX_INDEX = 65536
 _HELM_MAX_NESTED = 30
 # The value of a --set-file key: the content of a file nobody read.
@@ -3679,8 +3740,8 @@ class _StrvalsParser:
                 self.i += 1
                 return None
             try:
-                value, end = json.JSONDecoder().raw_decode(self.s, self.i)
-            except json.JSONDecodeError as err:
+                value, end = _GO_JSON.raw_decode(self.s, self.i)
+            except ValueError as err:
                 raise self.error(f"not JSON: {err}") from err
             self.i = end
             while self.i < len(self.s) and self.s[self.i].isspace():
@@ -3835,8 +3896,8 @@ def _merge_helm_values(params: dict[str, Any], sets: dict[str, list[str]],
         stripped = value.strip()
         if stripped.startswith("{"):
             try:
-                loaded = json.loads(stripped)
-            except json.JSONDecodeError as err:
+                loaded = _GO_JSON.decode(stripped)
+            except ValueError as err:
                 raise ValueError(f"helm: --set-json {value!r} is not JSON: {err}") from err
             if not isinstance(loaded, dict):
                 raise ValueError(f"helm: --set-json {value!r} is not a JSON object")
@@ -5501,7 +5562,7 @@ def _parse_gh_tokens(
 ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     spec = _GH_COMMAND_FLAGS.get(command) if command else None
     if spec is not None:
-        return _parse_gh_command_tokens(tokens, spec)
+        return _parse_gh_command_tokens(tokens, spec, typed_fields=command == ("api", ""))
     metadata: dict[str, Any] = {}
     params: dict[str, Any] = {}
     positional: list[str] = []
@@ -5527,7 +5588,8 @@ def _parse_gh_tokens(
                     i += 1
                     val = _value_at(tokens, i, tok)
                 k, _sep, v = val.partition("=")
-                params.setdefault("inputs", {})[k] = _coerce(v)
+                params.setdefault("inputs", {})[k] = _gh_field_value(
+                    v, typed=key in ("F", "field"))
             elif key == "admin":
                 params["admin"] = _bool_param(val)
             elif key in ("squash", "merge", "rebase") and val is None:
@@ -5553,8 +5615,29 @@ def _parse_gh_tokens(
     return metadata, params, positional
 
 
+_GH_INT_RE = re.compile(r"[+-]?[0-9]+")
+
+
+def _gh_field_value(text: str, *, typed: bool) -> Any:
+    """The value gh sends for a field: ``-f``/``--raw-field`` always a string; ``gh api
+    -F``/``--field`` is typed as gh's magicFieldValue types it: true, false and null, an
+    integer strconv.Atoi reads (decimal, a sign, within int64), and anything else a
+    string (``@file`` is read from a file, marked by the caller). ``gh workflow run -F`` is
+    a string too."""
+    if not typed:
+        return text
+    if text in ("true", "false"):
+        return text == "true"
+    if text == "null":
+        return None
+    if _GH_INT_RE.fullmatch(text) and -(2**63) <= int(text) < 2**63:
+        return int(text)
+    return text
+
+
 def _parse_gh_command_tokens(
     tokens: list[str], spec: tuple[frozenset[str], frozenset[str], dict[str, str]],
+    *, typed_fields: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     """A gh command from :data:`_GH_COMMAND_FLAGS`, read as pflag reads it: short words
     letter by letter, a value flag takes the next word, ``--`` ends the flags, and a flag
@@ -5609,7 +5692,8 @@ def _parse_gh_command_tokens(
                 metadata["ref"] = val
             elif name in ("field", "raw-field"):
                 k, _sep, v = val.partition("=")
-                params.setdefault("inputs", {})[k] = _coerce(v)
+                params.setdefault("inputs", {})[k] = _gh_field_value(
+                    v, typed=typed_fields and name == "field")
                 if name == "field" and v.startswith("@"):
                     # -F k=@file reads the value from a file (or stdin), not on the argv
                     marks = params.setdefault("unresolved_scope", [])

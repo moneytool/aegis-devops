@@ -2097,3 +2097,69 @@ def test_every_argocd_short_flag_reads_as_its_long_flag():
 ])
 def test_git_capital_letters_are_their_options_with_force(short, long):
     _same(short.split(), long.split())
+
+
+# --- round 5: each value as the tool sends it ---------------------------------------------
+
+
+@pytest.mark.parametrize("flags,value", [
+    # helm decodes --set-json with Go's encoding/json: every number is a float64
+    (["--set-json", "quota=9007199254740993"], 9007199254740992),
+    (["--set-json", '{"quota": 9007199254740993}'], 9007199254740992),
+    (["--set-json", "quota=1.0"], 1),
+    # --set reads an int64 exactly (strvals typedVal)
+    (["--set", "quota=9007199254740993"], 9007199254740993),
+])
+def test_helm_numbers_are_the_values_helm_gives_the_chart(flags, value):
+    intent = from_argv(["helm", "upgrade", "r", "./c", *flags])[0]
+    assert intent.params["set"]["quota"] == value
+
+
+@pytest.mark.parametrize("value", ["quota=1e400", "quota=NaN", "quota=Infinity"])
+def test_helm_set_json_refuses_numbers_go_refuses(value):
+    with pytest.raises(ValueError):
+        from_argv(["helm", "upgrade", "r", "./c", "--set-json", value])
+
+
+def test_helm_set_json_rule_sees_the_rounded_number():
+    rule = _rule("helm", "release/*", ["update"], {"set.quota": 9007199254740992})
+    assert _verdict([rule], ["helm", "upgrade", "r", "./c", "--set-json",
+                             "quota=9007199254740993"]) == "BLOCK"
+
+
+@pytest.mark.parametrize("yaml_text,value", [
+    # aws-cli v2 reads --cli-input-yaml as YAML 1.2 (run on aws 2.37)
+    ("{AutoScalingGroupName: g, DesiredCapacity: 010}", 10),
+    ("{AutoScalingGroupName: g, DesiredCapacity: 0o10}", 8),
+    ("{AutoScalingGroupName: g, DesiredCapacity: 0x10}", 16),
+    ("{AutoScalingGroupName: g, DesiredCapacity: 1_0}", 10),
+])
+def test_aws_yaml_input_is_read_as_aws_reads_it(yaml_text, value):
+    intent = from_argv(["aws", "autoscaling", "set-desired-capacity", "--cli-input-yaml",
+                        yaml_text])[0]
+    assert intent.params["desired_capacity"] == value
+
+
+def test_aws_yaml_yes_is_not_a_boolean():
+    with pytest.raises(ValueError):  # aws refuses the string "yes" for a boolean
+        from_argv(["aws", "autoscaling", "set-desired-capacity", "--cli-input-yaml",
+                   "{AutoScalingGroupName: g, DesiredCapacity: 1, HonorCooldown: yes}"])
+
+
+def test_aws_json_input_numbers_stay_exact():
+    intent = from_argv(["aws", "autoscaling", "set-desired-capacity", "--cli-input-json",
+                        '{"AutoScalingGroupName":"g","DesiredCapacity":9007199254740993}'])[0]
+    assert intent.params["desired_capacity"] == 9007199254740993
+
+
+@pytest.mark.parametrize("command,inputs", [
+    # gh api -F types a value as gh does; -f is always a string
+    ("gh api -X POST repos/o/r/x -F n=123 -F b=true -F z=null -F s=1.5 -f r=123",
+     {"n": 123, "b": True, "z": None, "s": "1.5", "r": "123"}),
+    ("gh api -X POST repos/o/r/x -F big=99999999999999999999",
+     {"big": "99999999999999999999"}),  # out of int64: Atoi fails, a string
+    # gh workflow run sends every input as a string
+    ("gh workflow run d.yml -R o/r -F n=123 -f m=1", {"n": "123", "m": "1"}),
+])
+def test_gh_fields_are_the_values_gh_sends(command, inputs):
+    assert from_argv(command.split())[0].params["inputs"] == inputs
