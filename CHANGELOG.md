@@ -143,7 +143,17 @@ count (`max_intents`) or change a `ratio`.
   delete the branch they overwrite, so `git branch -M feature main` meets a rule against
   deleting `branch/main`. Run with git 2.52.
 - helm `--set-json` was recorded raw, so `--set-json replicaCount=0` never met a rule scoped on
-  `set.replicaCount`. It is now read as JSON and merged into `set` in helm's order. A key set by
+  `set.replicaCount`. It is now read as JSON and merged into `set` in helm's order. Every
+  `--set` kind is read by a port of helm's `pkg/strvals` into one nested map, the shape helm
+  gives the chart: `--set-json 'securityContext={"privileged":true}'` had become the literal
+  key `securityContext.privileged`, which a rule on `set.securityContext.privileged` (a walk of
+  nested maps) did not find, so a BLOCK allowed it. `--set image.tag=v2` is now
+  `{"image": {"tag": "v2"}}` where it was the key `image.tag`. Lists (`{a,b}`, `x[1]=y`),
+  escapes (`a\,b`), helm's typing (`1.5` and `010` stay text, `null` is null), the order
+  (`--set-json` first, a later scalar replacing a map) and a map under a scalar, which helm
+  refuses, all follow helm; quotes are not special to helm, so `--set s="x,y"` is refused as
+  helm refuses it. The store's dotted lookup also finds a key with dots in it at any level
+  (`labels.app.kubernetes.io/name`). A key set by
   `--set-file`, or left to a values file (`-f`) or `--reuse-values`, comes from a file nobody
   read, so a rule scoped on it escalates with `set.<key>-unresolved`. The chart's own defaults
   are still not read: `set.*` is what the command line sets.
@@ -151,6 +161,36 @@ count (`max_intents`) or change a `ratio`.
   0, so it is 80, and `--port=080` is refused, as kubectl refuses it (run on kubectl 1.36). On
   `expose` and `run` `--port` is a string kubectl reads with `Atoi`, which the parser already
   matched.
+- aws read a prefix only for global options and target flags. Every option of each `aws s3`
+  command is now matched exactly or by its one unambiguous prefix, from aws-cli 2.37's tables:
+  `aws s3 sync ./empty s3://prod --del` was a put with a param `del`, and aws deletes in the
+  destination; `--dryr` is `--dryrun`, `--rec` is `--recursive`, and an ambiguous or unknown
+  prefix is refused as aws refuses it. A prefix of `--dry-run` of three letters or more
+  (`aws ec2 terminate-instances ... --dry`) is the rehearsal, except on the seven operations
+  botocore gives another `dry-*` option. Run with aws-cli 2.37.
+- `gh api <path> -f k=v` (or `-F`, `--field`, `--raw-field`, `--input`) without `-X` was read
+  as a GET; gh sends POST then, so `gh api repos/o/r/actions/workflows/deploy.yml/dispatches -f
+  ref=main` is now `workflow/deploy.yml` / `run`, as with `-X POST`. `{owner}`, `{repo}` and
+  `{branch}` (or `:owner` ...) in an api path are filled by gh from the current repository and
+  are no longer read as names. Without `-R` gh acts on the current directory's repository or
+  `$GH_REPO`, so `repo` is now unresolved and a repository-scoped rule escalates with
+  `repo-unresolved`; `--resolve-current-context` fills it from `$GH_REPO`. From cli/cli
+  v2.103 source.
+- `git push origin main --follow-tags` (and `-c push.followTags`, unless `--no-follow-tags`)
+  also pushes the annotated tags reachable from what is pushed, and now adds an unresolved
+  `ref/*` push, as `--tags` does. `git push origin HEAD` (or `@`) pushes the current branch and
+  `git push origin :` every matching branch; both were read as named refs (`:` as a delete of
+  nothing) and are now unresolved `ref/*`. `--mirror` and `-c remote.<name>.mirror=true` also
+  delete every remote ref with no local one, now a `ref/*` delete beside the force push.
+- `gcloud storage mv` and `gsutil mv` with several sources deleted only the first; every
+  `gs://` source is now a delete, and so is the source of `gsutil cp -M`, which moves. With
+  `-I` / `--read-paths-from-stdin`, `rm` and a move also reach `storage/bucket/*`, marked.
+  `rsync` with deletes stays refused.
+- gcloud: the space form of common create commands is read again (`gcloud container clusters
+  create --enable-autoscaling demo --zone ...` was refused). The boolean flags of the commands
+  that change something most often (container clusters and node pools, compute instances, sql
+  instances, run deploy, functions deploy) and more value flags are listed, from the gcloud
+  reference. `gcloud run deploy SVC` is `run/service/SVC` (it was `run/SVC`).
 - terraform and tofu `apply -destroy=true` (and `-destroy=T`) were refused as needing a plan, and
   `-destroy -destroy=false` was read as a destroy. Go's flag package reads the last `-destroy`,
   with `strconv.ParseBool`, and so does the parser now; `-auto-approve=true` and
