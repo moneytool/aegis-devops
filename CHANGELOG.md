@@ -638,6 +638,24 @@ name). git verbs without an option table leave every param unresolved when given
   SDK source, now leaves the setting it fills unresolved (`metadata.<key>` for each key given,
   `labels.*` for `--labels-file`, the env vars for `--env-vars-file`). The gcloud table's types
   were refreshed from the same SDK commit with `--types-only`, which keeps the flag lists.
+- `kubectl delete --raw /api/v1/namespaces/prod` did not get the namespace cascade that
+  `kubectl delete namespace prod` gets, so a `*/*` rule on namespace `prod` allowed it. A raw
+  path's target now goes through the same expansions as a target named by words, and the flags
+  kubectl does not send with `--raw` (`--cascade`, `--grace-period`, `--force`, `--all`, `-l`,
+  `--dry-run`) are dropped; `--raw` on a category such as `all` is refused.
+- `gh api 'repos/acme/prod#ignored' -X DELETE` kept `#ignored` in the target. URL and path
+  targets are now read as the tool's HTTP client sends them: gh drops the fragment, keeps the
+  query apart, and the server decodes the path (`pr%6Fd` is `prod`); a trailing slash is
+  dropped; `//`, `.` or `..` segments, an escaped slash and a scheme other than http(s) are
+  refused. gh repository, pull request and issue URLs, gcloud resource URIs and az `--ids`
+  are read the same way (az refuses `#`, `?` and `%` in an ID, which the request URL would
+  read).
+- `gcloud run deploy --container app --image forbidden --container sidecar --image safe` was
+  read as image `safe` only. Flags after each `--container` now belong to that container
+  (`containers.<name>.image`), the plain key holds every container's value, so a rule on
+  `image` meets any container, and gcloud's misplacements (a container flag before the first
+  `--container`, another flag inside one) are refused. A rule on a key of a repeated group
+  now meets each group (`create-disk.image`, `network-interface.network`).
 
 ### Added
 - A `NOTICE` file at the repository root lists the third-party code and data in the package

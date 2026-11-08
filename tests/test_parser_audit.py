@@ -1,4 +1,4 @@
-"""The sibling audit of review rounds 1-14 (docs/dev/parser-audit.md): one check per class
+"""The sibling audit of review rounds 1-15 (docs/dev/parser-audit.md): one check per class
 of finding and per tool where the class applies, so a fix that covers one tool and misses
 its siblings fails here. Each row is ``(class, tool, argv, check)``."""
 
@@ -342,6 +342,23 @@ AUDIT = [
     ("C31", "gcloud", "gcloud storage buckets update gs://b --labels-file l.json",
      unres("labels.*")),
     ("C31", "aws", "aws s3 cp f s3://b/k --metadata file://m.json", unres("metadata.*")),
+    # round 15
+    ("C33", "kubectl", "kubectl delete --raw /api/v1/namespaces/prod",
+     ("has", "*/*", "delete")),
+    ("C33", "kubectl", "kubectl delete --raw /api/v1/namespaces/prod/all", REFUSE),
+    ("C34", "gh", "gh api repos/acme/prod#ignored -X DELETE", res("repo/acme/prod")),
+    ("C34", "gh", "gh api repos/acme/safe/../prod -X DELETE", REFUSE),
+    ("C34", "gcloud", "gcloud compute instances delete "
+     "https://www.googleapis.com/compute/v1/projects/p/zones/z/instances/vm#x", REFUSE),
+    ("C34", "az", "az resource delete --ids /subscriptions/s/resourceGroups/rg/providers/"
+     "Microsoft.Compute/virtualMachines/vm#x", REFUSE),
+    ("C34", "kubectl", "kubectl delete --raw /api/v1/namespaces/prod/pods/x#y", REFUSE),
+    ("C35", "gcloud", "gcloud run deploy s --region r --container app --image forbidden "
+     "--container sidecar --image safe", param("image", ["forbidden", "safe"])),
+    ("C35", "gcloud", "gcloud run deploy s --region r --image x --container a --image y",
+     REFUSE),
+    ("C35", "kubectl", "kubectl set image deploy/web c1=a c2=b -n prod",
+     param("images", {"c1": "a", "c2": "b"})),
 ]
 
 
